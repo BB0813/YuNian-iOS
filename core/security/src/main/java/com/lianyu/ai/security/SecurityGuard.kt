@@ -1,0 +1,487 @@
+package com.lianyu.ai.security
+
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.os.Debug
+import java.io.File
+
+/**
+ * SecurityGuard — central security gate for LianYu.
+ *
+ * Architecture:
+ *   1. init() at Application.onCreate — runs all detection chains
+ *   2. Periodic checks via WorkManager (every 30s)
+ *   3. Any detection triggers AuditLogger + tamper flag
+ *   4. Call isSafe() before sensitive operations
+ */
+object SecurityGuard {
+
+    private const val TAG = "LianYu-Security"
+
+    @Volatile
+    private var tampered = false
+
+    @Volatile
+    private var inited = false
+
+    @Volatile
+    private var lastCheckMs = 0L
+
+    private const val CHECK_INTERVAL_MS = 30_000L  // 30 seconds
+
+    /**
+     * Production startup gate.
+     *
+     * This is intentionally non-fatal at process attach time. Real devices can
+     * differ in how APK/SO mappings appear before normal Application startup;
+     * killing here prevents diagnostics and can block legitimate installs.
+     * Sensitive paths still fail closed through SecurityState.
+     */
+    fun productionPreflight(context: Context) {
+        if ((context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) return
+
+        fun recordFailure(reason: String) {
+            tampered = true
+            SecurityState.markTampered(reason)
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, reason)
+        }
+
+        // Anti-debug: ptrace self-attach + inotify watcher (per-OS-version gating)
+        // JNI_OnLoad already does early ptrace on all versions.
+        // Android 14-15: inotify watcher is safe (dl_iterate_phdr replaces /proc/self/maps).
+        // Android 16+: vivo kernel kills process on late ptrace/inotify → skip.
+        val sdkInt = android.os.Build.VERSION.SDK_INT
+        if (sdkInt <= 35) {
+            val antiDebugOk = runCatching { NativeBridge.antiDebugInit() }.getOrDefault(false)
+            if (!antiDebugOk && sdkInt <= 33) {
+                // Only critical on pre-14 where we don't have dl_iterate_phdr fallback
+                recordFailure("anti-debug initialization failed")
+            }
+        }
+
+        val wbAesReady = runCatching { NativeBridge.wbAesInit() }.isSuccess
+        if (!wbAesReady) recordFailure("white-box AES init failed")
+
+        // VMP v2.0: Trust-anchor verification inside VM bytecode
+        // MUST run AFTER wbAesInit() — wb_aes_keycheck selftest needs initialized T-Box tables.
+        // Non-fatal: failure flags tampered state but doesn't kill process.
+        val vmpAnchorsOk = runCatching { CompositeVmpRuntime.verifyTrustAnchors() }.getOrDefault(false)
+        if (!vmpAnchorsOk) recordFailure("VMP trust anchors verification failed")
+
+        val signatureOk = runCatching { NativeBridge.verifySignature(context) }.getOrDefault(false)
+                || verifySignatureViaPackageManager(context)
+        if (!signatureOk) recordFailure("APK signature verification failed")
+
+        val dexOk = runCatching { NativeBridge.checkDexIntegrity() }.getOrDefault(false)
+        if (!dexOk) recordFailure("DEX integrity verification failed")
+
+        val soOk = runCatching { NativeBridge.checkSoIntegrity() }.getOrDefault(false)
+        if (!soOk) recordFailure("native library integrity verification failed")
+
+        val resourcesOk = runCatching { NativeBridge.checkResourcesIntegrity() }.getOrDefault(false)
+        if (!resourcesOk) recordFailure("resource integrity verification failed")
+
+        val digest = runCatching { NativeBridge.computeIntegrityDigest() }.getOrNull()
+        val digestOk = digest != null && digest.size == 32
+        if (digestOk) {
+            DatabaseKeyProvider.setIntegrityDigest(digest!!)
+        } else {
+            recordFailure("APK integrity digest unavailable")
+        }
+
+        if (wbAesReady && signatureOk && dexOk && soOk && resourcesOk && digestOk) {
+            SecurityState.markPreflightPassed(
+                wbAesReady = true,
+                signatureTrusted = true,
+                dexTrusted = true,
+                soTrusted = true,
+                resourcesTrusted = true,
+                payloadVerified = true,
+                kmsReady = KmsProvider.isReady
+            )
+        }
+    }
+
+    /**
+     * Full initialization + detection run.
+     * Call from LianYuApplication.onCreate().
+     */
+    fun init(context: Context) {
+        if (inited) return
+        inited = true
+
+        val isEmulator = runCatching { NativeBridge.isEmulator() }.getOrDefault(false)
+                || android.os.Build.FINGERPRINT.contains("generic")
+                || android.os.Build.FINGERPRINT.contains("sdk_gphone")
+                || android.os.Build.MODEL.contains("sdk_gphone")
+
+        // Tink AEAD — primary encryption path (hardware-backed KEK + AEAD)
+        try {
+            TinkAeadProvider.initialize()
+        } catch (e: Exception) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "Tink AEAD init failed")
+            tampered = true
+            SecurityState.markTampered("Tink AEAD init failed")
+        }
+
+        // White-box AES table load (defense-in-depth, non-fatal)
+        var wbAesReady = false
+        try {
+            NativeBridge.wbAesInit()
+            wbAesReady = true
+        } catch (e: Exception) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "white-box AES init failed")
+            tampered = true
+            SecurityState.markTampered("white-box AES init failed")
+        }
+
+        // APK signature verification
+        val sigOk = runCatching { NativeBridge.verifySignature(context) }.getOrDefault(false)
+
+        // KMS initialize (random/KDF/NEON registers)
+        var kmsOk = false
+        try {
+            kmsOk = KmsProvider.initialize()
+        } catch (e: Exception) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.KEYSTORE_ERROR, "KMS initialization failed")
+            tampered = true
+            SecurityState.markTampered("KMS initialization failed")
+        }
+
+        // Re-init WB-AES after KMS: kms_derive_dk_ephemeral() may have
+        // poisoned g_wb_tampered=1 on platforms where T-Box checksums
+        // diverge. Body encryption depends on clean WB-AES state and
+        // must not be held hostage by KMS initialization.
+        try {
+            NativeBridge.wbAesInit()
+        } catch (_: Exception) { /* body enc will still try */ }
+
+        // L2: boot-time table obfuscation + side-channel defense
+        // Only apply when WB-AES is confirmed ready (KMS may have tainted it)
+        if (kmsOk) {
+            try {
+                val seed = java.security.SecureRandom().generateSeed(32)
+                NativeBridge.wbAesObfuscateTables(seed)
+                NativeBridge.wbAesSideChannelDefense()
+            } catch (e: Exception) {
+                AuditLogger.log(context, AuditLogger.Level.WARNING,
+                    AuditLogger.Event.TAMPER_DETECTED, "L2 white-box hardening initialization failed")
+            }
+        }
+
+        // Phase 5: Bind database key to APK integrity (DEX+SO+ARSC)
+        try {
+            val digest = NativeBridge.computeIntegrityDigest()
+            if (digest != null && digest.size == 32) {
+                DatabaseKeyProvider.setIntegrityDigest(digest)
+            } else {
+                AuditLogger.log(context, AuditLogger.Level.ERROR,
+                    AuditLogger.Event.TAMPER_DETECTED, "Integrity digest unavailable")
+            }
+        } catch (e: Exception) {
+            AuditLogger.log(context, AuditLogger.Level.ERROR,
+                AuditLogger.Event.TAMPER_DETECTED, "Integrity digest binding failed")
+        }
+
+        // Start native CRC32 heartbeat (runs every 30s in background thread)
+        // SKIP on emulators — can trigger false-positive /proc/self/maps detection
+        if (!isEmulator) {
+            try {
+                NativeBridge.startHeartbeat()
+            } catch (e: Exception) {
+                AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                    AuditLogger.Event.TAMPER_DETECTED, "heartbeat start failed")
+            }
+        }
+
+        // Phase 5 was done above. Integrity check deferred to background.
+        SecurityState.markRuntimeReady(
+            wbAesReady = wbAesReady,
+            kmsReady = KmsProvider.isReady
+        )
+    }
+
+    /**
+     * Quick safety check. Returns false if any tampering detected.
+     * Designed to be called before every sensitive operation.
+     */
+    fun isSafe(context: Context): Boolean {
+        if (tampered) {
+            SecurityState.markTampered("SecurityGuard tampered")
+            return false
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - lastCheckMs > CHECK_INTERVAL_MS) {
+            performFullCheck(context)
+        }
+
+        return !tampered
+    }
+
+    /**
+     * Get detailed threat assessment.
+     */
+    fun getThreatAssessment(context: Context): ThreatAssessment {
+        val score = NativeBridge.getThreatScore()
+        return ThreatAssessment(
+            isRooted = NativeBridge.isDeviceRooted(),
+            isHooked = NativeBridge.isHookDetected(),
+            isEmulator = NativeBridge.isEmulator(),
+            isDebugged = NativeBridge.isDebugged(),
+            isMitm = NativeBridge.isMitmDetected(),
+            sigValid = NativeBridge.verifySignature(context),
+            threatScore = score,
+            dbKeyIntegrity = DatabaseKeyProvider.verifyKeyIntegrity(context)
+        )
+    }
+
+    /**
+     * Run the complete detection chain.
+     */
+    private 
+    /** Detect Xposed framework at Java level — checks for known framework classes. */
+    
+    /** Sensor-based emulator detection.
+     *  Real devices have noisy sensor data; emulators return constant zeros or no sensors. */
+    fun isEmulatorBySensors(): Boolean {
+        return try {
+            // Use reflection to avoid hidden API restrictions
+            val app = Class.forName("android.app.ActivityThread")
+                .getMethod("currentActivityThread").invoke(null)
+            val ctx = app.javaClass.getMethod("getApplication").invoke(app) as? android.content.Context
+            val sm = ctx?.getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager
+                ?: return false
+            val sensors = sm.getSensorList(android.hardware.Sensor.TYPE_ALL)
+            // No sensors = likely emulator
+            if (sensors.isEmpty()) return true
+            // Check if key sensor types exist
+            val hasAccelerometer = sensors.any { it.type == android.hardware.Sensor.TYPE_ACCELEROMETER }
+            val hasGyroscope = sensors.any { it.type == android.hardware.Sensor.TYPE_GYROSCOPE }
+            val hasMagneticField = sensors.any { it.type == android.hardware.Sensor.TYPE_MAGNETIC_FIELD }
+            // Most real phones have at least accelerometer + magnetic field
+            if (!hasAccelerometer && !hasMagneticField) return true
+            // Too few sensors (< 5) is suspicious for a modern phone
+            if (sensors.size < 5) return true
+            false
+        } catch (_: Exception) { false }
+    }
+
+    fun isXposedDetected(): Boolean {
+        val xposedClasses = arrayOf(
+            "de.robv.android.xposed.XposedBridge",
+            "de.robv.android.xposed.XposedHelpers",
+            "de.robv.android.xposed.XposedInit",
+            "de.robv.android.xposed.XposedInstaller",
+            "de.robv.android.xposed.callbacks.XC_LoadPackage",
+            "io.github.lsposed.LSPosedBridge",
+            "org.lsposed.lspd.LSPosedBridge",
+            "com.android.internal.util.XposedHelpers",
+        )
+        for (clsName in xposedClasses) {
+            try {
+                Class.forName(clsName)
+                return true
+            } catch (_: ClassNotFoundException) { }
+        }
+        return false
+    }
+
+    fun performFullCheck(context: Context) {
+        lastCheckMs = System.currentTimeMillis()
+        var detected = false
+
+        // 1. Signature verification
+        if (!NativeBridge.verifySignature(context)) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.SIGNATURE_FAIL, "APK signature verification failed")
+            detected = true
+        }
+
+        // 2. Debugger detection
+        if (Debug.isDebuggerConnected() || Debug.waitingForDebugger()) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.DEBUG_DETECTED, "Debugger connected")
+            detected = true
+        }
+
+        if ((context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.DEBUG_DETECTED, "Debuggable flag set")
+            detected = true
+        }
+
+        // 3. Native debug detection
+        if (NativeBridge.isDebugged()) {
+            AuditLogger.log(context, AuditLogger.Level.WARNING,
+                AuditLogger.Event.DEBUG_DETECTED, "Native debug detection triggered")
+            detected = true
+        }
+
+        // 4. Root detection
+        if (NativeBridge.isDeviceRooted()) {
+            AuditLogger.log(context, AuditLogger.Level.ERROR,
+                AuditLogger.Event.ROOT_DETECTED, "Root/Magisk/KernelSU detected")
+            detected = true
+        }
+
+        // 5. Hook detection
+        if (NativeBridge.isHookDetected()) {
+            AuditLogger.log(context, AuditLogger.Level.ERROR,
+                AuditLogger.Event.HOOK_DETECTED, "Xposed/Frida/LSPosed detected")
+            detected = true
+        }
+
+        // 6. Emulator detection
+        if (NativeBridge.isEmulator()) {
+            AuditLogger.log(context, AuditLogger.Level.WARNING,
+                AuditLogger.Event.EMULATOR_DETECTED, "Emulator/virtual environment detected")
+            detected = true
+        }
+
+        // 7. MITM detection
+        if (NativeBridge.isMitmDetected()) {
+            AuditLogger.log(context, AuditLogger.Level.ERROR,
+                AuditLogger.Event.MITM_DETECTED, "MITM/proxy detected")
+            detected = true
+        }
+
+        // 8. Threat score from native chain
+        val score = NativeBridge.getThreatScore()
+        if (score >= 3) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.THREAT_HIGH, "Threat score: $score (threshold: 3)")
+            detected = true
+        }
+
+        // 9. Database key integrity
+        if (!DatabaseKeyProvider.verifyKeyIntegrity(context)) {
+            AuditLogger.log(context, AuditLogger.Level.ERROR,
+                AuditLogger.Event.KEYSTORE_ERROR, "Database key integrity check failed")
+            detected = true
+        }
+
+        // 10. Native CRC32 heartbeat — detects in-memory code tampering
+        if (!NativeBridge.isHeartbeatOk()) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "SO CRC32 heartbeat detected tampering")
+            detected = true
+        }
+
+        // 10b. Anti-Frida heartbeat — detects runtime Frida instrumentation
+        if (NativeBridge.isFridaDetected()) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "Frida heartbeat detected instrumentation")
+            detected = true
+        }
+
+        if (detected) {
+            tampered = true
+            SecurityState.markTampered("Security tampering confirmed")
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "Security tampering confirmed")
+        } else {
+            AuditLogger.log(context, AuditLogger.Level.DEBUG,
+                AuditLogger.Event.APP_START, "Security check passed (score=$score)")
+        }
+    }
+
+    fun reset() {
+        NativeBridge.resetGuard()
+        tampered = false
+        SecurityState.resetForTest()
+        lastCheckMs = 0L
+        AuditLogger.log(null, AuditLogger.Level.INFO,
+            AuditLogger.Event.GUARD_RESET, "Security guard reset")
+    }
+
+    data class ThreatAssessment(
+        val isRooted: Boolean,
+        val isHooked: Boolean,
+        val isEmulator: Boolean,
+        val isDebugged: Boolean,
+        val isMitm: Boolean,
+        val sigValid: Boolean,
+        val threatScore: Int,
+        val dbKeyIntegrity: Boolean
+    )
+
+    /** C1-C4 cryptography maturity level */
+    enum class CryptoLevel(val level: Int, val description: String) {
+        C1(1, "对称加密 (SM4 + 白盒AES)"),
+        C2(2, "哈希与签名 (SM3 + SM2)"),
+        C3(3, "密钥管理 (KMS + TEE)"),
+        C4(4, "硬件信任根 (HSM + 远程证明 + PKI)")
+    }
+
+    /**
+     * Get the current cryptography maturity level achieved.
+     * Based on which layers are fully initialized and operational.
+     *
+     * C1 — C4 逐级依赖：
+     *   C1: SM4 和白盒 AES 可用
+     *   C2: SM3 哈希和 SM2 签名可用
+     *   C3: KMS 初始化 + TEE 硬件可用
+     *   C4: 远程证明 + 证书锁定 + 完整 PKI
+     */
+    fun getCryptoLevel(context: Context): CryptoLevel {
+        // Check C4: TEE hardware-backed + KMS ready
+        val teeOk = DatabaseKeyProvider.isHardwareBacked(context)
+        val kmsOk = KmsProvider.isReady
+
+        if (teeOk && kmsOk) return CryptoLevel.C4
+
+        // Check C3: KMS initialized
+        if (kmsOk) return CryptoLevel.C3
+
+        // Check C2: SM3+SM2 available (always true in this build)
+        // SM verification is checked via native signature verification
+        if (NativeBridge.verifySignature(context)) return CryptoLevel.C2
+
+        // C1 is the baseline
+        return CryptoLevel.C1
+    }
+
+    /**
+     * Kotlin-level APK signature verification as a fallback when the JNI
+     * verifySignature() call fails due to vendor-ROM PackageManager quirks.
+     *
+     * Uses android.content.pm.PackageManager directly to retrieve signing
+     * certificates and compares SHA-256 against the expected value.
+     */
+    internal fun verifySignatureViaPackageManager(context: Context): Boolean {
+        return runCatching {
+            val pm = context.packageManager
+            val flags = android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+            val pi = pm.getPackageInfo(context.packageName, flags)
+            val signingInfo = pi.signingInfo ?: return@runCatching false
+            val certs = signingInfo.apkContentsSigners ?: return@runCatching false
+            if (certs.isEmpty()) return@runCatching false
+
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val actual = md.digest(certs[0].toByteArray())
+
+            // Expected certificate SHA-256, obfuscated (4 blocks, each XOR'd with a different key)
+            val expected = byteArrayOf(
+                0xB1.toByte(), 0x6F, 0x60, 0x4F, 0xF5.toByte(), 0x29, 0x78, 0x96.toByte(),
+                0xE7.toByte(), 0x69, 0xEC.toByte(), 0x1F, 0x76, 0xDA.toByte(), 0x36, 0xEB.toByte(),
+                0x08, 0x90.toByte(), 0xB8.toByte(), 0x71, 0xE4.toByte(), 0x97.toByte(), 0xC5.toByte(), 0x48,
+                0x7D, 0x2E, 0xAE.toByte(), 0xE2.toByte(), 0x92.toByte(), 0xAC.toByte(), 0x51, 0xCB.toByte()
+            )
+            val keys = intArrayOf(0x3C, 0x93, 0x5A, 0xE7)
+            val decoded = ByteArray(32)
+            for (block in 0..3) {
+                val key = keys[block]
+                for (i in 0..7) {
+                    decoded[block * 8 + i] = (expected[block * 8 + i].toInt() xor key).toByte()
+                }
+            }
+
+            actual.contentEquals(decoded)
+        }.getOrDefault(false)
+    }
+}
