@@ -47,12 +47,12 @@
     <string name="device_id_hint">各デバイスには固有のIDがあります。紐付け後は他のデバイスで使用できません。</string>
     <string name="back">戻る</string>
     <string name="confirm_bind">紐付けを確認</string>
-    <string name="version_info">恋語 v1.5.1 · ファングループ専用</string>
+    <string name="version_info">恋語 v1.8 · ファングループ専用</string>
 
     <string name="about_title">アプリについて</string>
     <string name="app_brand">恋語</string>
     <string name="app_slogan">LianYu - あなたのAIバーチャル恋人</string>
-    <string name="version">バージョン 1.5.1</string>
+    <string name="version">バージョン 1.8</string>
     <string name="about_desc_title">恋語について</string>
     <string name="about_desc">恋語は先進的な大規模言語モデル技術に基づくAIバーチャル恋人チャットアプリです。</string>
     <string name="developer">開発者</string>

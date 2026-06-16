@@ -20,7 +20,9 @@ class LocalModelProviderImpl(context: Context) : LocalModelProvider {
     }
 
     override suspend fun isAvailable(): Boolean {
+        val state = manager.state.value
         return LocalAiService.isNativeLibrarySupported &&
+            state.status == LocalModelUiStatus.ENABLED &&
             LocalModelCatalog.all.any { it.modelFile(appContext).exists() }
     }
 
@@ -101,6 +103,7 @@ class LocalModelProviderImpl(context: Context) : LocalModelProvider {
 
     override suspend fun enableModel(modelId: String) {
         manager.selectModel(modelId)
+        manager.enable()
     }
 
     override suspend fun disableModel(modelId: String) {

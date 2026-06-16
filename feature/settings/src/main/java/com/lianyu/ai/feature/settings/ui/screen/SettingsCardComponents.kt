@@ -264,7 +264,7 @@ fun ModelSelectionCard(
             }
         }
 
-        if (state.isSelected) {
+        if (state.isSelected && state.status == ModelStatus.ENABLED) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "✓ 当前使用",

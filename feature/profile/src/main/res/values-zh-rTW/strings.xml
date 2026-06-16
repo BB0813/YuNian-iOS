@@ -47,12 +47,12 @@
     <string name="device_id_hint">每台設備擁有唯一的識別碼，綁定後無法在其他設備上使用</string>
     <string name="back">返回上一步</string>
     <string name="confirm_bind">確認綁定</string>
-    <string name="version_info">戀語 v1.5.1 · 僅限粉絲群內部使用</string>
+    <string name="version_info">戀語 v1.8 · 僅限粉絲群內部使用</string>
 
     <string name="about_title">關於應用</string>
     <string name="app_brand">戀語</string>
     <string name="app_slogan">LianYu - 你的AI虛擬戀人</string>
-    <string name="version">版本 1.5.1</string>
+    <string name="version">版本 1.8</string>
     <string name="about_desc_title">關於戀語</string>
     <string name="about_desc">戀語是一款AI虛擬戀人聊天應用，基於先進的大語言模型技術。</string>
     <string name="developer">開發者</string>
