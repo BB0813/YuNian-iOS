@@ -32,7 +32,7 @@ object CertificatePins {
     private const val DASHSCOPE_PIN = "sha256/nmIf6+o1f/RGC5G/iwtL/mVNLhAO28dHcOdlGdc0gw4="
 
     // ── Moonshot / Kimi ──
-    private const val KIMI_PIN = "sha256/MQKN8XnIDLqFu4zsN5+d1jr2kNbYenAxIcn/Z5ORtQE="
+    private const val KIMI_PIN = "sha256/kPjMPOLocq+5yBiG1tDVmTqsthmK8BKarCJvdXglzis="
 
     // ── OpenRouter ──
     private const val OPENROUTER_PIN = "sha256/hMBfVBKy9jV8IsH9P500W5rALpklRJGgW1ibRlcNO6k="

@@ -108,7 +108,9 @@ open class OpenAiCompatibleProvider : AiProvider {
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
-                jsonBody.put("temperature", safeTemp.toDouble())
+                if (!AiProvider.requiresFixedTemperature(config.model)) {
+                    jsonBody.put("temperature", safeTemp.toDouble())
+                }
                 val maxTokens = config.maxTokens ?: 800
                 if (maxTokens > 0) {
                     jsonBody.put(buildMaxTokensParam(config.provider), maxTokens)
@@ -183,7 +185,9 @@ open class OpenAiCompatibleProvider : AiProvider {
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
-                jsonBody.put("temperature", temperature)
+                if (!AiProvider.requiresFixedTemperature(config.model)) {
+                    jsonBody.put("temperature", temperature)
+                }
                 jsonBody.put(buildMaxTokensParam(config.provider), maxTokens)
 
                 val (headerName, headerValue) = buildAuthHeader(config.provider, currentKey)
