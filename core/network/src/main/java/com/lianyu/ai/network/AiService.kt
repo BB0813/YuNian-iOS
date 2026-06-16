@@ -1359,17 +1359,17 @@ class AiService(context: Context) : AiServiceProvider {
     private fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
         var cleaned = response
             .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-            .replace(Regex("\\(.*?\\)"), "")
-            .replace(Regex("\\[.*?\\]"), "")
-            .replace(Regex("【.*?】"), "")
+            .replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
+            .replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
+            .replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
             .replace(Regex("\\*.*?\\*"), "")
-            .replace(Regex("<.*?>"), "")
+            .replace(Regex("<(?!\\[).*?>"), "")
             .replace(Regex("\\{.*?\\}"), "")
             .replace(Regex("\\bsticker_\\w+\\.png\\b", RegexOption.IGNORE_CASE), "")
             .trim()
 
         if (cleaned.length < 2) {
-            cleaned = response.replace(Regex("[()\\[\\]【】*<>{}]"), "").trim()
+            cleaned = response.replace(Regex("[*<>{}]"), "").trim()
         }
         if (cleaned.isEmpty()) {
             cleaned = response.trim()
@@ -1982,8 +1982,12 @@ $chatText
     }
 
     private fun stripThinkingContent(content: String): String {
-        val thinkRegex = Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL)
-        return content.replace(thinkRegex, "").trim()
+        var result = content
+        result = result.replace(Regex("(?is)<think[^>]*>[\s\S]*?</think\s*>"), "")
+        result = result.replace(Regex("(?is)<thinking[^>]*>[\s\S]*?</thinking\s*>"), "")
+        result = result.replace(Regex("(?is)<thought[^>]*>[\s\S]*?</thought\s*>"), "")
+        result = result.replace(Regex("(?is)<reflection[^>]*>[\s\S]*?</reflection\s*>"), "")
+        return result.trim()
     }
 
     suspend fun callAnthropicForTest(config: ApiConfig, messages: List<Message>, systemPrompt: String): String {
