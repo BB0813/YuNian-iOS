@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_avatar">아바타</string>
+    <string name="profile_save">저장</string>
+    <string name="profile_edit">편집</string>
+    <string name="profile_avatar_hint">아바타를 탭하여 변경, 이름을 탭하여 편집</string>
+    <string name="memory_management">기억 관리</string>
+    <string name="memory_management_desc">가상 연인이 기억하는 것 보기</string>
+    <string name="api_settings">API 설정</string>
+    <string name="api_settings_desc">AI API 구성</string>
+    <string name="theme_mode">테마</string>
+    <string name="theme_mode_desc">라이트/다크 전환</string>
+    <string name="chat_background">채팅 배경</string>
+    <string name="chat_background_desc">채팅 배경 사용자 지정</string>
+    <string name="language">언어 설정</string>
+    <string name="language_desc">현재: 한국어</string>
+    <string name="framerate">프레임 레이트</string>
+    <string name="framerate_desc">화면 주사율 조정</string>
+    <string name="settings">설정</string>
+    <string name="settings_desc">업데이트, 정보, 권한</string>
+    <string name="check_new_version">새 버전 확인</string>
+    <string name="check_new_version_desc">사용 가능한 업데이트 확인</string>
+    <string name="about_app">앱 정보</string>
+    <string name="about_app_desc">연어 - 당신의 AI 가상 연인</string>
+    <string name="battery_whitelist">배터리 최적화 화이트리스트</string>
+    <string name="battery_whitelist_desc">백그라운드 메시지가 정상 작동하도록</string>
+    <string name="auto_start">자동 시작</string>
+    <string name="auto_start_desc">앱 자동 시작 허용</string>
+
+    <string name="ban_title">계정이 일시적으로 차단되었습니다</string>
+    <string name="ban_count">위반 %1$d 회 · 차단 레벨 %2$d</string>
+    <string name="ban_remaining">남은 차단 시간</string>
+    <string name="ban_reason_title">위반 설명</string>
+    <string name="ban_reason">위반 콘텐츠(성인, 폭력, 불법 등)를 반복적으로 전송하여 자동으로 차단되었습니다.</string>
+    <string name="ban_levels">차단 레벨: 1-5회 → 경고 | 6-10회 → 1일 | 11-15회 → 7일 | 16회 이상 → 30일</string>
+    <string name="ban_reenter">재입장</string>
+    <string name="ban_wait">차단 종료까지 기다려 주세요</string>
+
+    <string name="agreement_title">사용자 동의 및 면책 조항</string>
+    <string name="agreement_read">계속하려면 다음 약관을 읽고 동의해 주세요</string>
+    <string name="agreement_age">18세 이상이며 모든 약관에 동의합니다</string>
+    <string name="agreement_disagree">동의하지 않고 종료</string>
+    <string name="agreement_agree">동의하고 계속</string>
+    <string name="device_bind_title">기기 바인딩</string>
+    <string name="device_bind_desc">내부 사용만을 보장하기 위해 기기를 바인딩합니다</string>
+    <string name="device_id">기기 ID</string>
+    <string name="device_id_hint">각 기기에는 고유한 ID가 있습니다. 바인딩 후에는 다른 기기에서 사용할 수 없습니다.</string>
+    <string name="back">이전으로</string>
+    <string name="confirm_bind">바인딩 확인</string>
+    <string name="version_info">연어 v1.5.1 · 팬 그룹 전용</string>
+
+    <string name="about_title">앱 정보</string>
+    <string name="app_brand">연어</string>
+    <string name="app_slogan">LianYu - 당신의 AI 가상 연인</string>
+    <string name="version">버전 1.5.1</string>
+    <string name="about_desc_title">연어 소개</string>
+    <string name="about_desc">연어는先進的な 대규모 언어 모델 기술을 기반으로 한 AI 가상 연인 채팅 앱입니다.</string>
+    <string name="developer">개발자</string>
+    <string name="developer_douyin">TikTok: 我想天天开心</string>
+    <string name="developer_hint">팔로우하여 최신 정보 얻기</string>
+    <string name="features">기능</string>
+    <string name="feature_multi_ai">다중 AI 모델 지원</string>
+    <string name="feature_multi_ai_desc">OpenAI / Claude / Gemini / DeepSeek / 通义千问</string>
+    <string name="feature_memory">독립 기억 시스템</string>
+    <string name="feature_memory_desc">핵심 기억 + 임시 기억</string>
+    <string name="feature_refresh">높은 주사율 지원</string>
+    <string name="feature_refresh_desc">90/120/144/165Hz 지원</string>
+    <string name="feature_ui">精緻한 UI 디자인</string>
+    <string name="feature_ui_desc">심플하고 우아한 디자인</string>
+    <string name="feature_edit">연인 편집</string>
+    <string name="feature_edit_desc">언제든지 성격 수정</string>
+    <string name="view_agreement">사용자 동의 보기</string>
+</resources>

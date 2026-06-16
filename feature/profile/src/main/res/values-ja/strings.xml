@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_avatar">アバター</string>
+    <string name="profile_save">保存</string>
+    <string name="profile_edit">編集</string>
+    <string name="profile_avatar_hint">アバターをタップして変更、名前をタップして編集</string>
+    <string name="memory_management">記憶管理</string>
+    <string name="memory_management_desc">恋人が覚えていることを見る</string>
+    <string name="api_settings">API設定</string>
+    <string name="api_settings_desc">AI APIを設定</string>
+    <string name="theme_mode">テーマ</string>
+    <string name="theme_mode_desc">ライト/ダーク切替</string>
+    <string name="chat_background">チャット背景</string>
+    <string name="chat_background_desc">チャット背景をカスタマイズ</string>
+    <string name="language">言語設定</string>
+    <string name="language_desc">現在: 日本語</string>
+    <string name="framerate">フレームレート</string>
+    <string name="framerate_desc">画面リフレッシュレート調整</string>
+    <string name="settings">設定</string>
+    <string name="settings_desc">アップデート、について、権限</string>
+    <string name="check_new_version">アップデート確認</string>
+    <string name="check_new_version_desc">利用可能なアップデートを確認</string>
+    <string name="about_app">アプリについて</string>
+    <string name="about_app_desc">恋語 - あなたのAIバーチャル恋人</string>
+    <string name="battery_whitelist">電池最適化ホワイトリスト</string>
+    <string name="battery_whitelist_desc">バックグラウンドメッセージを確実に</string>
+    <string name="auto_start">自動起動</string>
+    <string name="auto_start_desc">自動起動を許可</string>
+
+    <string name="ban_title">アカウントが一時的に禁止されました</string>
+    <string name="ban_count">違反 %1$d 回 · 禁止レベル %2$d</string>
+    <string name="ban_remaining">残り禁止時間</string>
+    <string name="ban_reason_title">違反の詳細</string>
+    <string name="ban_reason">違反コンテンツ（性的、暴力的、違法等）を繰り返し送信したため、自動的に禁止されました。</string>
+    <string name="ban_levels">禁止レベル: 1-5回 → 警告 | 6-10回 → 1日 | 11-15回 → 7日 | 16回以上 → 30日</string>
+    <string name="ban_reenter">再入室</string>
+    <string name="ban_wait">禁止終了までお待ちください</string>
+
+    <string name="agreement_title">利用規約と免責事項</string>
+    <string name="agreement_read">続行する前に以下の条項をお読みください</string>
+    <string name="agreement_age">18歳以上で、すべての条項に同意します</string>
+    <string name="agreement_disagree">同意しないで終了</string>
+    <string name="agreement_agree">同意して続行</string>
+    <string name="device_bind_title">デバイス紐付け</string>
+    <string name="device_bind_desc">内部使用のみを確保するため、デバイスを紐付けます</string>
+    <string name="device_id">デバイスID</string>
+    <string name="device_id_hint">各デバイスには固有のIDがあります。紐付け後は他のデバイスで使用できません。</string>
+    <string name="back">戻る</string>
+    <string name="confirm_bind">紐付けを確認</string>
+    <string name="version_info">恋語 v1.5.1 · ファングループ専用</string>
+
+    <string name="about_title">アプリについて</string>
+    <string name="app_brand">恋語</string>
+    <string name="app_slogan">LianYu - あなたのAIバーチャル恋人</string>
+    <string name="version">バージョン 1.5.1</string>
+    <string name="about_desc_title">恋語について</string>
+    <string name="about_desc">恋語は先進的な大規模言語モデル技術に基づくAIバーチャル恋人チャットアプリです。</string>
+    <string name="developer">開発者</string>
+    <string name="developer_douyin">TikTok: 我想天天开心</string>
+    <string name="developer_hint">フォローして最新情報をゲット</string>
+    <string name="features">機能</string>
+    <string name="feature_multi_ai">複数AIモデル対応</string>
+    <string name="feature_multi_ai_desc">OpenAI / Claude / Gemini / DeepSeek / 通義千問</string>
+    <string name="feature_memory">独立記憶システム</string>
+    <string name="feature_memory_desc">コア記憶 + 一時記憶</string>
+    <string name="feature_refresh">高リフレッシュレート</string>
+    <string name="feature_refresh_desc">90/120/144/165Hz対応</string>
+    <string name="feature_ui">洗練されたUI</string>
+    <string name="feature_ui_desc">シンプルでエレガントなデザイン</string>
+    <string name="feature_edit">恋人編集</string>
+    <string name="feature_edit_desc">いつでも性格を編集</string>
+    <string name="view_agreement">利用規約を見る</string>
+</resources>

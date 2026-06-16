@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="create_companion">Create Companion</string>
+    <string name="edit_companion">Edit Companion</string>
+    <string name="add_avatar">Add Avatar</string>
+    <string name="select_avatar">Tap to select avatar</string>
+    <string name="name_hint">Give her a name</string>
+    <string name="name_label">Name *</string>
+    <string name="name_placeholder">e.g. Sakura</string>
+    <string name="age_label">Age</string>
+    <string name="age_placeholder">e.g. 18</string>
+    <string name="role_setting">Role Setting *</string>
+    <string name="role_hint">Enter full character setting, e.g.: Lin Nianan, 18, gentle and caring top student girlfriend...</string>
+    <string name="system_prompt">System Prompt (Advanced)</string>
+    <string name="system_prompt_hint">Custom AI behavior prompt, leave blank for auto-generation</string>
+    <string name="save_changes">Save Changes</string>
+    <string name="create">Create</string>
+    <string name="confirm_delete">Confirm Delete</string>
+    <string name="delete_confirm_msg">Are you sure you want to delete %1$s? This cannot be undone.</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="my_girlfriends">My Companions</string>
+    <string name="add_girlfriend">Add Companion</string>
+    <string name="no_companions">No companions yet</string>
+    <string name="create_hint">Tap the button to create your companion</string>
+    <string name="group_chat">Group Chat</string>
+    <string name="friends">Friends</string>
+    <string name="people_count">%1$d people</string>
+    <string name="no_contacts">No contacts yet</string>
+    <string name="add_hint">Tap to add your companion</string>
+    <string name="import_from_file">Import from File</string>
+    <string name="import_failed">Import Failed</string>
+    <string name="ok">OK</string>
+</resources>

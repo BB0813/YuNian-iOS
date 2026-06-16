@@ -1,0 +1,112 @@
+plugins {
+    alias(libs.plugins.android.library)
+}
+
+android {
+    namespace = "com.lianyu.ai.security"
+    compileSdk = 35
+    ndkVersion = "30.0.14904198"
+
+    defaultConfig {
+        minSdk = 26
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
+    }
+
+    // externalNativeBuild — ndk-build from Android.mk
+    externalNativeBuild {
+        ndkBuild {
+            path("src/main/cpp/Android.mk")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    kotlin {
+        jvmToolchain(17)
+    }
+}
+
+// Dex2C Transpiler Task �?runs before ndkBuild
+val dex2cOutputDir = file("src/main/cpp/generated")
+val dex2cWhitelist = rootProject.file("tools/dex2c_whitelist.txt")
+val dex2cTranspiler = rootProject.file("tools/dex2c_transpile.py")
+
+tasks.register("dex2cTranspile") {
+    description = "Transpile whitelisted DEX methods to C++ (Phase 2)"
+    group = "security"
+
+    val dexInput = rootProject.file("app/build/intermediates/dex/release/minifyReleaseWithR8/classes.dex")
+    inputs.file(dex2cWhitelist)
+    // P2-15: depend on R8 minification so DEX exists
+    dependsOn(":app:minifyReleaseWithR8")
+    outputs.dir(dex2cOutputDir)
+    // P2-15: always run — DEX may change without whitelist changing; security-critical
+    outputs.upToDateWhen { false }
+
+    doLast {
+        dex2cOutputDir.mkdirs()
+        if (!dexInput.exists()) {
+            logger.warn("Dex2C: classes.dex not found — transpose skipped")
+            // Write empty stubs so NDK compilation doesn't fail
+            dex2cOutputDir.mkdirs()
+            file("$dex2cOutputDir/dex2c_methods.cpp").writeText("""
+#include <jni.h>
+#include <stdint.h>
+#include "dex2c_registry.h"
+const uint32_t gDex2cTextCrc32 = 0x00000000;
+JNINativeMethod gDex2cMethods[] = {};
+const size_t gDex2cMethodCount = 0;
+""".trimIndent())
+            file("$dex2cOutputDir/dex2c_registry.h").writeText("""
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+extern JNINativeMethod gDex2cMethods[];
+extern const size_t gDex2cMethodCount;
+extern const uint32_t gDex2cTextCrc32;
+""".trimIndent())
+            return@doLast
+        }
+        val pb = ProcessBuilder(
+            "python", dex2cTranspiler.absolutePath, dexInput.absolutePath,
+            "--whitelist", dex2cWhitelist.absolutePath,
+            "--out-cpp", file("$dex2cOutputDir/dex2c_methods.cpp").absolutePath,
+            "--out-h", file("$dex2cOutputDir/dex2c_registry.h").absolutePath
+        )
+        pb.directory(rootProject.projectDir)
+        pb.inheritIO()
+        val proc = pb.start()
+        val exitCode = proc.waitFor()
+        if (exitCode != 0) {
+            logger.error("Dex2C transpiler failed with exit code $exitCode")
+        } else {
+            logger.lifecycle("Dex2C: transpilation complete")
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("configureNdkBuild") || it.name.startsWith("buildNdkBuild") }.configureEach {
+    // Only run dex2cTranspile for release builds
+    if (name.contains("Release")) {
+        dependsOn("dex2cTranspile")
+    }
+}
+
+dependencies {
+    implementation(project(":core:common"))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.tink.android)
+    testImplementation(libs.junit)
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation(kotlin("test"))
+}

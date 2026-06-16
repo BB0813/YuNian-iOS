@@ -1,0 +1,9 @@
+{
+  "ciphertext_sha256": "0ec492e28bd129390711de39fe4b5b4919697b1eaa8a89f8143b94439d63c854",
+  "hmac": "+RWhbWw8p5FrXSaFYAhqmnvf4tjfHA8cM1opKGE2Is97/sKP1BHUVaXHFNPR3O5xOW2imih2OZLTU7ON",
+  "metadata_size": 16,
+  "padded_size": 8741648,
+  "payload_size": 8741644,
+  "plaintext_sha256": "1f25458de6837f30aba6e60a8c91e2d1960a81989d6d6741bd29d8151e583af5",
+  "version": 1
+}
