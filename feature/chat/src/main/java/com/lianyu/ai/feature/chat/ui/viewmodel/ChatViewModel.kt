@@ -689,15 +689,7 @@ class ChatViewModel(
                 _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
             } else {
                 _events.tryEmit(ChatUiEvent.Error(rawMessage))
-                val errorText = rawMessage.takeIf { it.isNotBlank() }
-                    ?: getApplication<Application>().getString(R.string.api_error_generic)
-                val errorMessage = ChatMessage(
-                    companionId = companionId,
-                    content = errorText,
-                    isFromUser = false,
-                    timestamp = System.currentTimeMillis()
-                )
-                chatRepository.sendMessage(errorMessage)
+                // 错误消息仅通过UI事件展示，不存库——避免污染AI历史上下文
             }
             SecureLog.e("ChatViewModel", "AI response failed", e)
         } finally {
@@ -1196,15 +1188,7 @@ class ChatViewModel(
                     _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
                 } else {
                     _events.tryEmit(ChatUiEvent.Error(rawMessage))
-                    val errorText = rawMessage.takeIf { it.isNotBlank() }
-                        ?: getApplication<Application>().getString(R.string.api_error_generic)
-                    val errorMessage = ChatMessage(
-                        companionId = companionId,
-                        content = errorText,
-                        isFromUser = false,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    chatRepository.sendMessage(errorMessage)
+                    // 错误消息仅通过UI事件展示，不存库——避免污染AI历史上下文
                 }
             } finally {
                 exitLoading()
@@ -1305,10 +1289,11 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        applicationApiScope.cancel()
+        // 不取消 applicationApiScope —— 让正在进行的 AI 回复自然完成并存库
+        // AI 回复协程完成后 scope 无活跃子协程，不占资源
+        // 用户退出聊天后仍能收到回复（下次进入聊天时可见）
         avatarUnsubscribe?.invoke()
         avatarUnsubscribe = null
-        turnState.sendMessageJob?.cancel()
         chatTypingState.stopTyping()
         _activeRequests.set(0)
         _isLoading.value = false

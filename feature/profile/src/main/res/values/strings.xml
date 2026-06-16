@@ -78,13 +78,13 @@
     <string name="device_id_hint">每台设备拥有唯一的识别码，绑定后无法在其他设备上使用</string>
     <string name="back">返回上一步</string>
     <string name="confirm_bind">确认绑定</string>
-    <string name="version_info">恋语 v1.5.1 · 仅限粉丝群内部使用</string>
+    <string name="version_info">恋语 v1.8 · 仅限粉丝群内部使用</string>
 
     <!-- About Screen -->
     <string name="about_title">关于应用</string>
     <string name="app_brand">恋语</string>
     <string name="app_slogan">LianYu - 你的AI虚拟恋人</string>
-    <string name="version">版本 1.5.1</string>
+    <string name="version">版本 1.8</string>
     <string name="about_desc_title">关于恋语</string>
     <string name="about_desc">恋语是一款AI虚拟恋人聊天应用，基于先进的大语言模型技术，为你打造专属的虚拟伴侣体验。</string>
     <string name="developer">开发者</string>
