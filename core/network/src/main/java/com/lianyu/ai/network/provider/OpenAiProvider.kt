@@ -53,8 +53,13 @@ open class OpenAiCompatibleProvider : AiProvider {
     }
 
     private fun stripThinkingContent(content: String): String {
-        val thinkRegex = Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL)
-        return content.replace(thinkRegex, "").trim()
+        var result = content
+        // 匹配多种推理/思考标签变体
+        result = result.replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
+        result = result.replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
+        result = result.replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
+        result = result.replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
+        return result.trim()
     }
 
     private fun buildAuthHeader(provider: ApiProvider, key: String): Pair<String, String> {

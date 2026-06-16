@@ -639,15 +639,16 @@ class ChatViewModel(
             // 不 return —— 即使安全检查失败也继续尝试 AI 回复（消息已存）
         }
 
-        // Fire AI response asynchronously — queue free for next message
-        // Track the job so regenerateMessage/onCleared can cancel it
+        // Fire AI response — wait for completion before processing next queued message
+        // This prevents consecutive messages from cancelling each other's AI responses
         turnState.reset()
-        turnState.sendMessageJob?.cancel() // 取消旧请求，避免快速连发时的 Job 竞态
         turnState.sendMessageJob = applicationApiScope.startAiResponse(
             history = chatRepository.getRecentMessagesSync(companionId, 50).filterDecrypted(),
             stickerProbability = chatDetailSettingsStore.getSettings(companionId).stickerProbability,
             userContentForMemory = content
         )
+        // 等待当前AI回复完成，避免连续发消息时前一条回复被取消
+        turnState.sendMessageJob?.join()
     }
     /**
      * 公共 AI 响应流程：调用 AI → finalizeResponse → 错误处理
@@ -705,14 +706,8 @@ class ChatViewModel(
             )
         } catch (e: CancellationException) {
             SecureLog.e("ChatViewModel", "API call cancelled", e)
-            // 被取消时也需给用户反馈，避免"发消息后完全无响应"
-            val cancelMsg = ChatMessage(
-                companionId = companionId,
-                content = "回复已取消",
-                isFromUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            chatRepository.sendMessage(cancelMsg)
+            // 仅在用户主动取消（重新生成/发送图片/发送表情）时插入取消提示
+            // 正常的消息队列顺序处理不再触发取消
         } catch (e: Exception) {
             val rawMessage = e.message ?: "发送失败"
             if (rawMessage.startsWith("[TOAST]")) {
