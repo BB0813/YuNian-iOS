@@ -921,7 +921,9 @@ class AiService(context: Context) : AiServiceProvider {
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
-                jsonBody.put("temperature", temperature)
+                if (!requiresFixedTemperature(config.model)) {
+                    jsonBody.put("temperature", temperature)
+                }
                 // 根据API提供商选择正确的参数名称
                 val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
                     "max_completion_tokens"
@@ -1921,7 +1923,9 @@ $chatText
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
-                jsonBody.put("temperature", safeTemp.toDouble())
+                if (!requiresFixedTemperature(config.model)) {
+                    jsonBody.put("temperature", safeTemp.toDouble())
+                }
                 val maxTokens = config.maxTokens ?: 800
                 if (maxTokens > 0) {
                     val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
@@ -1983,10 +1987,10 @@ $chatText
 
     private fun stripThinkingContent(content: String): String {
         var result = content
-        result = result.replace(Regex("(?is)<think[^>]*>[\s\S]*?</think\s*>"), "")
-        result = result.replace(Regex("(?is)<thinking[^>]*>[\s\S]*?</thinking\s*>"), "")
-        result = result.replace(Regex("(?is)<thought[^>]*>[\s\S]*?</thought\s*>"), "")
-        result = result.replace(Regex("(?is)<reflection[^>]*>[\s\S]*?</reflection\s*>"), "")
+        result = result.replace(Regex("""(?is)<think[^>]*>[\s\S]*?</think\s*>"""), "")
+        result = result.replace(Regex("""(?is)<thinking[^>]*>[\s\S]*?</thinking\s*>"""), "")
+        result = result.replace(Regex("""(?is)<thought[^>]*>[\s\S]*?</thought\s*>"""), "")
+        result = result.replace(Regex("""(?is)<reflection[^>]*>[\s\S]*?</reflection\s*>"""), "")
         return result.trim()
     }
 
@@ -2070,7 +2074,9 @@ $chatText
         val jsonBody = org.json.JSONObject()
         jsonBody.put("model", config.model)
         jsonBody.put("messages", jsonArray)
-        jsonBody.put("temperature", 0.7)
+        if (!requiresFixedTemperature(config.model)) {
+            jsonBody.put("temperature", 0.7)
+        }
         // 根据API提供商选择正确的参数名称
         val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
             "max_completion_tokens"

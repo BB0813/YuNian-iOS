@@ -512,9 +512,20 @@ class ChatViewModel(
      */
     fun sendMessage(content: String) {
         System.err.println("[ChatVM] sendMessage called, content='${content.take(30)}', apis=${_availableApis.value.size}")
+        // 乐观存储：用户消息立即存库显示，不等AI回复
+        val userMessage = ChatMessage(
+            companionId = companionId,
+            content = content,
+            isFromUser = true,
+            timestamp = System.currentTimeMillis()
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            val userMessageId = chatRepository.sendMessage(userMessage)
+            broadcastWeChatMessage(userMessageId)
+        }
+
         if (_availableApis.value.isEmpty()) {
             _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
-            // 不 return —— 用户消息必须进队列显示在聊天界面，API 检查下沉到 doSendMessage
         }
         val result = messageQueue.trySend(content)
         System.err.println("[ChatVM] trySend result=$result, queueDepth=${_queueDepth.value}")
@@ -528,7 +539,6 @@ class ChatViewModel(
     }
 
     private suspend fun doSendMessage(content: String) {
-        // 安全检查已改为纯 Java 正则，无需等待 Native AC 预热；后台仍继续预热
         System.err.println("[ChatVM] doSendMessage ENTER, content='${content.take(30)}', apis=${_availableApis.value.size}")
 
         // 封禁检查：已封禁用户禁止发送
@@ -541,7 +551,6 @@ class ChatViewModel(
         System.err.println("[ChatVM] doSendMessage START, content='${content.take(30)}'")
 
         // 等待 API 配置加载完成（最多 1.5 秒），避免冷启动时序竞态
-        // P2-15: 若 DB 已加载完成且确实无 API，直接跳过等待
         if (_availableApis.value.isEmpty() && !_apisLoaded) {
             System.err.println("[ChatVM] waiting for API config (1.5s timeout, cold start)...")
             try {
@@ -554,65 +563,32 @@ class ChatViewModel(
             }
         }
 
-        // 无 API 时：仍需安全检查，再存用户消息 + 提示
+        // 无 API 时：仅做安全检查 + 提示，用户消息已在 sendMessage 中存库
         System.err.println("[ChatVM] apis after wait: ${_availableApis.value.size}")
         if (_availableApis.value.isEmpty()) {
-            // 即使无 API 也必须检查输入安全
-            System.err.println("[ChatVM] NO API branch — running safety check...")
             try {
                 val inputCheck = ContentFilter.checkInput(content)
-                System.err.println("[ChatVM] safety check done: violating=${inputCheck.isViolating}")
                 if (inputCheck.isViolating) {
                     com.lianyu.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
                     _events.tryEmit(ChatUiEvent.ContentBlocked("内容违规: ${inputCheck.reason}"))
                     return@doSendMessage
                 }
             } catch (e: Exception) {
-                System.err.println("[ChatVM] safety check CRASHED: ${e.javaClass.simpleName}: ${e.message}")
                 _events.tryEmit(ChatUiEvent.Error("安全检查异常"))
                 return@doSendMessage
             }
 
-            try {
-                System.err.println("[ChatVM] storing user message...")
-                val userMessage = ChatMessage(
-                    companionId = companionId,
-                    content = content,
-                    isFromUser = true,
-                    timestamp = System.currentTimeMillis()
-                )
-                val userMessageId = chatRepository.sendMessage(userMessage)
-                System.err.println("[ChatVM] userMessage stored, id=$userMessageId, allMsgs=${_allMessages.value.size}")
-                broadcastWeChatMessage(userMessageId)
-
-                System.err.println("[ChatVM] storing tip message...")
-                val tipMessage = ChatMessage(
-                    companionId = companionId,
-                    content = "请先配置API：我 → API设置 → 添加密钥",
-                    isFromUser = false,
-                    timestamp = System.currentTimeMillis()
-                )
-                val tipMsgId = chatRepository.sendMessage(tipMessage)
-                System.err.println("[ChatVM] tip message stored, id=$tipMsgId")
-            } catch (e: Exception) {
-                System.err.println("[ChatVM] message storage CRASHED: ${e.javaClass.simpleName}: ${e.message}")
-                _events.tryEmit(ChatUiEvent.Error("消息存储失败: ${e.message?.take(50)}"))
-            }
+            val tipMessage = ChatMessage(
+                companionId = companionId,
+                content = "请先配置API：我 → API设置 → 添加密钥",
+                isFromUser = false,
+                timestamp = System.currentTimeMillis()
+            )
+            chatRepository.sendMessage(tipMessage)
             return@doSendMessage
         }
 
-        // ── 乐观存储：先存用户消息让 UI 立刻显示气泡，再跑安全检查 ──
-        val userMessage = ChatMessage(
-            companionId = companionId,
-            content = content,
-            isFromUser = true,
-            timestamp = System.currentTimeMillis()
-        )
-        val userMessageId = chatRepository.sendMessage(userMessage)
-        System.err.println("[ChatVM] userMessage stored (optimistic), id=$userMessageId")
-        broadcastWeChatMessage(userMessageId)
-
-        // 阶段 1-3: 流水线安全检查（异步，不阻塞消息显示）
+        // 安全检查（用户消息已在 sendMessage 中乐观存库显示）
         System.err.println("[ChatVM] pipeline execute START")
         val pipelineOk = try {
             val result = withTimeoutOrNull(8000L) {
@@ -627,7 +603,7 @@ class ChatViewModel(
             null
         }
 
-        // fail-closed: 超时或拦截 → 显示提示但不删除已存储的消息（用户体验优先）
+        // fail-closed: 超时或拦截 → 显示提示但不删除已存储的消息
         if (pipelineOk != true) {
             val err = if (pipelineOk == null) {
                 System.err.println("[ChatVM] pipeline TIMEOUT — showing warning")
@@ -636,7 +612,6 @@ class ChatViewModel(
                 pipeline.pipelineState.value.error ?: "内容可能违规"
             }
             _events.tryEmit(ChatUiEvent.ContentBlocked(err))
-            // 不 return —— 即使安全检查失败也继续尝试 AI 回复（消息已存）
         }
 
         // Fire AI response — wait for completion before processing next queued message
@@ -1170,7 +1145,7 @@ class ChatViewModel(
     fun sendImageMessage(imagePath: String) {
         SecureLog.i("VISION", "========== sendImageMessage CALLED ==========")
         SecureLog.i("VISION", "imagePath=$imagePath")
-        turnState.sendMessageJob?.cancel()
+        // 图片消息不取消正在进行的AI回复，等其完成后再处理
         turnState.sendMessageJob = applicationApiScope.launch {
             try {
                 SecureLog.i("VISION", "sendImageMessage: Starting coroutine, path=$imagePath")

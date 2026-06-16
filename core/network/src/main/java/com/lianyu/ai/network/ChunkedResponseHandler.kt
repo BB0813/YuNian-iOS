@@ -1,6 +1,7 @@
 package com.lianyu.ai.network
 
 import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.network.provider.AiProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -112,7 +113,9 @@ object ChunkedResponseHandler {
         val jsonBody = org.json.JSONObject()
         jsonBody.put("model", request.model)
         jsonBody.put("messages", jsonArray)
-        jsonBody.put("temperature", request.temperature.toDouble())
+        if (!AiProvider.requiresFixedTemperature(request.model)) {
+            jsonBody.put("temperature", request.temperature.toDouble())
+        }
         request.max_tokens?.let { jsonBody.put("max_tokens", it) }
         jsonBody.put("stream", true)
 
