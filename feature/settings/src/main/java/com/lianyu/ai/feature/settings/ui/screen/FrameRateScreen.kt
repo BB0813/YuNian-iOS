@@ -43,18 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.settings.R
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatGreen
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightCard
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
 import com.lianyu.ai.common.FrameRateManager
+import com.lianyu.ai.uicommon.theme.PinkPrimary
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import com.lianyu.ai.uicommon.theme.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -77,11 +67,12 @@ fun FrameRateScreen(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val bgColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDark) WeChatDarkCard else WeChatLightCard
-    val textPrimary = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDark) WeChatDarkTextSecondary else WeChatLightTextSecondary
-    val dividerColor = if (isDark) WeChatDarkDivider else WeChatLightDivider
+    val colorScheme = MaterialTheme.colorScheme
+    val bgColor = colorScheme.background
+    val cardColor = colorScheme.surfaceVariant
+    val textPrimary = colorScheme.onSurface
+    val textSecondary = colorScheme.onSurfaceVariant
+    val dividerColor = colorScheme.outline
 
     val supportedRates = remember { FrameRateManager.getSupportedFrameRates(context) }
     var selectedRate by remember {
@@ -224,7 +215,7 @@ private fun FrameRateOptionItem(
                 modifier = Modifier
                     .size(20.dp)
                     .clip(CircleShape)
-                    .background(WeChatGreen),
+                    .background(PinkPrimary),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

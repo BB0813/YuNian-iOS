@@ -57,10 +57,7 @@ import com.lianyu.ai.uicommon.theme.PetalOnPrimaryContainer
 import com.lianyu.ai.uicommon.theme.PetalSurface
 import com.lianyu.ai.uicommon.theme.PetalGreen
 import com.lianyu.ai.uicommon.theme.PetalError
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
+
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -109,10 +106,11 @@ fun TokenUsageScreen(
         isVisible = true
     }
 
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else Color(0xFFFBF9F8)
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else Color(0xFF1B1C1C)
-    val textSecondaryColor = if (isDarkTheme) WeChatDarkTextSecondary else Color(0xFF524346)
-    val cardBg = if (isDarkTheme) WeChatDarkCard else PetalSurface
+    val colorScheme = MaterialTheme.colorScheme
+    val backgroundColor = colorScheme.background
+    val textPrimaryColor = colorScheme.onSurface
+    val textSecondaryColor = colorScheme.onSurfaceVariant
+    val cardBg = colorScheme.surfaceVariant
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -130,7 +128,7 @@ fun TokenUsageScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(if (isDarkTheme) WeChatDarkCard else Color.White.copy(alpha = 0.8f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -293,8 +291,8 @@ private fun StatsOverviewCard(
                 subtitle = formatTokenCount(monthStats?.requests?.toLong() ?: 0L) + " 次",
                 modifier = Modifier.weight(1f),
                 isDarkTheme = isDarkTheme,
-                bgColor = Color(0xFFFFA726).copy(alpha = 0.15f),
-                textColor = Color(0xFFFFA726)
+                bgColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+                textColor = MaterialTheme.colorScheme.primary
             )
         }
 
@@ -314,7 +312,7 @@ private fun StatsOverviewCard(
                 ) {
                     UsageDetailItem(label = "输入Token", value = formatTokenCount(todayUsage!!.inputTokens), color = PetalGreen, textPrimaryColor = textPrimaryColor)
                     UsageDetailItem(label = "输出Token", value = formatTokenCount(todayUsage!!.outputTokens), color = PetalPrimary, textPrimaryColor = textPrimaryColor)
-                    UsageDetailItem(label = "请求次数", value = "${todayUsage!!.requestCount}", color = Color(0xFFFFA726), textPrimaryColor = textPrimaryColor)
+                    UsageDetailItem(label = "请求次数", value = "${todayUsage!!.requestCount}", color = MaterialTheme.colorScheme.primary, textPrimaryColor = textPrimaryColor)
                 }
             }
         }

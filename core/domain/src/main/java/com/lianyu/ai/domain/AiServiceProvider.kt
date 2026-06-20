@@ -1,5 +1,7 @@
 package com.lianyu.ai.domain
 
+import kotlinx.coroutines.flow.Flow
+
 /**
  * AI 对话服务提供者接口。
  * 由 core:network 实现，通过 ServiceRegistry 注入到 feature 模块。
@@ -51,7 +53,8 @@ interface AiServiceProvider {
     suspend fun sendMessage(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
-        stickerProbability: Int = 0
+        stickerProbability: Int = 0,
+        ntpTimeEnabled: Boolean = false
     ): AiResponse
 
     /**
@@ -67,8 +70,28 @@ interface AiServiceProvider {
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
         imagePath: String,
-        stickerProbability: Int = 0
+        stickerProbability: Int = 0,
+        ntpTimeEnabled: Boolean = false
     ): AiResponse
+
+    /**
+     * 流式发送消息，逐块返回 AI 响应（打字机效果）。
+     *
+     * 用于降低首字延迟的场景（如 QQ 机器人边生成边发送）。
+     * 实现负责把内部 ChunkResult 映射为 [AiStreamChunk]，
+     * 思考过程(Reasoning)不暴露。
+     *
+     * @param companion 伴侣角色信息
+     * @param history 聊天历史消息
+     * @param stickerProbability 表情包发送概率 (0-100)
+     * @return 流式分块
+     */
+    fun sendMessageStream(
+        companion: AiCompanionInfo,
+        history: List<AiChatMessage>,
+        stickerProbability: Int = 0,
+        ntpTimeEnabled: Boolean = false
+    ): Flow<AiStreamChunk>
 
     /**
      * 判断是否需要发送主动消息。
@@ -83,6 +106,20 @@ interface AiServiceProvider {
     ): Boolean
 
     /**
+     * 判断是否需要发送主动消息（带自定义设置）。
+     *
+     * @param settings 主动消息自定义设置，null 走默认行为
+     */
+    fun shouldProactivelyMessage(
+        companion: AiCompanionInfo,
+        recentMessages: List<AiChatMessage>,
+        settings: ProactiveMessageSettings?
+    ): Boolean {
+        // 默认转发到无设置版本，实现侧可覆盖以读取开关
+        return shouldProactivelyMessage(companion, recentMessages)
+    }
+
+    /**
      * 生成主动消息内容。
      *
      * @param companion 伴侣角色信息
@@ -93,6 +130,23 @@ interface AiServiceProvider {
         companion: AiCompanionInfo,
         recentMessages: List<AiChatMessage>
     ): String?
+
+    /**
+     * 生成主动消息内容（带自定义设置）。
+     *
+     * 设置影响：allowNewTopic=false 时强制承接上一话题；
+     * allowFollowUpMessage 控制是否生成追问。
+     *
+     * @param settings 主动消息自定义设置，null 走默认行为
+     */
+    suspend fun generateProactiveMessage(
+        companion: AiCompanionInfo,
+        recentMessages: List<AiChatMessage>,
+        settings: ProactiveMessageSettings?
+    ): String? {
+        // 默认转发到无设置版本，实现侧可覆盖以读取开关
+        return generateProactiveMessage(companion, recentMessages)
+    }
 
     /**
      * 使用自定义系统提示词发送消息（群聊场景）。

@@ -250,20 +250,29 @@ object AiPromptBuilder {
     }
 
     // === fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
-        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
+        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
     }
 
     // === private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    internal fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
+    internal fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
         val persona = extractPersona(companion)
 
+        val metaDirective = buildString {
+            appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
+            appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
+        }
+
         val basePrompt = if (companion.systemPrompt != null) {
-            companion.systemPrompt
+            buildString {
+                append(metaDirective)
+                appendLine()
+                appendLine("【角色设定】")
+                appendLine(companion.systemPrompt)
+            }
         } else {
             buildString {
-                appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
-                appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
+                append(metaDirective)
                 appendLine()
                 appendLine(persona)
             }
@@ -272,7 +281,7 @@ object AiPromptBuilder {
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n关于用户的记忆：\n$memoryContext\n"
         } else ""
-        val timeSection = "\n\n${AiContextTools.buildCurrentTimeContext()}\n"
+        val timeSection = "\n\n${AiContextTools.buildCurrentTimeContext(ntpTimeEnabled)}\n"
 
         return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled)
     }
@@ -360,6 +369,7 @@ ${innerThoughtRule}
 12. 语气词：适当使用呀、呢、啦、嘛、哼、嘿嘿、诶、哇、呜呜、嘤等语气词，让说话更有温度。
 ${stickerRule}
 14. 情绪识别：仔细感受用户的情绪。用户发文字时看用词和标点，用户发表情包时看表情包内容。用户开心你就陪着开心，用户难过你就安慰，用户生气你就哄，用户撒娇你就宠。不要无视用户的情绪。
+15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<think>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
 
 === 回复示例 ===
 ${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是最好的"

@@ -97,13 +97,19 @@ object TextProcessor {
     /**
      * 初始清洗：移除 AI 输出中的各类元标记，避免泄露到聊天界面。
      * 注意：sticker 标记的识别必须在调用本函数之前的原始文本上进行。
+     *
+     * [P0 FIX] 改进清洗逻辑：
+     * - 保留方括号外的正常文本内容（之前会误删括号附近的文本）
+     * - 添加清洗前后长度校验，防止短回复被完全清空
+     * - 记录清洗日志便于调试
      */
     private fun cleanAiResponseText(text: String): String {
+        val originalLength = text.length
         var cleaned = ROLE_PREFIX_REGEX.replace(text, "")
         cleaned = THINK_REGEX.replace(cleaned, "")
         cleaned = ENC_REGEX.replace(cleaned, "").trim()
 
-        // 单遍扫描移除所有方括号、花括号、尖括号及其内容（已识别的 sticker 标记由调用方处理）
+        // [P0 FIX] 改进的括号处理：只移除匹配的括号对及其内容，保留孤立字符和外部文本
         val sb = StringBuilder(cleaned.length)
         var i = 0
         while (i < cleaned.length) {
@@ -118,28 +124,50 @@ object TextProcessor {
                     }
                     if (closeChar != null) {
                         val closeIdx = cleaned.indexOf(closeChar, i)
-                        if (closeIdx >= 0) {
+                        if (closeIdx >= 0 && closeIdx - i <= 50) {  // [FIX] 只跳过合理长度的内容（≤50字符）
                             i = closeIdx + 1
                             continue
                         }
+                        // 超长或未闭合的括号，保留原字符
                     }
-                    // 未闭合则跳过该字符
+                    sb.append(cleaned[i])
                     i++
                     continue
                 }
                 ']', '】', '}', '>' -> {
-                    // 跳过孤立的右半括号
+                    // 孤立的右半括号，保留（可能是表情符号或特殊用法）
+                    sb.append(cleaned[i])
                     i++
                     continue
                 }
+                else -> {
+                    sb.append(cleaned[i])
+                    i++
+                }
             }
-            sb.append(cleaned[i])
-            i++
         }
 
         var result = sb.toString().trim()
         result = STICKER_FILE_REGEX.replace(result, "")
         result = MULTI_NEWLINE_REGEX.replace(result, "\n")
+
+        // [P0 FIX] 清洗保护：如果清洗后内容过短（<原始20%且<2字符），返回保守结果
+        val cleanedLength = result.length
+        if (cleanedLength < 2 && originalLength > 5) {
+            SecureLog.w("TextProcessor", "Aggressive cleaning detected: $originalLength → $cleanedLength chars, applying conservative cleanup")
+            // 保守清洗：只移除think标签和明显的AI标记
+            result = ROLE_PREFIX_REGEX.replace(text, "")
+            result = THINK_REGEX.replace(result, "")
+            result = ENC_REGEX.replace(result, "").trim()
+            // 二次尝试：如果仍然太短，只做最小清理
+            if (result.length < 2) {
+                result = text.trim()
+                    .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
+                    .replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
+                    .trim()
+            }
+        }
+
         return result
     }
 
@@ -202,7 +230,9 @@ object TextProcessor {
         cleanText = removeSentStickerResiduals(cleanText, sentStickers)
 
         // 模式2：AI没有输出标记，根据概率随机发送
-        if (sentStickers.isEmpty() && stickerProbability > 0) {
+        // [P0 FIX] 只有当清洗后的文本仍有实质内容时才触发概率表情包
+        // 避免文本被清空后只剩表情包的"只回复表情包"问题
+        if (sentStickers.isEmpty() && stickerProbability > 0 && cleanText.isNotBlank()) {
             val allRules = stickerManager.getAllRules()
             if (allRules.isNotEmpty()) {
                 val random = kotlin.random.Random.nextInt(1, 101)
@@ -217,9 +247,12 @@ object TextProcessor {
                         } else {
                             sticker.description ?: sticker.name
                         }
-                        if (descToRemove.length >= 2) {
+                        // [FIX] 只移除描述文字，且移除后检查剩余内容是否仍然有意义
+                        if (descToRemove.length >= 2 && cleanText.length > descToRemove.length + 1) {
                             cleanText = cleanText.replace(descToRemove, "")
                             SecureLog.d("TextProcessor", "Removed sticker desc from split text (prob mode): $descToRemove")
+                        } else {
+                            SecureLog.d("TextProcessor", "Skipping desc removal: would leave text too short (${cleanText.length} - ${descToRemove.length})")
                         }
                         SecureLog.d("TextProcessor", "Auto-sent sticker by probability in split mode: ${sticker.name} ($stickerProbability%)")
                     }
@@ -230,6 +263,12 @@ object TextProcessor {
         cleanText = cleanText.trim()
         cleanText = removeLocalRepetition(cleanText)
         cleanText = clearLeakedStickerDescription(cleanText, sentStickers, stickerManager)
+
+        // [P0 FIX] 最终保护：如果处理后的文本为空但原始输入不为空，记录警告
+        if (cleanText.isBlank() && text.trim().isNotBlank()) {
+            SecureLog.w("TextProcessor", "WARNING: Text processing resulted in blank output. Original: '${text.take(50)}', stickers sent: ${sentStickers.size}")
+        }
+
         return cleanText
     }
 
@@ -284,7 +323,8 @@ object TextProcessor {
         cleanText = removeSentStickerResiduals(cleanText, sentStickers)
 
         // 模式2：AI文字中提到表情包但没有输出标记 → 智能匹配（仅在未通过模式1发送时）
-        if (sentStickers.isEmpty() && !stickerSentThisTurn && stickerProbability > 0) {
+        // [P0 FIX] 增加文本内容保护，避免清空后只发表情包
+        if (sentStickers.isEmpty() && !stickerSentThisTurn && stickerProbability > 0 && cleanText.isNotBlank()) {
             val allRules = stickerManager.getAllRules()
             if (allRules.isNotEmpty()) {
                 val matchedStickers = mutableListOf<Pair<StickerInfo, String>>()

@@ -24,6 +24,8 @@
     <string name="about_app_desc">戀語 - 你的AI虛擬戀人</string>
     <string name="battery_whitelist">電池優化白名單</string>
     <string name="battery_whitelist_desc">確保後台消息正常推送</string>
+    <string name="data_backup">資料備份</string>
+    <string name="data_backup_desc">匯出或匯入聊天資料</string>
     <string name="auto_start">自啟動權限</string>
     <string name="auto_start_desc">允許應用開機自啟動</string>
 

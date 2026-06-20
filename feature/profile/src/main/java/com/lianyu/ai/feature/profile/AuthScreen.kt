@@ -49,9 +49,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
 import com.lianyu.ai.feature.profile.BuildConfig
-import androidx.compose.foundation.isSystemInDarkTheme
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
 
@@ -61,9 +59,6 @@ fun AuthScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val isDarkTheme = isSystemInDarkTheme()
-    val cardColor = if (isDarkTheme) WeChatDarkCard else Color.White
-
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -106,11 +101,11 @@ fun AuthScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = if (isDarkTheme) {
-                        listOf(Color(0xFF1C1C1E), Color(0xFF121212), Color(0xFF1C1C1E))
-                    } else {
-                        listOf(Color(0xFFF5F5F5), Color(0xFFEEEEEE), Color(0xFFF5F5F5))
-                    }
+                    colors = listOf(
+                        MaterialTheme.colorScheme.surface,
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.surface
+                    )
                 )
             )
     ) {
@@ -148,7 +143,7 @@ fun AuthScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(cardColor)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(24.dp)
             ) {
                 Column {

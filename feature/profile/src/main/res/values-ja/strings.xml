@@ -24,6 +24,8 @@
     <string name="about_app_desc">恋語 - あなたのAIバーチャル恋人</string>
     <string name="battery_whitelist">電池最適化ホワイトリスト</string>
     <string name="battery_whitelist_desc">バックグラウンドメッセージを確実に</string>
+    <string name="data_backup">データバックアップ</string>
+    <string name="data_backup_desc">チャットデータをエクスポートまたはインポート</string>
     <string name="auto_start">自動起動</string>
     <string name="auto_start_desc">自動起動を許可</string>
 

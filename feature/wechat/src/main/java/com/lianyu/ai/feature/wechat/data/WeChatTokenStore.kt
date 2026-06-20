@@ -69,7 +69,7 @@ class WeChatTokenStore(context: Context) {
     // ==================== Auto Reply ====================
 
     val autoReplyFlow: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[AUTO_REPLY_KEY] ?: false
+        prefs[AUTO_REPLY_KEY] ?: true
     }
 
     suspend fun getAutoReply(): Boolean = autoReplyFlow.first()

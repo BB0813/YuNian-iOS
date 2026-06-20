@@ -24,6 +24,8 @@
     <string name="about_app_desc">연어 - 당신의 AI 가상 연인</string>
     <string name="battery_whitelist">배터리 최적화 화이트리스트</string>
     <string name="battery_whitelist_desc">백그라운드 메시지가 정상 작동하도록</string>
+    <string name="data_backup">데이터 백업</string>
+    <string name="data_backup_desc">채팅 데이터 내보내기 또는 가져오기</string>
     <string name="auto_start">자동 시작</string>
     <string name="auto_start_desc">앱 자동 시작 허용</string>
 

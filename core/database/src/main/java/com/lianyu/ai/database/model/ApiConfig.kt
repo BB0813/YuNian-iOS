@@ -20,7 +20,9 @@ data class ApiConfig(
     val isEnabled: Boolean = true,
     val connectionTested: Boolean = false,
     val connectionTestedAt: Long = 0L,
-    val latencyMs: Long = 0L
+    val latencyMs: Long = 0L,
+    val skipCertVerify: Boolean = false,
+    val formatHint: String = "openai"  // "openai" | "anthropic" | "iflytek" — API format hint for CUSTOM provider
 ) {
     companion object {
         val BUILTIN_KEYS = mapOf<ApiProvider, List<String>>(
@@ -75,5 +77,6 @@ enum class ApiProvider(val displayName: String, val defaultBaseUrl: String, val 
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1/", "openai/gpt-4o-mini"),
     GROQ("Groq", "https://api.groq.com/openai/v1/", "llama-3.1-8b-instant"),
     PARTNER("Clove API", "https://clove.dpdns.org/v1", "Pro/moonshotai/Kimi-K2.5"),
-    CUSTOM("自定义 API", "", "")
+    CUSTOM("自定义 API", "", ""),
+    IFLYTEK("讯飞星火", "https://spark-api-open.xf-yun.com/v1/", "generalv3.5")
 }

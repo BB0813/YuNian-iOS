@@ -15,9 +15,10 @@ object TimeoutBudgets {
     const val IMAGE_PROCESS_MS = 50L         // 图片处理
 
     // === 网络操作 ===
-    const val API_CHAT_MS = 25_000L          // 普通AI对话 (25s)
-    const val API_VISION_MS = 60_000L        // 视觉识别 (60s)
-    const val API_STREAM_MS = 30_000L        // 流式对话 (30s)
+    // [P0 FIX] API_CHAT_MS 从25s降至15s：原值导致消息队列串行堵塞，用户连续发消息时延迟=15s x N条
+    const val API_CHAT_MS = 15_000L          // 普通AI对话 (15s)
+    const val API_VISION_MS = 30_000L        // 视觉识别 (30s，需编码+传输)
+    const val API_STREAM_MS = 20_000L        // 流式对话 (20s)
     const val TTS_SYNTH_MS = 10_000L         // TTS合成 (10s)
     const val STT_RECOGNIZE_MS = 15_000L     // 语音识别 (15s)
 

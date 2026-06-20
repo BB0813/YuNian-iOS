@@ -35,8 +35,52 @@ android {
     }
 }
 
-// Dex2C Transpiler Task �?runs before ndkBuild
+// Ensure dex2c stubs exist before ndk-build runs (both Debug and Release)
 val dex2cOutputDir = file("src/main/cpp/generated")
+
+tasks.register("ensureDex2cStubs") {
+    description = "Ensure dex2c stub files exist for ndk-build"
+    group = "security"
+    outputs.dir(dex2cOutputDir)
+
+    doLast {
+        val cppFile = file("$dex2cOutputDir/dex2c_methods.cpp")
+        val hFile = file("$dex2cOutputDir/dex2c_registry.h")
+        if (!cppFile.exists() || !hFile.exists()) {
+            dex2cOutputDir.mkdirs()
+            if (!cppFile.exists()) {
+                cppFile.writeText("""
+#include <jni.h>
+#include <stdint.h>
+#include "dex2c_registry.h"
+const uint32_t gDex2cTextCrc32 = 0x00000000;
+JNINativeMethod gDex2cMethods[] = {};
+const size_t gDex2cMethodCount = 0;
+""".trimIndent())
+            }
+            if (!hFile.exists()) {
+                hFile.writeText("""
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+extern JNINativeMethod gDex2cMethods[];
+extern const size_t gDex2cMethodCount;
+extern const uint32_t gDex2cTextCrc32;
+""".trimIndent())
+            }
+        }
+    }
+}
+
+tasks.matching { it.name.startsWith("configureNdkBuild") || it.name.startsWith("buildNdkBuild") }.configureEach {
+    dependsOn("ensureDex2cStubs")
+    // Release builds also run full dex2c transpilation
+    if (name.contains("Release")) {
+        dependsOn("dex2cTranspile")
+    }
+}
+
+// Dex2C Transpiler Task — runs before ndkBuild (Release only)
 val dex2cWhitelist = rootProject.file("tools/dex2c_whitelist.txt")
 val dex2cTranspiler = rootProject.file("tools/dex2c_transpile.py")
 
@@ -91,13 +135,6 @@ extern const uint32_t gDex2cTextCrc32;
         } else {
             logger.lifecycle("Dex2C: transpilation complete")
         }
-    }
-}
-
-tasks.matching { it.name.startsWith("configureNdkBuild") || it.name.startsWith("buildNdkBuild") }.configureEach {
-    // Only run dex2cTranspile for release builds
-    if (name.contains("Release")) {
-        dependsOn("dex2cTranspile")
     }
 }
 

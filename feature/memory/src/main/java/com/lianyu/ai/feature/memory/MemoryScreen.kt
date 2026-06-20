@@ -65,12 +65,6 @@ import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.MemoryCategory
 import com.lianyu.ai.database.model.MemoryEntry
 import com.lianyu.ai.database.model.TempMemory
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -88,15 +82,6 @@ fun MemoryScreen(
     val companions by viewModel.companions.collectAsState(initial = emptyList())
     var selectedCompanion by remember { mutableStateOf<CompanionEntity?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) }
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDarkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val cardColor = if (isDarkTheme) WeChatDarkCard else Color.White
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
@@ -110,7 +95,7 @@ fun MemoryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(cardColor, shape = RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -122,7 +107,7 @@ fun MemoryScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.memory_management),
-                            tint = textPrimary,
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -133,7 +118,7 @@ fun MemoryScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         ),
-                        color = textPrimary
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Spacer(modifier = Modifier.width(32.dp))
@@ -248,8 +233,8 @@ fun CompanionChip(
                 } else {
                     Brush.horizontalGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.6f),
-                            Color(0xFFF5F5F5).copy(alpha = 0.4f)
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                         )
                     )
                 }
@@ -298,7 +283,7 @@ fun CompanionChip(
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
                 ),
-                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
             )
         }
     }
@@ -468,7 +453,7 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
                 if (isSelected) {
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                 } else {
-                    Color.White.copy(alpha = 0.5f)
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 }
             )
             .clickable(onClick = onClick)
@@ -480,7 +465,7 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
                 fontSize = 12.sp,
                 fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
             ),
-            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
         )
     }
 }
@@ -495,7 +480,7 @@ fun MemoryItemCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = RoundedCornerShape(12.dp)
     ) {
@@ -596,7 +581,7 @@ fun TempMemoryItemCard(tempMemory: TempMemory) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = RoundedCornerShape(12.dp)
     ) {

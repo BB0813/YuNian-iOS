@@ -107,21 +107,11 @@ import com.lianyu.ai.domain.ModelState
 import com.lianyu.ai.domain.ModelStatus
 import com.lianyu.ai.feature.settings.R
 import com.lianyu.ai.feature.settings.ui.viewmodel.SettingsViewModel
-import com.lianyu.ai.uicommon.theme.PinkPrimary
+import com.lianyu.ai.uicommon.theme.PetalPrimary
 import com.lianyu.ai.uicommon.theme.ThemeMode
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextTertiary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextTertiary
 import com.lianyu.ai.common.AppSettingsStore
+import com.lianyu.ai.common.SecureLog
 import kotlinx.coroutines.delay
 import java.util.Locale
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -167,10 +157,13 @@ fun SettingsScreen(
         }
     }
 
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else PetalBackgroundStart
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else PetalOnSurface
-    val textSecondaryColor = if (isDarkTheme) WeChatDarkTextSecondary else PetalOnSurfaceVariant
-    val textTertiaryColor = if (isDarkTheme) WeChatDarkTextTertiary else PetalOutlineVariant
+    val colorScheme = MaterialTheme.colorScheme
+    val backgroundColor = colorScheme.background
+    val textPrimaryColor = colorScheme.onSurface
+    val textSecondaryColor = colorScheme.onSurfaceVariant
+    val textTertiaryColor = colorScheme.outlineVariant
+    val dividerColor = colorScheme.outline
+    val cardBackground = colorScheme.surfaceVariant
 
     LaunchedEffect(Unit) {
         viewModel.refreshLocalModel()
@@ -209,7 +202,7 @@ fun SettingsScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(if (isDarkTheme) WeChatDarkCard else Color.White.copy(alpha = 0.8f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -298,7 +291,7 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (isDarkTheme) WeChatDarkCard else PetalSurface)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                         .clickable { showVisionModelSettings = true }
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -392,8 +385,8 @@ fun SettingsScreen(
                 newConfigDialog = null
             },
             onTest = { testConfig: ApiConfig -> viewModel.testConnection(testConfig) },
-            onFetchModels = { baseUrl: String, apiKey: String ->
-                viewModel.fetchModels(baseUrl, apiKey, newConfig.provider.name)
+            onFetchModels = { baseUrl: String, apiKey: String, skipCertVerify: Boolean ->
+                viewModel.fetchModels(baseUrl, apiKey, newConfig.provider.name, skipCertVerify)
             },
             isDarkTheme = isDarkTheme,
             textPrimaryColor = textPrimaryColor,
@@ -417,10 +410,11 @@ fun SettingsScreen(
             ApiProvider.GEMINI,
             ApiProvider.ANTHROPIC,
             ApiProvider.XIAOMI,
+            ApiProvider.IFLYTEK,
             ApiProvider.CUSTOM
         )
-        val cardBackground = if (isDarkTheme) WeChatDarkCard else PetalSurface
-        val dividerColor = if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer
+        val cardBackground = MaterialTheme.colorScheme.surfaceVariant
+        val dividerColor = MaterialTheme.colorScheme.outline
 
         AlertDialog(
             onDismissRequest = { showProviderPicker = false },
@@ -523,7 +517,7 @@ private fun ApiTestResultDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
         icon = {
             Icon(
                 imageVector = if (data.isSuccess) Icons.Filled.Check else Icons.Filled.Close,
@@ -544,7 +538,7 @@ private fun ApiTestResultDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = if (data.isSuccess) "${data.providerName} API 连接测试通过" else "${data.providerName} API 无法连接，请检查配置",
-                    color = if (isDarkTheme) WeChatDarkTextPrimary else PetalOnSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp
                 )
 
@@ -562,7 +556,7 @@ private fun ApiTestResultDialog(
                             data.latencyMs < 500 -> "🚀 延迟优秀，连接速度很快"
                             data.latencyMs < 1500 -> "✅ 延迟正常，可以正常使用"
                             else -> "⚠️ 延迟较高，可能影响体验"
-                        }, color = if (isDarkTheme) WeChatDarkTextSecondary else PetalOnSurfaceVariant, fontSize = 12.sp)
+                        }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
 
@@ -580,7 +574,7 @@ private fun ApiTestResultDialog(
 
                     Text(
                         text = "常见问题：\n• API Key 是否正确\n• Base URL 是否完整（含 /v1）\n• 网络连接是否正常\n• 该服务商是否支持当前模型",
-                        color = if (isDarkTheme) WeChatDarkTextSecondary else PetalOnSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
@@ -651,8 +645,8 @@ private fun ApiCardsSection(
                 },
                 onToggleEnabled = { viewModel.toggleConfigEnabled(partnerConfig) },
                 onSelectActive = { viewModel.selectActiveConfig(partnerConfig) },
-                onFetchModels = { baseUrl: String, apiKey: String, provider: String ->
-                    viewModel.fetchModels(baseUrl, apiKey, provider)
+                onFetchModels = { baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean ->
+                    viewModel.fetchModels(baseUrl, apiKey, provider, skipCertVerify)
                 },
                 fetchedModels = fetchedModels,
                 modelFetchStates = modelFetchStates,
@@ -684,8 +678,8 @@ private fun ApiCardsSection(
                     onTest = { viewModel.testConnection(config) },
                     onToggleEnabled = { viewModel.toggleConfigEnabled(config) },
                     onSelectActive = { viewModel.selectActiveConfig(config) },
-                    onFetchModels = { baseUrl: String, apiKey: String, provider: String ->
-                        viewModel.fetchModels(baseUrl, apiKey, provider)
+                    onFetchModels = { baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean ->
+                        viewModel.fetchModels(baseUrl, apiKey, provider, skipCertVerify)
                     },
                     fetchedModels = fetchedModels,
                     modelFetchStates = modelFetchStates,
@@ -751,13 +745,13 @@ fun ApiConfigEditDialog(
     isDarkTheme: Boolean,
     textPrimaryColor: Color,
     textSecondaryColor: Color,
-    onFetchModels: ((String, String) -> Unit)? = null,
+    onFetchModels: ((String, String, Boolean) -> Unit)? = null,
     availableModels: List<String> = emptyList(),
     modelFetchState: SettingsViewModel.ModelFetchState = SettingsViewModel.ModelFetchState()
 ) {
-    val cardBackground = if (isDarkTheme) WeChatDarkCard else PetalSurface
-    val dividerColor = if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer
-    val textTertiary = if (isDarkTheme) WeChatDarkTextTertiary else PetalOutlineVariant
+    val cardBackground = MaterialTheme.colorScheme.surfaceVariant
+    val dividerColor = MaterialTheme.colorScheme.outline
+    val textTertiary = MaterialTheme.colorScheme.outlineVariant
 
     var apiKey by remember { mutableStateOf(config.apiKey) }
     var extraApiKeys by remember { mutableStateOf(config.extraApiKeys) }
@@ -766,9 +760,13 @@ fun ApiConfigEditDialog(
     var temperature by remember { mutableFloatStateOf(config.temperature) }
     var maxTokens by remember { mutableStateOf(config.maxTokens?.toString() ?: "") }
     var showModelDropdown by remember { mutableStateOf(false) }
+    var skipCertVerify by remember { mutableStateOf(config.skipCertVerify) }
+    var formatHint by remember { mutableStateOf(config.formatHint) }
     var lastFetchedParams by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     val isPartner = config.provider == ApiProvider.PARTNER
+    val isCustom = config.provider == ApiProvider.CUSTOM
     val isValid = apiKey.isNotBlank() || baseUrl.isNotBlank() || isPartner
     val hasModels = availableModels.isNotEmpty()
 
@@ -779,27 +777,46 @@ fun ApiConfigEditDialog(
         else -> "填写密钥后自动拉取模型"
     }
 
-    LaunchedEffect(apiKey, baseUrl, isPartner) {
+    LaunchedEffect(apiKey, baseUrl, config.provider) {
         val fetchParams = baseUrl.trim() + "|" + apiKey.trim()
-        val shouldFetch = isPartner && baseUrl.isNotBlank() && fetchParams != lastFetchedParams
+        // PARTNER：baseUrl 非空即可自动拉取（密钥可空，由服务器下发）
+        // CUSTOM：baseUrl 和 apiKey 都非空才自动拉取
+        val shouldFetch = baseUrl.isNotBlank() &&
+                (isPartner || (isCustom && apiKey.isNotBlank())) &&
+                fetchParams != lastFetchedParams
         if (shouldFetch) {
             delay(600)
             lastFetchedParams = fetchParams
             // PARTNER 模式下，如果用户没有填写密钥，使用空字符串触发从服务器获取
             val keyToUse = apiKey.trim()
-            onFetchModels?.invoke(baseUrl, keyToUse)
+            onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
         }
     }
 
-    LaunchedEffect(availableModels, isPartner) {
-        if (isPartner && model.isBlank() && availableModels.isNotEmpty()) {
-            model = availableModels.first()
+    LaunchedEffect(availableModels, config.provider) {
+        if ((isPartner || isCustom) && availableModels.isNotEmpty()) {
+            model = if (isPartner) {
+                // [FIX] PARTNER 始终本地随机，避免 server randomModel 固定导致每次相同
+                val serverModel = com.lianyu.ai.common.RemoteKeyProvider.getRandomModel(context)
+                    ?.takeIf { it.isNotBlank() && availableModels.contains(it) }
+                val chosenModel = if (availableModels.size > 1) {
+                    com.lianyu.ai.network.AiService.familyBalancedRandom(availableModels)
+                } else {
+                    serverModel ?: availableModels.first()
+                }
+                SecureLog.d("SettingsScreen", "PARTNER auto-select model: chosen=$chosenModel, server=$serverModel, available=${availableModels.size}")
+                chosenModel
+            } else {
+                // CUSTOM: auto-select first only when model is blank
+                if (model.isBlank()) availableModels.first() else model
+            }
         }
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = cardBackground,
+        tonalElevation = 0.dp,
         title = {
             Text(
                 text = "${config.provider.displayName} 配置",
@@ -951,10 +968,13 @@ fun ApiConfigEditDialog(
                     if (hasModels && !modelFetchState.isLoading) {
                         Button(
                             onClick = {
+                                // 重新获取模型列表时清空已选模型，触发自动重新随机
+                                model = ""
+                                lastFetchedParams = ""
                                 val keyToUse = apiKey.trim().ifBlank {
                                     ApiConfig.BUILTIN_KEYS[ApiProvider.PARTNER]?.firstOrNull() ?: ""
                                 }
-                                onFetchModels?.invoke(baseUrl, keyToUse)
+                                onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
@@ -1022,6 +1042,94 @@ fun ApiConfigEditDialog(
                     ),
                     singleLine = true
                 )
+
+                // API 格式选择 — 仅对自定义 API 显示
+                if (isCustom) {
+                    var showFormatDropdown by remember { mutableStateOf(false) }
+                    val formatOptions = mapOf(
+                        "openai" to "OpenAI 兼容",
+                        "anthropic" to "Anthropic 兼容"
+                    )
+                    val selectedFormatText = formatOptions[formatHint] ?: "OpenAI 兼容"
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = selectedFormatText,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("API 格式", color = textSecondaryColor) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showFormatDropdown = !showFormatDropdown },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = PetalPrimary,
+                                unfocusedBorderColor = dividerColor,
+                                focusedContainerColor = cardBackground,
+                                unfocusedContainerColor = cardBackground,
+                                focusedTextColor = textPrimaryColor,
+                                unfocusedTextColor = textPrimaryColor
+                            ),
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = if (showFormatDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "展开",
+                                    modifier = Modifier.clickable { showFormatDropdown = !showFormatDropdown },
+                                    tint = textSecondaryColor
+                                )
+                            },
+                            singleLine = true
+                        )
+                        DropdownMenu(
+                            expanded = showFormatDropdown,
+                            onDismissRequest = { showFormatDropdown = false },
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        ) {
+                            formatOptions.forEach { (key, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label, color = textPrimaryColor, fontSize = 14.sp) },
+                                    onClick = {
+                                        formatHint = key
+                                        showFormatDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 跳过证书验证 — 仅对非 Clove 的 provider 显示（Clove 始终固定证书）
+                if (!isPartner) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "跳过证书验证",
+                                color = textPrimaryColor,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "⚠️ 仅限自托管/内网服务器，开启后不再验证 SSL 证书",
+                                color = PetalOrange,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = skipCertVerify,
+                            onCheckedChange = { skipCertVerify = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PetalOrange,
+                                checkedTrackColor = PetalOrange.copy(alpha = 0.3f),
+                                uncheckedThumbColor = dividerColor,
+                                uncheckedTrackColor = dividerColor.copy(alpha = 0.2f)
+                            )
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1036,7 +1144,9 @@ fun ApiConfigEditDialog(
                             baseUrl = baseUrl.trim(),
                             model = model.trim(),
                             temperature = temperature,
-                            maxTokens = maxTokens.toIntOrNull()
+                            maxTokens = maxTokens.toIntOrNull(),
+                            skipCertVerify = skipCertVerify,
+                            formatHint = formatHint
                         )
                         onTest(currentConfig)
                     },
@@ -1066,7 +1176,9 @@ fun ApiConfigEditDialog(
                                 baseUrl = baseUrl.trim(),
                                 model = model.trim(),
                                 temperature = temperature,
-                                maxTokens = maxTokens.toIntOrNull()
+                                maxTokens = maxTokens.toIntOrNull(),
+                                skipCertVerify = skipCertVerify,
+                                formatHint = formatHint
                             )
                         )
                     },

@@ -16,6 +16,11 @@ android {
         versionCode = 12
         versionName = "1.8"
 
+        manifestPlaceholders[
+            "VIVO_PUSH_API_KEY"] = project.findProperty("VIVO_PUSH_API_KEY")?.toString() ?: ""
+        manifestPlaceholders[
+            "VIVO_PUSH_APP_ID"] = project.findProperty("VIVO_PUSH_APP_ID")?.toString() ?: ""
+
         buildConfigField("String", "HARDENING_LEVEL", "\"VMPv2.0+Keystore+AES256GCM\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -151,6 +156,8 @@ dependencies {
     implementation(project(":feature:settings"))
     implementation(project(":feature:localmodel"))
     implementation(project(":feature:wechat"))
+    implementation(project(":feature:qqbot"))
+    implementation(project(":feature:backup"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -174,6 +181,18 @@ dependencies {
     implementation(libs.androidx.app.update.ktx)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.tracing)
+
+    // 厂商 Push SDK
+    // OPPO / vivo 使用本地 aar，请从各厂商开放平台下载后放置到 app/libs
+    implementation(files("libs/oppo-push-3.0.0.aar"))
+    implementation(files("libs/vivo-push-4.1.5.0.aar"))
+    // 华为 HMS Push 使用 Maven 依赖
+    implementation(libs.huawei.hms.push)
+
+    // 小米推送：请从 https://dev.mi.com/ 下载 aar 放到 app/libs/xiaomi-push-x.x.x.aar，
+    // 然后取消下面注释并同步 Gradle。
+    // implementation(files("libs/xiaomi-push-6.0.1.aar"))
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

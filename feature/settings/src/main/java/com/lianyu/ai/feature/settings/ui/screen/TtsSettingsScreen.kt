@@ -84,12 +84,6 @@ import com.lianyu.ai.uicommon.theme.PetalSurface
 import com.lianyu.ai.uicommon.theme.PetalSurfaceContainer
 import com.lianyu.ai.uicommon.theme.PetalGreen
 import com.lianyu.ai.uicommon.theme.PetalError
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextTertiary
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -146,11 +140,12 @@ fun TtsSettingsScreen(
         ttsService.getVoices(selectedProvider)
     }
 
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else Color(0xFFFBF9F8)
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else Color(0xFF1B1C1C)
-    val textSecondaryColor = if (isDarkTheme) WeChatDarkTextSecondary else Color(0xFF524346)
-    val textTertiaryColor = if (isDarkTheme) WeChatDarkTextTertiary else Color(0xFFD6C1C5)
-    val cardBg = if (isDarkTheme) WeChatDarkCard else PetalSurface
+    val colorScheme = MaterialTheme.colorScheme
+    val backgroundColor = colorScheme.background
+    val textPrimaryColor = colorScheme.onSurface
+    val textSecondaryColor = colorScheme.onSurfaceVariant
+    val textTertiaryColor = colorScheme.outlineVariant
+    val cardBg = colorScheme.surfaceVariant
 
     fun saveSettings() {
         val newConfig = TtsConfig(
@@ -199,7 +194,7 @@ fun TtsSettingsScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(if (isDarkTheme) WeChatDarkCard else Color.White.copy(alpha = 0.8f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -450,10 +445,10 @@ private fun TtsToggleCard(
             checked = enabled,
             onCheckedChange = onToggle,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = PetalPrimaryContainer,
-                uncheckedThumbColor = Color.White,
-                uncheckedTrackColor = Color(0xFFD6C1C5)
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
     }
@@ -489,7 +484,7 @@ private fun ProviderSelectionCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (isDarkTheme) Color(0xFF3D2F36) else PetalSurfaceContainer.copy(alpha = 0.5f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .clickable { onDropdownToggle(!showDropdown) }
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -576,7 +571,7 @@ private fun VoiceSelectionCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (isDarkTheme) Color(0xFF3D2F36) else PetalSurfaceContainer.copy(alpha = 0.5f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .clickable { onDropdownToggle(!showDropdown) }
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -674,7 +669,7 @@ private fun ApiKeyConfigCard(
     textSecondaryColor: Color,
     textTertiaryColor: Color
 ) {
-    val dividerColor = if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer
+    val dividerColor = MaterialTheme.colorScheme.outline
 
     Column(
         modifier = Modifier
@@ -754,8 +749,8 @@ private fun TtsTextField(
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = PetalPrimary,
             unfocusedBorderColor = dividerColor,
-            focusedContainerColor = if (isDarkTheme) Color(0xFF241B20) else Color.White,
-            unfocusedContainerColor = if (isDarkTheme) Color(0xFF241B20) else Color.White,
+            focusedContainerColor = MaterialTheme.colorScheme.surface,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
             focusedTextColor = textPrimaryColor,
             unfocusedTextColor = textPrimaryColor
         ),

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,7 +55,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatInputExtensionPanel(
     isVisible: Boolean,
-    isDarkTheme: Boolean,
     availableApis: List<ApiProviderInfo> = emptyList(),
     currentApi: ApiProviderInfo? = null,
     onSwitchApi: ((ApiProviderInfo) -> Unit)? = null,
@@ -75,10 +75,10 @@ fun ChatInputExtensionPanel(
         val pagerState = rememberPagerState(pageCount = { 1 })
         val coroutineScope = rememberCoroutineScope()
         val adaptiveSizing = rememberAdaptiveSizing()
-        val bgColor = if (isDarkTheme) Color(0xFF1C1519) else Color(0xFFF7F7F7)
-        val iconBgColor = if (isDarkTheme) Color(0xFF2D2228) else Color.White
-        val textColor = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF666666)
-        val iconTintColor = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+        val bgColor = MaterialTheme.colorScheme.surfaceVariant
+        val iconBgColor = MaterialTheme.colorScheme.surface
+        val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+        val iconTintColor = MaterialTheme.colorScheme.onSurface
 
         Column(
             modifier = Modifier

@@ -41,19 +41,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightCard
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.res.stringResource
@@ -65,18 +52,7 @@ fun AboutScreen(
     onNavigateBack: () -> Unit,
     onAgreementClick: () -> Unit = {}
 ) {
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDark = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val backgroundColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDark) WeChatDarkCard else WeChatLightCard
-    val textPrimary = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDark) WeChatDarkTextSecondary else WeChatLightTextSecondary
-    val dividerColor = if (isDark) WeChatDarkDivider else WeChatLightDivider
+    val colorScheme = MaterialTheme.colorScheme
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -90,7 +66,7 @@ fun AboutScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(cardColor, shape = RoundedCornerShape(20.dp))
+                        .background(colorScheme.surfaceVariant, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -102,7 +78,7 @@ fun AboutScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back),
-                            tint = textPrimary,
+                            tint = colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -113,7 +89,7 @@ fun AboutScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         ),
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
 
                     Spacer(modifier = Modifier.width(32.dp))
@@ -124,7 +100,7 @@ fun AboutScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .background(colorScheme.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -150,7 +126,7 @@ fun AboutScreen(
                     fontSize = 28.sp,
                     letterSpacing = 2.sp
                 ),
-                color = textPrimary
+                color = colorScheme.onSurface
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -160,7 +136,7 @@ fun AboutScreen(
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 14.sp
                 ),
-                color = textSecondary
+                color = colorScheme.onSurfaceVariant
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -170,25 +146,20 @@ fun AboutScreen(
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = 12.sp
                 ),
-                color = textSecondary
+                color = colorScheme.onSurfaceVariant
             )
 
             Spacer(modifier = Modifier.height(32.dp))
 
             // Description
-            AboutCard(
-                isDark = isDark,
-                cardColor = cardColor,
-                textPrimary = textPrimary,
-                textSecondary = textSecondary
-            ) {
+            AboutCard() {
                 Text(
                     text = stringResource(R.string.about_desc_title),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     ),
-                    color = textPrimary,
+                    color = colorScheme.onSurface,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
 
@@ -200,7 +171,7 @@ fun AboutScreen(
                         fontSize = 13.sp,
                         lineHeight = 20.sp
                     ),
-                    color = textSecondary,
+                    color = colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
             }
@@ -208,19 +179,14 @@ fun AboutScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // Developer info
-            AboutCard(
-                isDark = isDark,
-                cardColor = cardColor,
-                textPrimary = textPrimary,
-                textSecondary = textSecondary
-            ) {
+            AboutCard() {
                 Text(
                     text = stringResource(R.string.developer),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     ),
-                    color = textPrimary,
+                    color = colorScheme.onSurface,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
 
@@ -242,36 +208,31 @@ fun AboutScreen(
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = 12.sp
                     ),
-                    color = textSecondary
+                    color = colorScheme.onSurfaceVariant
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             // Features
-            AboutCard(
-                isDark = isDark,
-                cardColor = cardColor,
-                textPrimary = textPrimary,
-                textSecondary = textSecondary
-            ) {
+            AboutCard() {
                 Text(
                     text = stringResource(R.string.features),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     ),
-                    color = textPrimary,
+                    color = colorScheme.onSurface,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                FeatureItem(stringResource(R.string.feature_multi_ai), stringResource(R.string.feature_multi_ai_desc), textPrimary, textSecondary)
-                FeatureItem(stringResource(R.string.feature_memory), stringResource(R.string.feature_memory_desc), textPrimary, textSecondary)
-                FeatureItem(stringResource(R.string.feature_refresh), stringResource(R.string.feature_refresh_desc), textPrimary, textSecondary)
-                FeatureItem(stringResource(R.string.feature_ui), stringResource(R.string.feature_ui_desc), textPrimary, textSecondary)
-                FeatureItem(stringResource(R.string.feature_edit), stringResource(R.string.feature_edit_desc), textPrimary, textSecondary)
+                FeatureItem(stringResource(R.string.feature_multi_ai), stringResource(R.string.feature_multi_ai_desc))
+                FeatureItem(stringResource(R.string.feature_memory), stringResource(R.string.feature_memory_desc))
+                FeatureItem(stringResource(R.string.feature_refresh), stringResource(R.string.feature_refresh_desc))
+                FeatureItem(stringResource(R.string.feature_ui), stringResource(R.string.feature_ui_desc))
+                FeatureItem(stringResource(R.string.feature_edit), stringResource(R.string.feature_edit_desc))
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -296,7 +257,7 @@ fun AboutScreen(
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = 11.sp
                 ),
-                color = textSecondary.copy(alpha = 0.5f)
+                color = colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -306,17 +267,13 @@ fun AboutScreen(
 
 @Composable
 fun AboutCard(
-    isDark: Boolean,
-    cardColor: Color,
-    textPrimary: Color,
-    textSecondary: Color,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .background(cardColor, shape = RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(16.dp))
             .padding(20.dp)
     ) {
         content()
@@ -324,7 +281,8 @@ fun AboutCard(
 }
 
 @Composable
-fun FeatureItem(title: String, description: String, textPrimary: Color, textSecondary: Color) {
+fun FeatureItem(title: String, description: String) {
+    val colorScheme = MaterialTheme.colorScheme
     Column(modifier = Modifier.padding(vertical = 6.dp)) {
         Text(
             text = title,
@@ -332,14 +290,14 @@ fun FeatureItem(title: String, description: String, textPrimary: Color, textSeco
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp
             ),
-            color = textPrimary
+            color = colorScheme.onSurface
         )
         Text(
             text = description,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontSize = 11.sp
             ),
-            color = textSecondary
+            color = colorScheme.onSurfaceVariant
         )
     }
 }

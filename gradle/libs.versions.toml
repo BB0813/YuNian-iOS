@@ -32,6 +32,7 @@ zxing = "3.5.3"
 wechatIlinkSdk = "2.3.3"
 securityCrypto = "1.1.0-alpha06"
 tinkAndroid = "1.18.0"
+huaweiHmsPush = "6.12.0.300"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -70,6 +71,7 @@ tink-android = { group = "com.google.crypto.tink", name = "tink-android", versio
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragmentKtx" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutinesAndroid" }
 androidx-animation = { group = "androidx.compose.animation", name = "animation", version.ref = "animation" }
 androidx-animation-core = { group = "androidx.compose.animation", name = "animation-core", version.ref = "animation" }
 androidx-animation-graphics = { group = "androidx.compose.animation", name = "animation-graphics", version.ref = "animation" }
@@ -78,6 +80,7 @@ litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-and
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 wechat-ilink-sdk = { group = "io.github.lith0924", name = "wechat-ilink-sdk", version.ref = "wechatIlinkSdk" }
 androidx-tracing = { group = "androidx.tracing", name = "tracing", version = "1.2.0" }
+huawei-hms-push = { group = "com.huawei.hms", name = "push", version.ref = "huaweiHmsPush" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

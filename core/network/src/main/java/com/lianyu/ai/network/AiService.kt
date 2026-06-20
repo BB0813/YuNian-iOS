@@ -18,6 +18,8 @@ import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.AiStreamChunk
+import com.lianyu.ai.domain.ProactiveMessageSettings
 import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.TokenUsageRepository
@@ -28,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -353,10 +356,17 @@ class AiService(context: Context) : AiServiceProvider {
             val result = fetchModels(ApiProvider.PARTNER.defaultBaseUrl, keys.first())
             result.getOrNull()?.let { models ->
                 if (models.isNotEmpty()) {
-                    val selected = models.find { it.contains("Kimi", ignoreCase = true) }
-                        ?: models.find { it.contains("gpt", ignoreCase = true) }
-                        ?: models.first()
-                    SecureLog.api("BUILTIN", "Auto-selected model: $selected from ${models.size} models")
+                    val chatModels = models.filter { m ->
+                        chatKeywords.any { m.contains(it, ignoreCase = true) }
+                    }
+                    val candidatePool = if (chatModels.size > 1) chatModels
+                    else models.filter { !it.contains("embed", ignoreCase = true) && !it.contains("moderation", ignoreCase = true) }
+                    val selected = if (candidatePool.size > 1) {
+                        familyBalancedRandom(candidatePool)
+                    } else {
+                        candidatePool.firstOrNull() ?: models.first()
+                    }
+                    SecureLog.api("BUILTIN", "Auto-selected model: $selected from ${models.size} models (chatModels=${chatModels.size})")
                     selected
                 } else null
             }
@@ -375,6 +385,43 @@ class AiService(context: Context) : AiServiceProvider {
         fun requiresFixedTemperature(model: String): Boolean {
             return model.contains("kimi-k2.6", ignoreCase = true) ||
                    model.contains("k2.6", ignoreCase = true)
+        }
+
+        // 模型家族关键词（用于 chat 过滤 + 家族均衡随机）
+        private val modelFamilyKeywords = listOf(
+            "deepseek", "qwen", "glm", "kimi", "moonshot",
+            "gpt", "claude", "gemini", "yi-", "ernie", "hunyuan", "doubao"
+        )
+        private val chatKeywords = modelFamilyKeywords + listOf("chat", "completion", "instruct")
+
+        /**
+         * 家族均衡随机：先随机选家族，再在家族内随机选模型，避免模型数量多的家族占比过高。
+         * 若 candidatePool 为空或只有 1 个模型，直接返回。
+         * 随机数直接从 /dev/urandom 读取，不依赖 PRNG seed。
+         */
+        private fun urandomInt(bound: Int): Int {
+            val buf = ByteArray(4)
+            java.io.FileInputStream("/dev/urandom").use { it.read(buf) }
+            val raw = ((buf[0].toInt() and 0xFF) shl 24) or
+                       ((buf[1].toInt() and 0xFF) shl 16) or
+                       ((buf[2].toInt() and 0xFF) shl 8) or
+                       (buf[3].toInt() and 0xFF)
+            return (raw and Int.MAX_VALUE) % bound
+        }
+
+        fun familyBalancedRandom(candidatePool: List<String>): String {
+            if (candidatePool.size <= 1) return candidatePool.first()
+            // 按首个匹配的家族关键词分组
+            val groups = LinkedHashMap<String, MutableList<String>>()
+            for (m in candidatePool) {
+                val family = modelFamilyKeywords.firstOrNull { m.contains(it, ignoreCase = true) } ?: "other"
+                groups.getOrPut(family) { mutableListOf() }.add(m)
+            }
+            // 先随机选家族，再在家族内随机
+            val families = groups.keys.toList()
+            val chosenFamily = families[urandomInt(families.size)]
+            val pool = groups[chosenFamily]!!
+            return pool[urandomInt(pool.size)]
         }
 
         private val okHttpClient: OkHttpClient by lazy {
@@ -399,13 +446,96 @@ class AiService(context: Context) : AiServiceProvider {
             builder.certificatePinner(CertificatePins.certificatePinner)
             builder
                 .connectionPool(okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
+                // [FIX] callTimeout=30s 与 API_TIMEOUT_MS 对齐，readTimeout=30s
                 .callTimeout(30, TimeUnit.SECONDS)
-                .connectTimeout(12, TimeUnit.SECONDS)
-                .readTimeout(35, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
                 .pingInterval(30, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build()
+        }
+
+        // All-trusting client for CUSTOM providers with skipCertVerify enabled.
+        // Only used when config.skipCertVerify == true && config.provider == ApiProvider.CUSTOM.
+        // Skips certificate chain validation and hostname verification entirely.
+        // WARNING: This disables MITM protection — only for self-hosted/internal servers.
+        private val unpinnedClient: OkHttpClient by lazy {
+            try {
+                val trustAllCerts = object : javax.net.ssl.X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                    override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                    override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+                }
+                val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
+                sslContext.init(null, arrayOf(trustAllCerts), java.security.SecureRandom())
+                OkHttpClient.Builder()
+                    .sslSocketFactory(sslContext.socketFactory, trustAllCerts)
+                    .hostnameVerifier { _, _ -> true }
+                    .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
+                    .writeTimeout(10, TimeUnit.SECONDS)
+                    .retryOnConnectionFailure(true)
+                    .build()
+            } catch (e: Exception) {
+                SecureLog.e("AiService", "Failed to create unpinnedClient, falling back to okHttpClient", e)
+                okHttpClient
+            }
+        }
+
+        // Standard TLS client without certificate pinning — used for auto-fallback
+        // when a hardcoded pin expires. Still validates certs against system trust store.
+        private val standardTlsClient: OkHttpClient by lazy {
+            okHttpClient.newBuilder()
+                .certificatePinner(okhttp3.CertificatePinner.DEFAULT)
+                .build()
+        }
+
+        /**
+         * Executes a request with adaptive certificate handling:
+         * 1. Try with pinned client (hardcoded pins + dynamic pin if exists)
+         * 2. On SSLPeerUnverifiedException (pin expired) → auto-fallback to standard TLS
+         * 3. If skipCertVerify is enabled → use unpinnedClient directly
+         *
+         * This means: when a provider rotates their cert, the app auto-adapts
+         * without user intervention, while still maintaining standard TLS security.
+         */
+        private fun executeAdaptive(
+            config: ApiConfig,
+            request: okhttp3.Request,
+            client: OkHttpClient = getEffectiveClient(config)
+        ): okhttp3.Response {
+            // If user explicitly enabled skipCertVerify, go straight to unpinned
+            if (config.skipCertVerify && config.provider != ApiProvider.PARTNER) {
+                return unpinnedClient.newCall(request).execute()
+            }
+
+            return try {
+                client.newCall(request).execute()
+            } catch (e: javax.net.ssl.SSLPeerUnverifiedException) {
+                // Pin expired (cert rotated but still valid per system trust store)
+                SecureLog.w("AiService", "🔐 Pin expired for ${config.provider}, auto-fallback to standard TLS")
+                standardTlsClient.newCall(request).execute()
+            }
+        }
+
+        /**
+         * Returns the appropriate OkHttpClient for the given API config.
+         * - Any provider with skipCertVerify (except PARTNER) → unpinnedClient (trusts all certs)
+         * - PARTNER provider → partnerHttpClient (always pinned, never skips)
+         * - All others → okHttpClient (with cert pinning + TLS enforcement)
+         */
+        private fun getEffectiveClient(config: ApiConfig): OkHttpClient {
+            // PARTNER (Clove relay) is always pinned — skipCertVerify does not apply
+            if (config.provider == ApiProvider.PARTNER) {
+                return partnerHttpClient
+            }
+            // Any user-configured provider (CUSTOM, DeepSeek, OpenAI, etc.) can skip cert verification
+            if (config.skipCertVerify) {
+                return unpinnedClient
+            }
+            return okHttpClient
         }
 
         // Dedicated client for self-hosted (PARTNER) providers — avoids creating a new
@@ -415,11 +545,31 @@ class AiService(context: Context) : AiServiceProvider {
             OkHttpClient.Builder()
                 .certificatePinner(CertificatePins.certificatePinner)
                 .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(45, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
+                // [P0 FIX] 自托管服务器超时从45s降至25s（原值过于保守）
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(25, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build()
+        }
+
+        /**
+         * Checks if a response body is HTML (non-JSON) and throws a clear error.
+         * Some providers (e.g. Xunfei Spark) return HTML error pages on auth failure
+         * with HTTP 200, which would otherwise crash JSON parsing with a cryptic error.
+         */
+        private fun ensureNotHtml(body: String, response: okhttp3.Response) {
+            val trimmed = body.trimStart()
+            if (trimmed.startsWith("<!") || trimmed.startsWith("<html", ignoreCase = true)) {
+                val hint = when {
+                    response.code == 401 || response.code == 403 ->
+                        " (请检查API密钥/APIPassword是否正确)"
+                    response.code == 404 ->
+                        " (请检查API地址和模型名是否正确)"
+                    else -> " (HTTP ${response.code}，请检查API配置)"
+                }
+                throw Exception("服务器返回了网页而非API响应$hint")
+            }
         }
 
         private fun shouldSignRequest(request: okhttp3.Request): Boolean {
@@ -463,11 +613,17 @@ class AiService(context: Context) : AiServiceProvider {
             ApiProvider.GROQ to OpenAiCompatibleProvider(),
             ApiProvider.CUSTOM to OpenAiCompatibleProvider(),
             ApiProvider.PARTNER to OpenAiCompatibleProvider(),
+            ApiProvider.IFLYTEK to OpenAiCompatibleProvider(),
             ApiProvider.ANTHROPIC to ClaudeProvider(),
         )
 
-        private fun providerFor(config: ApiConfig): AiProvider =
-            providers[config.provider] ?: OpenAiCompatibleProvider()
+        private fun providerFor(config: ApiConfig): AiProvider {
+            // CUSTOM provider respects formatHint: choose Claude format for "anthropic" hint
+            if (config.provider == ApiProvider.CUSTOM && config.formatHint == "anthropic") {
+                return ClaudeProvider()
+            }
+            return providers[config.provider] ?: OpenAiCompatibleProvider()
+        }
 
         init {
             AiProvider.okHttpClient = okHttpClient
@@ -521,7 +677,8 @@ class AiService(context: Context) : AiServiceProvider {
     fun sendMessageStream(
         companion: CompanionModel?,
         history: List<ChatMessage>,
-        stickerProbability: Int = 30
+        stickerProbability: Int = 30,
+        ntpTimeEnabled: Boolean = false
     ): Flow<ChunkedResponseHandler.ChunkResult> = flow {
         if (companion == null) {
             emit(ChunkedResponseHandler.ChunkResult.Error("抱歉，找不到角色信息。"))
@@ -572,7 +729,7 @@ class AiService(context: Context) : AiServiceProvider {
                 } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                 if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
             }.distinct()
-            val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+            val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
             val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
             SecureLog.api("STREAM", "Using provider=${config.provider}, model=${config.model}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
@@ -589,7 +746,7 @@ class AiService(context: Context) : AiServiceProvider {
                 stream = true
             )
 
-            val allKeys = config.getAllApiKeys()
+            val allKeys = resolveKeysWithPartnerFallback(config).second
             var accumulatedText = ""
             var hasEmittedContent = false  // Track whether any Text chunk has been emitted to the collector
             var hasError = false
@@ -665,7 +822,7 @@ class AiService(context: Context) : AiServiceProvider {
     /**
      * 发送消息（非流式，兼容旧接口）
      */
-    suspend fun sendMessage(companion: CompanionModel?, history: List<ChatMessage>, stickerProbability: Int = 30): AiResponse {
+    suspend fun sendMessage(companion: CompanionModel?, history: List<ChatMessage>, stickerProbability: Int = 30, ntpTimeEnabled: Boolean = false): AiResponse {
         if (companion == null) return AiResponse("抱歉，找不到角色信息。")
 
         return SecureLog.timed("AiService", "sendMessage") {
@@ -706,10 +863,11 @@ class AiService(context: Context) : AiServiceProvider {
                 val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
                 SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
+                System.err.println("[AiService] sendMessage: provider=${config.provider}, model=${config.model}, url=${config.baseUrl}, messages=${messages.size}, keys=${config.getAllApiKeys().size}")
 
                 try {
                     val (rawResponse, reasoning) = when (config.provider) {
-                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.PARTNER -> {
+                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
                             callOpenAiCompatibleWithReasoning(config, messages)
                         }
                         ApiProvider.ANTHROPIC -> {
@@ -729,7 +887,7 @@ class AiService(context: Context) : AiServiceProvider {
                     val safetyResult = ContentFilter.checkOutputSafety(cleaned)
                     if (!safetyResult.isSafe) {
                         SecureLog.w("AiService", "Output safety violation: ${safetyResult.level} - ${safetyResult.reason}")
-                        BanManager.recordViolation(appContext, safetyResult.level)
+                        // [FIX] AI 输出不应记录用户封禁——模型生成内容不是用户责任
                         return@withContext AiResponse("抱歉，我无法继续这个话题。")
                     }
 
@@ -742,7 +900,7 @@ class AiService(context: Context) : AiServiceProvider {
         }
     }
 
-    suspend fun generateProactiveMessage(companion: CompanionModel, recentMessages: List<ChatMessage>): String? {
+    suspend fun generateProactiveMessage(companion: CompanionModel, recentMessages: List<ChatMessage>, settings: ProactiveMessageSettings? = null): String? {
         return withContext(Dispatchers.IO) {
             val config = resolveConfig()
             if (config == null) {
@@ -759,7 +917,7 @@ class AiService(context: Context) : AiServiceProvider {
             val contextLimit = appSettingsStore.getContextLimit()
             val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit)
 
-            val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext)
+            val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext, settings)
             val contextMessages = buildProactiveContext(sortedMessages, companion)
 
             val messages = listOf(
@@ -770,7 +928,7 @@ class AiService(context: Context) : AiServiceProvider {
 
             try {
                 val rawResponse = when (config.provider) {
-                    ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.PARTNER -> {
+                    ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
                         callOpenAiCompatible(config, messages)
                     }
                     ApiProvider.ANTHROPIC -> {
@@ -830,7 +988,7 @@ class AiService(context: Context) : AiServiceProvider {
 
                 try {
                     val rawResponse = when (config.provider) {
-                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.PARTNER -> {
+                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
                             callOpenAiCompatible(config, messages)
                         }
                         ApiProvider.ANTHROPIC -> {
@@ -899,13 +1057,14 @@ class AiService(context: Context) : AiServiceProvider {
     ): String {
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
-        val allKeys = config.getAllApiKeys()
+        val allKeys = resolveKeysWithPartnerFallback(config).second
         var lastException: Exception? = null
 
-        val lightClient = okHttpClient.newBuilder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(45, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+        val lightClient = getEffectiveClient(config).newBuilder()
+            // [P0 FIX] 轻量客户端超时从45s降至20s，与主客户端对齐
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(10, TimeUnit.SECONDS)
             .build()
 
         for (keyIndex in allKeys.indices) {
@@ -945,11 +1104,12 @@ class AiService(context: Context) : AiServiceProvider {
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = lightClient.newCall(request).execute()
+                val response = executeAdaptive(config, request, lightClient)
                 val body = response.body?.string() ?: throw Exception("Empty response")
                 if (!response.isSuccessful) {
                     throw Exception("HTTP ${response.code}")
                 }
+                ensureNotHtml(body, response)
                 val parsed = json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) throw Exception(parsed.error.message ?: "API error")
 
@@ -1024,11 +1184,20 @@ class AiService(context: Context) : AiServiceProvider {
         if (keysToTry.isEmpty()) return Result.failure(Exception("API Key 未配置"))
 
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl).trimEnd('/')
-        val testClient = OkHttpClient.Builder()
-            .certificatePinner(CertificatePins.certificatePinner)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(45, TimeUnit.SECONDS)
-            .build()
+        // Use appropriate client: unpinned when skipCertVerify is enabled (any provider), otherwise pinned
+        val balanceClient = if (config.skipCertVerify) {
+            unpinnedClient.newBuilder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .build()
+        } else {
+            OkHttpClient.Builder()
+                .certificatePinner(CertificatePins.certificatePinner)
+                // [P0 FIX] 余额查询超时对齐
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .build()
+        }
 
         var totalLimit: Double? = null
         var totalUsed: Double? = null
@@ -1046,7 +1215,7 @@ class AiService(context: Context) : AiServiceProvider {
                             .url("$baseUrl$subEndpoint")
                             .addHeader("Authorization", "Bearer $key")
                             .get().build()
-                        val subRes = testClient.newCall(subReq).execute()
+                        val subRes = executeAdaptive(config, subReq, balanceClient)
                         val subBody = subRes.body?.string() ?: ""
                         rawSub = subBody
                         if (subRes.isSuccessful && subBody.isNotBlank()) {
@@ -1069,7 +1238,7 @@ class AiService(context: Context) : AiServiceProvider {
                             .url("$baseUrl$usageEndpoint")
                             .addHeader("Authorization", "Bearer $key")
                             .get().build()
-                        val usageRes = testClient.newCall(usageReq).execute()
+                        val usageRes = executeAdaptive(config, usageReq, balanceClient)
                         val usageBody = usageRes.body?.string() ?: ""
                         rawUsage = usageBody
                         if (usageRes.isSuccessful && usageBody.isNotBlank()) {
@@ -1103,7 +1272,7 @@ class AiService(context: Context) : AiServiceProvider {
         return Result.success(BalanceInfo(totalLimit, totalUsed, totalAvailable, remaining, rawSub, rawUsage))
     }
 
-    suspend fun fetchModels(baseUrl: String, apiKey: String, provider: ApiProvider? = null): Result<List<String>> {
+    suspend fun fetchModels(baseUrl: String, apiKey: String, provider: ApiProvider? = null, skipCertVerify: Boolean = false): Result<List<String>> {
         return withContext(Dispatchers.IO) {
             try {
                 val normalizedBaseUrl = normalizeOpenAiBaseUrl(baseUrl)
@@ -1120,9 +1289,21 @@ class AiService(context: Context) : AiServiceProvider {
 
                 SecureLog.api("MODELS", "Fetching models from ${url.take(60)}...")
 
+                val fetchClient = when {
+                    provider == ApiProvider.PARTNER -> partnerHttpClient  // Clove always pinned
+                    skipCertVerify -> unpinnedClient  // any user-configured provider can skip
+                    else -> okHttpClient
+                }
+
                 val response = runCatching {
                 val future = java.util.concurrent.Executors.newSingleThreadExecutor().submit<okhttp3.Response> {
-                    okHttpClient.newCall(request).execute()
+                    try {
+                        fetchClient.newCall(request).execute()
+                    } catch (e: javax.net.ssl.SSLPeerUnverifiedException) {
+                        // Pin expired — auto-fallback to standard TLS
+                        SecureLog.w("AiService", "🔐 Pin expired for models fetch, auto-fallback to standard TLS")
+                        standardTlsClient.newCall(request).execute()
+                    }
                 }
                 future.get(25, java.util.concurrent.TimeUnit.SECONDS)
             }.getOrElse { e ->
@@ -1136,6 +1317,11 @@ class AiService(context: Context) : AiServiceProvider {
                 if (!response.isSuccessful) {
                     SecureLog.api("MODELS", "HTTP ${response.code}")
                     return@withContext Result.failure(Exception("HTTP " + response.code))
+                }
+
+                // Some providers (e.g. Xunfei) don't support /models and return HTML
+                if (body.trimStart().startsWith("<!") || body.trimStart().startsWith("<html", ignoreCase = true)) {
+                    return@withContext Result.failure(Exception("该API不支持模型列表查询"))
                 }
 
                 val modelsResponse = json.decodeFromString<ModelsListResponse>(body)
@@ -1358,6 +1544,39 @@ class AiService(context: Context) : AiServiceProvider {
      * 1. 截断过长回复
      * 2. 检测最近5轮内的重复词
      */
+    private fun extractDirectReply(text: String): String {
+        val trimmed = text.trim()
+
+        // 1. 如果模型把最终回复用引号包起来，直接提取引号内容
+        val quoteMatches = Regex("""[\"“](.+?)[\"”]""", RegexOption.DOT_MATCHES_ALL).findAll(trimmed).toList()
+        if (quoteMatches.isNotEmpty()) {
+            val quoted = quoteMatches.joinToString("\n") { it.groupValues[1].trim() }
+            if (quoted.isNotBlank() && quoted.length >= 2) return quoted
+        }
+
+        // 2. 如果最后一段明显短于前面大段内心独白，取最后一段
+        val paragraphs = trimmed.split(Regex("""\n\s*\n""")).map { it.trim() }.filter { it.isNotBlank() }
+        if (paragraphs.size >= 2) {
+            val last = paragraphs.last()
+            val first = paragraphs.first()
+            if (last.length <= 80 && first.length > last.length * 2) {
+                return last
+            }
+        }
+
+        // 3. 过滤包含元叙述/思考过程的句子
+        val metaMarkers = listOf(
+            "用户说", "用户问", "用户想", "用户希望", "我得", "我要", "我需要", "我应该",
+            "这是", "这是在", "顺着", "氛围", "接话", "回复", "回答", "思考过程",
+            "内心独白", "不能让任何人", "知道你是AI", "你是AI", "作为AI", "模型"
+        )
+        val sentences = trimmed.split(Regex("""[。！？!?]""")).map { it.trim() }.filter { it.isNotBlank() }
+        val filtered = sentences.filter { sentence ->
+            metaMarkers.none { marker -> sentence.contains(marker) }
+        }
+        return if (filtered.isNotEmpty()) filtered.joinToString("。") else trimmed
+    }
+
     private fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
         var cleaned = response
             .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
@@ -1369,6 +1588,9 @@ class AiService(context: Context) : AiServiceProvider {
             .replace(Regex("\\{.*?\\}"), "")
             .replace(Regex("\\bsticker_\\w+\\.png\\b", RegexOption.IGNORE_CASE), "")
             .trim()
+
+        // 去除模型在正文里输出的思考/分析/内心独白
+        cleaned = extractDirectReply(cleaned)
 
         if (cleaned.length < 2) {
             cleaned = response.replace(Regex("[*<>{}]"), "").trim()
@@ -1403,13 +1625,15 @@ class AiService(context: Context) : AiServiceProvider {
         return cleaned
     }
 
-    private fun buildCurrentTimeContext(): String {
+    private fun buildCurrentTimeContext(ntpTimeEnabled: Boolean = false): String {
         val zone = TimeZone.getDefault()
         val formatter = SimpleDateFormat("yyyy年MM月dd日 EEEE HH:mm:ss", Locale.CHINA).apply {
             timeZone = zone
         }
-        val now = formatter.format(Date())
-        return "当前精确时间：$now（${zone.id}）。如果用户问今天、现在、几点几分几秒、星期几、多久、刚才、明天等时间相关问题，必须以这个精确时间为准，不要猜测或编造。"
+        val timeMs = if (ntpTimeEnabled) NtpTimeProvider.getCurrentTimeMs() else System.currentTimeMillis()
+        val now = formatter.format(Date(timeMs))
+        val source = if (ntpTimeEnabled && NtpTimeProvider.isNtpSynced()) "NTP网络校时" else "设备本地时钟"
+        return "当前精确时间：$now（${zone.id}，$source）。如果用户问今天、现在、几点几分几秒、星期几、多久、刚才、明天等时间相关问题，必须以这个精确时间为准，不要猜测或编造。"
     }
 
     private fun formatApiException(error: Throwable): String {
@@ -1437,19 +1661,28 @@ class AiService(context: Context) : AiServiceProvider {
         return "API调用失败：$message"
     }
 
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
-        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
+        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
     }
 
-    private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
+    private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
         val persona = extractPersona(companion)
 
+        val metaDirective = buildString {
+            appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
+            appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
+        }
+
         val basePrompt = if (companion.systemPrompt != null) {
-            companion.systemPrompt
+            buildString {
+                append(metaDirective)
+                appendLine()
+                appendLine("【角色设定】")
+                appendLine(companion.systemPrompt)
+            }
         } else {
             buildString {
-                appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
-                appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
+                append(metaDirective)
                 appendLine()
                 appendLine(persona)
             }
@@ -1458,7 +1691,7 @@ class AiService(context: Context) : AiServiceProvider {
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n关于用户的记忆：\n$memoryContext\n"
         } else ""
-        val timeSection = "\n\n${buildCurrentTimeContext()}\n"
+        val timeSection = "\n\n${buildCurrentTimeContext(ntpTimeEnabled)}\n"
 
         return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled)
     }
@@ -1544,6 +1777,7 @@ ${innerThoughtRule}
 12. 语气词：适当使用呀、呢、啦、嘛、哼、嘿嘿、诶、哇、呜呜、嘤等语气词，让说话更有温度。
 ${stickerRule}
 14. 情绪识别：仔细感受用户的情绪。用户发文字时看用词和标点，用户发表情包时看表情包内容。用户开心你就陪着开心，用户难过你就安慰，用户生气你就哄，用户撒娇你就宠。不要无视用户的情绪。
+15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<think>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
 
 === 回复示例 ===
 ${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是最好的"
@@ -1552,10 +1786,20 @@ ${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是
 你是$persona，一个有真实情绪的活人。记住：你不是AI，你是活人。${if (innerThoughtEnabled) "重要：你的每条回复都必须包含括号内的心理活动描写，这是你表达真实情感的方式。" else ""}""".trimIndent()
     }
 
-    private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = ""): String {
+    private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", settings: ProactiveMessageSettings? = null): String {
         val persona = extractPersona(companion)
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n=== 关于用户的记忆 ===\n$memoryContext\n"
+        } else ""
+
+        // 根据自定义设置注入话题策略
+        val topicRule = when {
+            settings == null -> ""
+            !settings.allowNewTopic -> "\n=== 话题策略（重要）===\n你必须承接上一条话题继续聊，禁止主动开启全新话题。如果不知道说什么，就围绕用户最近提到的内容延伸或追问。\n"
+            else -> ""
+        }
+        val followUpHint = if (settings != null && !settings.allowFollowUpMessage) {
+            "\n注意：本次不要追加追问句，说完核心内容即可。\n"
         } else ""
 
         return buildString {
@@ -1563,6 +1807,8 @@ ${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是
             appendLine()
             appendLine(persona)
             append(memorySection)
+            append(topicRule)
+            append(followUpHint)
             appendLine()
             appendLine(buildProactiveTimeContext())
             appendLine()
@@ -1791,10 +2037,16 @@ $chatText
         }
 
         val recentHistory = compressed.keptMessages
-        val lastMsg = recentHistory.lastOrNull()
+
+        // [FIX] 先过滤掉空的 assistant 消息，避免 API 报错 "assistant message must not be empty"
+        val filteredHistory = recentHistory.filterNot { msg ->
+            !msg.isFromUser && msg.content.replace("\u200B", "").isBlank()
+        }
+
+        val lastMsg = filteredHistory.lastOrNull()
         val isLastFromUser = lastMsg?.isFromUser == true
 
-        recentHistory.forEach { msg ->
+        filteredHistory.forEach { msg ->
             val content = if (msg.isFromUser && msg.content.startsWith("[") && msg.content.endsWith("]")) {
                 val inner = msg.content.removeSurrounding("[", "]")
                 val label = when {
@@ -1826,7 +2078,7 @@ $chatText
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
 
-        val (startIdx, allKeys) = selectApiKey(config)
+        val (startIdx, allKeys) = resolveKeysWithPartnerFallback(config)
         var lastException: Exception? = null
 
         val jsonArray = org.json.JSONArray()
@@ -1866,7 +2118,7 @@ $chatText
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = okHttpClient.newCall(request).execute()
+                val response = executeAdaptive(config, request)
                 val body = response.body?.string() ?: throw Exception("Empty response")
 
                 if (!response.isSuccessful) {
@@ -1876,6 +2128,7 @@ $chatText
                     throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
 
+                ensureNotHtml(body, response)
                 val parsed = json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) {
                     throw Exception(parsed.error.message ?: "API返回错误")
@@ -1900,12 +2153,31 @@ $chatText
         return callOpenAiCompatibleWithReasoning(config, messages).first
     }
 
+    /**
+     * 为 PARTNER 提供商获取远程密钥的回退逻辑。
+     * PARTNER 的 apiKey 存储在远程服务器上，本地 apiKey 字段为空。
+     * 如果本地没有可用密钥，则从 RemoteKeyProvider 动态获取。
+     */
+    private suspend fun resolveKeysWithPartnerFallback(config: ApiConfig): Pair<Int, List<String>> {
+        val (startIdx, keys) = selectApiKey(config)
+        if (keys.isEmpty() && config.provider == ApiProvider.PARTNER) {
+            SecureLog.d("AiService", "PARTNER keys empty, fetching from RemoteKeyProvider...")
+            val remoteKeys = com.lianyu.ai.common.RemoteKeyProvider.fetchKeysAsync(appContext, forceRefresh = false)
+            if (remoteKeys.isNotEmpty()) {
+                SecureLog.d("AiService", "Fetched ${remoteKeys.size} remote keys for PARTNER send path")
+                return 0 to remoteKeys
+            }
+            SecureLog.w("AiService", "RemoteKeyProvider returned no keys for PARTNER")
+        }
+        return startIdx to keys
+    }
+
     private suspend fun callOpenAiCompatibleWithReasoning(config: ApiConfig, messages: List<Message>): Pair<String, String?> {
         val safeTemp = config.temperature.coerceIn(0.1f, 1.5f)
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
 
-        val (startIdx, allKeys) = selectApiKey(config)
+        val (startIdx, allKeys) = resolveKeysWithPartnerFallback(config)
         var lastException: Exception? = null
 
         val jsonArray = org.json.JSONArray()
@@ -1948,13 +2220,10 @@ $chatText
                                         .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                                         .build()
 
-                                    // Use dedicated client for self-hosted (PARTNER) to avoid stale connection pool entries
-                                    val client = if (config.provider == ApiProvider.PARTNER) {
-                                        partnerHttpClient
-                                    } else {
-                                        okHttpClient
-                                    }
-                                    val response = client.newCall(request).execute()
+                                    // Use dedicated client per config (PARTNER, CUSTOM+skipCert, or default pinned)
+                                    val client = getEffectiveClient(config)
+                                    val response = executeAdaptive(config, request, client)
+                System.err.println("[AiService] HTTP response: code=${response.code}, protocol=${response.protocol}")
                 val body = response.body?.string() ?: throw Exception("Empty response")
 
                 if (!response.isSuccessful) {
@@ -1964,15 +2233,33 @@ $chatText
                     throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
 
+                ensureNotHtml(body, response)
                 val parsed = json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) {
                     throw Exception(parsed.error.message ?: "API返回错误")
                 }
 
                 val message = parsed.choices?.firstOrNull()?.message
-                var content = message?.content ?: throw Exception("API返回空内容")
-                val reasoning = message.reasoning_content
-                content = stripThinkingContent(content)
+                val rawContent = message?.content
+                val reasoning = message?.reasoning_content
+                System.err.println("[AiService] Response: rawContent=${if (rawContent != null) "'${rawContent.take(80)}'(${rawContent.length}chars)" else "null"}, reasoning=${if (reasoning != null) "'${reasoning.take(80)}'(${reasoning.length}chars)" else "null"}")
+
+                // [FIX] 推理模型可能 content=null 但 reasoning_content 有值
+                // 也可能 content 只有思考标签，stripThinkingContent 后变空
+                // 注意：reasoning_content 是模型内部思考过程，绝不能作为用户可见的回复
+                var content = if (!rawContent.isNullOrBlank()) {
+                    stripThinkingContent(rawContent)
+                } else {
+                    // content 为空，即使有 reasoning_content 也不使用
+                    ""
+                }
+
+                if (content.isBlank()) {
+                    // stripThinkingContent 清空了全部内容（模型只返回了思考标签）
+                    // 或者 content 本身为空——都不应使用 reasoning_content 替代
+                    throw Exception("模型仅返回了思考过程，未生成实际回复，请重试")
+                }
+
                 return Pair(content, reasoning)
             } catch (e: Exception) {
                 lastException = e
@@ -1987,10 +2274,17 @@ $chatText
 
     private fun stripThinkingContent(content: String): String {
         var result = content
+        // XML/HTML 风格思考标签
         result = result.replace(Regex("""(?is)<think[^>]*>[\s\S]*?</think\s*>"""), "")
         result = result.replace(Regex("""(?is)<thinking[^>]*>[\s\S]*?</thinking\s*>"""), "")
         result = result.replace(Regex("""(?is)<thought[^>]*>[\s\S]*?</thought\s*>"""), "")
         result = result.replace(Regex("""(?is)<reflection[^>]*>[\s\S]*?</reflection\s*>"""), "")
+        // Markdown 风格思考标题（## 思考 / ## Thinking 等）
+        result = result.replace(Regex("""(?im)^#{1,3}\s*(思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought)\s*\n[\s\S]*?(?=\n#{1,3}\s|$)"""), "")
+        // 【思考】/【推理】等方括号包裹的思考块
+        result = result.replace(Regex("""(?is)【(思考|思维|推理|分析)】[\s\S]*?【/(思考|思维|推理|分析)】"""), "")
+        // 行内 [思考] ... [/思考] 格式
+        result = result.replace(Regex("""(?is)\[(思考|思维|推理|分析|thought|thinking)]\s*[\s\S]*?\[/\1]"""), "")
         return result.trim()
     }
 
@@ -2098,7 +2392,7 @@ $chatText
             .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = okHttpClient.newCall(request).execute()
+        val response = executeAdaptive(config, request)
         val body = response.body?.string() ?: throw Exception("Empty response")
 
         if (!response.isSuccessful) {
@@ -2143,7 +2437,8 @@ $chatText
         companion: CompanionModel?,
         history: List<ChatMessage>,
         imagePath: String,
-        stickerProbability: Int = 30
+        stickerProbability: Int = 30,
+        ntpTimeEnabled: Boolean = false
     ): AiResponse {
         SecureLog.i("VISION", "========== sendMessageWithImage CALLED ==========")
         SecureLog.i("VISION", "imagePath=$imagePath, companion=${companion?.name ?: "NULL"}")
@@ -2291,14 +2586,15 @@ $chatText
                     val mimeType = getImageMimeType(imagePath)
                     SecureLog.i("VISION", "Image encoded successfully: size=${imageBase64.length} chars, mimeType=$mimeType")
 
-                    val visionClient = okHttpClient.newBuilder()
-                        .connectTimeout(15, TimeUnit.SECONDS)
-                        .readTimeout(60, TimeUnit.SECONDS)
-                        .writeTimeout(20, TimeUnit.SECONDS)
-                        .build()
+                    val visionClient = getEffectiveClient(config).newBuilder()
+                    // [P0 FIX] 视觉客户端超时从60s降至30s（与VISION_API_TIMEOUT_MS对齐）
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
+                    .writeTimeout(15, TimeUnit.SECONDS)
+                    .build()
 
                     val rawResponse = when (config.provider) {
-                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.PARTNER -> {
+                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
                             callOpenAiCompatibleVision(config, sortedHistory, systemPrompt, lastUserMessage, imageBase64, mimeType, visionClient)
                         }
                         ApiProvider.ANTHROPIC -> {
@@ -2395,7 +2691,7 @@ $chatText
         val safeTemp = config.temperature.coerceIn(0.1f, 1.5f)
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
-        val allKeys = config.getAllApiKeys()
+        val allKeys = resolveKeysWithPartnerFallback(config).second
         if (allKeys.isEmpty()) {
             throw Exception("API Key 为空，请检查视觉模型配置")
         }
@@ -2473,7 +2769,7 @@ $chatText
                     .post(requestBodyStr.toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = client.newCall(request).execute()
+                val response = executeAdaptive(config, request, client)
                 val body = response.body?.string() ?: throw Exception("Empty response")
                 SecureLog.i("VISION", "Response code: ${response.code}, body length: ${body.length}")
 
@@ -2484,6 +2780,7 @@ $chatText
                     throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
 
+                ensureNotHtml(body, response)
                 val parsed = json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) {
                     throw Exception(parsed.error.message ?: "API返回错误")
@@ -2570,7 +2867,7 @@ $chatText
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = client.newCall(request).execute()
+        val response = executeAdaptive(config, request, client)
         val body = response.body?.string() ?: throw Exception("Empty response")
 
         if (!response.isSuccessful) {
@@ -2608,22 +2905,24 @@ $chatText
     override suspend fun sendMessage(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
-        stickerProbability: Int
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean
     ): AiResponse {
         val entity = companion.toCompanionEntity()
         val messages = history.map { it.toChatMessage() }
-        return sendMessage(entity, messages, stickerProbability)
+        return sendMessage(entity, messages, stickerProbability, ntpTimeEnabled)
     }
 
     override suspend fun sendMessageWithImage(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
         imagePath: String,
-        stickerProbability: Int
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean
     ): AiResponse {
         val entity = companion.toCompanionEntity()
         val messages = history.map { it.toChatMessage() }
-        return sendMessageWithImage(entity, messages, imagePath, stickerProbability)
+        return sendMessageWithImage(entity, messages, imagePath, stickerProbability, ntpTimeEnabled)
     }
 
     private fun AiCompanionInfo.toCompanionEntity(): CompanionModel = CompanionModel(
@@ -2663,6 +2962,35 @@ $chatText
         val entity = companion.toCompanionEntity()
         val messages = recentMessages.map { it.toChatMessage() }
         return generateProactiveMessage(entity, messages)
+    }
+
+    override suspend fun generateProactiveMessage(
+        companion: AiCompanionInfo,
+        recentMessages: List<AiChatMessage>,
+        settings: ProactiveMessageSettings?
+    ): String? {
+        val entity = companion.toCompanionEntity()
+        val messages = recentMessages.map { it.toChatMessage() }
+        return generateProactiveMessage(entity, messages, settings)
+    }
+
+    override fun sendMessageStream(
+        companion: AiCompanionInfo,
+        history: List<AiChatMessage>,
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean
+    ): Flow<AiStreamChunk> {
+        val entity = companion.toCompanionEntity()
+        val messages = history.map { it.toChatMessage() }
+        // 映射内部 ChunkResult 到 domain 层 AiStreamChunk，丢弃 Reasoning
+        return sendMessageStream(entity, messages, stickerProbability, ntpTimeEnabled).map { chunk ->
+            when (chunk) {
+                is ChunkedResponseHandler.ChunkResult.Text -> AiStreamChunk.Text(chunk.content)
+                is ChunkedResponseHandler.ChunkResult.Error -> AiStreamChunk.Error(chunk.message)
+                is ChunkedResponseHandler.ChunkResult.Reasoning -> AiStreamChunk.Text(chunk.content)
+                ChunkedResponseHandler.ChunkResult.Done -> AiStreamChunk.Done
+            }
+        }
     }
 
     override suspend fun sendMessageWithCustomSystem(
@@ -2724,7 +3052,7 @@ $chatText
 
         try {
             val rawResponse = when (config.provider) {
-                ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.PARTNER -> {
+                ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
                     callOpenAiCompatible(config, messages)
                 }
                 ApiProvider.ANTHROPIC -> {

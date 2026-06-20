@@ -48,6 +48,18 @@ interface MemoryDao {
     @Query("DELETE FROM temp_memory WHERE companionId = :companionId AND deviceId = :deviceId")
     suspend fun deleteTempMemoriesForCompanion(companionId: Long, deviceId: String): Int
 
+    @Query("SELECT * FROM memory_entries WHERE deviceId = :deviceId ORDER BY timestamp DESC")
+    suspend fun getAllMemoriesSync(deviceId: String): List<MemoryEntry>
+
+    @Query("SELECT * FROM temp_memory WHERE deviceId = :deviceId ORDER BY timestamp DESC")
+    suspend fun getAllTempMemoriesSync(deviceId: String): List<TempMemory>
+
+    @Query("DELETE FROM memory_entries WHERE deviceId = :deviceId")
+    suspend fun deleteAllMemories(deviceId: String): Int
+
+    @Query("DELETE FROM temp_memory WHERE deviceId = :deviceId")
+    suspend fun deleteAllTempMemories(deviceId: String): Int
+
     @Query("DELETE FROM temp_memory WHERE companionId = :companionId AND deviceId = :deviceId AND id NOT IN (SELECT id FROM temp_memory WHERE companionId = :companionId AND deviceId = :deviceId ORDER BY timestamp DESC LIMIT :keepCount)")
     suspend fun cleanupOldTempMemories(companionId: Long, deviceId: String, keepCount: Int = 20): Int
 }

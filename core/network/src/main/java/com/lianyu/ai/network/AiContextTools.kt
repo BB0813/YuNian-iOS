@@ -69,13 +69,15 @@ object AiContextTools {
     }
 
     // === private fun buildCurrentTimeContext(): String { ===
-    internal fun buildCurrentTimeContext(): String {
+    fun buildCurrentTimeContext(ntpTimeEnabled: Boolean = false): String {
         val zone = TimeZone.getDefault()
         val formatter = SimpleDateFormat("yyyy年MM月dd日 EEEE HH:mm:ss", Locale.CHINA).apply {
             timeZone = zone
         }
-        val now = formatter.format(Date())
-        return "当前精确时间：$now（${zone.id}）。如果用户问今天、现在、几点几分几秒、星期几、多久、刚才、明天等时间相关问题，必须以这个精确时间为准，不要猜测或编造。"
+        val timeMs = if (ntpTimeEnabled) NtpTimeProvider.getCurrentTimeMs() else System.currentTimeMillis()
+        val now = formatter.format(Date(timeMs))
+        val source = if (ntpTimeEnabled && NtpTimeProvider.isNtpSynced()) "NTP网络校时" else "设备本地时钟"
+        return "当前精确时间：$now（${zone.id}，$source）。如果用户问今天、现在、几点几分几秒、星期几、多久、刚才、明天等时间相关问题，必须以这个精确时间为准，不要猜测或编造。"
     }
 
     // === private fun compressContext( ===

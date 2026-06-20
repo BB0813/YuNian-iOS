@@ -19,6 +19,7 @@ data class ApiProviderInfo(
         val DASHSCOPE = ApiProviderInfo("DASHSCOPE", "通义千问", Color(0xFF624AFF))
         val KIMI = ApiProviderInfo("KIMI", "Kimi", Color(0xFF000000))
         val XIAOMI = ApiProviderInfo("XIAOMI", "小米 MiMo", Color(0xFFFF6900))
+        val IFLYTEK = ApiProviderInfo("IFLYTEK", "讯飞星火", Color(0xFF1677FF))
         val ZHIPU = ApiProviderInfo("ZHIPU", "智谱清言", Color(0xFF4169E1))
         val SILICONFLOW = ApiProviderInfo("SILICONFLOW", "硅基流动", Color(0xFF10A37F))
         val OPENROUTER = ApiProviderInfo("OPENROUTER", "OpenRouter", Color(0xFF7B68EE))
@@ -36,6 +37,7 @@ data class ApiProviderInfo(
                 "DASHSCOPE" -> DASHSCOPE
                 "KIMI" -> KIMI
                 "XIAOMI" -> XIAOMI
+                "IFLYTEK" -> IFLYTEK
                 "ZHIPU" -> ZHIPU
                 "SILICONFLOW" -> SILICONFLOW
                 "OPENROUTER" -> OPENROUTER

@@ -5,12 +5,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -26,11 +26,10 @@ fun CompanionAvatar(
     avatarUrl: String?,
     name: String?,
     size: Dp,
-    isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFE5E5EA)
-    val textColor = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888)
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Box(
         modifier = modifier.size(size).clip(CircleShape).background(bgColor),
@@ -63,11 +62,10 @@ fun UserAvatar(
     avatarUrl: String?,
     name: String,
     size: Dp,
-    isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFE5E5EA)
-    val textColor = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888)
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Box(
         modifier = modifier.size(size).clip(CircleShape).background(bgColor),

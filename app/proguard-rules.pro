@@ -195,3 +195,25 @@
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
+
+# ================================================================
+# Vendor Push SDKs (OPPO / vivo / Xiaomi / Huawei)
+# ================================================================
+# OPPO / vivo / Xiaomi SDKs are bundled as local aars and accessed via reflection.
+# Keep their class names and members so Class.forName / getMethod work in release builds.
+-keep class com.heytap.msp.push.** { *; }
+-keep class com.coloros.mcs.** { *; }
+-keep class com.vivo.push.** { *; }
+-keep class com.xiaomi.mipush.sdk.** { *; }
+-keep class com.xiaomi.push.** { *; }
+-keep class com.huawei.hms.push.** { *; }
+-dontwarn com.heytap.msp.push.**
+-dontwarn com.coloros.mcs.**
+-dontwarn com.vivo.push.**
+-dontwarn com.xiaomi.mipush.sdk.**
+-dontwarn com.xiaomi.push.**
+-dontwarn com.huawei.hms.**
+-dontwarn com.huawei.android.os.**
+-dontwarn com.huawei.hianalytics.**
+-dontwarn com.huawei.libcore.io.**
+-dontwarn org.apache.commons.codec.**

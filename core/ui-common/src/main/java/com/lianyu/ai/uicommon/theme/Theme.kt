@@ -2,7 +2,6 @@ package com.lianyu.ai.uicommon.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -10,7 +9,6 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -64,18 +62,17 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun LianYuTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val prefs = context.getSharedPreferences("theme_prefs", android.content.Context.MODE_PRIVATE)
-    val savedTheme = prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"
+    val systemInDarkTheme = isSystemInDarkTheme()
 
-    val effectiveDarkTheme = when (savedTheme) {
-        "LIGHT" -> false
-        "DARK" -> true
-        else -> darkTheme
+    val effectiveDarkTheme = when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> systemInDarkTheme
     }
 
     val colorScheme = when {
@@ -90,8 +87,19 @@ fun LianYuTheme(
     if (!view.isInEditMode) {
         DisposableEffect(effectiveDarkTheme) {
             val window = (view.context as Activity).window
-            window.statusBarColor = if (effectiveDarkTheme) WeChatDarkBackground.toArgb() else WeChatLightBackground.toArgb()
-            window.navigationBarColor = Color.Transparent.toArgb()
+            val navScrim = if (effectiveDarkTheme) {
+                Color(0xFF000000).copy(alpha = 0.25f)
+            } else {
+                Color(0xFFFFFFFF).copy(alpha = 0.55f)
+            }.toArgb()
+
+            // 状态栏使用不透明纯色，浅色主题用纯白避免显粉；深色主题用背景色保持一致。
+            window.statusBarColor = if (effectiveDarkTheme) {
+                colorScheme.background.toArgb()
+            } else {
+                Color(0xFFFFFFFF).toArgb()
+            }
+            window.navigationBarColor = navScrim
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !effectiveDarkTheme
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !effectiveDarkTheme
             onDispose { }

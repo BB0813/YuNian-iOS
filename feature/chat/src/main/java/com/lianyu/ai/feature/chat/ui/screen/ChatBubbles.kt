@@ -72,14 +72,6 @@ import com.lianyu.ai.uicommon.component.CompanionAvatar
 import com.lianyu.ai.uicommon.component.UserAvatar
 import com.lianyu.ai.uicommon.component.VoiceMessageBubble
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
-import com.lianyu.ai.uicommon.theme.AiBubbleDark
-import com.lianyu.ai.uicommon.theme.AiBubbleLight
-import com.lianyu.ai.uicommon.theme.AiBubbleBorderDark
-import com.lianyu.ai.uicommon.theme.AiBubbleBorderLight
-import com.lianyu.ai.uicommon.theme.UserBubbleColor
-import com.lianyu.ai.uicommon.theme.UserBubbleText
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
 
 import android.net.Uri
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -92,15 +84,11 @@ import kotlin.math.abs
 fun TypingIndicatorBubble(
     companionData: CompanionModel?,
     typingText: String,
-    isDarkTheme: Boolean,
-    adaptiveSizing: AdaptiveSizing
+    adaptiveSizing: AdaptiveSizing,
+    isDarkTheme: Boolean
 ) {
-    val aiBubbleColor = remember(isDarkTheme) {
-        if (isDarkTheme) AiBubbleDark else AiBubbleLight
-    }
-    val aiBorderColor = remember(isDarkTheme) {
-        if (isDarkTheme) AiBubbleBorderDark else AiBubbleBorderLight
-    }
+    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
+    val aiBorderColor = MaterialTheme.colorScheme.outline
 
     val infiniteTransition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by infiniteTransition.animateFloat(
@@ -121,8 +109,7 @@ fun TypingIndicatorBubble(
         CompanionAvatar(
             avatarUrl = companionData?.avatarUrl,
             name = companionData?.name,
-            size = adaptiveSizing.avatarSize,
-            isDarkTheme = isDarkTheme
+            size = adaptiveSizing.avatarSize
         )
         Spacer(modifier = Modifier.width(8.dp))
 
@@ -147,16 +134,14 @@ fun TypingIndicatorBubble(
                     Text(
                         text = typingText,
                         style = MaterialTheme.typography.bodyLarge.copy(fontSize = adaptiveSizing.fontSizeBody.sp, lineHeight = 20.sp),
-                        color = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Box(
                         modifier = Modifier
                             .padding(start = 2.dp)
                             .size(width = 2.dp, height = 16.dp)
                             .alpha(cursorAlpha)
-                            .background(
-                                if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
-                            )
+                            .background(MaterialTheme.colorScheme.onSurface)
                     )
                 }
             }
@@ -164,7 +149,7 @@ fun TypingIndicatorBubble(
             Text(
                 text = stringResource(R.string.typing),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = adaptiveSizing.fontSizeCaption.sp),
-                color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFFB2B2B2),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Start
             )
         }
@@ -174,12 +159,9 @@ fun TypingIndicatorBubble(
 @Composable
 fun RegeneratingBubble(
     companionData: CompanionModel?,
-    isDarkTheme: Boolean,
     adaptiveSizing: AdaptiveSizing
 ) {
-    val aiBubbleColor = remember(isDarkTheme) {
-        if (isDarkTheme) AiBubbleDark else AiBubbleLight
-    }
+    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
     val infiniteTransition = rememberInfiniteTransition(label = "regenerate_dots")
     val dot1Alpha by infiniteTransition.animateFloat(
         initialValue = 0.3f, targetValue = 1f,
@@ -202,8 +184,7 @@ fun RegeneratingBubble(
         CompanionAvatar(
             avatarUrl = companionData?.avatarUrl,
             name = companionData?.name,
-            size = adaptiveSizing.avatarSize,
-            isDarkTheme = isDarkTheme
+            size = adaptiveSizing.avatarSize
         )
         Spacer(modifier = Modifier.width(8.dp))
         Box(
@@ -216,7 +197,7 @@ fun RegeneratingBubble(
                 Text(
                     text = "正在重新生成",
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                    color = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 repeat(3) { i ->
@@ -226,7 +207,7 @@ fun RegeneratingBubble(
                             .size(6.dp)
                             .alpha(alpha)
                             .clip(CircleShape)
-                            .background(if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888))
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant)
                     )
                     if (i < 2) Spacer(modifier = Modifier.width(3.dp))
                 }
@@ -238,12 +219,11 @@ fun RegeneratingBubble(
 @Composable
 fun ReasoningBubble(
     reasoningText: String,
-    isDarkTheme: Boolean,
     adaptiveSizing: AdaptiveSizing
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val bgColor = if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFF0F0F0)
-    val textColor = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888)
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -294,11 +274,11 @@ fun ChatBubble(
     isUser: Boolean,
     userAvatar: String?,
     userName: String,
-    isDarkTheme: Boolean,
     onVoiceClick: () -> Unit = {},
     onRecall: ((ChatMessage) -> Unit)? = null,
     onRegenerate: ((ChatMessage) -> Unit)? = null,
-    adaptiveSizing: AdaptiveSizing
+    adaptiveSizing: AdaptiveSizing,
+    isDarkTheme: Boolean
 ) {
     val time = remember(message.timestamp) {
         java.time.format.DateTimeFormatter.ofPattern("HH:mm")
@@ -310,13 +290,9 @@ fun ChatBubble(
             !(message.content.startsWith("[") && message.content.endsWith("]"))
     if (isEmptyContent) return
 
-    val userBubbleColor = remember { UserBubbleColor }
-    val aiBubbleColor = remember(isDarkTheme) {
-        if (isDarkTheme) AiBubbleDark else AiBubbleLight
-    }
-    val aiBorderColor = remember(isDarkTheme) {
-        if (isDarkTheme) AiBubbleBorderDark else AiBubbleBorderLight
-    }
+    val userBubbleColor = MaterialTheme.colorScheme.primary
+    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
+    val aiBorderColor = MaterialTheme.colorScheme.outline
 
     Box {
         Row(
@@ -335,8 +311,7 @@ fun ChatBubble(
         CompanionAvatar(
             avatarUrl = companionData?.avatarUrl,
             name = companionData?.name,
-            size = adaptiveSizing.avatarSize,
-            isDarkTheme = isDarkTheme
+            size = adaptiveSizing.avatarSize
         )
             Spacer(modifier = Modifier.width(8.dp))
         }
@@ -357,8 +332,7 @@ fun ChatBubble(
             }
             if (isStickerMessage) {
                 StickerMessageBubble(
-                    stickerName = message.content.removeSurrounding("[", "]"),
-                    isDarkTheme = isDarkTheme
+                    stickerName = message.content.removeSurrounding("[", "]")
                 )
             } else if (message.content.startsWith("[语音]") || (message.type == MessageType.VOICE)) {
                 val voiceDuration = extractVoiceDuration(message.content)
@@ -369,8 +343,7 @@ fun ChatBubble(
                 VoiceMessageBubble(
                     audioPath = voicePath,
                     duration = voiceDuration,
-                    isUser = isUser,
-                    isDarkTheme = isDarkTheme
+                    isUser = isUser
                 )
             } else if (message.type == MessageType.IMAGE) {
                 val imageFile = java.io.File(message.linkString.ifBlank { message.content })
@@ -395,7 +368,7 @@ fun ChatBubble(
                         Text(
                             text = "📷 图片",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (isUser) UserBubbleText else (if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24))
+                            color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -413,7 +386,7 @@ fun ChatBubble(
                             fontSize = adaptiveSizing.fontSizeBody.sp,
                             lineHeight = (adaptiveSizing.fontSizeBody * 1.5).sp
                         ),
-                        color = UserBubbleText,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         softWrap = true
                     )
                 }
@@ -440,7 +413,7 @@ fun ChatBubble(
                             fontSize = adaptiveSizing.fontSizeBody.sp,
                             lineHeight = (adaptiveSizing.fontSizeBody * 1.5).sp
                         ),
-                        color = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24),
+                        color = MaterialTheme.colorScheme.onSurface,
                         softWrap = true
                     )
                 }
@@ -449,7 +422,7 @@ fun ChatBubble(
             Text(
                 text = time,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = adaptiveSizing.fontSizeCaption.sp),
-                color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFFB2B2B2),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = if (isUser) TextAlign.End else TextAlign.Start
             )
         }
@@ -459,15 +432,14 @@ fun ChatBubble(
             UserAvatar(
                 avatarUrl = userAvatar,
                 name = userName,
-                size = adaptiveSizing.avatarSize,
-                isDarkTheme = isDarkTheme
+                size = adaptiveSizing.avatarSize
             )
         }
 
         DropdownMenu(
             expanded = showMenu,
             onDismissRequest = { showMenu = false },
-            modifier = Modifier.background(if (isDarkTheme) Color(0xFF2D2228) else Color.White),
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface),
             offset = DpOffset(x = 0.dp, y = 0.dp)
         ) {
             if (!isUser && onRegenerate != null) {
@@ -476,7 +448,7 @@ fun ChatBubble(
                         Text(
                             text = "重新生成",
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = if (isDarkTheme) Color.White else Color(0xFF2C2C2C)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     },
                     onClick = {
@@ -485,7 +457,7 @@ fun ChatBubble(
                     },
                     leadingIcon = {
                         Icon(Icons.Outlined.Refresh, "重新生成",
-                            tint = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF888888),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp))
                     }
                 )
@@ -496,7 +468,7 @@ fun ChatBubble(
                         Text(
                             text = "撤回消息",
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = if (isDarkTheme) Color.White else Color(0xFF2C2C2C)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     },
                     onClick = {
@@ -505,7 +477,7 @@ fun ChatBubble(
                     },
                     leadingIcon = {
                         Icon(Icons.Outlined.DeleteOutline, "撤回",
-                            tint = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF888888),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp))
                     }
                 )
@@ -521,7 +493,6 @@ fun ChatBubble(
 @Composable
 fun StickerMessageBubble(
     stickerName: String,
-    isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -582,7 +553,7 @@ fun StickerMessageBubble(
             Text(
                 text = "🎨",
                 fontSize = 32.sp,
-                color = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

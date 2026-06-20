@@ -176,6 +176,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     "DASHSCOPE" -> ApiProvider.DASHSCOPE
                     "ZHIPU" -> ApiProvider.ZHIPU
                     "CUSTOM" -> ApiProvider.CUSTOM
+                    "IFLYTEK" -> ApiProvider.IFLYTEK
                     else -> ApiProvider.OPENAI
                 }
 
@@ -256,13 +257,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val key = connectionKey(config)
                 val draftStatus = _connectionStatus[key]
                 
-                // 优先使用测试连接后保存的配置（包含远程密钥和随机模型）
+                // 优先使用测试连接后保存的配置（包含远程密钥和测试结果）
                 val testedConfig = _testedConfigs[key]
-                
+
                 val configToSave = if (testedConfig != null && draftStatus?.status == ConnectionStatus.CONNECTED) {
-                    // 使用测试连接后的配置（包含远程密钥和随机模型）
+                    // 合并测试后的远程密钥/连接状态，但保留用户手动填写的字段
                     testedConfig.copy(
                         id = config.id,  // 保持原始ID
+                        // 如果用户手动填写了密钥/地址/模型，优先尊重用户选择；否则沿用测试后的值
+                        apiKey = config.apiKey.takeIf { it.isNotBlank() } ?: testedConfig.apiKey,
+                        extraApiKeys = config.extraApiKeys.takeIf { it.isNotBlank() } ?: testedConfig.extraApiKeys,
+                        baseUrl = config.baseUrl.takeIf { it.isNotBlank() } ?: testedConfig.baseUrl,
+                        model = config.model.takeIf { it.isNotBlank() } ?: testedConfig.model,
+                        name = config.name,
+                        temperature = config.temperature,
+                        maxTokens = config.maxTokens,
                         connectionTested = true,
                         connectionTestedAt = System.currentTimeMillis(),
                         latencyMs = draftStatus.latencyMs
@@ -276,15 +285,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     config
                 }
-                
+
                 SecureLog.d("SettingsViewModel", "Saving config: provider=${configToSave.provider}, model=${configToSave.model}, keys=${configToSave.getAllApiKeys().size}")
-                
+
                 val savedId = repository.saveConfig(configToSave)
                 // 保存时自动启用当前配置并禁用其他配置（单活跃模式）
                 repository.disableOtherConfigs(savedId)
                 repository.enableConfig(savedId)
                 val savedKey = connectionKey(configToSave.copy(id = savedId))
                 _connectionStatus[savedKey] = draftStatus ?: ConnectionResult(ConnectionStatus.UNKNOWN)
+                // 同步测试后缓存，避免下次编辑时显示旧模型
+                _testedConfigs[savedKey] = configToSave
                 _saveResult.emit(SaveResult.Success("配置已保存并已启用"))
             } catch (e: Exception) {
                 SecureLog.e("SettingsViewModel", "Save config failed: ${e.message}")
@@ -437,20 +448,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
             val startTime = System.currentTimeMillis()
             
-            // 对于 CUSTOM/PARTNER 或模型名未配置的情况，先拉取模型列表
+            // 如果用户已经手动填写了模型名，优先尊重用户选择；仅在未填写时自动拉取并兜底选择
             var testConfig = currentConfig
-            
-            if (currentConfig.provider == ApiProvider.PARTNER ||
-                currentConfig.provider == ApiProvider.CUSTOM ||
-                currentConfig.model.isBlank()) {
-                
+            val userModel = currentConfig.model.trim()
+
+            if (userModel.isBlank() ||
+                currentConfig.provider == ApiProvider.PARTNER ||
+                currentConfig.provider == ApiProvider.CUSTOM) {
+
                 val aiService = AiService(getApplication())
                 val keyToUse = allKeys.firstOrNull() ?: currentConfig.apiKey
                 SecureLog.d("SettingsViewModel", "Fetching models with key: ${keyToUse.take(8)}...")
-                
-                val modelsResult = aiService.fetchModels(currentConfig.baseUrl, keyToUse, currentConfig.provider)
+
+                val modelsResult = aiService.fetchModels(currentConfig.baseUrl, keyToUse, currentConfig.provider, currentConfig.skipCertVerify)
                 val models = modelsResult.getOrNull()
-                
+
                 if (models != null && models.isNotEmpty()) {
                     SecureLog.d("SettingsViewModel", "Found ${models.size} models: ${models.take(5).joinToString(", ")}")
                     _fetchedModels.value = _fetchedModels.value.toMutableMap().apply {
@@ -458,17 +470,39 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     // P2-15: 优先选 chat 模型，避免随机到 embedding/vision-only 模型导致测试失败
+                    // [FIX] 补上 kimi，避免 kimi-k2.7-code 等模型被排除
                     val chatKeywords = listOf("chat", "completion", "instruct", "gpt", "claude", "gemini",
-                        "deepseek", "qwen", "glm", "moonshot", "yi-", "ernie", "hunyuan", "doubao")
+                        "deepseek", "qwen", "glm", "moonshot", "kimi", "yi-", "ernie", "hunyuan", "doubao")
                     val chatModels = models.filter { m ->
                         chatKeywords.any { m.contains(it, ignoreCase = true) }
                     }
-                    val testModel = if (chatModels.isNotEmpty()) {
-                        chatModels.first()
-                    } else {
-                        // Fallback: try first non-embedding model
-                        models.firstOrNull { !it.contains("embed", ignoreCase = true) && !it.contains("moderation", ignoreCase = true) }
-                            ?: models.first()
+
+                    // [FIX] PARTNER 始终走本地随机选择，避免 server randomModel 固定导致每次相同
+                    // 非 PARTNER: 用户已填模型名则尊重用户选择，未填则自动选第一个 chat 模型
+                    val testModel = when {
+                        currentConfig.provider == ApiProvider.PARTNER -> {
+                            val serverModel = com.lianyu.ai.common.RemoteKeyProvider.getRandomModel(getApplication())?.takeIf { it.isNotBlank() }
+                            // 若可用 chat 模型 > 1，随机选；否则从所有非 embedding 模型中随机
+                            val candidatePool = if (chatModels.size > 1) chatModels
+                            else models.filter { !it.contains("embed", ignoreCase = true) && !it.contains("moderation", ignoreCase = true) }
+                            val chosenModel = if (candidatePool.size > 1) {
+                                com.lianyu.ai.network.AiService.familyBalancedRandom(candidatePool)
+                            } else {
+                                serverModel ?: chatModels.firstOrNull()
+                                ?: models.firstOrNull { !it.contains("embed", ignoreCase = true) && !it.contains("moderation", ignoreCase = true) }
+                                ?: models.first()
+                            }
+                            SecureLog.d("SettingsViewModel", "PARTNER test model: chosen=$chosenModel, server=$serverModel, chatModels=${chatModels.size}, candidatePool=${candidatePool.size}")
+                            chosenModel
+                        }
+                        // 用户已手动填写模型名 -> 尊重用户选择
+                        userModel.isNotBlank() -> userModel
+                        chatModels.isNotEmpty() -> chatModels.first()
+                        else -> {
+                            // Fallback: try first non-embedding model
+                            models.firstOrNull { !it.contains("embed", ignoreCase = true) && !it.contains("moderation", ignoreCase = true) }
+                                ?: models.first()
+                        }
                     }
 
                     testConfig = currentConfig.copy(model = testModel)
@@ -477,7 +511,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     SecureLog.w("SettingsViewModel", "No models fetched, using existing config: ${currentConfig.model}")
                 }
             }
-            
+
             // 确保有有效的模型名
             if (testConfig.model.isBlank()) {
                 _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, 0L, "无法获取模型列表，请手动填写模型名称")
@@ -506,6 +540,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     ApiProvider.OPENROUTER,
                     ApiProvider.GROQ,
                     ApiProvider.CUSTOM,
+                    ApiProvider.IFLYTEK,
                     ApiProvider.PARTNER -> aiService.callOpenAiCompatibleForTest(testConfig, testMessages)
                     ApiProvider.ANTHROPIC -> aiService.callAnthropicForTest(testConfig, testMessages, "Be helpful.")
                 }
@@ -599,7 +634,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _modelFetchStates = MutableStateFlow<Map<String, ModelFetchState>>(emptyMap())
     val modelFetchStates: StateFlow<Map<String, ModelFetchState>> = _modelFetchStates.asStateFlow()
 
-    fun fetchModels(baseUrl: String, apiKey: String, provider: String) {
+    fun fetchModels(baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             _modelFetchStates.value = _modelFetchStates.value.toMutableMap().apply {
                 put(provider, ModelFetchState(isLoading = true))
@@ -629,7 +664,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 if (!earlyReturn) {
-                val result = aiService.fetchModels(baseUrl, keyToUse)
+                val result = aiService.fetchModels(baseUrl, keyToUse, resolvedProvider, skipCertVerify)
                 result.onSuccess { models ->
                     _fetchedModels.value = _fetchedModels.value.toMutableMap().apply {
                         put(provider, models)

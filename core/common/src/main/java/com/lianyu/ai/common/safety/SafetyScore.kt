@@ -5,8 +5,10 @@ package com.lianyu.ai.common.safety
  *
  * 阈值定义（可配置）：
  *   score < 0.3  → SAFE（放行）
- *   score 0.3-0.7 → SUSPICIOUS（限频/标记但不拦截）
- *   score > 0.7  → DANGEROUS（拦截）
+ *   score 0.3-0.85 → SUSPICIOUS（限频/标记但不拦截）
+ *   score > 0.85  → DANGEROUS（拦截）
+ *
+ * [FIX] 阈值从0.7提高到0.85：0.7太敏感，先验0.3时正常消息也可能超0.7
  */
 data class SafetyScore(
     /** 0.0 ~ 1.0，P(违规 | 文本) */
@@ -33,7 +35,7 @@ data class SafetyScore(
 
     companion object {
         const val LOW_THRESHOLD = 0.3
-        const val HIGH_THRESHOLD = 0.7
+        const val HIGH_THRESHOLD = 0.85
 
         fun neutral(source: ScoreSource) = SafetyScore(
             score = 0.5,

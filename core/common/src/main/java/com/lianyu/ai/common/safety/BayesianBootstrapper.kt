@@ -8,6 +8,9 @@ package com.lianyu.ai.common.safety
  */
 object BayesianBootstrapper {
 
+    /** 正则元字符：包含这些字符的样本是模式串，直接当字面样本会污染分类器 */
+    private val REGEX_META = Regex("""[\\\\^$.*+?()|[\\]{}]""")
+
     /**
      * @param keywords (keyword, level) 对，如 ("违禁药", "HIGH")
      */
@@ -17,6 +20,8 @@ object BayesianBootstrapper {
         for ((word, level) in keywords) {
             val w = word.trim()
             if (w.isBlank()) continue
+            // 跳过正则模式串本身，避免把 "child\\s*porn" 这类字符串当成正样本
+            if (REGEX_META.containsMatchIn(w)) continue
 
             // 基础样本：原词
             samples.add(SafetySample(w, true, SampleSource.USER_INPUT, level))

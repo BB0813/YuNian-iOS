@@ -51,14 +51,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lianyu.ai.common.AppSettingsStore
 
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -150,12 +142,7 @@ fun ContextMemoryScreen(
     val compressionMode by viewModel.contextCompressionMode.collectAsState()
     val compressionKeepRatio by viewModel.compressionKeepRatio.collectAsState()
     val compressionMinKeep by viewModel.compressionMinKeep.collectAsState()
-    val isDark = isSystemInDarkTheme()
-
-    val backgroundColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDark) WeChatDarkCard else Color.White
-    val textPrimary = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDark) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -169,7 +156,7 @@ fun ContextMemoryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(cardColor, shape = RoundedCornerShape(20.dp))
+                        .background(colorScheme.surfaceVariant, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -181,7 +168,7 @@ fun ContextMemoryScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
-                            tint = textPrimary,
+                            tint = colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -192,7 +179,7 @@ fun ContextMemoryScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
                         ),
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
 
                     Spacer(modifier = Modifier.size(32.dp))
@@ -203,7 +190,7 @@ fun ContextMemoryScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .background(colorScheme.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 16.dp),
@@ -214,7 +201,7 @@ fun ContextMemoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(cardColor)
+                    .background(colorScheme.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Column {
@@ -222,13 +209,13 @@ fun ContextMemoryScreen(
                         text = "AI 记忆能力",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "设置 AI 能记住的最近对话轮数。数值越大，AI 越能记住之前的对话内容，但也会消耗更多 token。",
                         fontSize = 13.sp,
-                        color = textSecondary,
+                        color = colorScheme.onSurfaceVariant,
                         lineHeight = 20.sp
                     )
                 }
@@ -239,7 +226,7 @@ fun ContextMemoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(cardColor)
+                    .background(colorScheme.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Column {
@@ -253,7 +240,7 @@ fun ContextMemoryScreen(
                                 text = "记忆消息条数",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = textPrimary
+                                color = colorScheme.onSurface
                             )
                             Text(
                                 text = "当前: $contextLimit 条",
@@ -304,8 +291,8 @@ fun ContextMemoryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("1", fontSize = 11.sp, color = textSecondary)
-                        Text("100", fontSize = 11.sp, color = textSecondary)
+                        Text("1", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                        Text("100", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -313,7 +300,7 @@ fun ContextMemoryScreen(
                     Text(
                         text = "滑块快速调节 1-100，输入框可精确设置 1-10000",
                         fontSize = 11.sp,
-                        color = textSecondary
+                        color = colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -323,7 +310,7 @@ fun ContextMemoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(cardColor)
+                    .background(colorScheme.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Row(
@@ -336,13 +323,13 @@ fun ContextMemoryScreen(
                             text = "心理活动描写",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = textPrimary
+                            color = colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = if (innerThoughtEnabled) "已开启 - AI 回复中可能包含括号内的心理活动" else "已关闭 - AI 不会输出括号内的心理活动",
                             fontSize = 12.sp,
-                            color = textSecondary
+                            color = colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
@@ -351,8 +338,8 @@ fun ContextMemoryScreen(
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = PetalPrimary,
                             checkedTrackColor = PetalPrimary.copy(alpha = 0.4f),
-                            uncheckedThumbColor = textSecondary,
-                            uncheckedTrackColor = textSecondary.copy(alpha = 0.3f)
+                            uncheckedThumbColor = colorScheme.onSurfaceVariant,
+                            uncheckedTrackColor = colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                         )
                     )
                 }
@@ -363,7 +350,7 @@ fun ContextMemoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(cardColor)
+                    .background(colorScheme.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Column {
@@ -371,13 +358,13 @@ fun ContextMemoryScreen(
                         text = "上下文压缩",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "当聊天记录超过记忆条数时，旧消息不再直接丢弃而是压缩摘要",
                         fontSize = 12.sp,
-                        color = textSecondary
+                        color = colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(
@@ -395,10 +382,10 @@ fun ContextMemoryScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) PetalPrimary.copy(alpha = 0.15f) else cardColor)
+                                    .background(if (isSelected) PetalPrimary.copy(alpha = 0.15f) else colorScheme.surfaceVariant)
                                     .border(
                                         width = if (isSelected) 1.5.dp else 0.5.dp,
-                                        color = if (isSelected) PetalPrimary else textSecondary.copy(alpha = 0.2f),
+                                        color = if (isSelected) PetalPrimary else colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                     .clickable { viewModel.setContextCompressionMode(mode) }
@@ -409,7 +396,7 @@ fun ContextMemoryScreen(
                                     text = label,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isSelected) PetalPrimary else textSecondary
+                                    color = if (isSelected) PetalPrimary else colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -422,7 +409,7 @@ fun ContextMemoryScreen(
                             else -> "关闭：超出条数的消息将被直接丢弃"
                         },
                         fontSize = 11.sp,
-                        color = textSecondary.copy(alpha = 0.7f)
+                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
             }
@@ -432,7 +419,7 @@ fun ContextMemoryScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(cardColor)
+                        .background(colorScheme.surfaceVariant)
                         .padding(20.dp)
                 ) {
                     Column {
@@ -440,13 +427,13 @@ fun ContextMemoryScreen(
                             text = "压缩细节调整",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = textPrimary
+                            color = colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "微调压缩行为以适应不同场景",
                             fontSize = 12.sp,
-                            color = textSecondary
+                            color = colorScheme.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -461,7 +448,7 @@ fun ContextMemoryScreen(
                         Text(
                             text = "压缩时保留最近消息的比例，越高保留越多但压缩效果越弱",
                             fontSize = 11.sp,
-                            color = textSecondary
+                            color = colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Slider(
@@ -480,8 +467,8 @@ fun ContextMemoryScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("10%", fontSize = 11.sp, color = textSecondary)
-                            Text("90%", fontSize = 11.sp, color = textSecondary)
+                            Text("10%", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                            Text("90%", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                         }
 
                         Spacer(modifier = Modifier.height(20.dp))
@@ -496,7 +483,7 @@ fun ContextMemoryScreen(
                         Text(
                             text = "即使按比例计算更少，也至少保留这么多条最近消息",
                             fontSize = 11.sp,
-                            color = textSecondary
+                            color = colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Slider(
@@ -515,8 +502,8 @@ fun ContextMemoryScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("2", fontSize = 11.sp, color = textSecondary)
-                            Text("20", fontSize = 11.sp, color = textSecondary)
+                            Text("2", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
+                            Text("20", fontSize = 11.sp, color = colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -527,7 +514,7 @@ fun ContextMemoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(cardColor)
+                    .background(colorScheme.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Column {
@@ -535,13 +522,13 @@ fun ContextMemoryScreen(
                         text = "建议设置",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "• 普通对话: 12-50 条\n• 长文创作: 100-200 条\n• 超长上下文模型 (如 DeepSeek-V4 Pro): 可达 10000 条",
                         fontSize = 13.sp,
-                        color = textSecondary,
+                        color = colorScheme.onSurfaceVariant,
                         lineHeight = 22.sp
                     )
                 }

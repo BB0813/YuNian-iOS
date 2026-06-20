@@ -58,13 +58,6 @@ import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.uicommon.theme.PinkMuted
 import com.lianyu.ai.uicommon.theme.PinkPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
@@ -72,9 +65,6 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 
 enum class HomeTab {
     ALL, GROUP, FRIEND
@@ -92,19 +82,9 @@ fun HomeScreen(
     val chatList by viewModel.chatList.collectAsState(initial = emptyList())
     val groups by groupViewModel.groups.collectAsState(initial = emptyList())
     var isVisible by remember { mutableStateOf(false) }
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDarkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
-
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else WeChatLightBackground
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     LaunchedEffect(Unit) {
         delay(100)
@@ -114,7 +94,7 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(backgroundColor)
+            .background(colorScheme.background)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -137,13 +117,13 @@ fun HomeScreen(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 22.sp
                             ),
-                            color = textPrimary
+                            color = colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "${chatList.size} 个会话 · ${groups.size} 个群聊",
                             fontSize = 12.sp,
-                            color = textSecondary
+                            color = colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -153,7 +133,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(18.dp))
-                                .background(if (isDarkTheme) WeChatDarkCard else Color(0xFFF2F2F2))
+                                .background(colorScheme.surfaceVariant)
                                 .clickable { onCreateGroupClick() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -161,14 +141,14 @@ fun HomeScreen(
                                 imageVector = Icons.Outlined.Group,
                                 contentDescription = "创建群聊",
                                 modifier = Modifier.size(20.dp),
-                                tint = textPrimary
+                                tint = colorScheme.onSurface
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(18.dp))
-                                .background(if (isDarkTheme) WeChatDarkCard else Color(0xFFF2F2F2))
+                                .background(colorScheme.surfaceVariant)
                                 .clickable { onAddClick() },
                             contentAlignment = Alignment.Center
                         ) {
@@ -176,7 +156,7 @@ fun HomeScreen(
                                 imageVector = Icons.Outlined.Person,
                                 contentDescription = "添加女友",
                                 modifier = Modifier.size(20.dp),
-                                tint = textPrimary
+                                tint = colorScheme.onSurface
                             )
                         }
                     }
@@ -187,8 +167,7 @@ fun HomeScreen(
                 // 胶囊标签切换
                 HomeTabBar(
                     selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it },
-                    isDarkTheme = isDarkTheme
+                    onTabSelected = { selectedTab = it }
                 )
             }
 
@@ -204,7 +183,7 @@ fun HomeScreen(
 
             if (displayGroups.isEmpty() && displayChats.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    EmptyHomeState(isDarkTheme = isDarkTheme)
+                    EmptyHomeState()
                 }
             } else {
                 LazyColumn(
@@ -220,8 +199,7 @@ fun HomeScreen(
                     if (displayGroups.isNotEmpty()) {
                         item {
                             SectionTitle(
-                                title = "群聊",
-                                isDarkTheme = isDarkTheme
+                                title = "群聊"
                             )
                         }
                         itemsIndexed(displayGroups) { index, group ->
@@ -236,7 +214,6 @@ fun HomeScreen(
                             ) {
                                 GroupListItem(
                                 group = group,
-                                isDarkTheme = isDarkTheme,
                                 onClick = { onGroupClick(group.id) },
                                 adaptiveSizing = adaptiveSizing
                             )
@@ -247,8 +224,7 @@ fun HomeScreen(
                     if (displayChats.isNotEmpty()) {
                         item {
                             SectionTitle(
-                                title = "好友",
-                                isDarkTheme = isDarkTheme
+                                title = "好友"
                             )
                         }
                         itemsIndexed(displayChats) { index, item ->
@@ -265,7 +241,6 @@ fun HomeScreen(
                                     companion = item.companion,
                                     lastMessage = item.lastMessage,
                                     hasUnread = item.hasUnread,
-                                    isDarkTheme = isDarkTheme,
                                     onClick = { onCompanionClick(item.companion.id) },
                                     adaptiveSizing = adaptiveSizing
                                 )
@@ -280,10 +255,9 @@ fun HomeScreen(
 
 @Composable
 fun SectionTitle(
-    title: String,
-    isDarkTheme: Boolean
+    title: String
 ) {
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Row(
         modifier = Modifier
@@ -303,7 +277,7 @@ fun SectionTitle(
             text = title,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = textSecondary
+            color = colorScheme.onSurfaceVariant
         )
     }
 }
@@ -311,17 +285,16 @@ fun SectionTitle(
 @Composable
 fun HomeTabBar(
     selectedTab: HomeTab,
-    onTabSelected: (HomeTab) -> Unit,
-    isDarkTheme: Boolean
+    onTabSelected: (HomeTab) -> Unit
 ) {
-    val textSecondary = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFFB89AA2)
-    val selectedBg = if (isDarkTheme) PinkMuted.copy(alpha = 0.5f) else PinkPrimary.copy(alpha = 0.15f)
+    val colorScheme = MaterialTheme.colorScheme
+    val selectedBg = MaterialTheme.colorScheme.primaryContainer
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(if (isDarkTheme) Color(0xFF241B20) else Color(0xFFF2F2F2))
+            .background(MaterialTheme.colorScheme.surface)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -345,7 +318,7 @@ fun HomeTabBar(
                     text = label,
                     fontSize = 14.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) PinkPrimary else textSecondary
+                    color = if (selected) PinkPrimary else colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -355,18 +328,16 @@ fun HomeTabBar(
 @Composable
 fun GroupListItem(
     group: ChatGroup,
-    isDarkTheme: Boolean,
     onClick: () -> Unit,
     adaptiveSizing: AdaptiveSizing
 ) {
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(if (isDarkTheme) WeChatDarkCard else Color.White)
+            .background(colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
@@ -429,7 +400,7 @@ fun GroupListItem(
                             fontWeight = FontWeight.Normal,
                             fontSize = adaptiveSizing.fontSizeBody.sp
                         ),
-                        color = textPrimary,
+                        color = colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -441,7 +412,7 @@ fun GroupListItem(
                         fontSize = (adaptiveSizing.fontSizeBody - 1).sp,
                         lineHeight = 20.sp
                     ),
-                    color = textSecondary,
+                    color = colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -455,21 +426,19 @@ fun ChatListItem(
     companion: CompanionEntity,
     lastMessage: ChatMessage?,
     hasUnread: Boolean = false,
-    isDarkTheme: Boolean,
     onClick: () -> Unit,
     adaptiveSizing: AdaptiveSizing
 ) {
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = lastMessage?.let { dateFormat.format(Date(it.timestamp)) } ?: ""
 
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(if (isDarkTheme) WeChatDarkCard else Color.White)
+            .background(colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
@@ -534,7 +503,7 @@ fun ChatListItem(
                             fontWeight = FontWeight.Normal,
                             fontSize = adaptiveSizing.fontSizeBody.sp
                         ),
-                        color = textPrimary,
+                        color = colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -546,7 +515,7 @@ fun ChatListItem(
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontSize = adaptiveSizing.fontSizeSmall.sp
                             ),
-                            color = textSecondary
+                            color = colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -556,7 +525,7 @@ fun ChatListItem(
                         fontSize = (adaptiveSizing.fontSizeBody - 1).sp,
                         lineHeight = 20.sp
                     ),
-                    color = textSecondary,
+                    color = colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -566,9 +535,8 @@ fun ChatListItem(
 }
 
 @Composable
-fun EmptyHomeState(isDarkTheme: Boolean) {
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+fun EmptyHomeState() {
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -595,13 +563,13 @@ fun EmptyHomeState(isDarkTheme: Boolean) {
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Medium
                 ),
-                color = textPrimary
+                color = colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "去通讯录找你的女友聊天吧",
                 style = MaterialTheme.typography.bodyMedium,
-                color = textSecondary
+                color = colorScheme.onSurfaceVariant
             )
         }
     }

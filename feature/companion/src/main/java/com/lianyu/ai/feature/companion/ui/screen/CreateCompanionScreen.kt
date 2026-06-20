@@ -85,20 +85,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.feature.companion.ui.viewmodel.CreateCompanionViewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightCard
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
 import kotlinx.coroutines.delay
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.draw.alpha
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -206,18 +193,7 @@ fun CreateCompanionScreen(
         }
     }
 
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDark = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val backgroundColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDark) WeChatDarkCard else WeChatLightCard
-    val textPrimary = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDark) WeChatDarkTextSecondary else WeChatLightTextSecondary
-    val dividerColor = if (isDark) WeChatDarkDivider else WeChatLightDivider
+    val colorScheme = MaterialTheme.colorScheme
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -230,7 +206,7 @@ fun CreateCompanionScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 17.sp
                         ),
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
                 },
                 navigationIcon = {
@@ -238,7 +214,7 @@ fun CreateCompanionScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cancel),
-                            tint = textPrimary
+                            tint = colorScheme.onSurface
                         )
                     }
                 },
@@ -254,7 +230,7 @@ fun CreateCompanionScreen(
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = backgroundColor
+                    containerColor = colorScheme.background
                 ),
                 modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars)
             )
@@ -263,7 +239,7 @@ fun CreateCompanionScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .background(colorScheme.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .imePadding()
                 .verticalScroll(scrollState),
@@ -330,7 +306,7 @@ fun CreateCompanionScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 16.sp
                             ),
-                            color = if (name.isBlank()) textSecondary.copy(alpha = 0.7f) else textPrimary
+                            color = if (name.isBlank()) colorScheme.onSurfaceVariant.copy(alpha = 0.7f) else colorScheme.onSurface
                         )
                     }
                 }
@@ -351,8 +327,7 @@ fun CreateCompanionScreen(
                     value = name,
                     onValueChange = { name = it },
                     placeholder = stringResource(R.string.name_placeholder),
-                    imeAction = ImeAction.Next,
-                    isDarkTheme = isDark
+                    imeAction = ImeAction.Next
                 )
 
                 AnimatedFormField(
@@ -363,8 +338,7 @@ fun CreateCompanionScreen(
                     onValueChange = { age = it },
                     placeholder = stringResource(R.string.age_placeholder),
                     keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Next,
-                    isDarkTheme = isDark
+                    imeAction = ImeAction.Next
                 )
 
                 AnimatedVisibility(
@@ -374,8 +348,8 @@ fun CreateCompanionScreen(
                 ) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = cardColor),
-                        elevation = CardDefaults.cardElevation(defaultElevation = if (isDark) 0.dp else 2.dp),
+                        colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(
@@ -394,7 +368,7 @@ fun CreateCompanionScreen(
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 13.sp
                                     ),
-                                    color = textPrimary
+                                    color = colorScheme.onSurface
                                 )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -468,18 +442,18 @@ fun CreateCompanionScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                                    unfocusedBorderColor = dividerColor.copy(alpha = 0.5f),
-                                    focusedContainerColor = if (isDark) Color.Transparent else Color.White.copy(alpha = 0.3f),
+                                    focusedBorderColor = colorScheme.primary.copy(alpha = 0.3f),
+                                    unfocusedBorderColor = colorScheme.outline.copy(alpha = 0.5f),
+                                    focusedContainerColor = colorScheme.surface.copy(alpha = 0.3f),
                                     unfocusedContainerColor = Color.Transparent,
-                                    focusedTextColor = textSecondary,
-                                    unfocusedTextColor = textSecondary
+                                    focusedTextColor = colorScheme.onSurfaceVariant,
+                                    unfocusedTextColor = colorScheme.onSurfaceVariant
                                 ),
                                 placeholder = {
                                     Text(
                                         "参考角色（如：明日方舟-阿米娅，可选）",
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = textSecondary.copy(alpha = 0.5f)
+                                        color = colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                                     )
                                 },
                                 singleLine = true,
@@ -492,7 +466,7 @@ fun CreateCompanionScreen(
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontSize = 11.sp
                                 ),
-                                color = textSecondary.copy(alpha = 0.8f)
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(
@@ -501,14 +475,14 @@ fun CreateCompanionScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(14.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                                    unfocusedBorderColor = dividerColor,
-                                    focusedLabelColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                    unfocusedLabelColor = textSecondary.copy(alpha = 0.7f),
-                                    focusedContainerColor = if (isDark) cardColor.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.4f),
-                                    unfocusedContainerColor = if (isDark) cardColor.copy(alpha = 0.3f) else Color(0xFFF5F5F5).copy(alpha = 0.2f),
-                                    focusedTextColor = textPrimary,
-                                    unfocusedTextColor = textPrimary
+                                    focusedBorderColor = colorScheme.primary.copy(alpha = 0.4f),
+                                    unfocusedBorderColor = colorScheme.outline,
+                                    focusedLabelColor = colorScheme.primary.copy(alpha = 0.6f),
+                                    unfocusedLabelColor = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    focusedContainerColor = colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    unfocusedContainerColor = colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    focusedTextColor = colorScheme.onSurface,
+                                    unfocusedTextColor = colorScheme.onSurface
                                 ),
                                 minLines = 6,
                                 maxLines = 10,
@@ -528,8 +502,7 @@ fun CreateCompanionScreen(
                     onValueChange = { systemPrompt = it },
                     placeholder = stringResource(R.string.system_prompt_hint),
                     imeAction = ImeAction.Done,
-                    minLines = 3,
-                    isDarkTheme = isDark
+                    minLines = 3
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -630,14 +603,14 @@ fun CreateCompanionScreen(
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold
                     ),
-                    color = textPrimary
+                    color = colorScheme.onSurface
                 )
             },
             text = {
                 Text(
                     stringResource(R.string.delete_confirm_msg, name),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = textSecondary
+                    color = colorScheme.onSurfaceVariant
                 )
             },
             confirmButton = {
@@ -650,15 +623,15 @@ fun CreateCompanionScreen(
                         onNavigateBack()
                     }
                 ) {
-                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.delete), color = colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) {
-                    Text(stringResource(R.string.cancel), color = textSecondary)
+                    Text(stringResource(R.string.cancel), color = colorScheme.onSurfaceVariant)
                 }
             },
-            containerColor = cardColor
+            containerColor = colorScheme.surfaceVariant
         )
     }
 
@@ -671,22 +644,22 @@ fun CreateCompanionScreen(
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold
                     ),
-                    color = textPrimary
+                    color = colorScheme.onSurface
                 )
             },
             text = {
                 Text(
                     importErrorMessage,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = textSecondary
+                    color = colorScheme.onSurfaceVariant
                 )
             },
             confirmButton = {
                 TextButton(onClick = { showImportErrorDialog = false }) {
-                    Text(stringResource(R.string.ok), color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.ok), color = colorScheme.primary)
                 }
             },
-            containerColor = cardColor
+            containerColor = colorScheme.surfaceVariant
         )
     }
 
@@ -702,13 +675,9 @@ fun AnimatedFormField(
     placeholder: String,
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Default,
-    minLines: Int = 1,
-    isDarkTheme: Boolean
+    minLines: Int = 1
 ) {
-    val cardColor = if (isDarkTheme) WeChatDarkCard else WeChatLightCard
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
-    val dividerColor = if (isDarkTheme) WeChatDarkDivider else WeChatLightDivider
+    val colorScheme = MaterialTheme.colorScheme
 
     AnimatedVisibility(
         visible = visible,
@@ -717,8 +686,8 @@ fun AnimatedFormField(
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = cardColor),
-            elevation = CardDefaults.cardElevation(defaultElevation = if (isDarkTheme) 0.dp else 2.dp),
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(
@@ -732,7 +701,7 @@ fun AnimatedFormField(
                         fontWeight = FontWeight.Medium,
                         fontSize = 13.sp
                     ),
-                    color = textPrimary
+                    color = colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
@@ -744,20 +713,20 @@ fun AnimatedFormField(
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 13.sp
                             ),
-                            color = textSecondary.copy(alpha = 0.7f)
+                            color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                        unfocusedBorderColor = dividerColor,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                        unfocusedLabelColor = textSecondary.copy(alpha = 0.7f),
-                        focusedContainerColor = if (isDarkTheme) cardColor.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.4f),
-                        unfocusedContainerColor = if (isDarkTheme) cardColor.copy(alpha = 0.3f) else Color(0xFFF5F5F5).copy(alpha = 0.2f),
-                        focusedTextColor = textPrimary,
-                        unfocusedTextColor = textPrimary
+                        focusedBorderColor = colorScheme.primary.copy(alpha = 0.4f),
+                        unfocusedBorderColor = colorScheme.outline,
+                        focusedLabelColor = colorScheme.primary.copy(alpha = 0.6f),
+                        unfocusedLabelColor = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        focusedContainerColor = colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        unfocusedContainerColor = colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        focusedTextColor = colorScheme.onSurface,
+                        unfocusedTextColor = colorScheme.onSurface
                     ),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = keyboardType,

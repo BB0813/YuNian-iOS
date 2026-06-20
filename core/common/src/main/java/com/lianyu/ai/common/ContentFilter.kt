@@ -369,13 +369,16 @@ object ContentFilter {
 
     fun checkOutputSafety(text: String): OutputSafetyResult {
         val result = check(text)
-        if (result.isViolating) {
+        // 与输入侧 checkInput 保持一致：只对 HIGH 及以上级别做拦截，
+        // 避免语义检测 LOW/MEDIUM 误报把正常 AI 回复吞掉并导致误封。
+        val unsafe = result.isViolating && result.level >= ViolationLevel.HIGH
+        if (unsafe) {
             Log.w(TAG, "checkOutputSafety: ${result.level} - ${result.reason}")
         }
         return OutputSafetyResult(
-            isSafe = !result.isViolating,
-            level = result.level,
-            reason = result.reason
+            isSafe = !unsafe,
+            level = if (unsafe) result.level else ViolationLevel.NONE,
+            reason = if (unsafe) result.reason else ""
         )
     }
 

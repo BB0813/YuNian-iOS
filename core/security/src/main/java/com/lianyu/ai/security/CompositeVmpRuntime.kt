@@ -202,8 +202,12 @@ object CompositeVmpRuntime {
         val hmacFieldEnd = rawText.indexOf(',', hmacValueEnd)
         val contentForVerification = if (hmacFieldEnd > 0) {
             rawText.substring(0, hmacStart) + rawText.substring(hmacFieldEnd + 1)
+        } else if (hmacStart > 0) {
+            rawText.substring(0, hmacStart - 1)
         } else {
-            rawText.substring(0, hmacStart - 1) // -1 to strip leading comma/whitespace
+            rawText.substring(rawText.indexOf('}', hmacValueEnd).let { closeBrace ->
+                if (closeBrace > 0) closeBrace + 1 else rawText.length
+            })
         }
 
         if (!TinkAeadProvider.verifyManifest(

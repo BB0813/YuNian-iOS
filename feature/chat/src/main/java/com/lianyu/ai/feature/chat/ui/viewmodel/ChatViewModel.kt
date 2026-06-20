@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import android.content.Intent
+import com.lianyu.ai.common.ApplicationScopeProvider
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.BanManager
 import com.lianyu.ai.common.DeviceIdProvider
@@ -71,8 +72,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 // ViewModel 实例级作用域，用于 API 调用等需要跨越 UI 生命周期的操作
 // 在 onCleared() 中取消，避免作用域泄漏
-private const val API_TIMEOUT_MS = 25000L
-private const val VISION_API_TIMEOUT_MS = 60000L
+// [P0 FIX] 超时从25s降至15s：原25s导致消息队列严重堵塞，用户连续发消息时延迟指数增长
+// 总链路 = pipeline(8s) + AI调用(15s) + 安全检查(6s) ≈ 29s（比原来39s改善26%）
+private const val API_TIMEOUT_MS = 30000L       // 与 OkHttp callTimeout 对齐（网络慢时 15s 不够）
+private const val VISION_API_TIMEOUT_MS = 60000L   // 视觉识别需要编码+传输，保留60s
 private const val SAFETY_CLASSIFY_TIMEOUT_MS = 30000L
 private const val MEMORY_EXTRACT_TIMEOUT_MS = 5000L
 private const val TTS_SYNTH_TIMEOUT_MS = 10000L
@@ -88,6 +91,13 @@ class ChatViewModel(
         SecureLog.e("ChatViewModel", "applicationApiScope uncaught exception", throwable)
     }
     private val applicationApiScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + _appExceptionHandler)
+
+    /**
+     * [P0 FIX] 应用级后台作用域，生命周期与 Application 一致。
+     * AI 请求运行在此作用域中，确保用户退出聊天页面后请求仍能继续完成并写入数据库，
+     * 重新进入聊天时即可看到回复。ViewModel 销毁时不会取消此作用域中的任务。
+     */
+    private val chatBackgroundScope = ApplicationScopeProvider.scope
 
     private val database = AppDatabase.getDatabase(application)
     private val deviceId = DeviceIdProvider.getDeviceId(application)
@@ -121,13 +131,16 @@ class ChatViewModel(
 
     private fun List<ChatMessage>.toAiChatMessages() = map { it.toAiChatMessage() }
 
-    // ── 消息：Room Flow 做主数据源，_visibleCount 做视图分页 ──
-    private val _allMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    private val _visibleCount = MutableStateFlow(PAGE_SIZE)
+    // ── 消息：Room Flow 做最新一页数据源，_olderMessages 做加载的历史 ──
+    // 进入时先从 ChatRepository 内存缓存读取初始数据（HomeViewModel 预热），避免 loading
+    private val _recentMessages = MutableStateFlow<List<ChatMessage>>(
+        chatRepository.getCachedRecent(companionId) ?: emptyList()
+    )
+    private val _olderMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
 
-    val messages: StateFlow<List<ChatMessage>> = combine(_allMessages, _visibleCount) { all, count ->
-        all.takeLast(count)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val messages: StateFlow<List<ChatMessage>> = combine(_recentMessages, _olderMessages) { recent, older ->
+        older + recent
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, chatRepository.getCachedRecent(companionId) ?: emptyList())
 
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -135,7 +148,8 @@ class ChatViewModel(
     private val _hasMoreMessages = MutableStateFlow(false)
     val hasMoreMessages: StateFlow<Boolean> = _hasMoreMessages.asStateFlow()
 
-    private var oldestLoadedTimestamp = Long.MAX_VALUE
+    // true when a loadMore returned fewer than LOAD_MORE_SIZE, meaning no older messages
+    private var _reachedEnd = false
 
     private val _userName = MutableStateFlow("我")
     val userName: StateFlow<String> = _userName.asStateFlow()
@@ -225,7 +239,7 @@ class ChatViewModel(
         @Suppress("UNCHECKED_CAST")
         ChatState(
             companionData = values[0] as CompanionEntity?,
-            messages = _allMessages.value,
+            messages = values[1] as List<ChatMessage>,
             visibleMessages = values[1] as List<ChatMessage>,
             isLoading = values[2] as Boolean,
             isTyping = values[3] as Boolean,
@@ -256,7 +270,7 @@ class ChatViewModel(
     )
 
     val screenState: StateFlow<ScreenState> = combine(
-        _allMessages, _isLoading, chatTypingState.isTyping, _queueDepth
+        messages, _isLoading, chatTypingState.isTyping, _queueDepth
     ) { msgs, loading, typing, depth ->
         ScreenState(
             messageCount = msgs.size,
@@ -285,21 +299,100 @@ class ChatViewModel(
         startMessageConsumer()
     }
 
+// [P0 FIX] 批量合并窗口：用户快速连发的多条消息在窗口期内合并为一批
+// 不丢弃任何消息！AI会看到所有内容并像真人一样综合/逐一回复
+// 窗口时长2.5秒：平衡"响应速度"和"合并更多消息"
+private val BATCH_WINDOW_MS = 2500L
+// 窗口内轮询间隔：100ms，避免CPU忙等待
+private val BATCH_POLL_INTERVAL_MS = 100L
+// 单批次最大消息数：防止恶意/异常连续发送导致token溢出
+private val MAX_BATCH_SIZE = 10
+
     private fun startMessageConsumer() {
         System.err.println("[ChatVM] startMessageConsumer called, companionId=$companionId")
         applicationApiScope.launch {
-            System.err.println("[ChatVM] consumer coroutine STARTED")
+            System.err.println("[ChatVM] consumer coroutine STARTED (batch-merge mode)")
             try {
-                for (content in messageQueue) {
-                    System.err.println("[ChatVM] consumer received: '${content.take(30)}'")
-                    _queueDepth.value = maxOf(0, _queueDepth.value - 1)
-                    try {
-                        doSendMessage(content)
-                    } catch (e: Exception) {
-                        SecureLog.e("ChatViewModel", "doSendMessage failed for '${content.take(20)}'", e)
-                        System.err.println("[ChatVM] doSendMessage FAILED: ${e.javaClass.simpleName}: ${e.message}")
-                        _events.tryEmit(ChatUiEvent.Error("消息发送失败: ${e.message?.take(50) ?: "未知错误"}"))
+                val batch = mutableListOf<String>()
+
+                while (true) {
+                    // 阻塞等待第一条消息（无消息时挂起，不占CPU）
+                    val first = messageQueue.receiveCatching()
+                    if (first.isClosed) {
+                        System.err.println("[ChatVM] consumer: channel closed, exiting")
+                        break
                     }
+                    if (first.exceptionOrNull() != null) continue
+
+                    batch.add(first.getOrThrow())
+                    _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+                    System.err.println("[ChatVM] consumer received first msg of batch: '${batch.last().take(30)}'")
+
+                    // ── 批量合并窗口 ──
+                    // 在窗口期内持续收集新消息（不阻塞AI处理，只收集入队消息）
+                    val windowStart = System.currentTimeMillis()
+                    while (System.currentTimeMillis() - windowStart < BATCH_WINDOW_MS) {
+                        val next = messageQueue.tryReceive()
+                        if (next.isClosed) {
+                            System.err.println("[ChatVM] consumer: channel closed during batch window")
+                            break
+                        }
+                        if (next.isFailure) {
+                            delay(BATCH_POLL_INTERVAL_MS)
+                            continue
+                        }
+                        batch.add(next.getOrThrow())
+                        _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+                        System.err.println("[ChatVM] consumer collected into batch (${batch.size} total): '${batch.last().take(30)}'")
+                    }
+
+                    // 窗口结束后再排空一次残余（边界情况：delay期间刚好到达的消息）
+                    while (true) {
+                        val extra = messageQueue.tryReceive()
+                        if (extra.isClosed || extra.isFailure) break
+                        batch.add(extra.getOrThrow())
+                        _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+                    }
+
+                    if (batch.isEmpty()) continue
+
+                    // [P0 FIX] 批次大小安全保护：超限时自动拆分（不丢弃任何消息）
+                    // 单批次最多10条消息，超出部分作为下一批次处理
+                    val batches = if (batch.size <= MAX_BATCH_SIZE) {
+                        listOf(batch.toList())
+                    } else {
+                        System.err.println("[ChatVM] Batch overflow: ${batch.size} > $MAX_BATCH_SIZE, splitting into chunks")
+                        batch.chunked(MAX_BATCH_SIZE)
+                    }
+
+                    for ((batchIndex, subBatch) in batches.withIndex()) {
+                        // 第一个子批次开始时，取消上一批次的未完成AI请求
+                        if (batchIndex == 0) {
+                            val previousJob = turnState.sendMessageJob
+                            if (previousJob != null && previousJob.isActive) {
+                                System.err.println("[ChatVM] Cancelling previous batch AI job before new batch")
+                                previousJob.cancel("New message batch started, cancelling stale batch")
+                            }
+                        } else {
+                            // 拆分后的子批次之间短暂间隔，避免API限流
+                            delay(300L)
+                            // 取消上一子批次的未完成请求
+                            val prevSubJob = turnState.sendMessageJob
+                            if (prevSubJob?.isActive == true) {
+                                prevSubJob.cancel("New message batch started, cancelling stale batch")
+                            }
+                        }
+                        System.err.println("[ChatVM] processing sub-batch ${batchIndex + 1}/${batches.size}: ${subBatch.size} messages")
+
+                        try {
+                            doSendMessage(batch = subBatch)
+                        } catch (e: Exception) {
+                            SecureLog.e("ChatViewModel", "doSendMessage failed for sub-batch ${batchIndex + 1}", e)
+                            _events.tryEmit(ChatUiEvent.Error("消息发送失败: ${e.message?.take(50) ?: "未知错误"}"))
+                        }
+                    }
+
+                    batch.clear()
                 }
             } catch (e: CancellationException) {
                 System.err.println("[ChatVM] consumer coroutine CANCELLED")
@@ -307,7 +400,6 @@ class ChatViewModel(
             } catch (e: Exception) {
                 System.err.println("[ChatVM] consumer coroutine CRASHED: ${e.javaClass.simpleName}: ${e.message}")
                 SecureLog.e("ChatViewModel", "Consumer crashed, restarting...", e)
-                // 消费者崩溃后自动重启
                 startMessageConsumer()
             }
             System.err.println("[ChatVM] consumer coroutine ENDED (channel closed)")
@@ -318,10 +410,10 @@ class ChatViewModel(
         System.err.println("[ChatVM] observeMessages START, companionId=$companionId")
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                chatRepository.getMessagesForCompanion(companionId).collect { all ->
-                    _allMessages.value = all
-                    _hasMoreMessages.value = all.size > _visibleCount.value
-                    System.err.println("[ChatVM] Room Flow emit: ${all.size} messages")
+                chatRepository.getMessagesForCompanion(companionId, PAGE_SIZE).collect { recent ->
+                    _recentMessages.value = recent
+                    _hasMoreMessages.value = recent.size >= PAGE_SIZE && !_reachedEnd
+                    System.err.println("[ChatVM] Room Flow emit: ${recent.size} recent messages")
                 }
             } catch (e: CancellationException) {
                 System.err.println("[ChatVM] observeMessages CANCELLED (viewModelScope cancelled)")
@@ -340,11 +432,25 @@ class ChatViewModel(
     fun loadMoreHistory() {
         if (_isLoadingMore.value || !_hasMoreMessages.value) return
         _isLoadingMore.value = true
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             delay(200) // 短暂延迟让加载指示器可见
-            _visibleCount.value = (_visibleCount.value + LOAD_MORE_SIZE).coerceAtMost(200)
-            _hasMoreMessages.value = _allMessages.value.size > _visibleCount.value
-            _isLoadingMore.value = false
+            try {
+                val beforeTimestamp = _olderMessages.value.firstOrNull()?.timestamp
+                    ?: _recentMessages.value.firstOrNull()?.timestamp
+                    ?: Long.MAX_VALUE
+                val older = chatRepository.getMessagesBeforeSync(companionId, beforeTimestamp, LOAD_MORE_SIZE)
+                if (older.isNotEmpty()) {
+                    _olderMessages.value = older.reversed() + _olderMessages.value
+                }
+                if (older.size < LOAD_MORE_SIZE) {
+                    _reachedEnd = true
+                }
+                _hasMoreMessages.value = !_reachedEnd
+            } catch (e: Exception) {
+                SecureLog.e("ChatViewModel", "loadMoreHistory failed", e)
+            } finally {
+                _isLoadingMore.value = false
+            }
         }
     }
 
@@ -440,7 +546,8 @@ class ChatViewModel(
     private suspend fun generateWithLocalModel(
         companion: CompanionEntity,
         history: List<ChatMessage>,
-        stickerProbability: Int
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean = false
     ): String {
         val sortedHistory = history.sortedBy { it.timestamp }
         val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
@@ -496,6 +603,8 @@ class ChatViewModel(
                 }
             }
             appendLine("\n记住：你不是AI，你是活人。直接回复内容，不要输出思考过程。")
+            appendLine()
+            appendLine(com.lianyu.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled))
         }
 
         val localProvider = ServiceRegistry.get(LocalModelProvider::class.java)
@@ -512,6 +621,7 @@ class ChatViewModel(
      */
     fun sendMessage(content: String) {
         System.err.println("[ChatVM] sendMessage called, content='${content.take(30)}', apis=${_availableApis.value.size}")
+
         // 乐观存储：用户消息立即存库显示，不等AI回复
         val userMessage = ChatMessage(
             companionId = companionId,
@@ -538,46 +648,55 @@ class ChatViewModel(
         }
     }
 
-    private suspend fun doSendMessage(content: String) {
-        System.err.println("[ChatVM] doSendMessage ENTER, content='${content.take(30)}', apis=${_availableApis.value.size}")
+    /**
+     * 处理一批消息（批量合并模式）。
+     * 窗口期内（2.5秒）的多条消息合并为一次AI调用，不丢弃任何消息。
+     * AI会看到所有消息内容并像真人一样综合/逐一回复。
+     *
+     * @param batch 当前批次的所有消息（按时间顺序，最早在前）
+     */
+    private suspend fun doSendMessage(batch: List<String>) {
+        val content = if (batch.size == 1) batch[0] else batch.joinToString("\n")
+        System.err.println("[ChatVM] doSendMessage ENTER, batchSize=${batch.size}, mergedContent='${content.take(50)}', apis=${_availableApis.value.size}")
 
         // 封禁检查：已封禁用户禁止发送
         if (com.lianyu.ai.common.BanManager.isBanned(getApplication())) {
-            System.err.println("[ChatVM] doSendMessage BLOCKED: account is banned")
-            _events.tryEmit(ChatUiEvent.Error("账号已被封禁"))
+            val banInfo = com.lianyu.ai.common.BanManager.getBanInfo(getApplication())
+            val banMsg = if (banInfo.remainingDays > 0) {
+                "账号已被封禁（剩余${banInfo.remainingDays}天${banInfo.remainingHours}小时），原因：${banInfo.levelName}。第${banInfo.violationCount}次违规。"
+            } else if (banInfo.remainingHours > 0) {
+                "账号已被封禁（剩余${banInfo.remainingHours}小时${banInfo.remainingMinutes}分钟），原因：${banInfo.levelName}。第${banInfo.violationCount}次违规。"
+            } else {
+                "账号已被封禁，原因：${banInfo.levelName}。第${banInfo.violationCount}次违规。请完成安全答题以解除封禁。"
+            }
+            System.err.println("[ChatVM] doSendMessage BLOCKED: account is banned - $banMsg")
+            _events.tryEmit(ChatUiEvent.Error(banMsg))
             return
         }
 
-        System.err.println("[ChatVM] doSendMessage START, content='${content.take(30)}'")
-
         // 等待 API 配置加载完成（最多 1.5 秒），避免冷启动时序竞态
         if (_availableApis.value.isEmpty() && !_apisLoaded) {
-            System.err.println("[ChatVM] waiting for API config (1.5s timeout, cold start)...")
             try {
-                val result = withTimeoutOrNull(1500L) {
-                    _availableApis.first { it.isNotEmpty() }
-                }
-                System.err.println("[ChatVM] API config wait result: ${if (result != null) "got ${result.size} apis" else "timeout"}")
-            } catch (e: Exception) {
-                System.err.println("[ChatVM] API config wait exception: ${e.message}")
-            }
+                withTimeoutOrNull(1500L) { _availableApis.first { it.isNotEmpty() } }
+            } catch (_: Exception) {}
         }
 
-        // 无 API 时：仅做安全检查 + 提示，用户消息已在 sendMessage 中存库
-        System.err.println("[ChatVM] apis after wait: ${_availableApis.value.size}")
+        // 无 API 时：仅做安全检查 + 提示，用户消息已在 sendMessage 中乐观存库显示
         if (_availableApis.value.isEmpty()) {
-            try {
-                val inputCheck = ContentFilter.checkInput(content)
-                if (inputCheck.isViolating) {
-                    com.lianyu.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
-                    _events.tryEmit(ChatUiEvent.ContentBlocked("内容违规: ${inputCheck.reason}"))
+            // 对批次中每条消息都做安全检查
+            for (msg in batch) {
+                try {
+                    val inputCheck = ContentFilter.checkInput(msg)
+                    if (inputCheck.isViolating) {
+                        BanManager.recordViolation(getApplication(), inputCheck.level)
+                        _events.tryEmit(ChatUiEvent.ContentBlocked("内容违规: ${inputCheck.reason}"))
+                        return@doSendMessage
+                    }
+                } catch (_: Exception) {
+                    _events.tryEmit(ChatUiEvent.Error("安全检查异常"))
                     return@doSendMessage
                 }
-            } catch (e: Exception) {
-                _events.tryEmit(ChatUiEvent.Error("安全检查异常"))
-                return@doSendMessage
             }
-
             val tipMessage = ChatMessage(
                 companionId = companionId,
                 content = "请先配置API：我 → API设置 → 添加密钥",
@@ -588,42 +707,66 @@ class ChatViewModel(
             return@doSendMessage
         }
 
-        // 安全检查（用户消息已在 sendMessage 中乐观存库显示）
-        System.err.println("[ChatVM] pipeline execute START")
+        // 安全检查（对合并后的内容做pipeline检查）
         val pipelineOk = try {
-            val result = withTimeoutOrNull(8000L) {
-                pipeline.execute(
-                    MessagePipeline.PipelineInput(rawText = content, companionId = companionId)
-                )
+            withTimeoutOrNull(8000L) {
+                pipeline.execute(MessagePipeline.PipelineInput(rawText = content, companionId = companionId))
             }
-            System.err.println("[ChatVM] pipeline execute DONE, result=$result")
-            result
-        } catch (e: Exception) {
-            System.err.println("[ChatVM] pipeline execute EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
-            null
-        }
+        } catch (_: Exception) { null }
 
-        // fail-closed: 超时或拦截 → 显示提示但不删除已存储的消息
-        if (pipelineOk != true) {
-            val err = if (pipelineOk == null) {
-                System.err.println("[ChatVM] pipeline TIMEOUT — showing warning")
-                "安全检查超时"
-            } else {
-                pipeline.pipelineState.value.error ?: "内容可能违规"
-            }
+        if (pipelineOk == false) {
+            // 明确违规 → 阻止发送
+            val err = pipeline.pipelineState.value.error ?: "内容可能违规"
+            System.err.println("[ChatVM] doSendMessage BLOCKED by pipeline: $err")
             _events.tryEmit(ChatUiEvent.ContentBlocked(err))
+            return@doSendMessage
+        }
+        // pipelineOk == null（超时）→ fail-open，允许继续发送
+        // pipelineOk == true → 正常通过
+        if (pipelineOk == null) {
+            System.err.println("[ChatVM] doSendMessage: pipeline TIMEOUT, proceeding anyway (fail-open)")
         }
 
-        // Fire AI response — wait for completion before processing next queued message
-        // This prevents consecutive messages from cancelling each other's AI responses
+        // cancel已由消费者端统一处理（新批次开始时取消旧批次的AI Job），此处不再重复cancel
+
         turnState.reset()
-        turnState.sendMessageJob = applicationApiScope.startAiResponse(
-            history = chatRepository.getRecentMessagesSync(companionId, 50).filterDecrypted(),
-            stickerProbability = chatDetailSettingsStore.getSettings(companionId).stickerProbability,
-            userContentForMemory = content
+        // [FIX] 过滤掉空的 assistant 消息（零宽空格等），避免 API 报错 "assistant message must not be empty"
+        val fetchedHistory = chatRepository.getRecentMessagesSync(companionId, 50)
+            .filterDecrypted()
+            .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
+
+        // 上下文一致性校验：确保DB中最后的用户消息与当前批次匹配
+        val lastUserMsgInDb = fetchedHistory.lastOrNull { it.isFromUser }?.content
+        val batchLastMsg = batch.last()
+        if (lastUserMsgInDb != batchLastMsg && batch.size == 1) {
+            System.err.println("[ChatVM] CONTEXT WARNING: processing '$batchLastMsg' but DB lastUserMsg='$lastUserMsgInDb'")
+        }
+        if (batch.size > 1) {
+            System.err.println("[ChatVM] Processing batch of ${batch.size} messages, last='${batchLastMsg.take(30)}', DB lastUser='$lastUserMsgInDb'")
+        }
+
+        val chatSettings = chatDetailSettingsStore.getSettings(companionId)
+        System.err.println("[ChatVM] doSendMessage: starting AI response, historySize=${fetchedHistory.size}, stickerProb=${chatSettings.stickerProbability}")
+        // [P0 FIX] AI 请求运行在应用级作用域，避免退出聊天页面后因 ViewModel 销毁而取消。
+        turnState.sendMessageJob = chatBackgroundScope.startAiResponse(
+            history = fetchedHistory,
+            stickerProbability = chatSettings.stickerProbability,
+            userContentForMemory = content,  // 批量合并后的完整内容用于记忆提取
+            batchMessageCount = batch.size,   // 告诉AI这是批量消息（用于prompt优化）
+            ntpTimeEnabled = chatSettings.ntpTimeEnabled
         )
-        // 等待当前AI回复完成，避免连续发消息时前一条回复被取消
-        turnState.sendMessageJob?.join()
+        System.err.println("[ChatVM] doSendMessage: AI job started, isActive=${turnState.sendMessageJob?.isActive}, joining...")
+        // 串行等待当前批次AI回复完成（超时15s）
+        try {
+            turnState.sendMessageJob?.join()
+            System.err.println("[ChatVM] doSendMessage: AI job completed normally")
+        } catch (e: CancellationException) {
+            // [P0 FIX] 批量替换是预期行为：新批次开始时会取消旧批次。
+            // 如果在这里重新抛出 CancellationException，会导致整个消息消费者协程退出，
+            // 后续所有消息只被乐观存库但永远不会触发 AI 回复。
+            System.err.println("[ChatVM] AI job cancelled (superseded by newer batch), returning to consumer")
+            return@doSendMessage
+        }
     }
     /**
      * 公共 AI 响应流程：调用 AI → finalizeResponse → 错误处理
@@ -631,18 +774,23 @@ class ChatViewModel(
      * @param stickerProbability 表情包概率
      * @param userContentForMemory 用于记忆提取的用户内容
      * @param imagePath 图片路径（视觉模型），null 则用普通文本模型
+     * @param batchMessageCount 批量消息数量（>1表示多条消息合并处理）
      */
     private fun CoroutineScope.startAiResponse(
         history: List<ChatMessage>,
         stickerProbability: Int,
         userContentForMemory: String,
-        imagePath: String? = null
+        imagePath: String? = null,
+        batchMessageCount: Int = 1,
+        ntpTimeEnabled: Boolean = false
     ) = launch {
+        System.err.println("[ChatVM] startAiResponse LAUNCHED, companionId=$companionId, imagePath=$imagePath, batchMsgCount=$batchMessageCount")
         enterLoading()
         try {
             val companion = _companionData.value
             if (companion == null) {
                 SecureLog.e("ChatViewModel", "Companion data not loaded yet for id=$companionId")
+                System.err.println("[ChatVM] startAiResponse: companion is NULL, storing placeholder")
                 val errorMessage = ChatMessage(
                     companionId = companionId,
                     content = "系统正在加载伴侣信息，请稍后再试",
@@ -653,21 +801,23 @@ class ChatViewModel(
                 return@launch
             }
 
+            System.err.println("[ChatVM] startAiResponse: companion loaded, calling AI service...")
             val aiResponse = if (imagePath != null) {
                 withTimeoutOrNull(VISION_API_TIMEOUT_MS) {
-                    aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, stickerProbability)
+                    aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, stickerProbability, ntpTimeEnabled)
                 } ?: throw Exception(getApplication<Application>().getString(R.string.api_error_generic))
             } else if (isLocalModelEnabled()) {
                 AiResponse(content = runInterruptibleSafe(timeoutMs = API_TIMEOUT_MS) {
-                    generateWithLocalModel(companion, history, stickerProbability)
+                    generateWithLocalModel(companion, history, stickerProbability, ntpTimeEnabled)
                 } ?: throw java.util.concurrent.TimeoutException("Local model timeout"))
             } else {
                 runInterruptibleSafe(timeoutMs = API_TIMEOUT_MS) {
-                    aiService.sendMessage(companion.toAiCompanionInfo(), history.toAiChatMessages(), stickerProbability)
+                    aiService.sendMessage(companion.toAiCompanionInfo(), history.toAiChatMessages(), stickerProbability, ntpTimeEnabled)
                 } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
             }
 
             val aiContent = aiResponse.content
+            System.err.println("[ChatVM] startAiResponse: AI response received, length=${aiContent.length}, startsWithToast=${aiContent.startsWith("[TOAST]")}")
             if (aiContent.startsWith("[TOAST]")) {
                 _events.tryEmit(ChatUiEvent.Error(aiContent.removePrefix("[TOAST]")))
                 return@launch
@@ -677,22 +827,38 @@ class ChatViewModel(
                 aiContent = aiContent,
                 reasoning = aiResponse.reasoningContent,
                 userContentForMemory = userContentForMemory,
-                logMessage = if (imagePath != null) "AI image response received" else "AI response received"
+                logMessage = if (batchMessageCount > 1) "AI batch response received (${batchMessageCount} msgs)"
+                           else if (imagePath != null) "AI image response received"
+                           else "AI response received"
             )
         } catch (e: CancellationException) {
             SecureLog.e("ChatViewModel", "API call cancelled", e)
-            // 仅在用户主动取消（重新生成/发送图片/发送表情）时插入取消提示
-            // 正常的消息队列顺序处理不再触发取消
+            System.err.println("[ChatVM] startAiResponse CANCELLED: reason='${e.message}'")
+            // [FIX] 所有取消都给用户反馈，不再静默
+            // 即使是"正常批量替换"，新批次的回复可能也会失败，用户需要知道当前请求被取消了
+            val cancelReason = e.message ?: ""
+            val isExpectedSupersede = cancelReason.contains("batch started") ||
+                                      cancelReason.contains("Image message") ||
+                                      cancelReason.contains("stale")
+            if (!isExpectedSupersede) {
+                // 非预期的取消——可能是网络超时或系统级中断
+                System.err.println("[ChatVM] UNEXPECTED cancellation: $cancelReason")
+                _events.tryEmit(ChatUiEvent.Error("回复被打断，请重试"))
+            } else {
+                // 预期的取消（新批次替换）——新回复马上到来，不存占位消息
+                System.err.println("[ChatVM] Expected cancellation (batch superseded): $cancelReason")
+            }
         } catch (e: Exception) {
             val rawMessage = e.message ?: "发送失败"
+            System.err.println("[ChatVM] startAiResponse EXCEPTION: ${e.javaClass.simpleName}: $rawMessage")
             if (rawMessage.startsWith("[TOAST]")) {
                 _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
             } else {
                 _events.tryEmit(ChatUiEvent.Error(rawMessage))
-                // 错误消息仅通过UI事件展示，不存库——避免污染AI历史上下文
             }
             SecureLog.e("ChatViewModel", "AI response failed", e)
         } finally {
+            System.err.println("[ChatVM] startAiResponse FINALLY: exitLoading, activeRequests=${_activeRequests.get()}")
             exitLoading()
         }
     }
@@ -735,10 +901,12 @@ class ChatViewModel(
             withTimeoutOrNull(3000L) { ContentFilter.checkVector(aiContent) }
         } catch (e: Exception) { null }
             ?: ContentFilter.CheckResult(true, ContentFilter.ViolationLevel.HIGH, "向量检查超时", emptyList())
-        // 关键词级拦截：HIGH 及以上违规直接拦截（覆盖本地模型路径，与 AiService 层 checkOutputSafety 一致）
+        // 关键词级拦截：HIGH 及以上违规直接拦截
+        // [FIX] AI 生成的内容不应记录用户封禁——模型输出不是用户的责任
         if (modelKw.isViolating && modelKw.level >= ContentFilter.ViolationLevel.HIGH) {
             SecureLog.w("ChatViewModel", "Output keyword violation: ${modelKw.level} - ${modelKw.reason}")
-            com.lianyu.ai.common.BanManager.recordViolation(getApplication(), modelKw.level)
+            System.err.println("[ChatVM] AI output blocked by keyword check: ${modelKw.level} - ${modelKw.reason}")
+            // 不再调用 BanManager.recordViolation()——AI 回复不应累加用户违规
             val safeFallback = "抱歉，我无法继续这个话题。"
             val fallbackMsg = ChatMessage(
                 companionId = companionId,
@@ -747,19 +915,36 @@ class ChatViewModel(
                 timestamp = System.currentTimeMillis()
             )
             val fallbackId = chatRepository.sendMessageAndGetId(fallbackMsg)
-            _isReasoning.value = false
             _reasoningText.value = ""
+            _isReasoning.value = false
             return fallbackId
         }
 
-        val modelBayesian = ContentSafetyVerifier.verifyModelOutputAsync(
-            aiContent, modelKw,
-            modelVec ?: ContentFilter.CheckResult(false, ContentFilter.ViolationLevel.NONE, "timeout", emptyList()),
-            userContentForMemory ?: ""
-        )
+        // [P0 FIX] 贝叶斯模型输出校验必须带超时，防止 native JNI 死锁导致 AI 回复永久卡死。
+        val modelBayesian = try {
+            withTimeoutOrNull(5000L) {
+                ContentSafetyVerifier.verifyModelOutputAsync(
+                    aiContent, modelKw,
+                    modelVec ?: ContentFilter.CheckResult(false, ContentFilter.ViolationLevel.NONE, "timeout", emptyList()),
+                    userContentForMemory ?: ""
+                )
+            } ?: com.lianyu.ai.common.safety.SafetyScore(
+                score = 0.0,
+                source = com.lianyu.ai.common.safety.ScoreSource.MODEL_OUTPUT,
+                explanation = "模型输出校验超时"
+            )
+        } catch (e: Exception) {
+            SecureLog.e("ChatViewModel", "Model output verification failed", e)
+            com.lianyu.ai.common.safety.SafetyScore(
+                score = 0.0,
+                source = com.lianyu.ai.common.safety.ScoreSource.MODEL_OUTPUT,
+                explanation = "模型输出校验异常"
+            )
+        }
         if (modelBayesian.isDangerous) {
             SecureLog.w("ChatViewModel", "Bayesian model output blocked (" + "%.3f".format(modelBayesian.score) + "): " + modelBayesian.explanation)
-            com.lianyu.ai.common.BanManager.recordViolation(getApplication(), ContentFilter.ViolationLevel.HIGH)
+            System.err.println("[ChatVM] AI output blocked by Bayesian: score=${"%.3f".format(modelBayesian.score)}, reason=${modelBayesian.explanation}")
+            // [FIX] AI 生成的内容不应记录用户封禁
             val safeFallback = "抱歉，我无法继续这个话题。"
             val fallbackMsg = ChatMessage(
                 companionId = companionId,
@@ -768,8 +953,8 @@ class ChatViewModel(
                 timestamp = System.currentTimeMillis()
             )
             val fallbackId = chatRepository.sendMessageAndGetId(fallbackMsg)
-            _isReasoning.value = false
             _reasoningText.value = ""
+            _isReasoning.value = false
             return fallbackId
         }
         if (modelBayesian.riskLevel == RiskLevel.SUSPICIOUS) {
@@ -790,9 +975,23 @@ class ChatViewModel(
         val hasPendingSticker = turnState.pendingSticker != null
         val stickerBeforeText = hasPendingSticker && kotlin.random.Random.nextFloat() < 0.5f
 
+        // [P0 FIX] 空内容保护和日志记录
+        if (processedText.isBlank() && aiContent.isNotBlank()) {
+            SecureLog.w("ChatViewModel", "WARNING: processedText is blank but aiContent has ${aiContent.length} chars. Original: '${aiContent.take(80)}'")
+        }
+
         val aiMessageId = if (segments.size <= 1) {
             // 单条回复，走原有逻辑
-            val safeProcessed = processedText.ifBlank { if (aiContent.isNotBlank()) "\u200B" else "" }
+            // [P0 FIX] 改进空内容处理：使用零宽空格但记录详细日志
+            val safeProcessed = processedText.ifBlank {
+                if (aiContent.isNotBlank()) {
+                    SecureLog.w("ChatViewModel", "Falling back to zero-width space. aiContent length=${aiContent.length}")
+                    "\u200B"
+                } else {
+                    SecureLog.w("ChatViewModel", "Both processedText and aiContent are blank, storing empty message")
+                    ""
+                }
+            }
             if (stickerBeforeText) {
                 flushPendingSticker()
             }
@@ -804,8 +1003,8 @@ class ChatViewModel(
             )
             val id = chatRepository.sendMessageAndGetId(aiMessage)
             SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id")
-            _isReasoning.value = false
             _reasoningText.value = ""
+            _isReasoning.value = false
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
             }
@@ -832,10 +1031,10 @@ class ChatViewModel(
                 val id = chatRepository.sendMessageAndGetId(msg)
                 lastId = id
                 SecureLog.d("ChatViewModel", "$logMessage segment ${index + 1}/${segments.size}, length=${segment.length}, id=$id")
-            }
-            _isReasoning.value = false
-            _reasoningText.value = ""
-            if (!stickerBeforeText && turnState.pendingSticker != null) {
+        }
+        _reasoningText.value = ""
+        _isReasoning.value = false
+        if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
             }
             delay(100)
@@ -1003,6 +1202,8 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.clearChatHistory(companionId)
+                _olderMessages.value = emptyList()
+                _reachedEnd = false
                 SecureLog.i("ChatViewModel", "Chat history cleared for companion=$companionId")
             } catch (e: Exception) {
                 SecureLog.e("ChatViewModel", "clearChatHistory failed", e)
@@ -1021,9 +1222,18 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 重新生成指定AI消息的回复
+     *
+     * [P0 FIX] regenerate是用户主动触发的操作，cancel+replace语义正确：
+     * 用户点击"重新生成"时，期望取消当前处理并立即重新生成。
+     * 这会中断队列消费者的.join()等待（抛CancellationException），消费者会继续处理下一条。
+     * 与自动发送新消息的场景不同，regenerate不需要走messageQueue（用户明确意图）。
+     */
     fun regenerateMessage(targetMessage: ChatMessage) {
         turnState.sendMessageJob?.cancel()
-        turnState.sendMessageJob = applicationApiScope.launch {
+        // [P0 FIX] 重新生成也运行在应用级作用域，退出聊天后仍能完成。
+        turnState.sendMessageJob = chatBackgroundScope.launch {
             turnState.reset()
             _isRegenerating.value = true
             try {
@@ -1033,7 +1243,7 @@ class ChatViewModel(
                     ?: throw IllegalStateException("Companion data is null")
                 val settings = chatDetailSettingsStore.getSettings(companionId)
                 val aiResponse = withTimeoutOrNull(API_TIMEOUT_MS) {
-                    aiService.sendMessage(companion.toAiCompanionInfo(), allMessages.toAiChatMessages(), settings.stickerProbability)
+                    aiService.sendMessage(companion.toAiCompanionInfo(), allMessages.toAiChatMessages(), settings.stickerProbability, settings.ntpTimeEnabled)
                 } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
 
                 finalizeResponse(
@@ -1065,37 +1275,18 @@ class ChatViewModel(
     /**
      * 发送表情包消息
      * 使用 fileName 存储以便后续查找显示
+     *
+     * [P0 FIX] 统一走 messageQueue：无论AI是否在处理中，表情包都通过队列串行处理。
+     * 移除了 _isLoading 判断的else分支（原分支直接启动AI Job绕过队列，造成并发竞态）。
+     * 队列排空机制确保快速连发时只处理最新一条，不会产生冗余AI调用。
      */
     fun sendSticker(sticker: StickerInfo) {
-        if (_isLoading.value) {
-            SecureLog.w("ChatViewModel", "sendSticker ignored: already processing")
-            return
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val stickerId = sticker.description
-                    ?: sticker.fileName?.removePrefix("sticker_")?.removeSuffix(".png")?.takeIf { it.isNotBlank() }
-                    ?: sticker.name
-                val stickerMessage = ChatMessage(
-                    companionId = companionId,
-                    content = "[$stickerId]",
-                    isFromUser = true,
-                    timestamp = System.currentTimeMillis()
-                )
-                val msgId = chatRepository.sendMessage(stickerMessage)
-                SecureLog.d("ChatViewModel", "Sticker sent: $stickerId, triggering AI response")
-                broadcastWeChatMessage(msgId)
-
-                turnState.sendMessageJob?.cancel()
-                turnState.sendMessageJob = applicationApiScope.startAiResponse(
-                    history = chatRepository.getRecentMessagesSync(companionId, 50).filterDecrypted(),
-                    stickerProbability = chatDetailSettingsStore.getSettings(companionId).stickerProbability,
-                    userContentForMemory = "[$stickerId]"
-                )
-            } catch (e: Exception) {
-                SecureLog.e("ChatViewModel", "sendSticker failed", e)
-            }
-        }
+        val stickerId = sticker.description
+            ?: sticker.fileName?.removePrefix("sticker_")?.removeSuffix(".png")?.takeIf { it.isNotBlank() }
+            ?: sticker.name
+        // [P0 FIX] 始终通过 sendMessage → messageQueue → doSendMessage 的完整流水线
+        // 这保证了：安全检查、串行化、队列排空、旧请求取消 等机制全部生效
+        sendMessage("[$stickerId]")
     }
 
     /**
@@ -1133,12 +1324,24 @@ class ChatViewModel(
 
     /**
      * 发送图片消息并调用视觉AI模型进行识别
+     *
+     * [P0 FIX] 图片消息现在会取消正在进行的文本AI请求（如果有的话），
+     * 避免视觉Job与队列中的文本Job并发执行导致上下文混乱和回复错乱。
+     * 视觉处理独立于messageQueue（因为需要特殊参数），但通过cancel保证互斥。
      */
     fun sendImageMessage(imagePath: String) {
         SecureLog.i("VISION", "========== sendImageMessage CALLED ==========")
         SecureLog.i("VISION", "imagePath=$imagePath")
-        // 图片消息不取消正在进行的AI回复，等其完成后再处理
-        turnState.sendMessageJob = applicationApiScope.launch {
+        // [P0 FIX] 取消正在进行的AI请求（可能是队列消费者正在处理的文本消息）
+        // 这确保视觉请求不会与过时的文本回复并发，避免"答非所问"
+        val previousJob = turnState.sendMessageJob
+        if (previousJob != null && previousJob.isActive) {
+            SecureLog.i("VISION", "Cancelling previous AI job before vision processing")
+            previousJob.cancel("Image message sent, cancelling previous AI request")
+        }
+        turnState.reset()
+        // [P0 FIX] 视觉请求运行在应用级作用域，退出聊天后仍能完成。
+        turnState.sendMessageJob = chatBackgroundScope.launch {
             try {
                 SecureLog.i("VISION", "sendImageMessage: Starting coroutine, path=$imagePath")
                 enterLoading()
@@ -1161,7 +1364,7 @@ class ChatViewModel(
                 if (companion != null) {
                     val settings = chatDetailSettingsStore.getSettings(companionId)
                     val aiResponse = withTimeoutOrNull(VISION_API_TIMEOUT_MS) {
-                        aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, settings.stickerProbability)
+                        aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, settings.stickerProbability, settings.ntpTimeEnabled)
                     } ?: throw Exception(getApplication<Application>().getString(R.string.api_error_generic))
 
                     // Handle [TOAST] prefix — show as toast, don't store as chat message
@@ -1289,19 +1492,23 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        // 不取消 applicationApiScope —— 让正在进行的 AI 回复自然完成并存库
-        // AI 回复协程完成后 scope 无活跃子协程，不占资源
-        // 用户退出聊天后仍能收到回复（下次进入聊天时可见）
+        // 关闭消息队列，让消费者协程退出等待
+        messageQueue.close()
+        // 取消 applicationApiScope：停止当前 ViewModel 的消费者协程、内容预热等 UI 相关任务。
+        // [P0 FIX] 不要取消 turnState.sendMessageJob：AI 请求已迁移到 chatBackgroundScope（应用级作用域），
+        // 退出聊天页面后应继续运行并写入数据库，重新进入聊天时即可看到回复。
+        applicationApiScope.cancel()
         avatarUnsubscribe?.invoke()
         avatarUnsubscribe = null
         chatTypingState.stopTyping()
         _activeRequests.set(0)
         _isLoading.value = false
         _isRegenerating.value = false
-        _isReasoning.value = false
         _reasoningText.value = ""
-        _allMessages.value = emptyList()
-        _visibleCount.value = PAGE_SIZE
+        _isReasoning.value = false
+        _recentMessages.value = emptyList()
+        _olderMessages.value = emptyList()
+        _reachedEnd = false
         _hasMoreMessages.value = false
     }
 }

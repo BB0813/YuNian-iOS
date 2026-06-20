@@ -108,12 +108,10 @@ class ChatTypingState {
     }
 
     fun stopTyping() {
-        if (textBuffer.isNotEmpty()) {
-            _typingText.value += textBuffer.toString()
-            textBuffer.setLength(0)
-        }
-        _isTyping.value = false
+        // 先清空文本再置标志位，避免 UI 观察到 typingText 非空但 isTyping=false 的中间态
+        textBuffer.setLength(0)
         _typingText.value = ""
+        _isTyping.value = false
         typingJob?.cancel()
         typingJob = null
     }

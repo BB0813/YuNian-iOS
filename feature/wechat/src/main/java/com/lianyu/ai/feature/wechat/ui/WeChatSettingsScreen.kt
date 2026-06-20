@@ -50,11 +50,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import androidx.compose.foundation.isSystemInDarkTheme
 import android.content.Context
 import androidx.compose.runtime.collectAsState
 
@@ -68,9 +63,6 @@ fun WeChatSettingsScreen(
     val context = LocalContext.current
     val viewModel: WeChatViewModel = viewModel(factory = remember { WeChatViewModelFactory(context.applicationContext as android.app.Application) })
     val uiState by viewModel.uiState.collectAsState()
-    val isDark = isSystemInDarkTheme()
-    val bgColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val textColor = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
 
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showCompanionDialog by remember { mutableStateOf(false) }
@@ -79,22 +71,22 @@ fun WeChatSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("微信设置", color = textColor) },
+                title = { Text("微信设置", color = MaterialTheme.colorScheme.onSurface) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
-                            tint = textColor
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = bgColor
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         },
-        containerColor = bgColor
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
             modifier = modifier
@@ -107,8 +99,6 @@ fun WeChatSettingsScreen(
                 isLoggedIn = uiState.isLoggedIn,
                 accountId = uiState.account?.ilinkBotId,
                 customName = uiState.customBotName,
-                textColor = textColor,
-                bgColor = bgColor,
                 onBindClick = onBindClick,
                 onUnbindClick = { showLogoutDialog = true },
                 onRenameClick = { showRenameDialog = true }
@@ -124,7 +114,7 @@ fun WeChatSettingsScreen(
                 text = "功能设置",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = textColor.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -132,7 +122,6 @@ fun WeChatSettingsScreen(
                 icon = Icons.Outlined.Message,
                 title = "消息通知",
                 subtitle = "微信消息到达时推送通知",
-                textColor = textColor,
                 trailing = {
                     Switch(
                         checked = uiState.notifyEnabled,
@@ -141,13 +130,12 @@ fun WeChatSettingsScreen(
                 }
             )
 
-            HorizontalDivider(color = textColor.copy(alpha = 0.1f), modifier = Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
             SettingItem(
                 icon = Icons.Outlined.Link,
                 title = "自动回复",
                 subtitle = "收到微信消息后自动调用 AI 回复",
-                textColor = textColor,
                 trailing = {
                     Switch(
                         checked = uiState.autoReply,
@@ -156,13 +144,12 @@ fun WeChatSettingsScreen(
                 }
             )
 
-            HorizontalDivider(color = textColor.copy(alpha = 0.1f), modifier = Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
             SettingItem(
                 icon = Icons.Outlined.Message,
                 title = "消息转发",
                 subtitle = "将 AI 消息同步发送到微信",
-                textColor = textColor,
                 trailing = {
                     Switch(
                         checked = uiState.forwardEnabled,
@@ -172,14 +159,13 @@ fun WeChatSettingsScreen(
             )
 
             if (uiState.availableCompanions.isNotEmpty()) {
-                HorizontalDivider(color = textColor.copy(alpha = 0.1f), modifier = Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
                 SettingItem(
                     icon = Icons.Outlined.Message,
                     title = "默认 AI 伴侣",
                     subtitle = uiState.availableCompanions.find { it.id == uiState.defaultCompanionId }?.name
                         ?: "未选择（使用第一个）",
-                    textColor = textColor,
                     trailing = {
                         TextButton(onClick = { showCompanionDialog = true }) {
                             Text("选择")
@@ -189,13 +175,13 @@ fun WeChatSettingsScreen(
             }
 
             if (uiState.userCompanionMappings.isNotEmpty() && uiState.availableCompanions.isNotEmpty()) {
-                HorizontalDivider(color = textColor.copy(alpha = 0.1f), modifier = Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
                 Text(
                     text = "微信用户人设分配",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
-                    color = textColor.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
 
@@ -209,7 +195,6 @@ fun WeChatSettingsScreen(
                         icon = Icons.Outlined.Link,
                         title = "用户 $wechatUserId",
                         subtitle = "人设: $mappedCompanionName",
-                        textColor = textColor,
                         trailing = {
                             Row {
                                 TextButton(onClick = { showMappingDialog = true }) {
@@ -219,7 +204,7 @@ fun WeChatSettingsScreen(
                                     Icon(
                                         imageVector = Icons.Outlined.Delete,
                                         contentDescription = "删除映射",
-                                        tint = Color(0xFFFF5252).copy(alpha = 0.7f),
+                                        tint = MaterialTheme.colorScheme.error,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -228,7 +213,7 @@ fun WeChatSettingsScreen(
                     )
 
                     if (index < uiState.userCompanionMappings.size - 1) {
-                        HorizontalDivider(color = textColor.copy(alpha = 0.05f), modifier = Modifier.padding(horizontal = 16.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
                     }
 
                     if (showMappingDialog) {
@@ -248,7 +233,7 @@ fun WeChatSettingsScreen(
                                             Text(
                                                 companion.name,
                                                 color = if (companion.id == companionId)
-                                                    MaterialTheme.colorScheme.primary else textColor
+                                                    MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                             )
                                         }
                                     }
@@ -273,7 +258,7 @@ fun WeChatSettingsScreen(
                                     viewModel.removeUserCompanionMapping(wechatUserId)
                                     showDeleteConfirm = false
                                 }) {
-                                    Text("删除", color = Color(0xFFFF5252))
+                                    Text("删除", color = MaterialTheme.colorScheme.error)
                                 }
                             },
                             dismissButton = {
@@ -293,7 +278,7 @@ fun WeChatSettingsScreen(
                 text = "说明",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = textColor.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -302,7 +287,7 @@ fun WeChatSettingsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(textColor.copy(alpha = 0.05f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(16.dp)
             ) {
                 Text(
@@ -310,7 +295,7 @@ fun WeChatSettingsScreen(
                            "• 绑定后请用微信给机器人发消息以激活会话\n" +
                            "• Token 有效期约数天，过期后需重新绑定",
                     fontSize = 13.sp,
-                    color = textColor.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp
                 )
             }
@@ -327,7 +312,7 @@ fun WeChatSettingsScreen(
                     viewModel.logout()
                     showLogoutDialog = false
                 }) {
-                    Text("确定", color = Color(0xFFFF5252))
+                    Text("确定", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
@@ -353,7 +338,7 @@ fun WeChatSettingsScreen(
                     ) {
                         Text(
                             "自动分配（使用第一个）",
-                            color = if (uiState.defaultCompanionId == null) MaterialTheme.colorScheme.primary else textColor
+                            color = if (uiState.defaultCompanionId == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
                     uiState.availableCompanions.forEach { companion ->
@@ -366,7 +351,7 @@ fun WeChatSettingsScreen(
                         ) {
                             Text(
                                 companion.name,
-                                color = if (companion.id == uiState.defaultCompanionId) MaterialTheme.colorScheme.primary else textColor
+                                color = if (companion.id == uiState.defaultCompanionId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -417,8 +402,6 @@ private fun WeChatStatusCard(
     isLoggedIn: Boolean,
     accountId: String?,
     customName: String?,
-    textColor: Color,
-    bgColor: Color,
     onBindClick: () -> Unit,
     onUnbindClick: () -> Unit,
     onRenameClick: () -> Unit
@@ -428,7 +411,7 @@ private fun WeChatStatusCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(if (isLoggedIn) Color(0xFF4CAF50).copy(alpha = 0.1f) else textColor.copy(alpha = 0.05f))
+            .background(if (isLoggedIn) Color(0xFF4CAF50).copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -447,14 +430,14 @@ private fun WeChatStatusCard(
             },
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            color = textColor
+            color = MaterialTheme.colorScheme.onSurface
         )
         if (isLoggedIn && !accountId.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "ID: $accountId",
                 fontSize = 12.sp,
-                color = textColor.copy(alpha = 0.6f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
@@ -484,7 +467,7 @@ private fun WeChatStatusCard(
                     Text(
                         text = "解除绑定",
                         fontSize = 13.sp,
-                        color = Color(0xFFFF5252)
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
             } else {
@@ -508,7 +491,6 @@ private fun SettingItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    textColor: Color,
     trailing: @Composable () -> Unit
 ) {
     Row(
@@ -521,7 +503,7 @@ private fun SettingItem(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = textColor.copy(alpha = 0.6f),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp)
         )
         Column(
@@ -532,13 +514,13 @@ private fun SettingItem(
             Text(
                 text = title,
                 fontSize = 14.sp,
-                color = textColor,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
             Text(
                 text = subtitle,
                 fontSize = 12.sp,
-                color = textColor.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
         }

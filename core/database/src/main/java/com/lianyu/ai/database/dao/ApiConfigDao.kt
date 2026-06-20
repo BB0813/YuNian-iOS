@@ -20,13 +20,13 @@ interface ApiConfigDao {
     @Query("SELECT * FROM api_configs WHERE id = :id")
     suspend fun getConfigById(id: Long): ApiConfig?
 
-    @Query("SELECT * FROM api_configs WHERE provider = :provider AND apiKey IS NOT NULL AND apiKey != '' ORDER BY id DESC LIMIT 1")
+    @Query("SELECT * FROM api_configs WHERE provider = :provider AND (apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER') ORDER BY id DESC LIMIT 1")
     suspend fun getConfigByProvider(provider: ApiProvider): ApiConfig?
 
     @Query("SELECT * FROM api_configs WHERE (apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER') AND isEnabled = 1 ORDER BY id DESC LIMIT 1")
     suspend fun getActiveConfig(): ApiConfig?
 
-    @Query("SELECT * FROM api_configs WHERE apiKey IS NOT NULL AND apiKey != '' ORDER BY id DESC")
+    @Query("SELECT * FROM api_configs WHERE (apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER') ORDER BY id DESC")
     fun getAllConfiguredConfigs(): Flow<List<ApiConfig>>
 
     @Query("SELECT * FROM api_configs WHERE (apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER') AND isEnabled = 1 ORDER BY id DESC LIMIT 1")

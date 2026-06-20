@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +25,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,13 +49,12 @@ fun VoiceMessageBubble(
     audioPath: String,
     duration: Int,
     isUser: Boolean,
-    isDarkTheme: Boolean,
     onPlayComplete: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val bubbleColor = if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFFFFFFF)
-    val iconColor = if (isUser) Color.White else (if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24))
-    val waveColor = if (isUser) Color(0xFF34C759).copy(alpha = 0.6f) else (if (isDarkTheme) Color(0xFF8A727C).copy(alpha = 0.8f) else Color(0xFF888888).copy(alpha = 0.8f))
+    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val iconColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val waveColor = if (isUser) Color(0xFF34C759).copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
 
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }

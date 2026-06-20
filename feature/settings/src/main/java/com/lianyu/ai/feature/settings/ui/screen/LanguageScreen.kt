@@ -38,19 +38,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.settings.R
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
 import com.lianyu.ai.feature.settings.ui.viewmodel.LanguageViewModel
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import com.lianyu.ai.uicommon.theme.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
@@ -84,11 +75,12 @@ fun LanguageScreen(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else WeChatLightBackground
-    val dividerColor = if (isDarkTheme) WeChatDarkDivider else WeChatLightDivider
-    val textSecondaryColor = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
-    val cardColor = if (isDarkTheme) WeChatDarkCard else WeChatLightBackground
+    val colorScheme = MaterialTheme.colorScheme
+    val textPrimaryColor = colorScheme.onSurface
+    val backgroundColor = colorScheme.background
+    val dividerColor = colorScheme.outline
+    val textSecondaryColor = colorScheme.onSurfaceVariant
+    val cardColor = colorScheme.surfaceVariant
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
@@ -243,18 +235,18 @@ fun LanguageOptionCard(
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFF07C160).copy(alpha = 0.9f),
-                                    Color(0xFF07C160).copy(alpha = 0.7f)
-                                )
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                             )
+                        )
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = stringResource(R.string.cd_selected),
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(16.dp)
                 )
                 }

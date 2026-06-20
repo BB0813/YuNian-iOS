@@ -13,6 +13,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import com.lianyu.ai.uicommon.theme.GlassDarkBg
+import com.lianyu.ai.uicommon.theme.GlassLightBg
 import com.lianyu.ai.uicommon.theme.PinkPrimary
 
 fun Modifier.liquidGlass(
@@ -63,10 +65,10 @@ private fun Modifier.glassBackground(isDark: Boolean, intensity: Float): Modifie
         val width = size.width
         val height = size.height
         val i = intensity.coerceIn(0f, 1.5f)
+        val baseColor = if (isDark) GlassDarkBg else GlassLightBg
 
         drawRect(
-            color = if (isDark) Color(0xFF2D2228).copy(alpha = 0.45f * i)
-            else Color(0xFFFFFFFF).copy(alpha = 0.15f * i)
+            color = baseColor.copy(alpha = if (isDark) 0.45f * i else 0.15f * i)
         )
 
         val primaryHighlight = Brush.verticalGradient(
@@ -111,10 +113,10 @@ private fun Modifier.navGlassBackground(isDark: Boolean, intensity: Float): Modi
         val width = size.width
         val height = size.height
         val i = intensity.coerceIn(0f, 1.5f)
+        val baseColor = if (isDark) GlassDarkBg else GlassLightBg
 
         drawRect(
-            color = if (isDark) Color(0xFF2D2228).copy(alpha = 0.55f * i)
-            else Color(0xFFFFFFFF).copy(alpha = 0.35f * i)
+            color = baseColor.copy(alpha = if (isDark) 0.55f * i else 0.35f * i)
         )
 
         val topGloss = Brush.verticalGradient(
