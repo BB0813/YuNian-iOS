@@ -42,6 +42,9 @@ interface GroupMessageDao {
     @Query("DELETE FROM group_messages WHERE groupId = :groupId")
     suspend fun deleteMessagesForGroup(groupId: Long): Int
 
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId ORDER BY timestamp ASC")
+    suspend fun getMessagesForGroupSync(groupId: Long): List<GroupMessage>
+
     @Query("SELECT COUNT(*) FROM group_messages WHERE groupId = :groupId")
     suspend fun getMessageCount(groupId: Long): Int
 }

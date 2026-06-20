@@ -3,16 +3,17 @@ package com.lianyu.ai.uicommon.component
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.random.Random
 
 @Composable
 fun GradientOrbBackground(modifier: Modifier = Modifier) {
@@ -38,15 +39,27 @@ fun GradientOrbBackground(modifier: Modifier = Modifier) {
         label = "orb2"
     )
 
+    val background = MaterialTheme.colorScheme.background
+    val isDark = background.luminance() < 0.5f
+    val primary = MaterialTheme.colorScheme.primary
+
     Canvas(modifier = modifier.fillMaxSize()) {
-        // Background gradient
+        // Background gradient: 深色/浅色变体
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFFFFF8FA),
-                    Color(0xFFFFF0F3),
-                    Color(0xFFFCE4EC).copy(alpha = 0.3f)
-                )
+                colors = if (isDark) {
+                    listOf(
+                        background,
+                        background,
+                        primary.copy(alpha = 0.08f)
+                    )
+                } else {
+                    listOf(
+                        Color(0xFFFFF8FA),
+                        Color(0xFFFFF0F3),
+                        Color(0xFFFCE4EC).copy(alpha = 0.3f)
+                    )
+                }
             )
         )
 
@@ -57,8 +70,8 @@ fun GradientOrbBackground(modifier: Modifier = Modifier) {
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFFFCE4EC).copy(alpha = 0.15f),
-                    Color(0xFFFCE4EC).copy(alpha = 0.05f),
+                    primary.copy(alpha = if (isDark) 0.10f else 0.15f),
+                    primary.copy(alpha = if (isDark) 0.04f else 0.05f),
                     Color.Transparent
                 ),
                 center = Offset(orb1X, orb1Y),
@@ -75,8 +88,8 @@ fun GradientOrbBackground(modifier: Modifier = Modifier) {
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFFF8BBD0).copy(alpha = 0.12f),
-                    Color(0xFFF8BBD0).copy(alpha = 0.04f),
+                    primary.copy(alpha = if (isDark) 0.08f else 0.12f),
+                    primary.copy(alpha = if (isDark) 0.03f else 0.04f),
                     Color.Transparent
                 ),
                 center = Offset(orb2X, orb2Y),

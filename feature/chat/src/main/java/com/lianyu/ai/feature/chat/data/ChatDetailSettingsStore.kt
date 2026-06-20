@@ -1,19 +1,15 @@
 package com.lianyu.ai.feature.chat.data
 
 import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import com.lianyu.ai.common.ChatDetailSettingsDataStoreProvider
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-
-private val Context.chatDetailSettingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "chat_detail_settings")
 
 @Serializable
 data class CompanionChatDetailSettings(
@@ -36,12 +32,13 @@ data class CompanionChatDetailSettings(
     val stickerProbability: Int = 30, // AI发送表情包的概率 0-100
     val ttsEnabled: Boolean = false, // 是否启用AI回复转语音
     val ttsProbability: Int = 50, // AI回复转语音的概率 0-100
+    val ntpTimeEnabled: Boolean = false, // 是否启用NTP精确时间感知（关闭则使用设备本地时间）
     val updatedAt: Long = System.currentTimeMillis()
 )
 
 class ChatDetailSettingsStore(context: Context) {
 
-    private val dataStore = context.applicationContext.chatDetailSettingsDataStore
+    private val dataStore = ChatDetailSettingsDataStoreProvider.get(context)
     private val json = Json { ignoreUnknownKeys = true }
 
     companion object {

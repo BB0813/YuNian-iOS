@@ -23,9 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -42,6 +40,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,9 +59,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lianyu.ai.common.AppSettingsStore
-import com.lianyu.ai.common.BatteryOptimizationHelper
 import com.lianyu.ai.common.FrameRateManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.lianyu.ai.uicommon.component.BackgroundPermissionsCard
 import com.lianyu.ai.uicommon.theme.ThemeMode
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
@@ -118,6 +118,12 @@ fun AppSettingsScreen(
     val reqField by settingsStore.reasoningRequestFieldFlow.collectAsState(initial = "reasoning_content")
 
     var showReasoningDialog by remember { mutableStateOf(false) }
+    var isVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        isVisible = true
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -225,7 +231,7 @@ fun AppSettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 第三组：检查更新 + 电池优化 + 自启动
+            // 第三组：检查更新
             SettingsGroup(
                 items = listOf(
                     SettingsItemData(
@@ -233,28 +239,21 @@ fun AppSettingsScreen(
                         title = stringResource(R.string.check_new_version),
                         subtitle = stringResource(R.string.check_new_version_desc),
                         onClick = onCheckUpdateClick
-                    ),
-                    SettingsItemData(
-                        icon = Icons.Filled.BatterySaver,
-                        title = stringResource(R.string.battery_whitelist),
-                        subtitle = stringResource(R.string.battery_whitelist_desc),
-                        onClick = {
-                            BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
-                        }
-                    ),
-                    SettingsItemData(
-                        icon = Icons.Filled.PowerSettingsNew,
-                        title = stringResource(R.string.auto_start),
-                        subtitle = stringResource(R.string.auto_start_desc),
-                        onClick = {
-                            BatteryOptimizationHelper.openAutoStartSettings(context)
-                        }
                     )
                 ),
                 isDark = isDark,
                 textPrimary = textPrimary,
                 textSecondary = textSecondary,
                 dividerColor = dividerColor
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 第四组：权限与后台运行
+            BackgroundPermissionsCard(
+                isVisible = isVisible,
+                textPrimaryColor = textPrimary,
+                textSecondaryColor = textSecondary
             )
 
             Spacer(modifier = Modifier.height(32.dp))

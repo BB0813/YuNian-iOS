@@ -29,6 +29,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.datastore.preferences)
 
     testImplementation(libs.junit)
 }

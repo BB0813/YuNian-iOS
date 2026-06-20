@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -145,7 +146,7 @@ fun VoiceCallScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -162,7 +163,7 @@ fun VoiceCallScreen(
                     CallState.ENDED -> "通话结束"
                 },
                 fontSize = 18.sp,
-                color = Color.White.copy(alpha = 0.9f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 2.sp
             )
@@ -185,12 +186,11 @@ fun VoiceCallScreen(
                     Text(
                         text = if (isAiSpeaking) "对方正在说话..." else "已连接",
                         fontSize = 13.sp,
-                        color = if (isAiSpeaking) Color(0xFFF4A6B5) else Color(0xFF34C759),
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isAiSpeaking) Color(0xFFF4A6B5).copy(alpha = 0.15f)
-                                else Color(0xFF34C759).copy(alpha = 0.15f)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                             )
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     )
@@ -209,11 +209,11 @@ fun VoiceCallScreen(
                 if (callState == CallState.CONNECTED) {
                     PulsingGlowRing(
                         modifier = Modifier.size(180.dp),
-                        color = Color(0xFFF4A6B5).copy(alpha = 0.3f)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                     )
                     PulsingGlowRing(
                         modifier = Modifier.size(220.dp),
-                        color = Color(0xFFF4A6B5).copy(alpha = 0.15f),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                         delayMillis = 500
                     )
                 }
@@ -223,7 +223,7 @@ fun VoiceCallScreen(
                     modifier = Modifier
                         .size(140.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.2f)),
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (companionData?.avatarUrl != null) {
@@ -238,7 +238,7 @@ fun VoiceCallScreen(
                             text = companionData?.name?.firstOrNull()?.toString() ?: "?",
                             fontSize = 48.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -251,7 +251,7 @@ fun VoiceCallScreen(
                 text = companionData?.name ?: "",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             // AI speaking text
@@ -260,7 +260,7 @@ fun VoiceCallScreen(
                 Text(
                     text = currentSpeakingText,
                     fontSize = 14.sp,
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
@@ -321,7 +321,7 @@ fun VoiceCallScreen(
                 Text(
                     text = "点击接听开始通话",
                     fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
                 )
 
@@ -438,51 +438,58 @@ private fun FlowingGradientBackground() {
         label = "flow3"
     )
 
+    val background = MaterialTheme.colorScheme.background
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // Base gradient - soft pink
+        // Base gradient - theme aware
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color(0xFFFFF0F3),
-                    Color(0xFFFFE4E9),
-                    Color(0xFFFCE4EC)
+                    background,
+                    background,
+                    surfaceVariant
                 )
             )
         )
 
-        // Flowing blob 1 - warm pink
+        // Flowing blob 1 - primary
         val blob1X = size.width * 0.3f + cos(offset1) * size.width * 0.2f
         val blob1Y = size.height * 0.3f + sin(offset1 * 0.7f) * size.height * 0.15f
         drawFlowingBlob(
             centerX = blob1X,
             centerY = blob1Y,
             radius = size.width * 0.45f,
-            color = Color(0xFFF8BBD0).copy(alpha = 0.25f)
+            color = primary.copy(alpha = 0.25f)
         )
 
-        // Flowing blob 2 - soft peach
+        // Flowing blob 2 - secondary
         val blob2X = size.width * 0.7f + cos(offset2 * 0.8f) * size.width * 0.18f
         val blob2Y = size.height * 0.5f + sin(offset2) * size.height * 0.12f
         drawFlowingBlob(
             centerX = blob2X,
             centerY = blob2Y,
             radius = size.width * 0.4f,
-            color = Color(0xFFFFCCBC).copy(alpha = 0.2f)
+            color = secondary.copy(alpha = 0.2f)
         )
 
-        // Flowing blob 3 - lavender pink
+        // Flowing blob 3 - tertiary
         val blob3X = size.width * 0.5f + cos(offset3 * 0.6f) * size.width * 0.15f
         val blob3Y = size.height * 0.7f + sin(offset3 * 0.9f) * size.height * 0.1f
         drawFlowingBlob(
             centerX = blob3X,
             centerY = blob3Y,
             radius = size.width * 0.5f,
-            color = Color(0xFFE1BEE7).copy(alpha = 0.15f)
+            color = tertiary.copy(alpha = 0.15f)
         )
 
         // Subtle noise texture overlay
         drawRect(
-            color = Color.White.copy(alpha = 0.03f)
+            color = onSurface.copy(alpha = 0.03f)
         )
     }
 }
@@ -560,7 +567,7 @@ private fun PulsingDot(delayMillis: Int = 0) {
         modifier = Modifier
             .size(8.dp)
             .clip(CircleShape)
-            .background(Color(0xFF34C759).copy(alpha = alpha))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
     )
 }
 
@@ -580,8 +587,8 @@ private fun CallControlButton(
                 .size(56.dp)
                 .clip(CircleShape)
                 .background(
-                    if (isActive) Color.White.copy(alpha = 0.2f)
-                    else Color.White.copy(alpha = 0.1f)
+                    if (isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -589,7 +596,7 @@ private fun CallControlButton(
                 imageVector = icon,
                 contentDescription = label,
                 modifier = Modifier.size(24.dp),
-                tint = if (isActive) Color.White else Color.White.copy(alpha = 0.5f)
+                tint = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
         }
 
@@ -598,7 +605,7 @@ private fun CallControlButton(
         Text(
             text = label,
             fontSize = 11.sp,
-            color = Color.White.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             textAlign = TextAlign.Center
         )
     }

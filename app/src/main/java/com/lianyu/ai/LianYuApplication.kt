@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
 import com.lianyu.ai.common.ContentFilter
+import com.lianyu.ai.common.RomUtils
 import com.lianyu.ai.common.SaltStore
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.embedding.VectorLibrary
@@ -17,11 +18,14 @@ import com.lianyu.ai.domain.LocalModelProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.domain.UserProfileProvider
 
+import com.lianyu.ai.feature.notification.NotificationHelper
+import com.lianyu.ai.push.PushManager
 import com.lianyu.ai.feature.wechat.data.WeChatTokenStore
 import com.lianyu.ai.feature.wechat.service.WeChatNotificationHelper
 import com.lianyu.ai.feature.wechat.service.WeChatPollingService
 import com.lianyu.ai.feature.wechat.service.WeChatPollingWorker
 import com.lianyu.ai.network.AiService
+import com.lianyu.ai.network.NtpTimeProvider
 import com.lianyu.ai.security.G0
 import com.lianyu.ai.security.SecurityState
 import com.lianyu.ai.uicommon.component.ChatBackgroundCache
@@ -92,8 +96,12 @@ class LianYuApplication : Application(), ImageLoaderFactory {
             SecureLog.init(false)
             applyStoredLanguage(app)
             AiService.initialize(app)
+            NtpTimeProvider.initialize(app)
             registerServiceProviders(app)
             clearUpdateIgnore(app)
+
+            // 注入应用级后台作用域，供跨越 ViewModel 生命周期的任务使用
+            com.lianyu.ai.common.ApplicationScopeProvider.init(bgScope)
 
             // Seed default companion synchronously — must exist before any chat opens
             seedDefaultCompanion(app)
@@ -117,7 +125,12 @@ class LianYuApplication : Application(), ImageLoaderFactory {
         }
 
         private suspend fun initWeChat(app: Application) {
+            // 提前创建通知渠道，避免 OPPO/vivo 首次通知被系统折叠或延迟。
+            NotificationHelper.createNotificationChannel(app)
             WeChatNotificationHelper.createChannel(app)
+            SecureLog.d("LianYuApplication", "ROM: ${RomUtils.getRomDisplayName()} ${RomUtils.romVersion}")
+            // 初始化厂商 Push SDK，提升 OPPO / vivo / 小米 / 华为 设备的消息到达率
+            runCatching { PushManager.init(app) }
             val tokenStore = WeChatTokenStore(app)
             if (runCatching { tokenStore.isLoggedIn() }.getOrDefault(false)) {
                 WeChatPollingService.start(app)

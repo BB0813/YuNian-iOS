@@ -36,6 +36,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,9 +64,7 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
 import com.lianyu.ai.uicommon.component.ChatBackgroundPickerDialog
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
-import com.lianyu.ai.uicommon.theme.BlushPink
-import com.lianyu.ai.uicommon.theme.DeepWarm
-import com.lianyu.ai.uicommon.theme.PinkPrimary
+import com.lianyu.ai.common.AppSettingsStore
 
 @Composable
 fun ChatDetailScreen(
@@ -80,6 +79,13 @@ fun ChatDetailScreen(
     )
     val companionData by viewModel.companionData.collectAsState()
     val settings by store.settingsFlow(companionId).collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
+    val appSettingsStore = remember { AppSettingsStore(context) }
+    var innerThoughtEnabled by remember { mutableStateOf(false) }
+
+    // 读取心理活动开关状态
+    LaunchedEffect(Unit) {
+        innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
+    }
 
     var showBgPicker by remember { mutableStateOf(false) }
     var showBlockConfirm by remember { mutableStateOf(false) }
@@ -89,7 +95,7 @@ fun ChatDetailScreen(
 
     val scrollState = rememberScrollState()
 
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
             // Top bar
             Row(
@@ -100,13 +106,13 @@ fun ChatDetailScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onNavigateBack, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = DeepWarm)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = MaterialTheme.colorScheme.onBackground)
                 }
                 Text(
                     text = "聊天详情",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = DeepWarm,
+                    color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -117,12 +123,12 @@ fun ChatDetailScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
-                    modifier = Modifier.size(72.dp).clip(CircleShape).background(Color(0xFFE5E5EA)),
+                    modifier = Modifier.size(72.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
                     if (companionData?.avatarUrl != null) {
@@ -137,7 +143,7 @@ fun ChatDetailScreen(
                             text = companionData?.name?.firstOrNull()?.toString() ?: "?",
                             fontSize = 28.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF888888)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -146,14 +152,14 @@ fun ChatDetailScreen(
                     text = companionData?.name ?: "",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = DeepWarm
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 if (!companionData?.personality.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = companionData?.personality ?: "",
                         fontSize = 13.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 24.dp),
                         maxLines = 3,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -166,7 +172,7 @@ fun ChatDetailScreen(
                     } else if (settings.doNotDisturbEnabled) {
                         StatusTag("免打扰", Color(0xFFFF9500))
                     } else if (!settings.proactiveEnabled) {
-                        StatusTag("主动消息关闭", Color(0xFF888888))
+                        StatusTag("主动消息关闭", MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         StatusTag("正常", Color(0xFF34C759))
                     }
@@ -181,7 +187,7 @@ fun ChatDetailScreen(
                 SettingsRow(title = "当前聊天背景", subtitle = backgroundName(settings.backgroundKey, context)) {
                     showBgPicker = true
                 }
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsToggleRow(
                     title = "使用全局背景",
                     checked = settings.useGlobalBackground,
@@ -207,11 +213,11 @@ fun ChatDetailScreen(
                         }
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsRow(title = "主动消息间隔", subtitle = intervalLabel(settings.proactiveIntervalMinutes)) {
                     showIntervalDialog = true
                 }
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsToggleRow(
                     title = "允许主动开启新话题",
                     checked = settings.allowNewTopic,
@@ -221,7 +227,7 @@ fun ChatDetailScreen(
                         }
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsToggleRow(
                     title = "允许深夜消息",
                     checked = settings.allowLateNightMessage,
@@ -231,13 +237,36 @@ fun ChatDetailScreen(
                         }
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsToggleRow(
                     title = "允许连续追问",
                     checked = settings.allowFollowUpMessage,
                     onCheckedChange = { checked ->
                         scope.launch {
                             store.updateSettings(companionId) { it.copy(allowFollowUpMessage = checked) }
+                        }
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsToggleRow(
+                    title = "显示心理活动",
+                    subtitle = "AI回复中包含（脸红）（开心）等内心描写",
+                    checked = innerThoughtEnabled,
+                    onCheckedChange = { checked ->
+                        innerThoughtEnabled = checked
+                        scope.launch {
+                            appSettingsStore.setInnerThoughtEnabled(checked)
+                        }
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsToggleRow(
+                    title = "精确时间感知",
+                    subtitle = "通过NTP网络校时获取精确时间，避免设备时钟不准",
+                    checked = settings.ntpTimeEnabled,
+                    onCheckedChange = { checked ->
+                        scope.launch {
+                            store.updateSettings(companionId) { it.copy(ntpTimeEnabled = checked) }
                         }
                     }
                 )
@@ -274,7 +303,7 @@ fun ChatDetailScreen(
                         }
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsToggleRow(
                     title = "夜间免打扰 (23:00-08:00)",
                     checked = settings.dndStartMinutes == 23 * 60 && settings.dndEndMinutes == 8 * 60,
@@ -305,11 +334,11 @@ fun ChatDetailScreen(
                         showBlockConfirm = true
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 DangerRow(title = "清空聊天记录", color = Color(0xFFFF3B30)) {
                     showClearConfirm = true
                 }
-                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = Color(0xFFEEEEEE))
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 DangerRow(title = "重置聊天设置", color = Color(0xFFFF9500)) {
                     showResetConfirm = true
                 }
@@ -348,7 +377,7 @@ fun ChatDetailScreen(
                         }
                         showBlockConfirm = false
                     }
-                ) { Text("拉黑", color = Color(0xFFFF3B30)) }
+                ) { Text("拉黑", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showBlockConfirm = false }) { Text("取消") }
@@ -370,7 +399,7 @@ fun ChatDetailScreen(
                         }
                         showClearConfirm = false
                     }
-                ) { Text("清空", color = Color(0xFFFF3B30)) }
+                ) { Text("清空", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) { Text("取消") }
@@ -392,7 +421,7 @@ fun ChatDetailScreen(
                         }
                         showResetConfirm = false
                     }
-                ) { Text("重置", color = Color(0xFFFF9500)) }
+                ) { Text("重置", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showResetConfirm = false }) { Text("取消") }
@@ -421,7 +450,7 @@ private fun SectionTitle(text: String) {
         text = text,
         fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF888888),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
 }
@@ -433,7 +462,7 @@ private fun SettingsCard(content: @Composable () -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
     ) {
         content()
     }
@@ -450,17 +479,17 @@ private fun SettingsRow(title: String, subtitle: String? = null, onClick: () -> 
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column {
-            Text(text = title, fontSize = 15.sp, color = DeepWarm)
+            Text(text = title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
             if (subtitle != null) {
-                Text(text = subtitle, fontSize = 13.sp, color = Color(0xFF888888))
+                Text(text = subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Text(text = "›", fontSize = 18.sp, color = Color(0xFFCCCCCC))
+        Text(text = "›", fontSize = 18.sp, color = MaterialTheme.colorScheme.outline)
     }
 }
 
 @Composable
-private fun SettingsToggleRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingsToggleRow(title: String, subtitle: String? = null, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -468,13 +497,18 @@ private fun SettingsToggleRow(title: String, checked: Boolean, onCheckedChange: 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = title, fontSize = 15.sp, color = DeepWarm)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+            if (subtitle != null) {
+                Text(text = subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = PinkPrimary,
-                checkedTrackColor = PinkPrimary.copy(alpha = 0.5f)
+                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
             )
         )
     }
@@ -497,8 +531,8 @@ private fun SettingsSliderRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = title, fontSize = 15.sp, color = DeepWarm)
-            Text(text = subtitle, fontSize = 14.sp, color = PinkPrimary, fontWeight = FontWeight.SemiBold)
+            Text(text = title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = subtitle, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
         }
         Spacer(modifier = Modifier.height(4.dp))
         androidx.compose.material3.Slider(
@@ -508,9 +542,9 @@ private fun SettingsSliderRow(
             valueRange = 0f..1f,
             steps = 9,
             colors = androidx.compose.material3.SliderDefaults.colors(
-                thumbColor = PinkPrimary,
-                activeTrackColor = PinkPrimary,
-                inactiveTrackColor = Color(0xFFE5E5EA)
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
     }
@@ -577,7 +611,7 @@ private fun IntervalInputDialog(
             Text(
                 text = "主动消息间隔",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = DeepWarm
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
@@ -585,7 +619,7 @@ private fun IntervalInputDialog(
                 Text(
                     text = "设置AI主动发消息的最小间隔时间（分钟）",
                     fontSize = 13.sp,
-                    color = Color(0xFF888888)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -600,13 +634,13 @@ private fun IntervalInputDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     isError = errorText != null,
-                    supportingText = errorText?.let { { Text(it, color = Color(0xFFFF3B30)) } }
+                    supportingText = errorText?.let { { Text(it, color = MaterialTheme.colorScheme.error) } }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "范围：30~1440 分钟（0.5~24 小时），当前：${intervalLabel(currentMinutes)}",
                     fontSize = 12.sp,
-                    color = Color(0xFFAAAAAA)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
@@ -624,11 +658,11 @@ private fun IntervalInputDialog(
                         onConfirm(minutes)
                     }
                 }
-            ) { Text("确定", color = PinkPrimary) }
+            ) { Text("确定", color = MaterialTheme.colorScheme.primary) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消", color = Color(0xFF888888)) }
+            TextButton(onClick = onDismiss) { Text("取消", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
-        containerColor = Color.White
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }

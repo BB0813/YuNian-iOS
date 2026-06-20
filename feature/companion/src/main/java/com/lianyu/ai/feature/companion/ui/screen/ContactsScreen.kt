@@ -57,20 +57,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.CompanionEntity
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
 import com.lianyu.ai.database.viewmodel.CompanionListViewModel
 import kotlinx.coroutines.delay
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 
 @Composable
 fun ContactsScreen(
@@ -86,16 +74,7 @@ fun ContactsScreen(
     val companions by viewModel.companions.collectAsState(initial = emptyList())
     var localIsVisible by remember { mutableStateOf(false) }
     val actualIsVisible = if (isVisible) localIsVisible else false
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDarkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else WeChatLightBackground
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
+    val colorScheme = MaterialTheme.colorScheme
 
     LaunchedEffect(Unit) {
         delay(100)
@@ -106,7 +85,7 @@ fun ContactsScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .background(colorScheme.background)
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(
                     bottom = paddingValues.calculateBottomPadding()
@@ -128,7 +107,7 @@ fun ContactsScreen(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 22.sp
                             ),
-                            color = textPrimaryColor,
+                            color = colorScheme.onSurface,
                             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp, top = 4.dp)
                         )
                     }
@@ -139,7 +118,7 @@ fun ContactsScreen(
                             text = stringResource(R.string.group_chat),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary,
+                            color = colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
                         )
                         }
@@ -155,8 +134,7 @@ fun ContactsScreen(
                             ) {
                                 GroupContactItem(
                                     group = group,
-                                    onClick = { onGroupClick(group.id) },
-                                    isDarkTheme = isDarkTheme
+                                    onClick = { onGroupClick(group.id) }
                                 )
                             }
                         }
@@ -169,7 +147,7 @@ fun ContactsScreen(
                             text = stringResource(R.string.friends),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary,
+                            color = colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
                         )
                         }
@@ -186,8 +164,7 @@ fun ContactsScreen(
                                 ContactItem(
                                     companion = companion,
                                     onClick = { onCompanionClick(companion.id) },
-                                    onLongClick = { onEditClick(companion.id) },
-                                    isDarkTheme = isDarkTheme
+                                    onLongClick = { onEditClick(companion.id) }
                                 )
                             }
                         }
@@ -201,17 +178,15 @@ fun ContactsScreen(
 @Composable
 fun GroupContactItem(
     group: ChatGroup,
-    onClick: () -> Unit,
-    isDarkTheme: Boolean
+    onClick: () -> Unit
 ) {
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondaryColor = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(if (isDarkTheme) WeChatDarkCard else Color.White)
+            .background(colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
@@ -248,7 +223,7 @@ fun GroupContactItem(
                     text = group.name,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Normal,
-                    color = textPrimaryColor,
+                    color = colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -256,7 +231,7 @@ fun GroupContactItem(
                 Text(
                     text = stringResource(R.string.people_count, group.getCompanionIdList().size),
                     fontSize = 13.sp,
-                    color = textSecondaryColor
+                    color = colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -268,16 +243,15 @@ fun GroupContactItem(
 fun ContactItem(
     companion: CompanionEntity,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    isDarkTheme: Boolean
+    onLongClick: () -> Unit
 ) {
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(if (isDarkTheme) WeChatDarkCard else Color.White)
+            .background(colorScheme.surfaceVariant)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
@@ -318,7 +292,7 @@ fun ContactItem(
                 text = companion.name,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal,
-                color = textPrimaryColor,
+                color = colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -329,15 +303,7 @@ fun ContactItem(
 
 @Composable
 fun EmptyContactsState() {
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDarkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondaryColor = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -363,13 +329,13 @@ fun EmptyContactsState() {
                 text = stringResource(R.string.no_contacts),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal,
-                color = textPrimaryColor
+                color = colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = stringResource(R.string.add_hint),
                 fontSize = 14.sp,
-                color = textSecondaryColor
+                color = colorScheme.onSurfaceVariant
             )
         }
     }

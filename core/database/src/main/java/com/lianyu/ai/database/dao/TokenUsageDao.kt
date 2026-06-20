@@ -65,6 +65,9 @@ interface TokenUsageDao {
     @Query("DELETE FROM token_usage WHERE deviceId = :deviceId")
     suspend fun deleteAll(deviceId: String): Int
 
+    @Query("SELECT * FROM token_usage WHERE deviceId = :deviceId ORDER BY date DESC")
+    suspend fun getAllUsageSync(deviceId: String): List<TokenUsage>
+
     @Query("SELECT SUM(inputTokens) as totalInput, SUM(outputTokens) as totalOutput, SUM(totalTokens) as total, SUM(requestCount) as requests FROM token_usage WHERE deviceId = :deviceId AND date >= :sinceDate")
     suspend fun getTotalStats(deviceId: String, sinceDate: String): TotalStats?
 

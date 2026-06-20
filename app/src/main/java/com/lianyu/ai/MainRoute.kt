@@ -34,7 +34,9 @@ sealed class MainRoute(val route: String) {
     object Language : MainRoute("language")
     object CheckUpdate : MainRoute("check_update")
     object FrameRate : MainRoute("frame_rate")
-    object AppSettings : MainRoute("app_settings")
+
+    // === 总设置 ===
+    object GeneralSettings : MainRoute("general_settings")
 
     // === 个人中心 ===
     object Memory : MainRoute("memory")
@@ -47,6 +49,12 @@ sealed class MainRoute(val route: String) {
     // === 微信 ===
     object WeChatSettings : MainRoute("wechat_settings")
     object WeChatBind : MainRoute("wechat_bind")
+
+    // === QQ 机器人 ===
+    object QQBotSettings : MainRoute("qqbot_settings")
+
+    // === 数据备份 ===
+    object DataBackup : MainRoute("data_backup")
 
     companion object {
         /** 从路由字符串解析（用于 NavHost currentRoute） */
@@ -68,11 +76,13 @@ sealed class MainRoute(val route: String) {
             route == "about" -> About
             route == "agreement_view" -> AgreementView
             route == "frame_rate" -> FrameRate
+            route == "general_settings" -> GeneralSettings
             route == "team" -> Team
             route == "support" -> Support
-            route == "app_settings" -> AppSettings
             route == "wechat_settings" -> WeChatSettings
             route == "wechat_bind" -> WeChatBind
+            route == "qqbot_settings" -> QQBotSettings
+            route == "data_backup" -> DataBackup
             route?.startsWith("chat/") == true -> Chat(route.removePrefix("chat/").toLongOrNull() ?: 0L)
             route?.startsWith("chat_detail/") == true -> ChatDetail(route.removePrefix("chat_detail/").toLongOrNull() ?: 0L)
             route?.startsWith("voice_call/") == true -> VoiceCall(route.removePrefix("voice_call/").toLongOrNull() ?: 0L)

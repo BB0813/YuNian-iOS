@@ -12,6 +12,8 @@
     <string name="theme_mode_desc">Switch light/dark theme</string>
     <string name="chat_background">Chat Background</string>
     <string name="chat_background_desc">Customize chat background</string>
+    <string name="qqbot_settings">QQ Bot</string>
+    <string name="qqbot_settings_desc">Bind official QQ bot</string>
     <string name="language">Language</string>
     <string name="language_desc">Current: English</string>
     <string name="framerate">Frame Rate</string>
@@ -24,6 +26,8 @@
     <string name="about_app_desc">LianYu - Your AI Virtual Companion</string>
     <string name="battery_whitelist">Battery Optimization</string>
     <string name="battery_whitelist_desc">Ensure background messages work</string>
+    <string name="data_backup">Data Backup</string>
+    <string name="data_backup_desc">Export or import chat data</string>
     <string name="auto_start">Auto-start</string>
     <string name="auto_start_desc">Allow app to auto-start</string>
 

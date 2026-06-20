@@ -54,14 +54,12 @@ import androidx.compose.ui.unit.sp
 import com.lianyu.ai.uicommon.R
 import com.lianyu.ai.uicommon.model.ApiProviderInfo
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
-import com.lianyu.ai.uicommon.theme.WeChatGreen
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 
 @Composable
 fun WeChatChatInputBar(
     onSendMessage: (String) -> Unit,
     isLoading: Boolean,
-    isDarkTheme: Boolean,
     availableApis: List<ApiProviderInfo> = emptyList(),
     currentApi: ApiProviderInfo? = null,
     onSwitchApi: ((ApiProviderInfo) -> Unit)? = null,
@@ -74,8 +72,10 @@ fun WeChatChatInputBar(
     var text by remember { mutableStateOf("") }
     var showApiSelector by remember { mutableStateOf(false) }
     val adaptiveSizing = rememberAdaptiveSizing()
-    val hintColor = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF888888)
-    val textColor = if (isDarkTheme) Color.White else Color(0xFF2C2C2C)
+    val hintColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val onSurface = MaterialTheme.colorScheme.onSurface
 
     Column(modifier = modifier) {
         AnimatedVisibility(
@@ -90,7 +90,6 @@ fun WeChatChatInputBar(
                     onSwitchApi?.invoke(api)
                     showApiSelector = false
                 },
-                isDarkTheme = isDarkTheme,
                 adaptiveSizing = adaptiveSizing
             )
         }
@@ -108,7 +107,7 @@ fun WeChatChatInputBar(
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = stringResource(R.string.more),
-                        tint = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF666666),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(adaptiveSizing.iconSize)
                     )
                 }
@@ -116,7 +115,7 @@ fun WeChatChatInputBar(
                 Box(
                     modifier = Modifier.weight(1f).height(adaptiveSizing.inputBarHeight)
                         .clip(RoundedCornerShape(21.dp))
-                        .background(if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFF2F2F2))
+                        .background(surfaceVariant)
                         .padding(horizontal = 16.dp, vertical = 0.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -149,7 +148,6 @@ fun WeChatChatInputBar(
                         if (onVoiceRecordStart != null && text.isEmpty()) {
                             Spacer(modifier = Modifier.width(4.dp))
                             VoiceHoldButton(
-                                isDarkTheme = isDarkTheme,
                                 onRecordStart = { onVoiceRecordStart() },
                                 onRecordStop = { onVoiceRecordStop?.invoke() },
                                 onRecordCancel = { onVoiceRecordCancel?.invoke() },
@@ -164,7 +162,7 @@ fun WeChatChatInputBar(
                         modifier = Modifier
                             .height(36.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .background(currentApi?.color ?: if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFE5E5E5))
+                            .background(currentApi?.color ?: surfaceVariant)
                             .clickable { showApiSelector = !showApiSelector }
                             .padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center
@@ -188,16 +186,18 @@ fun WeChatChatInputBar(
                 }
 
                 val canSend = text.isNotBlank()
+                val sendBg = if (canSend) MaterialTheme.colorScheme.primary else surfaceVariant
+                val sendIconTint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                 Box(
                     modifier = Modifier.size(40.dp).clip(CircleShape)
-                        .background(if (canSend) WeChatGreen else if (isDarkTheme) Color(0xFF3D2F36) else Color(0xFFE5E5E5))
+                        .background(sendBg)
                         .clickable(enabled = canSend) {
                             onSendMessage(text.trim()); text = ""
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.send),
-                        tint = if (canSend) Color(0xFF2D1F24) else if (isDarkTheme) Color(0xFF636366) else Color(0xFF888888),
+                        tint = sendIconTint,
                         modifier = Modifier.size(20.dp))
                 }
             }
@@ -207,7 +207,6 @@ fun WeChatChatInputBar(
 
 @Composable
 private fun VoiceHoldButton(
-    isDarkTheme: Boolean,
     onRecordStart: () -> Unit,
     onRecordStop: () -> Unit,
     onRecordCancel: () -> Unit,
@@ -217,7 +216,7 @@ private fun VoiceHoldButton(
 
     val iconTint = when {
         isRecording -> Color(0xFFFF3B30)
-        else -> if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF666666)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Box(
@@ -247,9 +246,10 @@ private fun ApiSelectorPanel(
     availableApis: List<ApiProviderInfo>,
     currentApi: ApiProviderInfo?,
     onSwitchApi: (ApiProviderInfo) -> Unit,
-    isDarkTheme: Boolean,
     adaptiveSizing: AdaptiveSizing
 ) {
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -258,7 +258,7 @@ private fun ApiSelectorPanel(
         Text(
             text = "切换模型:",
             fontSize = adaptiveSizing.fontSizeSmall.sp,
-            color = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF888888),
+            color = onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp)
         )
         androidx.compose.foundation.layout.FlowRow(
@@ -267,15 +267,13 @@ private fun ApiSelectorPanel(
         ) {
             availableApis.forEach { api ->
                 val isSelected = api.name == currentApi?.name
+                val chipBg = if (isSelected) api.color else surfaceVariant.copy(alpha = 0.6f)
+                val chipText = if (isSelected) Color.White else onSurfaceVariant
                 Box(
                     modifier = Modifier
                         .height(32.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(
-                            if (isSelected) api.color
-                            else if (isDarkTheme) Color(0xFF3D2F36).copy(alpha = 0.6f)
-                            else Color(0xFFF2F2F2)
-                        )
+                        .background(chipBg)
                         .clickable { onSwitchApi(api) }
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center
@@ -284,7 +282,7 @@ private fun ApiSelectorPanel(
                         text = api.displayName,
                         fontSize = adaptiveSizing.fontSizeSmall.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (isSelected) Color.White else if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF666666)
+                        color = chipText
                     )
                 }
             }

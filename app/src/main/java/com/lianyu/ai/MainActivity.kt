@@ -10,10 +10,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.edit
 import com.lianyu.ai.common.AppForegroundTracker
 import com.lianyu.ai.common.BatteryOptimizationHelper
@@ -23,6 +26,7 @@ import com.lianyu.ai.feature.notification.CompanionMessageWorker
 import com.lianyu.ai.feature.profile.AgreementScreen
 import com.lianyu.ai.feature.update.AppUpdateManager
 import com.lianyu.ai.uicommon.theme.LianYuTheme
+import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -96,9 +100,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val agreementPrefs = getSharedPreferences("agreement_prefs", android.content.Context.MODE_PRIVATE)
             val agreementAccepted = agreementPrefs.getBoolean("agreement_accepted", false)
+            val themeViewModel: ThemeViewModel = viewModel()
+            val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
 
-            LianYuTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color.Transparent) {
+            LianYuTheme(themeMode = themeMode) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (!agreementAccepted) {
                         AgreementScreen(
                             onAgree = {

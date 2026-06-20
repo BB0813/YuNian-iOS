@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.notification
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -22,6 +23,8 @@ object NotificationHelper {
                 description = CHANNEL_DESCRIPTION
                 enableLights(true)
                 enableVibration(true)
+                // OPPO / vivo 在锁屏时默认可能不显示通知内容，显式声明以提升到达率。
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)

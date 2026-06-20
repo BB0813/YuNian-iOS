@@ -46,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.groupchat.R
@@ -56,20 +55,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.CompanionEntity
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatGreen
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
 import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
 import com.lianyu.ai.database.viewmodel.CompanionListViewModel
 import kotlinx.coroutines.delay
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,18 +70,6 @@ fun CreateGroupScreen(
     var groupName by remember { mutableStateOf("") }
     val selectedIds = remember { mutableStateListOf<Long>() }
     var isVisible by remember { mutableStateOf(false) }
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDarkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDarkTheme) WeChatDarkCard else Color.White
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDarkTheme) WeChatDarkTextSecondary else WeChatLightTextSecondary
 
     LaunchedEffect(Unit) {
         delay(100)
@@ -110,7 +86,7 @@ fun CreateGroupScreen(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 17.sp
                     ),
-                    color = textPrimary
+                    color = MaterialTheme.colorScheme.onBackground
                 )
                 },
                 navigationIcon = {
@@ -118,7 +94,7 @@ fun CreateGroupScreen(
                         Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.group_chat),
-                        tint = textPrimary
+                        tint = MaterialTheme.colorScheme.onBackground
                     )
                     }
                 },
@@ -126,7 +102,7 @@ fun CreateGroupScreen(
                     val canCreate = groupName.isNotBlank() && selectedIds.isNotEmpty()
                     Text(
                         text = stringResource(R.string.create),
-                        color = if (canCreate) WeChatGreen else textSecondary,
+                        color = if (canCreate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
@@ -138,7 +114,7 @@ fun CreateGroupScreen(
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = backgroundColor
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         }
@@ -146,7 +122,7 @@ fun CreateGroupScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .padding(horizontal = 16.dp)
         ) {
@@ -158,17 +134,17 @@ fun CreateGroupScreen(
                     value = groupName,
                     onValueChange = { groupName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.group_name), color = textSecondary) },
-                    placeholder = { Text(stringResource(R.string.group_name_hint), color = textSecondary.copy(alpha = 0.6f)) },
+                    label = { Text(stringResource(R.string.group_name), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    placeholder = { Text(stringResource(R.string.group_name_hint), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = WeChatGreen,
-                        unfocusedBorderColor = if (isDarkTheme) Color(0xFF38383A) else Color(0xFFE5E5E5),
-                        focusedContainerColor = if (isDarkTheme) Color(0xFF1C1C1E) else Color.White,
-                        unfocusedContainerColor = if (isDarkTheme) Color(0xFF1C1C1E) else Color.White,
-                        focusedTextColor = textPrimary,
-                        unfocusedTextColor = textPrimary
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                     )
                 )
             }
@@ -179,7 +155,7 @@ fun CreateGroupScreen(
                 text = stringResource(R.string.select_companions, selectedIds.size, companions.size),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = textSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
@@ -190,7 +166,7 @@ fun CreateGroupScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.no_companions),
-                        color = textSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(vertical = 32.dp)
                     )
@@ -205,7 +181,6 @@ fun CreateGroupScreen(
                         CompanionSelectItem(
                             companion = companion,
                             isSelected = isSelected,
-                            isDarkTheme = isDarkTheme,
                             onClick = {
                                 if (isSelected) {
                                     selectedIds.remove(companion.id)
@@ -225,17 +200,13 @@ fun CreateGroupScreen(
 fun CompanionSelectItem(
     companion: CompanionEntity,
     isSelected: Boolean,
-    isDarkTheme: Boolean,
     onClick: () -> Unit
 ) {
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val cardColor = if (isDarkTheme) WeChatDarkCard else Color.White
-
     Box(
         modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(cardColor)
+                .background(MaterialTheme.colorScheme.surface)
                 .clickable(onClick = onClick)
                 .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
@@ -247,7 +218,7 @@ fun CompanionSelectItem(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFE5E5E5)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (companion.avatarUrl != null) {
@@ -261,7 +232,7 @@ fun CompanionSelectItem(
                     Icon(
                         imageVector = Icons.Outlined.Person,
                         contentDescription = null,
-                        tint = Color(0xFF888888),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -273,7 +244,7 @@ fun CompanionSelectItem(
                 text = companion.name,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal,
-                color = textPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)
             )
 
@@ -282,13 +253,13 @@ fun CompanionSelectItem(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(WeChatGreen),
+                        .background(MaterialTheme.colorScheme.primary),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Check,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -297,7 +268,7 @@ fun CompanionSelectItem(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFE5E5E5))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 )
             }
         }

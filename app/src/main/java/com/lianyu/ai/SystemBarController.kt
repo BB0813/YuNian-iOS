@@ -1,13 +1,14 @@
 package com.lianyu.ai
 
+import android.app.Activity
 import android.content.res.Configuration
 import android.os.Build
 import android.os.LocaleList
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
 import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import androidx.compose.ui.graphics.toArgb
-import android.app.Activity
+
 
 /**
  * 系统栏控制器 — 主题/Locale/状态栏/导航栏统一管理。
@@ -58,9 +59,20 @@ object SystemBarController {
             "LIGHT" -> false
             else -> (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
-        activity.window.statusBarColor =
-            (if (isDark) WeChatDarkBackground else WeChatLightBackground).toArgb()
-        activity.window.navigationBarColor = android.graphics.Color.TRANSPARENT
+
+        val navScrim = if (isDark) {
+            Color(0xFF000000).copy(alpha = 0.25f)
+        } else {
+            Color(0xFFFFFFFF).copy(alpha = 0.55f)
+        }
+
+        // 状态栏使用不透明纯色，浅色主题用纯白避免显粉；深色主题用背景色保持一致。
+        activity.window.statusBarColor = if (isDark) {
+            WeChatDarkBackground.toArgb()
+        } else {
+            Color(0xFFFFFFFF).toArgb()
+        }
+        activity.window.navigationBarColor = navScrim.toArgb()
         WindowCompat.setDecorFitsSystemWindows(activity.window, false)
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
             isAppearanceLightStatusBars = !isDark

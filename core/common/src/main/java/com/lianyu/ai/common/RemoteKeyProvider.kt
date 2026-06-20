@@ -245,6 +245,32 @@ object RemoteKeyProvider {
         for (i in 0 until keysArray.length()) {
             keys.add(keysArray.getString(i))
         }
+
+        // 🎲 解析服务器推荐的随机模型
+        if (keysJson.has("randomModel") && !keysJson.isNull("randomModel")) {
+            val randomModel = keysJson.getString("randomModel")
+            cachedRandomModel = randomModel
+            SecureLog.d("RemoteKeyProvider", "Server recommended random model: $randomModel")
+
+            // 保存到本地缓存
+            try {
+                ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_RANDOM_MODEL, randomModel)
+                    .apply()
+            } catch (_: Exception) {}
+        }
+
+        // 如果没有推荐模型但有模型列表，本地随机选一个
+        if (cachedRandomModel == null && keysJson.has("models")) {
+            val modelsArray = keysJson.getJSONArray("models")
+            if (modelsArray.length() > 0) {
+                val randomIndex = random.nextInt(modelsArray.length())
+                cachedRandomModel = modelsArray.getString(randomIndex)
+                SecureLog.d("RemoteKeyProvider", "Locally selected random model: $cachedRandomModel")
+            }
+        }
+
         return keys
     }
 

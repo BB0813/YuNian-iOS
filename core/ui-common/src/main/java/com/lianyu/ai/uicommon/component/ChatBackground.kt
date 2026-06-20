@@ -47,9 +47,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import coil.compose.AsyncImage
 import com.lianyu.ai.uicommon.R
-import com.lianyu.ai.uicommon.theme.BlushPink
-import com.lianyu.ai.uicommon.theme.DeepWarm
-import com.lianyu.ai.uicommon.theme.WarmGray
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -241,21 +238,15 @@ private fun isReadableImage(file: File): Boolean {
     return options.outWidth > 0 && options.outHeight > 0
 }
 
-fun getChatBackground(context: Context): Pair<Color, Brush?> {
+fun getChatBackground(context: Context, isDark: Boolean): Pair<Color, Brush?> {
     val key = getChatBackgroundKey(context)
-
-    if (isCustomBackground(key)) {
-        return Color.Transparent to null
-    }
-
-    val allOptions = chatBackgroundOptions(context)
-    val option = allOptions.find { it.key == key } ?: allOptions.first()
-    return option.color to option.gradient
+    return getChatBackgroundByKey(context, key, isDark)
 }
 
-fun getChatBackgroundByKey(context: Context, key: String): Pair<Color, Brush?> {
+fun getChatBackgroundByKey(context: Context, key: String, isDark: Boolean): Pair<Color, Brush?> {
     if (isCustomBackground(key)) {
-        return Color.Transparent to null
+        val fallback = if (isDark) Color(0xFF1A1216) else Color(0xFFF5F5F5)
+        return fallback to null
     }
     val allOptions = chatBackgroundOptions(context)
     val option = allOptions.find { it.key == key } ?: allOptions.first()
@@ -303,7 +294,7 @@ fun ChatBackgroundPickerDialog(
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = DeepWarm
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
@@ -311,7 +302,7 @@ fun ChatBackgroundPickerDialog(
                 Text(
                     stringResource(R.string.select_bg_hint),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = WarmGray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -368,10 +359,10 @@ fun ChatBackgroundPickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.close), color = BlushPink)
+                Text(stringResource(R.string.close), color = MaterialTheme.colorScheme.primary)
             }
         },
-        containerColor = Color(0xFFFFF8FA)
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }
 
@@ -383,6 +374,8 @@ private fun BackgroundOptionItem(
     gradient: Brush?,
     onClick: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -392,7 +385,7 @@ private fun BackgroundOptionItem(
                 .clip(RoundedCornerShape(14.dp))
                 .border(
                     width = if (isSelected) 2.dp else 0.dp,
-                    color = if (isSelected) BlushPink.copy(alpha = 0.8f) else Color.Transparent,
+                    color = if (isSelected) primary.copy(alpha = 0.8f) else Color.Transparent,
                     shape = RoundedCornerShape(14.dp)
                 )
                 .background(
@@ -407,7 +400,7 @@ private fun BackgroundOptionItem(
             style = MaterialTheme.typography.labelSmall.copy(
                 fontSize = 11.sp
             ),
-            color = if (isSelected) BlushPink else WarmGray
+            color = if (isSelected) primary else onSurfaceVariant
         )
     }
 }
@@ -419,6 +412,9 @@ private fun CustomBackgroundItem(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -428,7 +424,7 @@ private fun CustomBackgroundItem(
                 .clip(RoundedCornerShape(14.dp))
                 .border(
                     width = if (isSelected) 2.dp else 0.dp,
-                    color = if (isSelected) BlushPink.copy(alpha = 0.8f) else Color.Transparent,
+                    color = if (isSelected) primary.copy(alpha = 0.8f) else Color.Transparent,
                     shape = RoundedCornerShape(14.dp)
                 )
                 .clickable { onClick() }
@@ -445,10 +441,10 @@ private fun CustomBackgroundItem(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
-                        .background(Color(0xFFE5E5EA)),
+                        .background(surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("?", color = WarmGray)
+                    Text("?", color = onSurfaceVariant)
                 }
             }
 
@@ -458,14 +454,14 @@ private fun CustomBackgroundItem(
                     .align(Alignment.TopEnd)
                     .size(18.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(Color(0xFFFF3B30))
+                    .background(MaterialTheme.colorScheme.error)
                     .clickable { onDelete() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = stringResource(R.string.delete),
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onError,
                     modifier = Modifier.size(10.dp)
                 )
             }
@@ -476,7 +472,7 @@ private fun CustomBackgroundItem(
             style = MaterialTheme.typography.labelSmall.copy(
                 fontSize = 11.sp
             ),
-            color = if (isSelected) BlushPink else WarmGray
+            color = if (isSelected) primary else onSurfaceVariant
         )
     }
 }
@@ -485,6 +481,7 @@ private fun CustomBackgroundItem(
 private fun AddCustomBackgroundItem(
     onClick: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -494,17 +491,17 @@ private fun AddCustomBackgroundItem(
                 .clip(RoundedCornerShape(14.dp))
                 .border(
                     width = 1.dp,
-                    color = BlushPink.copy(alpha = 0.5f),
+                    color = primary.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(14.dp)
                 )
-                .background(Color(0xFFFFF5F7))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable { onClick() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Filled.Add,
                 contentDescription = stringResource(R.string.add_custom_bg),
-                tint = BlushPink,
+                tint = primary,
                 modifier = Modifier.size(24.dp)
             )
         }
@@ -514,7 +511,7 @@ private fun AddCustomBackgroundItem(
             style = MaterialTheme.typography.labelSmall.copy(
                 fontSize = 11.sp
             ),
-            color = BlushPink
+            color = primary
         )
     }
 }

@@ -32,11 +32,14 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,6 +63,8 @@ import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.feature.settings.ui.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalContext
+import com.lianyu.ai.common.SecureLog
 
 // ============================================================
 // Petal Color Constants
@@ -128,13 +133,13 @@ private fun PetalApiConfigEditDialog(
     isDarkTheme: Boolean,
     textPrimaryColor: Color,
     textSecondaryColor: Color,
-    onFetchModels: ((String, String) -> Unit)? = null,
+    onFetchModels: ((String, String, Boolean) -> Unit)? = null,
     availableModels: List<String> = emptyList(),
     modelFetchState: SettingsViewModel.ModelFetchState = SettingsViewModel.ModelFetchState()
 ) {
-    val cardBackground = if (isDarkTheme) PetalPrimaryContainer.copy(alpha = 0.15f) else PetalSurface
-    val dividerColor = if (isDarkTheme) PetalOutlineVariant.copy(alpha = 0.3f) else PetalSurfaceContainer
-    val textTertiary = if (isDarkTheme) PetalOutlineVariant else PetalOutlineVariant
+    val cardBackground = MaterialTheme.colorScheme.surfaceVariant
+    val dividerColor = MaterialTheme.colorScheme.outline
+    val textTertiary = MaterialTheme.colorScheme.outlineVariant
 
     var apiKey by remember { mutableStateOf(config.apiKey) }
     var extraApiKeys by remember { mutableStateOf(config.extraApiKeys) }
@@ -143,9 +148,13 @@ private fun PetalApiConfigEditDialog(
     var temperature by remember { mutableFloatStateOf(config.temperature) }
     var maxTokens by remember { mutableStateOf(config.maxTokens?.toString() ?: "") }
     var showModelDropdown by remember { mutableStateOf(false) }
+    var skipCertVerify by remember { mutableStateOf(config.skipCertVerify) }
+    var formatHint by remember { mutableStateOf(config.formatHint) }
     var lastFetchedParams by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     val isPartner = config.provider == ApiProvider.PARTNER
+    val isCustom = config.provider == ApiProvider.CUSTOM
     val isValid = apiKey.isNotBlank() || baseUrl.isNotBlank() || isPartner
     val hasModels = availableModels.isNotEmpty()
 
@@ -156,26 +165,45 @@ private fun PetalApiConfigEditDialog(
         else -> "填写密钥后自动拉取模型"
     }
 
-    LaunchedEffect(apiKey, baseUrl, isPartner) {
+    LaunchedEffect(apiKey, baseUrl, config.provider) {
         val fetchParams = baseUrl.trim() + "|" + apiKey.trim()
-        val shouldFetch = isPartner && baseUrl.isNotBlank() && fetchParams != lastFetchedParams
+        // PARTNER：baseUrl 非空即可自动拉取（密钥可空，由服务器下发）
+        // CUSTOM：baseUrl 和 apiKey 都非空才自动拉取
+        val shouldFetch = baseUrl.isNotBlank() &&
+                (isPartner || (isCustom && apiKey.isNotBlank())) &&
+                fetchParams != lastFetchedParams
         if (shouldFetch) {
             delay(600)
             lastFetchedParams = fetchParams
             val keyToUse = apiKey.trim()
-            onFetchModels?.invoke(baseUrl, keyToUse)
+            onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
         }
     }
 
-    LaunchedEffect(availableModels, isPartner) {
-        if (isPartner && model.isBlank() && availableModels.isNotEmpty()) {
-            model = availableModels.first()
+    LaunchedEffect(availableModels, config.provider) {
+        if ((isPartner || isCustom) && availableModels.isNotEmpty()) {
+            model = if (isPartner) {
+                // [FIX] PARTNER 始终本地随机，避免 server randomModel 固定导致每次相同
+                val serverModel = com.lianyu.ai.common.RemoteKeyProvider.getRandomModel(context)
+                    ?.takeIf { it.isNotBlank() && availableModels.contains(it) }
+                val chosenModel = if (availableModels.size > 1) {
+                    com.lianyu.ai.network.AiService.familyBalancedRandom(availableModels)
+                } else {
+                    serverModel ?: availableModels.first()
+                }
+                SecureLog.d("PetalApiCards", "PARTNER auto-select model: chosen=$chosenModel, server=$serverModel, available=${availableModels.size}")
+                chosenModel
+            } else {
+                // CUSTOM: auto-select first only when model is blank
+                if (model.isBlank()) availableModels.first() else model
+            }
         }
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = cardBackground,
+        tonalElevation = 0.dp,
         title = {
             Text(
                 text = "${config.provider.displayName} 配置",
@@ -327,10 +355,13 @@ private fun PetalApiConfigEditDialog(
                     if (hasModels && !modelFetchState.isLoading) {
                         Button(
                             onClick = {
+                                // 重新获取模型列表时清空已选模型，触发自动重新随机
+                                model = ""
+                                lastFetchedParams = ""
                                 val keyToUse = apiKey.trim().ifBlank {
                                     ApiConfig.BUILTIN_KEYS[ApiProvider.PARTNER]?.firstOrNull() ?: ""
                                 }
-                                onFetchModels?.invoke(baseUrl, keyToUse)
+                                onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
@@ -398,6 +429,94 @@ private fun PetalApiConfigEditDialog(
                     ),
                     singleLine = true
                 )
+
+                // API 格式选择 — 仅对自定义 API 显示
+                if (isCustom) {
+                    var showFormatDropdown by remember { mutableStateOf(false) }
+                    val formatOptions = mapOf(
+                        "openai" to "OpenAI 兼容",
+                        "anthropic" to "Anthropic 兼容"
+                    )
+                    val selectedFormatText = formatOptions[formatHint] ?: "OpenAI 兼容"
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = selectedFormatText,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("API 格式", color = textSecondaryColor) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showFormatDropdown = !showFormatDropdown },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = PetalPrimary,
+                                unfocusedBorderColor = dividerColor,
+                                focusedContainerColor = cardBackground,
+                                unfocusedContainerColor = cardBackground,
+                                focusedTextColor = textPrimaryColor,
+                                unfocusedTextColor = textPrimaryColor
+                            ),
+                            trailingIcon = {
+                                Icon(
+                                    imageVector = if (showFormatDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "展开",
+                                    modifier = Modifier.clickable { showFormatDropdown = !showFormatDropdown },
+                                    tint = textSecondaryColor
+                                )
+                            },
+                            singleLine = true
+                        )
+                        DropdownMenu(
+                            expanded = showFormatDropdown,
+                            onDismissRequest = { showFormatDropdown = false },
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        ) {
+                            formatOptions.forEach { (key, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label, color = textPrimaryColor, fontSize = 14.sp) },
+                                    onClick = {
+                                        formatHint = key
+                                        showFormatDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 跳过证书验证 — 仅对非 Clove 的 provider 显示（Clove 始终固定证书）
+                if (!isPartner) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "跳过证书验证",
+                                color = textPrimaryColor,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "⚠️ 仅限自托管/内网服务器，开启后不再验证 SSL 证书",
+                                color = PetalOrange,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = skipCertVerify,
+                            onCheckedChange = { skipCertVerify = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PetalOrange,
+                                checkedTrackColor = PetalOrange.copy(alpha = 0.3f),
+                                uncheckedThumbColor = dividerColor,
+                                uncheckedTrackColor = dividerColor.copy(alpha = 0.2f)
+                            )
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -412,7 +531,9 @@ private fun PetalApiConfigEditDialog(
                             baseUrl = baseUrl.trim(),
                             model = model.trim(),
                             temperature = temperature,
-                            maxTokens = maxTokens.toIntOrNull()
+                            maxTokens = maxTokens.toIntOrNull(),
+                            skipCertVerify = skipCertVerify,
+                            formatHint = formatHint
                         )
                         onTest(currentConfig)
                     },
@@ -442,7 +563,9 @@ private fun PetalApiConfigEditDialog(
                                 baseUrl = baseUrl.trim(),
                                 model = model.trim(),
                                 temperature = temperature,
-                                maxTokens = maxTokens.toIntOrNull()
+                                maxTokens = maxTokens.toIntOrNull(),
+                                skipCertVerify = skipCertVerify,
+                                formatHint = formatHint
                             )
                         )
                     },
@@ -482,7 +605,7 @@ fun PetalApiCard(
     onTest: (ApiConfig) -> Unit,
     onToggleEnabled: () -> Unit,
     onSelectActive: () -> Unit,
-    onFetchModels: (String, String, String) -> Unit,
+    onFetchModels: (String, String, String, Boolean) -> Unit,
     fetchedModels: Map<String, List<String>>,
     modelFetchStates: Map<String, SettingsViewModel.ModelFetchState>,
     testedConfigs: Map<String, ApiConfig>,
@@ -673,8 +796,8 @@ fun PetalApiCard(
             isDarkTheme = isDarkTheme,
             textPrimaryColor = textPrimaryColor,
             textSecondaryColor = textSecondaryColor,
-            onFetchModels = { baseUrl: String, apiKey: String ->
-                onFetchModels(baseUrl, apiKey, editing.provider.name)
+            onFetchModels = { baseUrl: String, apiKey: String, skipCertVerify: Boolean ->
+                onFetchModels(baseUrl, apiKey, editing.provider.name, skipCertVerify)
             },
             availableModels = providerModels,
             modelFetchState = fetchState
@@ -698,7 +821,7 @@ fun PetalSavedApiCard(
     onTest: (ApiConfig) -> Unit,
     onToggleEnabled: () -> Unit,
     onSelectActive: () -> Unit,
-    onFetchModels: (String, String, String) -> Unit,
+    onFetchModels: (String, String, String, Boolean) -> Unit,
     fetchedModels: Map<String, List<String>>,
     modelFetchStates: Map<String, SettingsViewModel.ModelFetchState>,
     testedConfigs: Map<String, ApiConfig>,
@@ -904,8 +1027,8 @@ fun PetalSavedApiCard(
             isDarkTheme = isDarkTheme,
             textPrimaryColor = textPrimaryColor,
             textSecondaryColor = textSecondaryColor,
-            onFetchModels = { baseUrl: String, apiKey: String ->
-                onFetchModels(baseUrl, apiKey, editing.provider.name)
+            onFetchModels = { baseUrl: String, apiKey: String, skipCertVerify: Boolean ->
+                onFetchModels(baseUrl, apiKey, editing.provider.name, skipCertVerify)
             },
             availableModels = providerModels,
             modelFetchState = fetchState

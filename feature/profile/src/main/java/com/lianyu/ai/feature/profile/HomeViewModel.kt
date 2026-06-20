@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -42,6 +43,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 if (companions.isEmpty()) {
                     flowOf(emptyList())
                 } else {
+                    // 预热：为每个 companion 加载最近一页消息到 ChatRepository 内存缓存
+                    viewModelScope.launch {
+                        companions.forEach { companion ->
+                            if (chatRepository.getCachedRecent(companion.id) == null) {
+                                runCatching {
+                                    chatRepository.getRecentMessagesSync(companion.id, 50)
+                                }
+                            }
+                        }
+                    }
                     val flows: List<Flow<ChatListItem>> = companions.map { companion ->
                         combine(
                             chatRepository.getLastMessageForCompanion(companion.id),

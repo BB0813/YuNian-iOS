@@ -36,6 +36,7 @@ open class WeChatPollingService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
+    private var timedOut = false
 
     override fun onCreate() {
         super.onCreate()
@@ -54,6 +55,21 @@ open class WeChatPollingService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onTimeout(startId: Int) {
+        super.onTimeout(startId)
+        timedOut = true
+        Log.w(TAG, "Foreground service timeout reached, scheduling restart and stopping gracefully")
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (_: Exception) {
+            // ignore cleanup errors
+        }
+        stopSelf(startId)
+        // Fallback to WorkManager polling immediately; service restart is handled
+        // when the app next comes to foreground or on BOOT_COMPLETED.
+        runCatching { WeChatPollingWorker.schedule(applicationContext) }
+    }
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")

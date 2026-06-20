@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,7 +62,6 @@ import kotlinx.coroutines.withContext
 @Composable
 fun StickerPanel(
     isVisible: Boolean,
-    isDarkTheme: Boolean,
     onStickerClick: (StickerInfo) -> Unit,
     onImportClick: () -> Unit = {},
     onDeleteAllClick: () -> Unit = {},
@@ -89,7 +89,10 @@ fun StickerPanel(
         exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(150)),
         modifier = modifier
     ) {
-        val bgColor = if (isDarkTheme) Color(0xFF1C1519) else Color(0xFFF7F7F7)
+        val bgColor = MaterialTheme.colorScheme.background
+        val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+        val onSurface = MaterialTheme.colorScheme.onSurface
+        val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
 
         Column(
             modifier = Modifier
@@ -109,7 +112,7 @@ fun StickerPanel(
                     text = "表情包",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+                    color = onSurface
                 )
                 Row {
                     // Delete all button
@@ -117,7 +120,7 @@ fun StickerPanel(
                         modifier = Modifier
                             .size(32.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isDarkTheme) Color(0xFF2D2228) else Color.White)
+                            .background(surfaceVariant)
                             .clickable(onClick = onDeleteAllClick),
                         contentAlignment = Alignment.Center
                     ) {
@@ -125,7 +128,7 @@ fun StickerPanel(
                             imageVector = Icons.Filled.Delete,
                             contentDescription = "删除全部表情包",
                             modifier = Modifier.size(18.dp),
-                            tint = Color(0xFFFF3B30)
+                            tint = MaterialTheme.colorScheme.error
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
@@ -134,7 +137,7 @@ fun StickerPanel(
                         modifier = Modifier
                             .size(32.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isDarkTheme) Color(0xFF2D2228) else Color.White)
+                            .background(surfaceVariant)
                             .clickable(onClick = onImportClick),
                         contentAlignment = Alignment.Center
                     ) {
@@ -142,7 +145,7 @@ fun StickerPanel(
                             imageVector = Icons.Filled.Add,
                             contentDescription = "导入表情包",
                             modifier = Modifier.size(18.dp),
-                            tint = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+                            tint = onSurface
                         )
                     }
                 }
@@ -158,7 +161,7 @@ fun StickerPanel(
                     Text(
                         text = "加载中...",
                         fontSize = 13.sp,
-                        color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF999999)
+                        color = onSurfaceVariant
                     )
                 }
             } else if (stickers.isEmpty()) {
@@ -172,13 +175,13 @@ fun StickerPanel(
                         Text(
                             text = "暂无表情包",
                             fontSize = 13.sp,
-                            color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF999999)
+                            color = onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "点击 + 导入表情包压缩包",
                             fontSize = 12.sp,
-                            color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF999999)
+                            color = onSurfaceVariant
                         )
                     }
                 }
@@ -195,7 +198,6 @@ fun StickerPanel(
                     items(stickers, key = { it.path }) { sticker ->
                         StickerGridItem(
                             sticker = sticker,
-                            isDarkTheme = isDarkTheme,
                             onClick = { onStickerClick(sticker) }
                         )
                     }
@@ -208,7 +210,6 @@ fun StickerPanel(
 @Composable
 private fun StickerGridItem(
     sticker: StickerInfo,
-    isDarkTheme: Boolean,
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -224,7 +225,7 @@ private fun StickerGridItem(
         modifier = Modifier
             .size(64.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isDarkTheme) Color(0xFF2D2228) else Color.White)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -239,7 +240,7 @@ private fun StickerGridItem(
             Text(
                 text = sticker.name.take(2),
                 fontSize = 20.sp,
-                color = if (isDarkTheme) Color(0xFFF5E6EB) else Color(0xFF2D1F24)
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }

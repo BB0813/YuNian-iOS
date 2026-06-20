@@ -21,13 +21,13 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -36,6 +36,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Velocity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -59,11 +60,12 @@ import com.lianyu.ai.feature.settings.ui.screen.*
 import com.lianyu.ai.feature.update.AppUpdateManager
 import com.lianyu.ai.feature.wechat.ui.WeChatBindScreen
 import com.lianyu.ai.feature.wechat.ui.WeChatSettingsScreen
+import com.lianyu.ai.feature.qqbot.ui.QQBotSettingsScreen
+import com.lianyu.ai.feature.backup.BackupScreen
 import com.lianyu.ai.uicommon.component.UpdateDialog
 import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Group
@@ -80,7 +82,7 @@ import kotlin.math.abs
  * 状态空间模型:
  *   S ∈ {Home, Contacts, Profile, Chat(id), ChatDetail(id), VoiceCall(id),
  *        GroupChat(id), GroupDetail(id), CreateGroup, Settings, Theme, Language,
- *        CheckUpdate, About, FrameRate, Team, Support, AppSettings, Memory,
+ *        CheckUpdate, About, FrameRate, Team, Support, Memory,
  *        ContextMemory, TtsSettings, TokenUsage, WeChatSettings, WeChatBind,
  *        AgreementView, CreateCompanion, EditCompanion(id)}
  *   差分方程: S[k+1] = f(S[k], E[k])
@@ -165,8 +167,7 @@ fun MainScreen(mainActivity: Activity) {
     }
 
     val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDark = themeViewModel.isDarkTheme()
+    val isDark by themeViewModel.isDarkTheme.collectAsStateWithLifecycle()
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -178,15 +179,13 @@ fun MainScreen(mainActivity: Activity) {
                     onItemClick = { index ->
                         lastTabPage = index
                         coroutineScope.launch { pagerState.animateScrollToPage(index) }
-                    },
-                    isDark = isDark
+                    }
                 )
             }
         }
     ) { paddingValues ->
-        val bgColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
         Box(
-            modifier = Modifier.fillMaxSize().background(bgColor).padding(paddingValues)
+            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(paddingValues)
         ) {
             NavHost(
                 navController = navController,
@@ -260,18 +259,18 @@ fun MainScreen(mainActivity: Activity) {
                                     onCreateGroupClick = { navController.navigate(MainRoute.CreateGroup.route) }
                                 )
                                 2 -> ProfileScreen(
-                                    onSettingsClick = { navController.navigate(MainRoute.Settings.route) },
+                                    // 记忆与管理
                                     onMemoryClick = { navController.navigate(MainRoute.Memory.route) },
+                                    onContextMemoryClick = { navController.navigate(MainRoute.ContextMemory.route) },
+                                    // AI与外观
+                                    onSettingsClick = { navController.navigate(MainRoute.Settings.route) },
                                     onThemeClick = { navController.navigate(MainRoute.Theme.route) },
-                                    onLanguageClick = { navController.navigate(MainRoute.Language.route) },
-                                    onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) },
-                                    onAboutClick = { navController.navigate(MainRoute.About.route) },
-                                    onFrameRateClick = { navController.navigate(MainRoute.FrameRate.route) },
+                                    // 总设置
+                                    onGeneralSettingsClick = { navController.navigate(MainRoute.GeneralSettings.route) },
+                                    // 关于与支持
                                     onTeamClick = { navController.navigate(MainRoute.Team.route) },
                                     onSupportClick = { navController.navigate(MainRoute.Support.route) },
-                                    onAppSettingsClick = { navController.navigate(MainRoute.AppSettings.route) },
-                                    onWeChatClick = { navController.navigate(MainRoute.WeChatSettings.route) },
-                                    onContextMemoryClick = { navController.navigate(MainRoute.ContextMemory.route) }
+                                    onAboutClick = { navController.navigate(MainRoute.About.route) }
                                 )
                             }
                         }
@@ -323,21 +322,26 @@ fun MainScreen(mainActivity: Activity) {
                 composable(MainRoute.FrameRate.route) { FrameRateScreen(onNavigateBack = { navController.popBackStack() }, activity = mainActivity) }
                 composable(MainRoute.Team.route) { TeamScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.Support.route) { SupportScreen(onNavigateBack = { navController.popBackStack() }) }
-                composable(MainRoute.AppSettings.route) {
-                    AppSettingsScreen(
+                composable(MainRoute.ContextMemory.route) { ContextMemoryScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.GeneralSettings.route) {
+                    GeneralSettingsScreen(
                         onNavigateBack = { navController.popBackStack() },
                         onLanguageClick = { navController.navigate(MainRoute.Language.route) },
                         onFrameRateClick = { navController.navigate(MainRoute.FrameRate.route) },
-                        onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) },
                         onTtsSettingsClick = { navController.navigate(MainRoute.TtsSettings.route) },
-                        onTokenUsageClick = { navController.navigate(MainRoute.TokenUsage.route) }
+                        onTokenUsageClick = { navController.navigate(MainRoute.TokenUsage.route) },
+                        onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) },
+                        onWeChatClick = { navController.navigate(MainRoute.WeChatSettings.route) },
+                        onQQBotClick = { navController.navigate(MainRoute.QQBotSettings.route) },
+                        onDataBackupClick = { navController.navigate(MainRoute.DataBackup.route) }
                     )
                 }
-                composable(MainRoute.ContextMemory.route) { ContextMemoryScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.WeChatSettings.route) {
                     WeChatSettingsScreen(onNavigateBack = { navController.popBackStack() }, onBindClick = { navController.navigate(MainRoute.WeChatBind.route) })
                 }
                 composable(MainRoute.WeChatBind.route) { WeChatBindScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.QQBotSettings.route) { QQBotSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.DataBackup.route) { BackupScreen(onNavigateBack = { navController.popBackStack() }) }
             }
 
             // 更新弹窗

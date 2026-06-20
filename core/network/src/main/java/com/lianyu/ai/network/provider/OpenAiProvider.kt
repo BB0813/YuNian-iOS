@@ -54,11 +54,17 @@ open class OpenAiCompatibleProvider : AiProvider {
 
     private fun stripThinkingContent(content: String): String {
         var result = content
-        // 匹配多种推理/思考标签变体
+        // XML/HTML 风格思考标签
         result = result.replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
         result = result.replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
         result = result.replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
         result = result.replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
+        // Markdown 风格思考标题
+        result = result.replace(Regex("(?im)^#{1,3}\\s*(思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought)\\s*\\n[\\s\\S]*?(?=\\n#{1,3}\\s|$)"), "")
+        // 【思考】/【推理】等方括号包裹的思考块
+        result = result.replace(Regex("(?is)【(思考|思维|推理|分析)】[\\s\\S]*?【/(思考|思维|推理|分析)】"), "")
+        // 行内 [思考] ... [/思考] 格式
+        result = result.replace(Regex("(?is)\\[(思考|思维|推理|分析|thought|thinking)]\\s*[\\s\\S]*?\\[/\\1]"), "")
         return result.trim()
     }
 
@@ -136,6 +142,11 @@ open class OpenAiCompatibleProvider : AiProvider {
                     throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
 
+                // Detect HTML error pages from servers that don't return proper JSON errors
+                val trimmedBody = body.trimStart()
+                if (trimmedBody.startsWith("<!") || trimmedBody.startsWith("<html", ignoreCase = true)) {
+                    throw Exception("服务器返回了网页而非API响应 (HTTP ${response.code})，请检查API密钥/地址是否正确")
+                }
                 val parsed = AiProvider.json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) {
                     throw Exception(parsed.error.message ?: "API返回错误")
@@ -268,6 +279,11 @@ open class OpenAiCompatibleProvider : AiProvider {
                     throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
 
+                // Detect HTML error pages from servers that don't return proper JSON errors
+                val trimmedBody = body.trimStart()
+                if (trimmedBody.startsWith("<!") || trimmedBody.startsWith("<html", ignoreCase = true)) {
+                    throw Exception("服务器返回了网页而非API响应 (HTTP ${response.code})，请检查API密钥/地址是否正确")
+                }
                 val parsed = AiProvider.json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) {
                     throw Exception(parsed.error.message ?: "API返回错误")
@@ -375,6 +391,11 @@ open class OpenAiCompatibleProvider : AiProvider {
                     throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
 
+                // Detect HTML error pages from servers that don't return proper JSON errors
+                val trimmedBody = body.trimStart()
+                if (trimmedBody.startsWith("<!") || trimmedBody.startsWith("<html", ignoreCase = true)) {
+                    throw Exception("服务器返回了网页而非API响应 (HTTP ${response.code})，请检查API密钥/地址是否正确")
+                }
                 val parsed = AiProvider.json.decodeFromString<ChatCompletionResponse>(body)
                 if (parsed.error != null) {
                     throw Exception(parsed.error.message ?: "API返回错误")

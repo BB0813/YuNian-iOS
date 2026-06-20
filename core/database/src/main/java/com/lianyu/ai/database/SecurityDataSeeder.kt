@@ -43,6 +43,7 @@ class SecurityDataSeeder(
         fun getEnabledKeywords(context: Context): List<Pair<String, String>> {
             return runCatching {
                 AppDatabase.getDatabase(context.applicationContext).keywordDao().getAllEnabled()
+                    .filter { it.type == "KEYWORD" }
                     .map { it.keyword to it.level }
             }.getOrDefault(emptyList())
         }

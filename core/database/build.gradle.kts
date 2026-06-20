@@ -16,6 +16,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // 导出 Room Schema JSON，用于 CI 检测 Entity 变化导致的 Schema 不兼容
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 dependencies {

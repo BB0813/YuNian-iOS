@@ -50,10 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.lianyu.ai.R
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
 
 /** 底部导航项数据类 */
 data class BottomNavItem(
@@ -68,11 +64,11 @@ data class BottomNavItem(
 fun FloatingGlassBottomNav(
     items: List<BottomNavItem>,
     currentIndex: Int,
-    onItemClick: (Int) -> Unit,
-    isDark: Boolean
+    onItemClick: (Int) -> Unit
 ) {
-    val selectedColor = Color(0xFFF4A6B5)
-    val unselectedColor = if (isDark) Color(0xFF8E8E93) else Color(0xFF8A8A8E)
+    val selectedColor = MaterialTheme.colorScheme.primary
+    val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val backgroundColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
 
     Box(
         modifier = Modifier
@@ -86,10 +82,7 @@ fun FloatingGlassBottomNav(
                 .fillMaxWidth(0.85f)
                 .height(52.dp)
                 .clip(RoundedCornerShape(26.dp))
-                .background(
-                    if (isDark) Color(0xFF2D2228).copy(alpha = 0.95f)
-                    else Color(0xFFFFFFFF).copy(alpha = 0.95f)
-                ),
+                .background(backgroundColor),
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -137,11 +130,11 @@ fun FloatingGlassBottomNav(
 @Composable
 fun WeChatTopBar(
     title: String,
-    isDark: Boolean,
     isVisible: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
-    val bgColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
+    val bgColor = MaterialTheme.colorScheme.background
+    val textColor = MaterialTheme.colorScheme.onBackground
 
     Box(
         modifier = Modifier
@@ -165,7 +158,7 @@ fun WeChatTopBar(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 17.sp
                     ),
-                    color = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary,
+                    color = textColor,
                     textAlign = TextAlign.Start
                 )
                 Row(
@@ -180,9 +173,9 @@ fun WeChatTopBar(
 
 /** 首页顶部栏操作按钮 */
 @Composable
-fun HomeTopBarActions(navController: NavHostController, isDark: Boolean) {
-    val iconBgColor = if (isDark) Color(0xFF2C2C2E) else Color(0xFFF2F2F2)
-    val iconTint = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
+fun HomeTopBarActions(navController: NavHostController) {
+    val iconBgColor = MaterialTheme.colorScheme.surfaceVariant
+    val iconTint = MaterialTheme.colorScheme.onBackground
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(

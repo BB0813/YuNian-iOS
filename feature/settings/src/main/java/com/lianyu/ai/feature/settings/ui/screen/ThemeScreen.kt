@@ -43,14 +43,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.settings.R
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkDivider
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightCard
-import com.lianyu.ai.uicommon.theme.WeChatLightDivider
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import com.lianyu.ai.uicommon.theme.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -72,10 +64,11 @@ fun ThemeScreen(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val backgroundColor = if (isDarkTheme) WeChatDarkBackground else WeChatLightBackground
-    val textPrimaryColor = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val dividerColor = if (isDarkTheme) WeChatDarkDivider else WeChatLightDivider
-    val cardColor = if (isDarkTheme) WeChatDarkCard else WeChatLightCard
+    val colorScheme = MaterialTheme.colorScheme
+    val backgroundColor = colorScheme.background
+    val textPrimaryColor = colorScheme.onSurface
+    val dividerColor = colorScheme.outline
+    val cardColor = colorScheme.surfaceVariant
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
@@ -260,8 +253,8 @@ fun ThemeOptionCard(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF07C160).copy(alpha = 0.9f),
-                                Color(0xFF07C160).copy(alpha = 0.7f)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                             )
                         )
                     ),

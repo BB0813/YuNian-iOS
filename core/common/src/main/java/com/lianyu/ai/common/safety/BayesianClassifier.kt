@@ -227,12 +227,13 @@ class BayesianClassifier(
 
     // ============ 概率查询 ============
 
-    /** P(违规) 先验 */
+    /** P(违规) 先验 — 钳制上限0.3，防止被污染后先验膨胀导致误杀 */
     @Synchronized
     fun priorViolation(): Double {
         val total = sampleCountByClass[true]!! + sampleCountByClass[false]!!
         if (total == 0) return 0.5
-        return sampleCountByClass[true]!!.toDouble() / total
+        val raw = sampleCountByClass[true]!!.toDouble() / total
+        return raw.coerceAtMost(0.3)  // 先验上限0.3：正常用户违规比例不应超过30%
     }
 
     /** P(安全) 先验 */

@@ -55,11 +55,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.lianyu.ai.uicommon.R
 import com.lianyu.ai.uicommon.theme.BlushPink
-import com.lianyu.ai.uicommon.theme.DeepWarm
 import com.lianyu.ai.uicommon.theme.PetalPink
 import com.lianyu.ai.uicommon.theme.RoseDeep
 import com.lianyu.ai.uicommon.theme.RoseLight
-import com.lianyu.ai.uicommon.theme.RoseMedium
 import com.lianyu.ai.uicommon.theme.SoftRose
 import com.lianyu.ai.uicommon.theme.WarmGray
 import com.lianyu.ai.uicommon.theme.WarmGray40
@@ -89,7 +87,7 @@ fun UpdateDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
             shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8FA)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
         ) {
             Box {
@@ -161,7 +159,7 @@ fun UpdateDialog(
                         Icon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = stringResource(R.string.close),
-                            tint = WarmGray,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -218,10 +216,10 @@ fun UpdateDialog(
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .border(
                                 width = 1.dp,
-                                color = PetalPink.copy(alpha = 0.4f),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
                                 shape = RoundedCornerShape(16.dp)
                             )
                             .padding(16.dp)
@@ -233,7 +231,7 @@ fun UpdateDialog(
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp
                                 ),
-                                color = DeepWarm
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -242,7 +240,7 @@ fun UpdateDialog(
                                     fontSize = 13.sp,
                                     lineHeight = 20.sp
                                 ),
-                                color = WarmGray
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -304,21 +302,21 @@ fun UpdateDialog(
                                 .fillMaxWidth()
                                 .padding(horizontal = 24.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFFFEBEE))
+                                .background(MaterialTheme.colorScheme.errorContainer)
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.ErrorOutline,
                                 contentDescription = null,
-                                tint = Color(0xFFE53935),
+                                tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = stringResource(R.string.download_failed),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                color = Color(0xFFC62828)
+                                color = MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
                     }

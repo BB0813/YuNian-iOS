@@ -113,7 +113,11 @@ fun QuizScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFF5F5F5), Color(0xFFEEEEEE), Color(0xFFF5F5F5))
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.surface,
+                        MaterialTheme.colorScheme.background
+                    )
                 )
             )
     ) {
@@ -154,7 +158,7 @@ fun QuizScreen(
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = Color(0xFF5C6BC0),
-                trackColor = Color(0xFFE0E0E0)
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -193,7 +197,7 @@ fun QuizScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Text(
@@ -203,7 +207,7 @@ fun QuizScreen(
                         fontSize = 16.sp,
                         lineHeight = 24.sp
                     ),
-                    color = Color(0xFF212121)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
@@ -274,7 +278,7 @@ fun QuizScreen(
                         text = option,
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = Color(0xFF424242)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (showResult && index == currentQuestion.correctIndex) {
                         Icon(
@@ -370,7 +374,11 @@ fun QuizResultScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFF5F5F5), Color(0xFFEEEEEE), Color(0xFFF5F5F5))
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.surface,
+                        MaterialTheme.colorScheme.background
+                    )
                 )
             )
     ) {

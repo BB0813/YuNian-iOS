@@ -17,37 +17,37 @@ object CertificatePins {
     private const val CLOVE_BACKUP_PIN = "sha256/gjR+Zqma3Qv/1DhbeH/UpPoonupgZwYjN9zGOE/H7rY="
 
     // ── OpenAI ──
-    private const val OPENAI_PIN = "sha256/9LYV5mq0LcNGLO/QLoMxNs69wYMRKxkKWPSG3phd5s4="
+    private const val OPENAI_PIN = "sha256/9g+mtyVAhL3wQl0JVOKDKS5NZtYWty5pQuLjWkSlTCU="
 
     // ── Anthropic ──
-    private const val ANTHROPIC_PIN = "sha256/GQxBJn4g6qXKIxmWciScnMyQ0EOZXiJjMR7DgWhVuNk="
+    private const val ANTHROPIC_PIN = "sha256/LQfSFZEKft9yS7oIKOIO5Vu7Fj33L2H3SDN8/uADlWg="
 
     // ── DeepSeek ──
     private const val DEEPSEEK_PIN = "sha256/jD4HoReqi4yPTndb5/Ks7bDUycyp1uN11oii4qwracs="
 
     // ── Google / Gemini ──
-    private const val GEMINI_PIN = "sha256/9LYV5mq0LcNGLO/QLoMxNs69wYMRKxkKWPSG3phd5s4="
+    private const val GEMINI_PIN = "sha256/AGcONCXR6dr82pNjwrd5xoDQnWWv5j5jdkxyrxXgDro="
 
     // ── DashScope (Alibaba) ──
-    private const val DASHSCOPE_PIN = "sha256/nmIf6+o1f/RGC5G/iwtL/mVNLhAO28dHcOdlGdc0gw4="
+    private const val DASHSCOPE_PIN = "sha256/WZVJFj4+3elgfAAI/zW+L9mKCgh+6gck7f6zYoUC0Yg="
 
     // ── Moonshot / Kimi ──
     private const val KIMI_PIN = "sha256/kPjMPOLocq+5yBiG1tDVmTqsthmK8BKarCJvdXglzis="
 
     // ── OpenRouter ──
-    private const val OPENROUTER_PIN = "sha256/hMBfVBKy9jV8IsH9P500W5rALpklRJGgW1ibRlcNO6k="
+    private const val OPENROUTER_PIN = "sha256/SUYfKXVXd5065Ui4N6JcivgvHidyKergt1e4y1Lswhc="
 
     // ── Groq ──
-    private const val GROQ_PIN = "sha256/2d+R1d/l/Z5dMvMgPUHHhG1nGve6JUVgfEqt4kmxzYo="
+    private const val GROQ_PIN = "sha256/NSUwR6RBgH3a1fgXJYTEtVVUxeRgIIRwhID90KEv4Qc="
 
     // ── SiliconFlow ──
-    private const val SILICONFLOW_PIN = "sha256/vXB1qrsS4TN88P1SONUexEXmTcu7naD62k3xl+rdht8="
+    private const val SILICONFLOW_PIN = "sha256/NG2+7f12uitxN5No4ZUkVg9t4lq0JeMD89pxW+7EhiA="
 
     // ── Zhipu / BigModel ──
-    private const val ZHIPU_PIN = "sha256/tyW/LNnbjyel1+zlerg1728UiPpmYpVaDbGK6e+ySNI="
+    private const val ZHIPU_PIN = "sha256/efpviN4CHX6YeOqbLWsBTvnJqjULfZE/j9OAUrm/qH0="
 
     // ── Xiaomi MiMo ──
-    private const val XIAOMI_PIN = "sha256/9LYV5mq0LcNGLO/QLoMxNs69wYMRKxkKWPSG3phd5s4="
+    private const val XIAOMI_PIN = "sha256/H7ox+nLEX/IGOH8nZwl1Yzus/kqXmmbwXVvQA/lklRU="
 
     val certificatePinner: CertificatePinner = CertificatePinner.Builder()
         // Self-hosted

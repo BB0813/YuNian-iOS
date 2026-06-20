@@ -54,8 +54,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -101,6 +101,7 @@ import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.chat.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -126,17 +127,7 @@ import com.lianyu.ai.uicommon.component.getChatBackgroundByKey
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
-import com.lianyu.ai.uicommon.theme.AiBubbleBorderDark
-import com.lianyu.ai.uicommon.theme.AiBubbleBorderLight
-import com.lianyu.ai.uicommon.theme.AiBubbleDark
-import com.lianyu.ai.uicommon.theme.AiBubbleLight
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
-import com.lianyu.ai.uicommon.theme.UserBubbleColor
-import com.lianyu.ai.uicommon.theme.UserBubbleText
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.common.ReadStatusManager
 import com.lianyu.ai.common.HardwareInfo
@@ -282,7 +273,6 @@ fun ChatScreen(
     val reasoningText by viewModel.reasoningText.collectAsState()
     val availableApis by viewModel.availableApis.collectAsState()
     val currentApi by viewModel.currentApi.collectAsState()
-    val listState = rememberLazyListState()
     val keyboardController = LocalSoftwareKeyboardController.current
 
     val themeViewModel: ThemeViewModel = viewModel()
@@ -318,68 +308,76 @@ fun ChatScreen(
 
     var hasScrolledToBottom by remember { mutableStateOf(false) }
 
-        // 首次加载滚动到底部
-        LaunchedEffect(messages) {
-            if (messages.isNotEmpty() && !hasScrolledToBottom) {
-                listState.scrollToItem(messages.size - 1)
-                hasScrolledToBottom = true
-            }
+    // LazyColumn 实际 item 总数（与 LazyColumn 内部 item 声明保持一致）
+    val itemCount = messages.size +
+        (if (isLoadingMore) 1 else 0) +
+        (if (isTyping) 1 else 0) +
+        (if (isRegenerating) 1 else 0) +
+        (if (isReasoning && reasoningText.isNotBlank()) 1 else 0)
+
+    // 列表状态始终存在；空消息列表时不显示转圈，而是正常展示输入栏
+    val listState = remember { LazyListState() }
+
+    // 首次有消息时同步滚动到底部，避免首帧闪现顶部
+    LaunchedEffect(messages.isNotEmpty()) {
+        if (messages.isNotEmpty() && !hasScrolledToBottom) {
+            hasScrolledToBottom = true
+            listState.scrollToItem((messages.size - 1).coerceAtLeast(0))
         }
+    }
 
-        // 检查当前是否在底部附近
-        val isAtBottom = remember {
-            derivedStateOf {
-                val layoutInfo = listState.layoutInfo
-                val totalItems = layoutInfo.totalItemsCount
-                if (totalItems == 0) return@derivedStateOf true
-                val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()
-                lastVisible != null && lastVisible.index >= totalItems - 2
-            }
+    // 检查当前是否在底部附近
+    val isAtBottom = remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            if (totalItems == 0) return@derivedStateOf true
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()
+            lastVisible != null && lastVisible.index >= totalItems - 2
         }
+    }
 
-        val itemCount = messages.size +
-            (if (isLoadingMore) 1 else 0) +
-            (if (isTyping && typingText.isNotBlank()) 1 else 0) +
-            (if (isRegenerating) 1 else 0) +
-            (if (isReasoning && reasoningText.isNotBlank()) 1 else 0)
-
-        // 新消息或状态改变时：若之前已在底部或者是用户发送的消息，则滚到底部
-        LaunchedEffect(itemCount) {
-            if (itemCount == 0) return@LaunchedEffect
-            val lastMessage = messages.lastOrNull()
-            val isMyMessage = lastMessage?.isFromUser == true
-            if (isAtBottom.value || isMyMessage) {
-                val total = listState.layoutInfo.totalItemsCount
-                if (total > 0) {
-                    listState.scrollToItem(total - 1)
-                }
-            }
+    // 通过 snapshotFlow 追踪用户是否在底部附近，避免布局更新时序导致的误判
+    var wasAtBottom by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { isAtBottom.value }.collect { nearBottom ->
+            wasAtBottom = nearBottom
         }
+    }
 
-        // AI 流式回复时持续滚动到底部（typingText 变化但 itemCount 不变）
-        LaunchedEffect(typingText) {
-            if (typingText.isNotBlank() && isAtBottom.value) {
-                val total = listState.layoutInfo.totalItemsCount
-                if (total > 0) {
-                    listState.scrollToItem(total - 1)
-                }
-            }
+    // 新消息时自动滚动到底部：用户消息始终滚动，AI 消息仅在用户位于底部时滚动
+    val lastMessageId = messages.lastOrNull()?.id
+    LaunchedEffect(lastMessageId) {
+        if (messages.isEmpty()) return@LaunchedEffect
+        val lastMessage = messages.lastOrNull()
+        val isMyMessage = lastMessage?.isFromUser == true
+        if (wasAtBottom || isMyMessage) {
+            val currentItemCount = messages.size +
+                (if (isLoadingMore) 1 else 0) +
+                (if (isTyping) 1 else 0) +
+                (if (isRegenerating) 1 else 0) +
+                (if (isReasoning && reasoningText.isNotBlank()) 1 else 0)
+            listState.scrollToItem((currentItemCount - 1).coerceAtLeast(0))
         }
+    }
 
-        // AI 深度推理时持续滚动到底部（reasoningText 变化但 itemCount 不变）
-        LaunchedEffect(reasoningText) {
-            if (reasoningText.isNotBlank() && isAtBottom.value) {
-                val total = listState.layoutInfo.totalItemsCount
-                if (total > 0) {
-                    listState.scrollToItem(total - 1)
-                }
-            }
+    // AI 流式回复时持续滚动到底部（typingText 变化但消息数不变）
+    LaunchedEffect(typingText) {
+        if (typingText.isNotBlank() && wasAtBottom) {
+            listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
         }
+    }
 
-    // Keyboard-open → scroll to bottom (same logic as new-message scroll at L354)
+    // AI 深度推理时持续滚动到底部（reasoningText 变化但消息数不变）
+    LaunchedEffect(reasoningText) {
+        if (reasoningText.isNotBlank() && wasAtBottom) {
+            listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
+        }
+    }
+
+    // 键盘弹出时滚动到底部
     LaunchedEffect(WindowInsets.ime.getBottom(LocalDensity.current)) {
-        val total = listState.layoutInfo.totalItemsCount
-        if (total > 0) listState.scrollToItem(total - 1)
+        if (itemCount > 0) listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
     }
 
     // ── 上划加载历史消息 ──
@@ -387,6 +385,8 @@ fun ChatScreen(
     var isLoadingMoreTriggered by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState.firstVisibleItemIndex, hasMoreMessages) {
+        // 首次进入时列表可能尚未滚动到底，避免此时误触发加载历史
+        if (!hasScrolledToBottom) return@LaunchedEffect
         if (listState.firstVisibleItemIndex <= 2 && hasMoreMessages && !isLoadingMore && !isLoadingMoreTriggered) {
             isLoadingMoreTriggered = true
             prevMessageCount = messages.size
@@ -398,14 +398,15 @@ fun ChatScreen(
     LaunchedEffect(isLoadingMore, prevMessageCount) {
         if (!isLoadingMore && prevMessageCount > 0 && messages.size > prevMessageCount) {
             val addedCount = messages.size - prevMessageCount
-            listState.scrollToItem(addedCount, scrollOffset = 0)
+            listState.scrollToItem(addedCount.coerceAtLeast(0), scrollOffset = 0)
             prevMessageCount = 0
             isLoadingMoreTriggered = false
         }
     }
 
     // Background: per-companion > global > default
-    var targetBgColor by remember { mutableStateOf(if (isDarkTheme) WeChatDarkBackground else WeChatLightBackground) }
+    val defaultBackground = MaterialTheme.colorScheme.background
+    var targetBgColor by remember { mutableStateOf(defaultBackground) }
     var chatBgGradient by remember { mutableStateOf<Brush?>(null) }
     var isCustomBg by remember { mutableStateOf(false) }
     var customBgKey by remember { mutableStateOf("") }
@@ -423,7 +424,7 @@ fun ChatScreen(
             val (color, gradient) = if (isCustomBackground(effectiveKey)) {
                 Color.Transparent to null
             } else {
-                getChatBackgroundByKey(context, effectiveKey)
+                getChatBackgroundByKey(context, effectiveKey, isDarkTheme)
             }
             val custom = isCustomBackground(effectiveKey)
             withContext(Dispatchers.Main) {
@@ -437,9 +438,9 @@ fun ChatScreen(
 
     val chatBgColor by animateColorAsState(targetBgColor, tween(300), label = "bgColor")
     val backgroundColor = if (isDarkTheme && !isCustomBg) {
-        WeChatDarkBackground
+        MaterialTheme.colorScheme.background
     } else if (isDarkTheme && isCustomBg) {
-        Color(0xFF1A1A1E)
+        MaterialTheme.colorScheme.background
     } else {
         chatBgColor
     }
@@ -506,95 +507,93 @@ fun ChatScreen(
         ) {
             // Messages list - takes full space, top bar is overlay
             LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .nestedScroll(rememberHorizontalSwipeGuard())
-                        .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
-                    contentPadding = PaddingValues(
-                        start = adaptiveSizing.listHorizontalPadding, end = adaptiveSizing.listHorizontalPadding,
-                        top = 120.dp,
-                        bottom = 8.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // 顶部加载指示器
-                    if (isLoadingMore) {
-                        item(key = "load_more_indicator") {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                                contentAlignment = Alignment.Center
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .nestedScroll(rememberHorizontalSwipeGuard())
+                    .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
+                contentPadding = PaddingValues(
+                    start = adaptiveSizing.listHorizontalPadding, end = adaptiveSizing.listHorizontalPadding,
+                    top = 120.dp,
+                    bottom = 8.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // 顶部加载指示器
+                if (isLoadingMore) {
+                    item(key = "load_more_indicator") {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp,
-                                        color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888)
-                                    )
-                                    Text(
-                                        "加载更早的消息...",
-                                        fontSize = 12.sp,
-                                        color = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF888888)
-                                    )
-                                }
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "加载更早的消息...",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
-                    items(
-                        items = messages,
-                        key = { it.id }
-                    ) { message ->
-                        if (message.id > 0 && message.id % 5 == 0L) {
-                            android.util.Log.w("ChatScreen", "[ChatScreen] rendering message id=${message.id} content='${message.content.take(20)}'")
-                        }
-                        ChatBubble(
-                            message = message,
+                }
+                items(
+                    items = messages,
+                    key = { it.id }
+                ) { message ->
+                    if (message.id > 0 && message.id % 5 == 0L) {
+                        android.util.Log.w("ChatScreen", "[ChatScreen] rendering message id=${message.id} content='${message.content.take(20)}'")
+                    }
+                    ChatBubble(
+                        message = message,
+                        companionData = companionData,
+                        isUser = message.isFromUser,
+                        userAvatar = userAvatar,
+                        userName = userName,
+                        onVoiceClick = { /* TODO: play voice message */ },
+                        onRecall = { msg -> viewModel.recallMessage(msg) },
+                        onRegenerate = { msg -> viewModel.regenerateMessage(msg) },
+                        adaptiveSizing = adaptiveSizing,
+                        isDarkTheme = isDarkTheme
+                    )
+                }
+
+                if (isTyping) {
+                    item(key = "typing_indicator") {
+                        TypingIndicatorBubble(
                             companionData = companionData,
-                            isUser = message.isFromUser,
-                            userAvatar = userAvatar,
-                            userName = userName,
-                            isDarkTheme = isDarkTheme,
-                            onVoiceClick = { /* TODO: play voice message */ },
-                            onRecall = { msg -> viewModel.recallMessage(msg) },
-                            onRegenerate = { msg -> viewModel.regenerateMessage(msg) },
+                            typingText = typingText,
+                            adaptiveSizing = adaptiveSizing,
+                            isDarkTheme = isDarkTheme
+                        )
+                    }
+                }
+
+                if (isRegenerating) {
+                    item(key = "regenerating_indicator") {
+                        RegeneratingBubble(
+                            companionData = companionData,
                             adaptiveSizing = adaptiveSizing
                         )
                     }
+                }
 
-                    if (isTyping) {
-                        item(key = "typing_indicator") {
-                            TypingIndicatorBubble(
-                                companionData = companionData,
-                                typingText = typingText,
-                                isDarkTheme = isDarkTheme,
-                                adaptiveSizing = adaptiveSizing
-                            )
-                        }
+                if (isReasoning && reasoningText.isNotBlank()) {
+                    item(key = "reasoning_indicator") {
+                        ReasoningBubble(
+                            reasoningText = reasoningText,
+                            adaptiveSizing = adaptiveSizing
+                        )
                     }
-
-                    if (isRegenerating) {
-                        item(key = "regenerating_indicator") {
-                            RegeneratingBubble(
-                                companionData = companionData,
-                                isDarkTheme = isDarkTheme,
-                                adaptiveSizing = adaptiveSizing
-                            )
-                        }
-                    }
-
-                    if (isReasoning && reasoningText.isNotBlank()) {
-                        item(key = "reasoning_indicator") {
-                            ReasoningBubble(
-                                reasoningText = reasoningText,
-                                isDarkTheme = isDarkTheme,
-                                adaptiveSizing = adaptiveSizing
-                            )
-                        }
-                    }
+                }
             }
 
             // Bottom panels and input
@@ -606,7 +605,6 @@ fun ChatScreen(
                 // Sticker panel
                 StickerPanel(
                     isVisible = showStickerPanel,
-                    isDarkTheme = isDarkTheme,
                     onStickerClick = { sticker ->
                         viewModel.sendSticker(sticker)
                         showStickerPanel = false
@@ -630,7 +628,6 @@ fun ChatScreen(
                 // Extension panel
                 ChatInputExtensionPanel(
                     isVisible = showExtensionPanel,
-                    isDarkTheme = isDarkTheme,
                     availableApis = availableApis,
                     currentApi = currentApi,
                     onSwitchApi = { provider -> viewModel.switchApi(provider) },
@@ -660,14 +657,14 @@ fun ChatScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                             .clip(RoundedCornerShape(28.dp))
-                            .background(if (isDarkTheme) Color(0xFF241B20).copy(alpha = 0.95f) else Color(0xFFFFFFFF).copy(alpha = 0.95f))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "你已拉黑该联系人",
                             fontSize = 14.sp,
-                            color = Color(0xFFFF3B30),
+                            color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -677,7 +674,7 @@ fun ChatScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                             .clip(RoundedCornerShape(28.dp))
-                            .background(if (isDarkTheme) Color(0xFF241B20).copy(alpha = 0.95f) else Color(0xFFFFFFFF).copy(alpha = 0.95f))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         WeChatChatInputBar(
@@ -686,7 +683,6 @@ fun ChatScreen(
                                 viewModel.sendMessage(msg)
                             },
                             isLoading = isLoading,
-                            isDarkTheme = isDarkTheme,
                             availableApis = availableApis,
                             currentApi = currentApi,
                             onSwitchApi = { provider ->
@@ -728,7 +724,7 @@ fun ChatScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.5f))
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
                     .clickable { },
                 contentAlignment = Alignment.Center
             ) {
@@ -739,19 +735,19 @@ fun ChatScreen(
                     Text(
                         text = "录音中...",
                         fontSize = 18.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "${recordingDuration}s",
                         fontSize = 48.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "点击按钮操作",
                         fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.6f)
+                        color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.6f)
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -760,7 +756,7 @@ fun ChatScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF34C759))
+                                .background(MaterialTheme.colorScheme.primary)
                                 .clickable {
                                     val audioPath = voiceRecorder.stop()
                                     isRecording = false
@@ -773,14 +769,14 @@ fun ChatScreen(
                         ) {
                             Text(
                                 text = "发送",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onPrimary,
                                 fontSize = 14.sp
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFFF3B30))
+                                .background(MaterialTheme.colorScheme.error)
                                 .clickable {
                                     voiceRecorder.cancel()
                                     isRecording = false
@@ -790,7 +786,7 @@ fun ChatScreen(
                         ) {
                             Text(
                                 text = "取消",
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onError,
                                 fontSize = 14.sp
                             )
                         }
@@ -812,7 +808,7 @@ fun ChatScreen(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(28.dp))
-                    .background(if (isDarkTheme) Color(0xFF2D2228).copy(alpha = 0.85f) else Color(0xFFFFFFFF).copy(alpha = 0.85f))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -824,7 +820,7 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.send),
-                        tint = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -848,7 +844,7 @@ fun ChatScreen(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(10.dp),
                                     strokeWidth = 1.5.dp,
-                                    color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     text = stringResource(R.string.typing),
@@ -856,7 +852,7 @@ fun ChatScreen(
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 14.sp
                                     ),
-                                    color = if (isDarkTheme) Color(0xFF8A727C) else Color(0xFF888888)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         } else {
@@ -864,17 +860,19 @@ fun ChatScreen(
                                 CompanionAvatar(
                                     avatarUrl = companionData?.avatarUrl,
                                     name = companionData?.name,
-                                    size = 24.dp,
-                                    isDarkTheme = isDarkTheme
+                                    size = 24.dp
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = companionData?.name ?: "",
+                                    modifier = Modifier.weight(1f, fill = false),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 15.sp
                                     ),
-                                    color = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 // AI生成标识
@@ -882,25 +880,33 @@ fun ChatScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(
-                                            if (isDarkTheme) Color(0xFF34C759).copy(alpha = 0.2f)
-                                            else Color(0xFF34C759).copy(alpha = 0.12f)
+                                            MaterialTheme.colorScheme.primary.copy(
+                                                alpha = if (isDarkTheme) 0.2f else 0.12f
+                                            )
                                         )
                                         .padding(horizontal = 5.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = "AI生成仅供参考",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF34C759)
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Outlined.Info,
-                                    contentDescription = "详情",
-                                    modifier = Modifier.size(20.dp).clickable { onNavigateToDetail(companionId) },
-                                    tint = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-                                )
+                                IconButton(
+                                    onClick = { onNavigateToDetail(companionId) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Info,
+                                        contentDescription = "详情",
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
@@ -914,7 +920,7 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.Filled.Call,
                         contentDescription = "语音通话",
-                        tint = if (isDarkTheme) Color(0xFF34C759) else Color(0xFF34C759),
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -922,4 +928,3 @@ fun ChatScreen(
         }
     }
 }
-

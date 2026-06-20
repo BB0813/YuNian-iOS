@@ -44,16 +44,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
-import com.lianyu.ai.uicommon.theme.WeChatLightBackground
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextSecondary
-import androidx.compose.foundation.isSystemInDarkTheme
 import com.lianyu.ai.feature.profile.R
 
 data class TeamMember(
@@ -121,17 +111,7 @@ val teamMembers = listOf(
 fun TeamScreen(
     onNavigateBack: () -> Unit
 ) {
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDark = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val backgroundColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDark) WeChatDarkCard else Color.White
-    val textPrimary = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val textSecondary = if (isDark) WeChatDarkTextSecondary else WeChatLightTextSecondary
+    val colorScheme = MaterialTheme.colorScheme
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -145,7 +125,7 @@ fun TeamScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(cardColor, shape = RoundedCornerShape(20.dp))
+                        .background(colorScheme.surfaceVariant, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -157,7 +137,7 @@ fun TeamScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back),
-                            tint = textPrimary,
+                            tint = colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -168,7 +148,7 @@ fun TeamScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         ),
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
 
                     Spacer(modifier = Modifier.width(32.dp))
@@ -179,7 +159,7 @@ fun TeamScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .background(colorScheme.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -191,7 +171,7 @@ fun TeamScreen(
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 14.sp
                 ),
-                color = textSecondary,
+                color = colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
 
@@ -200,9 +180,6 @@ fun TeamScreen(
             teamMembers.forEachIndexed { index, member ->
                 TeamMemberCard(
                     member = member,
-                    isDark = isDark,
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
                     delayIndex = index
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -216,7 +193,7 @@ fun TeamScreen(
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center
                 ),
-                color = textSecondary.copy(alpha = 0.6f),
+                color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
 
@@ -228,17 +205,14 @@ fun TeamScreen(
 @Composable
 fun TeamMemberCard(
     member: TeamMember,
-    isDark: Boolean,
-    textPrimary: Color,
-    textSecondary: Color,
     delayIndex: Int
 ) {
-    val cardColor = if (isDark) WeChatDarkCard else Color.White
+    val colorScheme = MaterialTheme.colorScheme
     Column(
         modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .background(cardColor, shape = RoundedCornerShape(16.dp))
+                .background(colorScheme.surfaceVariant, shape = RoundedCornerShape(16.dp))
                 .padding(20.dp)
     ) {
         Row(
@@ -279,7 +253,7 @@ fun TeamMemberCard(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     ),
-                    color = textPrimary
+                    color = colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
@@ -300,7 +274,7 @@ fun TeamMemberCard(
                 fontSize = 13.sp,
                 lineHeight = 20.sp
             ),
-            color = textSecondary
+            color = colorScheme.onSurfaceVariant
         )
     }
 }

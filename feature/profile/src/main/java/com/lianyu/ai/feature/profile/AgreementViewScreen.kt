@@ -1,9 +1,6 @@
 package com.lianyu.ai.feature.profile
 
 import androidx.compose.foundation.background
-import com.lianyu.ai.uicommon.theme.ThemeViewModel
-import com.lianyu.ai.uicommon.theme.ThemeMode
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,24 +39,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.uicommon.theme.WeChatDarkCard
-import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
-import com.lianyu.ai.uicommon.theme.WeChatLightTextPrimary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgreementViewScreen(
     onNavigateBack: () -> Unit
 ) {
-    val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
-    val isDarkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val cardColor = if (isDarkTheme) WeChatDarkCard else Color.White
+    val colorScheme = MaterialTheme.colorScheme
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -73,7 +59,7 @@ fun AgreementViewScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(cardColor, shape = RoundedCornerShape(20.dp))
+                        .background(colorScheme.surfaceVariant, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -85,7 +71,7 @@ fun AgreementViewScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back),
-                            tint = textPrimary,
+                            tint = colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -96,7 +82,7 @@ fun AgreementViewScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         ),
-                        color = textPrimary
+                        color = colorScheme.onSurface
                     )
 
                     Spacer(modifier = Modifier.width(32.dp))
@@ -115,7 +101,7 @@ fun AgreementViewScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(16.dp)
             ) {
                 Column {

@@ -14,6 +14,9 @@ interface ChatGroupDao {
     @Query("SELECT * FROM chat_groups ORDER BY updatedAt DESC")
     fun getAllGroups(): Flow<List<ChatGroup>>
 
+    @Query("SELECT * FROM chat_groups ORDER BY updatedAt DESC")
+    suspend fun getAllGroupsSync(): List<ChatGroup>
+
     @Query("SELECT * FROM chat_groups WHERE id = :id")
     suspend fun getGroupById(id: Long): ChatGroup?
 

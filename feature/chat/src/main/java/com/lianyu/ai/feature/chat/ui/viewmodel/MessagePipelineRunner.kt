@@ -82,6 +82,11 @@ class MessagePipelineRunner(
             _queueDepth.value = maxOf(0, _queueDepth.value - 1)
             true
 
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // [CRITICAL] 必须重新抛出 CancellationException，否则 withTimeoutOrNull 失效
+            // 吞掉 CancellationException 会导致外层 withTimeoutOrNull 无法正确返回 null
+            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+            throw e
         } catch (e: Throwable) {
             SecureLog.e("MessagePipeline", "[${_pipelineState.value.stage}] 失败", e)
             System.err.println("[MessagePipeline] error at stage=${_pipelineState.value.stage}: ${e.javaClass.simpleName}: ${e.message}")
