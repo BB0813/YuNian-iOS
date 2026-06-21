@@ -56,5 +56,5 @@ LOCAL_CPPFLAGS := -Os -fvisibility=hidden -fdata-sections -ffunction-sections
 LOCAL_CPPFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
 LOCAL_LDLIBS := -llog
 LOCAL_CPP_FEATURES := exceptions rtti
-LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script-shell.map -Wl,--gc-sections
+LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script-shell.map -Wl,--gc-sections -Wl,-u,JNI_OnLoad
 include $(BUILD_SHARED_LIBRARY)

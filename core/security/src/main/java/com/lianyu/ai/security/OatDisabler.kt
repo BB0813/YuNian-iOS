@@ -22,7 +22,10 @@ object OatDisabler {
             val sp = Class.forName("android.os.SystemProperties")
             sp.getMethod("set", String::class.java, String::class.java)
                 .invoke(null, "dalvik.vm.dex2oat-filter", "interpret-only")
-        } catch (_: Exception) { }
+        } catch (_: Exception) {
+            // OAT disable failed — ART may compile DEX. Non-fatal but logged.
+            android.util.Log.w("OatDisabler", "Failed to disable dex2oat compilation")
+        }
 
         // 2. Delete existing compile artifacts
         deleteOatFiles(context)

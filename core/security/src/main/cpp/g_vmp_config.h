@@ -36,4 +36,48 @@
 #define VMP_SHELL_DEX_LOADER     "ceAPV7xKK1YDE"
 #define VMP_SHELL_REAL_APP_CLASS "_pg9fWGG63DU7"
 
+
+// ── Per-build VMP opcode mapping (randomized per APK) ──
+// Seed: 0xAAF0BF89
+
+// ── Per-build VMP opcode mapping (randomized per APK) ──
+// Seed: 0xAAF0BF89
+
+// ── Per-build VMP opcode mapping (randomized per APK) ──
+// Seed: 0xAAF0BF89
+
+// ── Per-build VMP opcode mapping (randomized per APK) ──
+// Seed: 0xAAF0BF89
+#define VMP_OP_ADD 0x29
+#define VMP_OP_ADD_IMM 0xC5
+#define VMP_OP_AND 0xBB
+#define VMP_OP_CALL 0x09
+#define VMP_OP_CMP 0x25
+#define VMP_OP_CMP_IMM 0x5E
+#define VMP_OP_GFMUL 0x85
+#define VMP_OP_HALT 0xFF
+#define VMP_OP_HYPERCALL 0xA2
+#define VMP_OP_JE 0x0C
+#define VMP_OP_JG 0xBA
+#define VMP_OP_JGE 0x53
+#define VMP_OP_JL 0xE4
+#define VMP_OP_JMP 0xBE
+#define VMP_OP_JNE 0xD8
+#define VMP_OP_LOAD_IMM 0xBD
+#define VMP_OP_LOAD_MEM 0xCC
+#define VMP_OP_LOAD_REG 0x6B
+#define VMP_OP_MUL 0xAD
+#define VMP_OP_MUL_IMM 0xC3
+#define VMP_OP_NOP 0x78
+#define VMP_OP_OR 0x9C
+#define VMP_OP_RET 0xF9
+#define VMP_OP_SBOX 0xF7
+#define VMP_OP_SHL 0xC4
+#define VMP_OP_SHR 0xD0
+#define VMP_OP_STORE_MEM 0x20
+#define VMP_OP_STORE_REG 0x97
+#define VMP_OP_SUB 0x86
+#define VMP_OP_XOR 0x47
+#define VMP_OP_XTIME 0x7D
+
 #endif // LIANYU_VMP_CONFIG_H

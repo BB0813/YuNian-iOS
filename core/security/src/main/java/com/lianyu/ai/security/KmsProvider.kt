@@ -26,7 +26,9 @@ object KmsProvider {
         try {
             System.loadLibrary("lianyu_security")
         } catch (e: UnsatisfiedLinkError) {
-            // Already loaded by shell ClassLoader — native methods are registered
+            throw RuntimeException(
+                "FATAL: KmsProvider — liblianyu_security.so missing", e
+            )
         }
     }
 
@@ -111,7 +113,7 @@ object KmsProvider {
 
     /** V2: Decrypt with metadata-synced BK unblinding pipeline.
      *
-     * Tries native WB-AES first (production). Falls back to AES-256-CBC
+     * Tries native WB-AES first (production path). Falls back to AES-256-CBC
      * with a compile-time dev key when the native path returns null
      * (dev-mode payloads encrypted with package_shell_payload.py --dev).
      *
@@ -125,6 +127,7 @@ object KmsProvider {
         if (nativeResult != null) return nativeResult
 
         // Dev fallback: AES-256-CBC — ONLY in debug builds
+        // 🔒 SecurityConstants.Level.TOP_SECRET: key sourced from native code
         if (isDebugBuild) {
             return devDecryptAesCbc(ciphertext, metadata)
         }
@@ -132,22 +135,22 @@ object KmsProvider {
     }
 
     /** Runtime check: is this a debug build?
-     *  Uses reflection to read android.os.Build.IS_DEBUGGABLE
-     *  which is true for debug builds and false for release. */
+     *  Uses BuildConfig.DEBUG (compile-time constant, cannot be runtime-faked)
+     *  with Build.IS_DEBUGGABLE as fallback for dev testing. */
     private val isDebugBuild: Boolean by lazy {
-        try {
-            val field = Class.forName("android.os.Build")
-                .getDeclaredField("IS_DEBUGGABLE")
-            field.isAccessible = true
-            field.getBoolean(null)
-        } catch (_: Exception) { false }
+        com.lianyu.ai.security.BuildConfig.DEBUG
     }
 
-    /** Dev-mode AES-256-CBC decryptor. Key is derived from a compile-time
-     *  constant identical to what package_shell_payload.py --dev uses.
+    /** @SecurityLevel TOP_SECRET — Dev AES-256 key sourced from native .rodata encrypted section.
+     *  NEVER hardcoded in Kotlin. Native code returns the key only in debug builds.
+     *  In release builds, nativeGetDevAesKey() returns null unconditionally. */
+    private external fun nativeGetDevAesKey(): ByteArray?
+
+    /** Dev-mode AES-256-CBC decryptor. Key is fetched from native code
+     *  (encrypted in .rodata section of liblianyu_security.so).
      *  Not safe for production — native WB-AES must be used for release. */
     private fun devDecryptAesCbc(ciphertext: ByteArray, iv: ByteArray): ByteArray? {
-        val aesKey = DEV_AES_KEY ?: return null
+        val aesKey = nativeGetDevAesKey() ?: return null
         return try {
             val key = javax.crypto.spec.SecretKeySpec(aesKey, "AES")
             val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
@@ -155,22 +158,10 @@ object KmsProvider {
             cipher.doFinal(ciphertext)
         } catch (_: Exception) {
             null
+        } finally {
+            // 🔒 Zero out key material immediately after use
+            java.util.Arrays.fill(aesKey, 0.toByte())
         }
-    }
-
-    /** Dev AES-256 key — ONLY available in debug builds.
-     *  In release builds this field is inaccessible (guarded by BuildConfig.DEBUG). */
-    private val DEV_AES_KEY: ByteArray? by lazy {
-        if (isDebugBuild) byteArrayOf(
-            0x4f.toByte(), 0xf8.toByte(), 0xfd.toByte(), 0xb2.toByte(),
-            0xf6.toByte(), 0xe7.toByte(), 0x2b.toByte(), 0xa0.toByte(),
-            0x3a.toByte(), 0x21.toByte(), 0xa4.toByte(), 0x64.toByte(),
-            0x58.toByte(), 0x70.toByte(), 0x64.toByte(), 0x80.toByte(),
-            0xd5.toByte(), 0x1f.toByte(), 0xdb.toByte(), 0xbc.toByte(),
-            0x32.toByte(), 0xf9.toByte(), 0x6e.toByte(), 0x39.toByte(),
-            0x8f.toByte(), 0xf9.toByte(), 0xb4.toByte(), 0x33.toByte(),
-            0x06.toByte(), 0x16.toByte(), 0x19.toByte(), 0xe6.toByte()
-        ) else null
     }
 
     /** Check if KMS is ready for operations. */

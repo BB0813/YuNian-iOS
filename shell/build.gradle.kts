@@ -1,3 +1,5 @@
+// Shell module — build with plain Kotlin (JVM target)
+// Not an Android library; used only for class structure reference.
 plugins {
     kotlin("jvm")
 }
@@ -7,5 +9,5 @@ kotlin {
 }
 
 dependencies {
-    compileOnly(files("${System.getenv("ANDROID_HOME") ?: "C:/Users/27194/AppData/Local/Android/Sdk"}/platforms/android-35/android.jar"))
+    implementation(kotlin("stdlib"))
 }

@@ -10,6 +10,10 @@
 -classobfuscationdictionary proguard-dictionary.txt
 -packageobfuscationdictionary proguard-dictionary.txt
 
+# Prevent -repackageclasses from moving Dex2C-whitelisted classes out of
+# com.lianyu.ai.security — transpiler matches by FQN (com.lianyu.ai.security.KmsProvider.decryptWithMetadata)
+-keeppackagenames com.lianyu.ai.security
+
 # Kotlin metadata: R8 must be able to parse these for correct optimization
 -keep class kotlin.Metadata { *; }
 -dontwarn kotlin.metadata.**
@@ -32,38 +36,61 @@
 -keep class com.lianyu.ai.security.SecurityGuard { *; }
 
 # P2-15: 阻止 R8 内联 Dex2C 白名单方法，确保转译器能找到字节码
-# 以下方法必须保留完整 DEX body 供 tools/dex2c_transpile.py 转译
+# 使用 <methods> 匹配所有方法（ProGuard 不支持 *** 通配符）
 -keepclassmembers class com.lianyu.ai.security.KmsProvider {
-    *** decryptWithMetadata(...);
-    *** encryptWithMetadata(...);
-    *** decryptWithSession(...);
-    *** encryptWithSession(...);
+    <methods>;
 }
 -keepclassmembers class com.lianyu.ai.security.SecurityOrchestrator {
-    *** encrypt(...);
-    *** decrypt(...);
+    <methods>;
 }
 -keepclassmembers class com.lianyu.ai.security.Sm4Cipher {
-    *** encrypt(...);
-    *** decrypt(...);
-    *** encryptWithMetadata(...);
-    *** decryptWithMetadata(...);
+    <methods>;
 }
 -keepclassmembers class com.lianyu.ai.security.CompositeVmpRuntime {
-    *** verifyApkSignature(...);
-    *** verifyBeforePayload(...);
-    *** decryptPayload(...);
+    <methods>;
 }
 -keepclassmembers class com.lianyu.ai.security.SecurityGuard {
-    *** isSafe(...);
-    *** performFullCheck(...);
+    <methods>;
+}
+-keepclassmembers class com.lianyu.ai.security.VmpDex2cDispatcher {
+    <methods>;
 }
 
 # Strip Android logging in release builds.
-# EXCEPTION: SecureLog.scritical() uses System.err.println instead — keep the class intact.
+# EXCEPTION: SecureLog.critical() uses Log.wtf — keep the class intact.
 -keep class com.lianyu.ai.common.SecureLog { *; }
 -keep class com.lianyu.ai.common.RemoteKeyProvider { *; }
 -keep class com.lianyu.ai.network.CertificatePins { *; }
+
+# 🔒 ServiceRegistry: reflection-based register()/get() — must survive obfuscation
+-keep class com.lianyu.ai.domain.ServiceRegistry { *; }
+-keepclassmembers class com.lianyu.ai.domain.ServiceRegistry {
+    public static <methods>;
+}
+
+# 🔒 feature:notification: CompanionKeepAliveService + BootReceiver declared in AndroidManifest
+-keep class com.lianyu.ai.feature.notification.** { *; }
+
+# 🔒 Push: PushManager imported in LianYuApplication, routes to vendor Push SDKs
+-keep class com.lianyu.ai.push.PushManager { *; }
+
+# kotlinx.serialization: preserve serializers for reflection-based adapter lookup
+-keepattributes *Annotation*, InnerClasses, EnclosingMethod
+-dontnote kotlinx.serialization.AnnotationsKt
+-keepclassmembers class kotlinx.serialization.json.** {
+    *** Companion;
+}
+-keepclasseswithmembers class kotlinx.serialization.json.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,includedescriptorclasses class com.lianyu.ai.**$$serializer { *; }
+-keepclassmembers class com.lianyu.ai.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.lianyu.ai.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);

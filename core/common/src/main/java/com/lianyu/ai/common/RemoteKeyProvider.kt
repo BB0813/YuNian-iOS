@@ -27,29 +27,11 @@ object RemoteKeyProvider {
     private const val KEY_RANDOM_MODEL = "random_model"
     private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_SESSION_KEY = "session_key"
-    // 服务端地址经多层 XOR 编码 + 交错拆分，防止逆向直接提取域名
-    private val _urlPart1 = byteArrayOf(
-        0x32, 0x2A, 0x75, 0x33, 0x23, 0x39, 0x2E
-    )
-    private val _urlPart2 = byteArrayOf(
-        0x2E, 0x29, 0x75, 0x3B, 0x2F, 0x32
-    )
-    private val _urlPart3 = byteArrayOf(
-        0x2E, 0x60, 0x36, 0x34, 0x74, 0x3B
-    )
-    private val SERVER_URL: String by lazy {
-        val total = _urlPart1.size + _urlPart2.size + _urlPart3.size
-        val combined = ByteArray(total)
-        var i1 = 0; var i2 = 0; var i3 = 0
-        for (i in 0 until total) {
-            combined[i] = when (i % 3) {
-                0 -> _urlPart1[i1++]
-                1 -> _urlPart2[i2++]
-                else -> _urlPart3[i3++]
-            }
-        }
-        String(ByteArray(total) { (combined[it].toInt() xor 0x5A).toByte() })
-    }
+    // Server URL set at app init — no hardcoded default
+    @Volatile
+    var serverUrl: String = ""
+
+    private fun resolveServerUrl(): String = serverUrl
     private const val HANDSHAKE_PATH = "/api/auth/handshake"
     private const val KEYS_FETCH_PATH = "/api/keys/fetch"
     private const val CACHE_TTL_MS = 6 * 60 * 60 * 1000L
@@ -185,7 +167,7 @@ object RemoteKeyProvider {
         // Step 1: Handshake to get token and sessionKey
         val clientId = getClientId(ctx)
         val handshakeJson = JSONObject().apply { put("clientId", clientId) }
-        val handshakeUrl = URL("$SERVER_URL$HANDSHAKE_PATH")
+        val handshakeUrl = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
 
         SecureLog.d("RemoteKeyProvider", "Handshake POST $HANDSHAKE_PATH")
         val handshakeResp = httpPost(handshakeUrl, handshakeJson.toString())
@@ -203,7 +185,7 @@ object RemoteKeyProvider {
 
         // Step 2: Fetch encrypted keys
         val fetchJson = JSONObject().apply { put("token", token) }
-        val fetchUrl = URL("$SERVER_URL$KEYS_FETCH_PATH")
+        val fetchUrl = URL("${resolveServerUrl()}$KEYS_FETCH_PATH")
 
         SecureLog.d("RemoteKeyProvider", "Fetch keys POST $KEYS_FETCH_PATH")
         val fetchResp = httpPost(fetchUrl, fetchJson.toString())
@@ -274,9 +256,17 @@ object RemoteKeyProvider {
         return keys
     }
 
-    private fun decryptAesGcm(data: String, keyHex: String, ivHex: String, tagHex: String): String? {
+    private fun decryptAesGcm(data: String, sessionKeyHex: String, ivHex: String, tagHex: String): String? {
         return try {
-            val keyBytes = keyHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray().copyOf(32)
+            // PBKDF2-SHA256 key derivation (not raw sessionKey)
+            val rawKey = sessionKeyHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            val factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val salt = "lianyu_suflow_v3".toByteArray()
+            val spec = javax.crypto.spec.PBEKeySpec(
+                String(rawKey).toCharArray(), salt, 100000, 256
+            )
+            val keyBytes = factory.generateSecret(spec).encoded.copyOf(32)
+
             val ivBytes = ivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
             val tagBytes = tagHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
             val cipherText = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
@@ -492,12 +482,6 @@ object RemoteKeyProvider {
         val file = File(context.filesDir, KEY_CACHE_FILE)
         file.delete()
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
-    }
-
-    fun injectFallbackKeys(context: Context, keys: List<String>) {
-        saveLocalKeys(context.applicationContext, keys)
-        cachedKeys = keys
-        updateFetchTime(context.applicationContext)
     }
 
     private fun getAppVersion(context: Context): String {

@@ -268,7 +268,10 @@ object SecurityGuard {
             // Too few sensors (< 5) is suspicious for a modern phone
             if (sensors.size < 5) return true
             false
-        } catch (_: Exception) { false }
+        } catch (_: Exception) {
+            // fail-closed: cannot verify → assume emulator
+            return true
+        }
     }
 
     fun isXposedDetected(): Boolean {
@@ -452,6 +455,9 @@ object SecurityGuard {
      *
      * Uses android.content.pm.PackageManager directly to retrieve signing
      * certificates and compares SHA-256 against the expected value.
+     *
+     * 🔒 SecurityConstants.Level.TOP_SECRET: Certificate hash fetched from native
+     *    code (encrypted in .rodata). No hardcoded hash in Kotlin source.
      */
     internal fun verifySignatureViaPackageManager(context: Context): Boolean {
         return runCatching {
@@ -465,23 +471,11 @@ object SecurityGuard {
             val md = java.security.MessageDigest.getInstance("SHA-256")
             val actual = md.digest(certs[0].toByteArray())
 
-            // Expected certificate SHA-256, obfuscated (4 blocks, each XOR'd with a different key)
-            val expected = byteArrayOf(
-                0xB1.toByte(), 0x6F, 0x60, 0x4F, 0xF5.toByte(), 0x29, 0x78, 0x96.toByte(),
-                0xE7.toByte(), 0x69, 0xEC.toByte(), 0x1F, 0x76, 0xDA.toByte(), 0x36, 0xEB.toByte(),
-                0x08, 0x90.toByte(), 0xB8.toByte(), 0x71, 0xE4.toByte(), 0x97.toByte(), 0xC5.toByte(), 0x48,
-                0x7D, 0x2E, 0xAE.toByte(), 0xE2.toByte(), 0x92.toByte(), 0xAC.toByte(), 0x51, 0xCB.toByte()
-            )
-            val keys = intArrayOf(0x3C, 0x93, 0x5A, 0xE7)
-            val decoded = ByteArray(32)
-            for (block in 0..3) {
-                val key = keys[block]
-                for (i in 0..7) {
-                    decoded[block * 8 + i] = (expected[block * 8 + i].toInt() xor key).toByte()
-                }
-            }
+            // 🔒 TOP_SECRET: Expected certificate SHA-256 fetched from native .rodata encrypted section
+            // Native code returns the deobfuscated hash, then zeros the buffer.
+            val expected = NativeBridge.getExpectedCertSha256() ?: return@runCatching false
 
-            actual.contentEquals(decoded)
+            actual.contentEquals(expected)
         }.getOrDefault(false)
     }
 }

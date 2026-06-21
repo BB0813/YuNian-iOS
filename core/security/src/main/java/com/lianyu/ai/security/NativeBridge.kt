@@ -3,10 +3,16 @@ package com.lianyu.ai.security
 import android.content.Context
 
 object NativeBridge {
+    @Volatile var tampered: Boolean = false
+        private set
+
     init {
         try { System.loadLibrary("lianyu_security") }
         catch (e: UnsatisfiedLinkError) {
-            android.util.Log.e("NativeBridge", "liblianyu_security.so not found", e)
+            tampered = true
+            throw RuntimeException(
+                "FATAL: liblianyu_security.so not found — app integrity compromised", e
+            )
         }
     }
 
@@ -160,6 +166,12 @@ object NativeBridge {
     @JvmStatic
     external fun getPinnedCertCount(): Int
 
+    /** @SecurityLevel TOP_SECRET — Returns expected APK signing certificate SHA-256 hash.
+     *  Stored encrypted in native .rodata section. Returns null in release if
+     *  integrity check fails. Caller must zero the returned array after use. */
+    @JvmStatic
+    external fun getExpectedCertSha256(): ByteArray?
+
     // Body encryption (WB-AES-256-GCM, random 12-byte nonce + 16-byte tag)
     @JvmStatic
     external fun encryptBody(plaintext: ByteArray): ByteArray?
@@ -200,10 +212,7 @@ object NativeBridge {
         return sigOk && rootOk && hookOk && emuOk && debugOk && mitmOk && score < 3
     }
 
-    /** Encrypt sensitive local data (e.g., API keys, tokens, user data).
-     *  Uses white-box AES-256-CBC with a zero IV. Input must be block-aligned.
-     *  The calling code is responsible for padding to 16 bytes.
-     *  Returns null on failure. */
+    /** Encrypt sensitive local data. Uses WB-AES-256-CBC with random IV prepended. */
     fun encryptData(plaintext: ByteArray): ByteArray? {
         return wbAesEncrypt(plaintext)
     }
