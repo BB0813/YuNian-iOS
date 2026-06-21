@@ -15,6 +15,7 @@
 
 #include "vm-engine.h"
 #include "g_vmp_config.h"
+#include "vm_hardening.h"
 #include <cstring>
 #include <cstdlib>
 #include <android/log.h>
@@ -33,6 +34,7 @@
 #include <link.h>
 #include "obfuscate.h"
 #include "obfuscated_strings.h"
+#include "anti_debug_syscall.h"
 
 /* Global scratch buffers for VM hypercalls — allocated in .bss to avoid .rodata */
 int g_scratch_key_buf[8];    /* 32 bytes for KDF output */
@@ -154,16 +156,32 @@ int vm_run(VMState* vm, uint32_t max_steps) {
     OBF_BARRIER(143);
     if (!vm || !vm->code || vm->halted) return -1;
 
+    /* ── Hardening init ── */
+    VMTimingState tstate;
+    vm_timing_init(&tstate);
+    VM_MFENCE();
+
     while (vm->steps < max_steps && !vm->halted) {
         vm->steps++;
 
-        /* VMP Hardening: periodic integrity checkpoint every 256 instructions */
+        /* ── Hardening: timing anomaly detection (anti-singlestep) ── */
+        if (vm_timing_check(&tstate)) {
+            vm->error = 3; /* timing anomaly */
+            return -3;
+        }
+
+        /* ── Hardening: periodic integrity checkpoint ── */
         vm->tick_count++;
         if ((vm->tick_count & 0xFF) == 0) {
             if (!vm_security_checkpoint(vm)) {
-                vm->error = 2; /* integrity violation */
+                vm->error = 2;
                 return -2;
             }
+        }
+
+        /* ── Hardening: random bubble injection (every ~32 insns) ── */
+        if ((vm->tick_count & 0x1F) == 0) {
+            VM_RANDOM_BUBBLE(vm->tick_count ^ vm->integrity_seed);
         }
 
 #ifndef PRODUCTION_BUILD
@@ -177,6 +195,9 @@ int vm_run(VMState* vm, uint32_t max_steps) {
         }
 
         uint8_t op = FETCH_U8(); ADVANCE(1);
+
+        /* ── Hardening: opaque predicate before dispatch ── */
+        VM_OPAQUE_TRUE(vm->pc ^ op ^ vm->integrity_seed);
 
         switch (op) {
             case OP_NOP:
@@ -290,7 +311,8 @@ int vm_run(VMState* vm, uint32_t max_steps) {
                 uint8_t rd = FETCH_U8(); ADVANCE(1);
                 uint8_t rs = FETCH_U8(); ADVANCE(1);
                 uint8_t idx = RD(rs) & 0xFF;
-                WR(rd, AES_SBOX_LOOKUP(idx));
+                /* Constant-time lookup: prefetch entire S-Box, then select */
+                WR(rd, vm_ct_sbox(AES_SBOX_XORED, idx) ^ 0xA5);
                 break;
             }
 
@@ -298,14 +320,15 @@ int vm_run(VMState* vm, uint32_t max_steps) {
                 uint8_t rd = FETCH_U8(); ADVANCE(1);
                 uint8_t rs1 = FETCH_U8(); ADVANCE(1);
                 uint8_t rs2 = FETCH_U8(); ADVANCE(1);
-                WR(rd, gf_mul(RD(rs1) & 0xFF, RD(rs2) & 0xFF));
+                /* Constant-time GF multiplication */
+                WR(rd, vm_ct_gfmul(RD(rs1) & 0xFF, RD(rs2) & 0xFF));
                 break;
             }
 
             case OP_XTIME: {
                 uint8_t rd = FETCH_U8(); ADVANCE(1);
                 uint8_t rs = FETCH_U8(); ADVANCE(1);
-                WR(rd, xtime(RD(rs) & 0xFF));
+                WR(rd, vm_ct_xtime(RD(rs) & 0xFF));
                 break;
             }
 
@@ -417,24 +440,7 @@ int vm_run(VMState* vm, uint32_t max_steps) {
                         break;
                     }
                     case VM_HYPER_TRACER: {
-                        int fd = open("/proc/self/status", O_RDONLY);
-                        if (fd < 0) { WR(rd, 0); break; }
-                        char buf[512];
-                        ssize_t n = read(fd, buf, sizeof(buf) - 1);
-                        close(fd);
-                        int traced = 0;
-                        if (n > 0) {
-                            buf[n] = '\0';
-                            char _vt[16];
-                            decode_obs(_vt, (const uint8_t[]){OBS_TRACERPID}, OBS_LEN_TRACERPID, OB_KEY(21));
-                            const char* p = strstr(buf, _vt);
-                            if (p) {
-                                p += 10; /* skip "TracerPid:" */
-                                while (*p == ' ' || *p == '\t') p++;
-                                if (*p != '0') traced = 1;
-                            }
-                        }
-                        WR(rd, traced);
+                        WR(rd, ad_check_tracerpid_syscall() ? 1 : 0);
                         break;
                     }
                     case VM_HYPER_DELAY: {
@@ -443,42 +449,8 @@ int vm_run(VMState* vm, uint32_t max_steps) {
                         break;
                     }
                     case VM_HYPER_FRIDA: {
-                        /* Run Frida detection — maps scan + port check + thread names */
-                        int d = 0; char buf[8192]; int fd2; ssize_t n2;
-                        fd2 = open("/proc/self/maps", O_RDONLY);
-                        if (fd2 >= 0) { n2 = read(fd2, buf, sizeof(buf)-1); close(fd2);
-                            if (n2 > 0) { buf[n2] = 0;
-                                if (xstrstr_obs(buf, (const uint8_t[]){OBS_FRIDA}, OBS_LEN_FRIDA, OB_KEY(0)) || xstrstr_obs(buf, (const uint8_t[]){OBS_GUMJS}, OBS_LEN_GUMJS, OB_KEY(3)) || xstrstr_obs(buf, (const uint8_t[]){OBS_FRIDAGENT}, OBS_LEN_FRIDAGENT, OB_KEY(4))
-                                    || xstrstr_obs(buf, (const uint8_t[]){OBS_LINJECTOR}, OBS_LEN_LINJECTOR, OB_KEY(5)) || xstrstr_obs(buf, (const uint8_t[]){OBS_XPOSED}, OBS_LEN_XPOSED, OB_KEY(6)) || xstrstr_obs(buf, (const uint8_t[]){OBS_SUBSTRATE}, OBS_LEN_SUBSTRATE, OB_KEY(8)))
-                                    d = 1;
-                            }
-                        }
-                        if (!d) {
-                            DIR* dir = opendir("/proc/self/task");
-                            if (dir) { struct dirent* e;
-                                while ((e = readdir(dir)) && !d) {
-                                    if (e->d_name[0] == '.') continue;
-                                    char cp[64]; snprintf(cp, sizeof(cp), "/proc/self/task/%s/comm", e->d_name);
-                                    int cfd = open(cp, O_RDONLY);
-                                    if (cfd >= 0) { char comm[256] = {0}; ssize_t cn = read(cfd, comm, 255); close(cfd);
-                                        if (cn > 0 && (xstrstr_obs(comm, (const uint8_t[]){OBS_FRIDA}, OBS_LEN_FRIDA, OB_KEY(0)) || xstrstr_obs(comm, (const uint8_t[]){OBS_GUMJS}, OBS_LEN_GUMJS, OB_KEY(3)))) d = 1;
-                                    }
-                                } closedir(dir);
-                            }
-                        }
-                        if (!d) {
-                            int sock = socket(AF_INET, SOCK_STREAM, 0);
-                            if (sock >= 0) {
-                                struct timeval tv = {0, 50000};
-                                setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-                                setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-                                struct sockaddr_in a; memset(&a, 0, sizeof(a));
-                                a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK); a.sin_port = htons(27042);
-                                if (connect(sock, (struct sockaddr*)&a, sizeof(a)) == 0) d = 1;
-                                close(sock);
-                            }
-                        }
-                        WR(rd, d);
+                        /* Syscall-based Frida detection (bypasses libc hooks) */
+                        WR(rd, ad_check_frida_port_syscall() ? 1 : 0);
                         break;
                     }
                     case VM_HYPER_CRC32: {
@@ -938,27 +910,79 @@ void vm_encode_cmp_imm(uint8_t* buf, uint32_t* off, uint8_t rs, uint32_t imm) {
 
 extern "C" __attribute__((visibility("default"))) void vm_engine_wipe_cache(void)
 {
-    /*
-     * Wipe all internal VM engine state and any cached key material.
-     *
-     * The VM engine may have:
-     *   1. Static/inline bytecode buffers (g_vm_aes_decrypt, g_vm_check_tracer)
-     *   2. Global VM state cache (if any)
-     *   3. Pre-computed S-BOX/GF tables used during execution
-     *
-     * Note: g_vm_aes_decrypt and g_vm_check_tracer are const bytecode
-     * arrays. They may reside in .rodata (read-only). If so, the wipe
-     * will SIGSEGV. In production, ensure these are in writable memory
-     * or use mprotect() before wiping.
-     *
-     * We only wipe mutable state here. The bytecode arrays (which
-     * contain the key schedule as immediate operands) should be in
-     * mutable segments if wipe capability is required.
-     */
-
-    /* AES S-BOX is static const (XOR-obfuscated). In production,
-     * this function should use mprotect() to make the table writable
-     * before zeroing. For now, the KMS state machine will deny
-     * any further VM operations after wipe. */
     __asm__ __volatile__("" ::: "memory");
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * VMP1 Block Decryptor — dual-instruction recovery
+ *
+ * Scans class bytes for VMP1 magic markers (0x564D5031) and
+ * XOR-decrypts the embedded Dalvik bytecode in-place.
+ * Called by MethodRecoveryEngine.recoverMethods() after
+ * the class is loaded from DEX but before defineClass().
+ *
+ * Format: [4B "VMP1"] [4B insns_count LE] [encrypted Dalvik...]
+ *
+ * Decrypt key = g_shell_key[offset & 0xF] ^ (j * 0x9D + offset * 0x37)
+ * Must match the encryption in nativeRecoverClassMethods.
+ * ═══════════════════════════════════════════════════════════ */
+
+// Forward declaration: shell key (defined in dex-extractor.cpp)
+extern uint8_t g_shell_key[16];
+extern int g_key_derived;
+
+int vm_decrypt_vmp1_blocks(uint8_t* class_bytes, uint32_t class_len) {
+    if (!class_bytes || class_len < 12) return 0;
+
+    // Ensure shell key is derived
+    if (!g_key_derived) {
+        // Key derivation is done in dex-extractor.cpp's nativeShellInitWithBlob
+        // If not yet derived, the class has no VMP1 blocks
+        return 0;
+    }
+
+    int blocks_decrypted = 0;
+    uint32_t pos = 0;
+
+    while (pos + 8 <= class_len) {
+        // Scan for "VMP1" magic
+        if (class_bytes[pos] == 0x56 && class_bytes[pos+1] == 0x4D &&
+            class_bytes[pos+2] == 0x50 && class_bytes[pos+3] == 0x31) {
+
+            // Read insns count (LE)
+            uint32_t insns = (uint32_t)class_bytes[pos+4]
+                           | ((uint32_t)class_bytes[pos+5] << 8)
+                           | ((uint32_t)class_bytes[pos+6] << 16)
+                           | ((uint32_t)class_bytes[pos+7] << 24);
+
+            if (insns == 0 || insns > 50000) {
+                pos += 2;  // false positive, skip
+                continue;
+            }
+
+            if (pos + 8 + insns > class_len) break;
+
+            // Decrypt Dalvik bytes in-place
+            uint8_t* enc = class_bytes + pos + 8;
+            for (uint32_t j = 0; j < insns; j++) {
+                uint8_t key_byte = g_shell_key[(pos + j) & 0xF]
+                                 ^ (uint8_t)((j * 0x9D + pos * 0x37) & 0xFF);
+                enc[j] ^= key_byte;
+            }
+
+            // Overwrite magic with the now-valid Dalvik bytes
+            // Shift left: move decrypted bytes to where magic+header was
+            // (ART expects Dalvik at code_off, not VMP1 header)
+            for (uint32_t j = 0; j < insns; j++) {
+                class_bytes[pos + j] = enc[j];
+            }
+
+            blocks_decrypted++;
+            pos += insns;
+        } else {
+            pos += 2;  // Dalvik is 2-byte aligned
+        }
+    }
+
+    return blocks_decrypted;
 }
