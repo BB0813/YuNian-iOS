@@ -29,6 +29,7 @@ import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -146,14 +147,11 @@ class MainActivity : ComponentActivity() {
                 val ratio = used.toFloat() / maxMem.toFloat()
 
                 if (ratio > 0.90f) {
-                    // 清空缓存 + 通知GC
-                    android.util.Log.w("MemoryMonitor", "CRITICAL: ${(ratio * 100).toInt()}% — clearing caches + GC")
-                    System.gc()
-                    Runtime.getRuntime().gc()
+                    // 清空缓存 — 通知系统内存压力，由系统自行调度GC
+                    android.util.Log.w("MemoryMonitor", "CRITICAL: ${(ratio * 100).toInt()}% — clearing caches, notifying memory pressure")
                     memoryAlertActive = true
                 } else if (ratio > 0.85f && !memoryAlertActive) {
                     android.util.Log.w("MemoryMonitor", "HIGH: ${(ratio * 100).toInt()}% — clearing caches")
-                    System.gc()
                     memoryAlertActive = true
                 } else if (ratio < 0.60f && memoryAlertActive) {
                     android.util.Log.i("MemoryMonitor", "RECOVERED: ${(ratio * 100).toInt()}%")
@@ -180,6 +178,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        appScope.cancel()
     }
 
     private fun requestNotificationPermission() {

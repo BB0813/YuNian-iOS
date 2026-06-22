@@ -14,7 +14,7 @@ class KeywordRepository(private val keywordDao: KeywordDao) {
 
     private fun getSalt(): String = SaltStore.getSalt("keyword")
 
-    fun getAllEnabled(): List<KeywordEntity> {
+    suspend fun getAllEnabled(): List<KeywordEntity> {
         val keywords = keywordDao.getAllEnabled()
         if (!verifyIntegrity(keywords)) {
             Log.e(TAG, "关键词数据完整性校验失败！可能被篡改")
@@ -22,17 +22,17 @@ class KeywordRepository(private val keywordDao: KeywordDao) {
         return keywords.filter { verifyItemIntegrity(it) }
     }
 
-    fun getByLevel(level: String): List<KeywordEntity> {
+    suspend fun getByLevel(level: String): List<KeywordEntity> {
         return keywordDao.getByLevel(level).filter { verifyItemIntegrity(it) }
     }
 
-    fun getByType(type: String): List<KeywordEntity> {
+    suspend fun getByType(type: String): List<KeywordEntity> {
         return keywordDao.getByType(type).filter { verifyItemIntegrity(it) }
     }
 
-    fun count(): Int = keywordDao.count()
+    suspend fun count(): Int = keywordDao.count()
 
-    fun countEnabled(): Int = keywordDao.countEnabled()
+    suspend fun countEnabled(): Int = keywordDao.countEnabled()
 
     fun insertAll(keywords: List<KeywordEntity>) {
         val protectedKeywords = keywords.map { it.copy(checksum = calculateChecksum(it)) }
@@ -68,7 +68,7 @@ class KeywordRepository(private val keywordDao: KeywordDao) {
         return allValid
     }
 
-    fun getDatabaseHash(): String {
+    suspend fun getDatabaseHash(): String {
         val allKeywords = keywordDao.getAllWithChecksum()
         val data = allKeywords.joinToString("|") { "${it.id}:${it.checksum}" }
         val digest = MessageDigest.getInstance("SHA-256")

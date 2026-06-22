@@ -43,6 +43,14 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         application.registerComponentCallbacks(configCallback)
+        // 🔒 AutoCloseable ensures cleanup when ViewModel is cleared, even if
+        //    onCleared() is never called (e.g., scoped to a long-lived NavBackStackEntry).
+        addCloseable(object : AutoCloseable {
+            override fun close() {
+                prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
+                getApplication<Application>().unregisterComponentCallbacks(configCallback)
+            }
+        })
     }
 
     fun setThemeMode(mode: ThemeMode) {

@@ -38,6 +38,7 @@ static void kbkdf_sm3_v2(uint8_t sk_out[32]);
 static volatile int g_kms_state = KMS_STATE_UNINIT;
 static uint8_t g_sk_bulk[KMS_SK_SIZE] __attribute__((aligned(64)));  /* SK_bulk */
 static uint8_t g_nonce[KMS_NONCE_SIZE] __attribute__((aligned(64))) = {0};
+uint8_t g_kms_apk_bound_key[32] __attribute__((aligned(64))) = {0};  /* APK signature binding */
 static volatile uint32_t g_session_counter = 0;
 static volatile int g_dk_loaded = 0;   /* 1 = DK loaded in NEON regs */
 

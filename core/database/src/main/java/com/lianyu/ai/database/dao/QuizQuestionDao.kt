@@ -7,22 +7,22 @@ import com.lianyu.ai.database.model.QuizQuestionEntity
 interface QuizQuestionDao {
 
     @Query("SELECT * FROM quiz_questions WHERE isEnabled = 1 ORDER BY category, id")
-    fun getAllEnabled(): List<QuizQuestionEntity>
+    suspend fun getAllEnabled(): List<QuizQuestionEntity>
 
     @Query("SELECT * FROM quiz_questions WHERE category = :category AND isEnabled = 1 ORDER BY RANDOM() LIMIT :count")
-    fun getRandomByCategory(category: String, count: Int): List<QuizQuestionEntity>
+    suspend fun getRandomByCategory(category: String, count: Int): List<QuizQuestionEntity>
 
     @Query("SELECT * FROM quiz_questions WHERE isEnabled = 1 ORDER BY RANDOM() LIMIT :count")
-    fun getRandom(count: Int): List<QuizQuestionEntity>
+    suspend fun getRandom(count: Int): List<QuizQuestionEntity>
 
     @Query("SELECT COUNT(*) FROM quiz_questions")
-    fun count(): Int
+    suspend fun count(): Int
 
     @Query("SELECT SUM(CASE WHEN isEnabled = 1 THEN 1 ELSE 0 END) FROM quiz_questions")
-    fun countEnabled(): Int
+    suspend fun countEnabled(): Int
 
     @Query("SELECT COUNT(*) FROM quiz_questions WHERE category = :category AND isEnabled = 1")
-    fun countByCategory(category: String): Int
+    suspend fun countByCategory(category: String): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertAll(questions: List<QuizQuestionEntity>): List<Long>
@@ -41,5 +41,5 @@ interface QuizQuestionDao {
 
     @Transaction
     @Query("SELECT * FROM quiz_questions ORDER BY id")
-    fun getAllWithChecksum(): List<QuizQuestionEntity>
+    suspend fun getAllWithChecksum(): List<QuizQuestionEntity>
 }

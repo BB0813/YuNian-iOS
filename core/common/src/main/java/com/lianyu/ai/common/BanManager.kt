@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.provider.Settings
 import android.os.Build
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import java.security.MessageDigest
 
 /**
@@ -77,7 +79,22 @@ object BanManager {
     )
 
     private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        // 🔒 SecurityConstants.Level.HIGH: 封禁数据使用 EncryptedSharedPreferences
+        //    防止 root 用户直接修改 XML 文件绕过封禁
+        return try {
+            val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+            EncryptedSharedPreferences.create(
+                PREFS_NAME,
+                masterKey,
+                context,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // 回退到明文 — 记录安全事件
+            SecureLog.security("BanManager: EncryptedSharedPreferences failed, falling back to plain")
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        }
     }
 
     /**

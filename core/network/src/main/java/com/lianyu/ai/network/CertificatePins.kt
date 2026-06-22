@@ -12,9 +12,8 @@ import okhttp3.CertificatePinner
  */
 object CertificatePins {
 
-    // ── Clove (self-hosted) ──
-    private const val CLOVE_PIN = "sha256/gjR+Zqma3Qv/1DhbeH/UpPoonupgZwYjN9zGOE/H7rY="
-    private const val CLOVE_BACKUP_PIN = "sha256/gjR+Zqma3Qv/1DhbeH/UpPoonupgZwYjN9zGOE/H7rY="
+    // ── SuFlowAPI (self-hosted) ──
+    // HTTP only for now; pins to be added when HTTPS is configured
 
     // ── OpenAI ──
     private const val OPENAI_PIN = "sha256/9g+mtyVAhL3wQl0JVOKDKS5NZtYWty5pQuLjWkSlTCU="
@@ -50,8 +49,7 @@ object CertificatePins {
     private const val XIAOMI_PIN = "sha256/H7ox+nLEX/IGOH8nZwl1Yzus/kqXmmbwXVvQA/lklRU="
 
     val certificatePinner: CertificatePinner = CertificatePinner.Builder()
-        // Self-hosted
-        .add("clove.dpdns.org", CLOVE_PIN, CLOVE_BACKUP_PIN)
+        // SuFlowAPI: no pinning needed (HTTP-only in current deployment)
         // Third-party API endpoints
         .add("api.openai.com", OPENAI_PIN)
         .add("api.anthropic.com", ANTHROPIC_PIN)

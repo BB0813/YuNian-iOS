@@ -16,6 +16,10 @@ android {
         versionCode = 12
         versionName = "1.8"
 
+        // Force multi-DEX output — prevents R8 from merging all classes into 1 giant DEX
+        multiDexEnabled = true
+        multiDexKeepProguard = file("tools/shell-multidex-keep.pro")
+
         manifestPlaceholders[
             "VIVO_PUSH_API_KEY"] = project.findProperty("VIVO_PUSH_API_KEY")?.toString() ?: ""
         manifestPlaceholders[
@@ -26,7 +30,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
 
@@ -57,7 +61,7 @@ android {
         release {
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
-            isShrinkResources = true
+            isShrinkResources = false  // Shell loads DEX from assets — must not strip
             isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -114,27 +118,6 @@ tasks.register<Exec>("packageShellPayload") {
 
 
 
-// Strip plaintext classes.dex from the unsigned release APK after packaging.
-// The encrypted shell payload (assets/lianyu_shell/) contains the full DEX.
-// Uses tools/strip_dex.py to operate on the output APK.
-tasks.register<Exec>("removePlaintextDex") {
-    val unsignedApk = layout.buildDirectory.file("outputs/apk/release/app-release-unsigned.apk")
-    inputs.file(unsignedApk)
-    onlyIf { unsignedApk.get().asFile.exists() }
-
-    commandLine(
-        pythonExecutable,
-        "${rootProject.projectDir}/tools/strip_dex.py",
-        unsignedApk.get().asFile.absolutePath
-    )
-}
-
-// Auto-attach: run removePlaintextDex AFTER packageRelease completes
-afterEvaluate {
-    tasks.named("packageRelease") {
-        finalizedBy("removePlaintextDex")
-    }
-}
 
 
 dependencies {
@@ -184,8 +167,14 @@ dependencies {
 
     // 厂商 Push SDK
     // OPPO / vivo 使用本地 aar，请从各厂商开放平台下载后放置到 app/libs
-    implementation(files("libs/oppo-push-3.0.0.aar"))
-    implementation(files("libs/vivo-push-4.1.5.0.aar"))
+    val oppoAar = file("libs/oppo-push-3.0.0.aar")
+    if (oppoAar.exists()) {
+        implementation(files(oppoAar))
+    }
+    val vivoAar = file("libs/vivo-push-4.1.5.0.aar")
+    if (vivoAar.exists()) {
+        implementation(files(vivoAar))
+    }
     // 华为 HMS Push 使用 Maven 依赖
     implementation(libs.huawei.hms.push)
 

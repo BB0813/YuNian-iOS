@@ -14,7 +14,18 @@ object CompositeVmpRuntime {
     var debugMode = false
         private set
 
+    /**
+     * 🔒 SecurityConstants.Level.TOP_SECRET: Debug bypass gate.
+     * Uses BuildConfig.DEBUG (compile-time constant, cannot be runtime-faked via Frida/Xposed).
+     * Runtime checks (FLAG_DEBUGGABLE, Build.TYPE) are secondary and only consulted
+     * when BuildConfig.DEBUG is already true.
+     *
+     * In release builds, BuildConfig.DEBUG is false → isDebugBuild ALWAYS returns false,
+     * making the entire debug bypass path dead code that R8 can eliminate.
+     */
     private fun isDebugBuild(context: Context): Boolean {
+        if (!com.lianyu.ai.security.BuildConfig.DEBUG) return false
+        // Secondary runtime checks for debug builds only
         val debuggable = (context.applicationInfo?.flags?.and(ApplicationInfo.FLAG_DEBUGGABLE) ?: 0) != 0
         val buildTypeDebug = Build.TYPE == "userdebug" || Build.TYPE == "eng" || Build.TAGS?.contains("debug") == true
         return debuggable || buildTypeDebug
@@ -90,6 +101,8 @@ object CompositeVmpRuntime {
         if (isDebugBuild(context)) {
             debugMode = true
             android.util.Log.w("LianYu-Gate", "Debug build detected — bypassing startup preflight")
+            // 🔒 FIX: Do NOT set kmsReady=true in debug bypass.
+            //    KMS must be initialized explicitly even in debug builds.
             SecurityState.markPreflightPassed(
                 wbAesReady = true,
                 signatureTrusted = true,
@@ -97,7 +110,7 @@ object CompositeVmpRuntime {
                 soTrusted = true,
                 resourcesTrusted = true,
                 payloadVerified = true,
-                kmsReady = true
+                kmsReady = false  // KMS must be initialized explicitly
             )
             return
         }
@@ -108,6 +121,7 @@ object CompositeVmpRuntime {
     private fun verifyBeforePayload(context: Context) {
         if (isDebugBuild(context)) {
             android.util.Log.w("LianYu-Gate", "Debug build detected — bypassing one-piece shell hard gate")
+            // 🔒 FIX: Do NOT set kmsReady=true in debug bypass.
             SecurityState.markPreflightPassed(
                 wbAesReady = true,
                 signatureTrusted = true,
@@ -115,7 +129,7 @@ object CompositeVmpRuntime {
                 soTrusted = true,
                 resourcesTrusted = true,
                 payloadVerified = true,
-                kmsReady = true
+                kmsReady = false  // KMS must be initialized explicitly
             )
             return
         }
@@ -150,10 +164,10 @@ object CompositeVmpRuntime {
             SecurityState.markPreflightPassed(
                 wbAesReady = state.wbAesReady,
                 signatureTrusted = true,
-                dexTrusted = state.dexTrusted || true,
-                soTrusted = state.soTrusted || true,
-                resourcesTrusted = state.resourcesTrusted || true,
-                payloadVerified = state.payloadVerified || true,
+                dexTrusted = state.dexTrusted,
+                soTrusted = state.soTrusted,
+                resourcesTrusted = state.resourcesTrusted,
+                payloadVerified = state.payloadVerified,
                 kmsReady = kmsOk
             )
         }

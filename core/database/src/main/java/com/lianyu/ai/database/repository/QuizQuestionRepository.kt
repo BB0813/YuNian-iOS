@@ -14,7 +14,7 @@ class QuizQuestionRepository(private val quizQuestionDao: QuizQuestionDao) {
 
     private fun getSalt(): String = SaltStore.getSalt("quiz")
 
-    fun getAllEnabled(): List<QuizQuestionEntity> {
+    suspend fun getAllEnabled(): List<QuizQuestionEntity> {
         val questions = quizQuestionDao.getAllEnabled()
         if (!verifyIntegrity(questions)) {
             Log.e(TAG, "题库数据完整性校验失败！可能被篡改")
@@ -22,21 +22,21 @@ class QuizQuestionRepository(private val quizQuestionDao: QuizQuestionDao) {
         return questions.filter { verifyItemIntegrity(it) }
     }
 
-    fun getRandom(count: Int): List<QuizQuestionEntity> {
+    suspend fun getRandom(count: Int): List<QuizQuestionEntity> {
         val questions = quizQuestionDao.getRandom(count)
         return questions.filter { verifyItemIntegrity(it) }
     }
 
-    fun getRandomByCategory(category: String, count: Int): List<QuizQuestionEntity> {
+    suspend fun getRandomByCategory(category: String, count: Int): List<QuizQuestionEntity> {
         val questions = quizQuestionDao.getRandomByCategory(category, count)
         return questions.filter { verifyItemIntegrity(it) }
     }
 
-    fun count(): Int = quizQuestionDao.count()
+    suspend fun count(): Int = quizQuestionDao.count()
 
-    fun countEnabled(): Int = quizQuestionDao.countEnabled()
+    suspend fun countEnabled(): Int = quizQuestionDao.countEnabled()
 
-    fun countByCategory(category: String): Int = quizQuestionDao.countByCategory(category)
+    suspend fun countByCategory(category: String): Int = quizQuestionDao.countByCategory(category)
 
     fun insertAll(questions: List<QuizQuestionEntity>) {
         val protectedQuestions = questions.map { it.copy(checksum = calculateChecksum(it)) }
@@ -72,7 +72,7 @@ class QuizQuestionRepository(private val quizQuestionDao: QuizQuestionDao) {
         return allValid
     }
 
-    fun getDatabaseHash(): String {
+    suspend fun getDatabaseHash(): String {
         val allQuestions = quizQuestionDao.getAllWithChecksum()
         val data = allQuestions.joinToString("|") { "${it.id}:${it.checksum}" }
         val digest = MessageDigest.getInstance("SHA-256")

@@ -485,7 +485,7 @@ private fun PetalApiConfigEditDialog(
                     }
                 }
 
-                // 跳过证书验证 — 仅对非 Clove 的 provider 显示（Clove 始终固定证书）
+                // 跳过证书验证 — 仅对非 PARTNER 的 provider 显示（PARTNER 始终固定证书）
                 if (!isPartner) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -591,7 +591,7 @@ private fun PetalApiConfigEditDialog(
 }
 
 // ============================================================
-// PetalApiCard - 主要 API 配置卡片 (Clove/PARTNER)
+// PetalApiCard - 主要 API 配置卡片 (PARTNER)
 // ============================================================
 
 @Composable

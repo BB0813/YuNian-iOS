@@ -87,7 +87,7 @@ class ChatViewModel(
 
     // 实例级作用域，用于 API 调用等需要跨越 UI 生命周期的操作
     private val _appExceptionHandler = CoroutineExceptionHandler { _, throwable ->
-        System.err.println("[ChatVM] applicationApiScope UNCAUGHT: ${throwable.javaClass.simpleName}: ${throwable.message}")
+        ChatDebugLog.log("[ChatVM] applicationApiScope UNCAUGHT: ${throwable.javaClass.simpleName}: ${throwable.message}")
         SecureLog.e("ChatViewModel", "applicationApiScope uncaught exception", throwable)
     }
     private val applicationApiScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + _appExceptionHandler)
@@ -290,9 +290,9 @@ class ChatViewModel(
             try {
                 ContentFilter.initialize(application)
                 val warmOk = ContentFilter.warmUpNativeAc()
-                System.err.println("[ChatVM] ContentFilter warmUp: $warmOk")
+                ChatDebugLog.log("[ChatVM] ContentFilter warmUp: $warmOk")
             } catch (e: Exception) {
-                System.err.println("[ChatVM] ContentFilter init/warmUp failed: ${e.javaClass.simpleName}: ${e.message}")
+                ChatDebugLog.log("[ChatVM] ContentFilter init/warmUp failed: ${e.javaClass.simpleName}: ${e.message}")
             }
             KeywordBridge.initialize(application)
         }
@@ -309,9 +309,9 @@ private val BATCH_POLL_INTERVAL_MS = 100L
 private val MAX_BATCH_SIZE = 10
 
     private fun startMessageConsumer() {
-        System.err.println("[ChatVM] startMessageConsumer called, companionId=$companionId")
+        ChatDebugLog.log("[ChatVM] startMessageConsumer called, companionId=$companionId")
         applicationApiScope.launch {
-            System.err.println("[ChatVM] consumer coroutine STARTED (batch-merge mode)")
+            ChatDebugLog.log("[ChatVM] consumer coroutine STARTED (batch-merge mode)")
             try {
                 val batch = mutableListOf<String>()
 
@@ -319,14 +319,14 @@ private val MAX_BATCH_SIZE = 10
                     // 阻塞等待第一条消息（无消息时挂起，不占CPU）
                     val first = messageQueue.receiveCatching()
                     if (first.isClosed) {
-                        System.err.println("[ChatVM] consumer: channel closed, exiting")
+                        ChatDebugLog.log("[ChatVM] consumer: channel closed, exiting")
                         break
                     }
                     if (first.exceptionOrNull() != null) continue
 
                     batch.add(first.getOrThrow())
                     _queueDepth.value = maxOf(0, _queueDepth.value - 1)
-                    System.err.println("[ChatVM] consumer received first msg of batch: '${batch.last().take(30)}'")
+                    ChatDebugLog.log("[ChatVM] consumer received first msg of batch: '${batch.last().take(30)}'")
 
                     // ── 批量合并窗口 ──
                     // 在窗口期内持续收集新消息（不阻塞AI处理，只收集入队消息）
@@ -334,7 +334,7 @@ private val MAX_BATCH_SIZE = 10
                     while (System.currentTimeMillis() - windowStart < BATCH_WINDOW_MS) {
                         val next = messageQueue.tryReceive()
                         if (next.isClosed) {
-                            System.err.println("[ChatVM] consumer: channel closed during batch window")
+                            ChatDebugLog.log("[ChatVM] consumer: channel closed during batch window")
                             break
                         }
                         if (next.isFailure) {
@@ -343,7 +343,7 @@ private val MAX_BATCH_SIZE = 10
                         }
                         batch.add(next.getOrThrow())
                         _queueDepth.value = maxOf(0, _queueDepth.value - 1)
-                        System.err.println("[ChatVM] consumer collected into batch (${batch.size} total): '${batch.last().take(30)}'")
+                        ChatDebugLog.log("[ChatVM] consumer collected into batch (${batch.size} total): '${batch.last().take(30)}'")
                     }
 
                     // 窗口结束后再排空一次残余（边界情况：delay期间刚好到达的消息）
@@ -361,7 +361,7 @@ private val MAX_BATCH_SIZE = 10
                     val batches = if (batch.size <= MAX_BATCH_SIZE) {
                         listOf(batch.toList())
                     } else {
-                        System.err.println("[ChatVM] Batch overflow: ${batch.size} > $MAX_BATCH_SIZE, splitting into chunks")
+                        ChatDebugLog.log("[ChatVM] Batch overflow: ${batch.size} > $MAX_BATCH_SIZE, splitting into chunks")
                         batch.chunked(MAX_BATCH_SIZE)
                     }
 
@@ -370,7 +370,7 @@ private val MAX_BATCH_SIZE = 10
                         if (batchIndex == 0) {
                             val previousJob = turnState.sendMessageJob
                             if (previousJob != null && previousJob.isActive) {
-                                System.err.println("[ChatVM] Cancelling previous batch AI job before new batch")
+                                ChatDebugLog.log("[ChatVM] Cancelling previous batch AI job before new batch")
                                 previousJob.cancel("New message batch started, cancelling stale batch")
                             }
                         } else {
@@ -382,7 +382,7 @@ private val MAX_BATCH_SIZE = 10
                                 prevSubJob.cancel("New message batch started, cancelling stale batch")
                             }
                         }
-                        System.err.println("[ChatVM] processing sub-batch ${batchIndex + 1}/${batches.size}: ${subBatch.size} messages")
+                        ChatDebugLog.log("[ChatVM] processing sub-batch ${batchIndex + 1}/${batches.size}: ${subBatch.size} messages")
 
                         try {
                             doSendMessage(batch = subBatch)
@@ -395,37 +395,37 @@ private val MAX_BATCH_SIZE = 10
                     batch.clear()
                 }
             } catch (e: CancellationException) {
-                System.err.println("[ChatVM] consumer coroutine CANCELLED")
+                ChatDebugLog.log("[ChatVM] consumer coroutine CANCELLED")
                 throw e
             } catch (e: Exception) {
-                System.err.println("[ChatVM] consumer coroutine CRASHED: ${e.javaClass.simpleName}: ${e.message}")
+                ChatDebugLog.log("[ChatVM] consumer coroutine CRASHED: ${e.javaClass.simpleName}: ${e.message}")
                 SecureLog.e("ChatViewModel", "Consumer crashed, restarting...", e)
                 startMessageConsumer()
             }
-            System.err.println("[ChatVM] consumer coroutine ENDED (channel closed)")
+            ChatDebugLog.log("[ChatVM] consumer coroutine ENDED (channel closed)")
         }
     }
 
     private fun observeMessages() {
-        System.err.println("[ChatVM] observeMessages START, companionId=$companionId")
+        ChatDebugLog.log("[ChatVM] observeMessages START, companionId=$companionId")
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.getMessagesForCompanion(companionId, PAGE_SIZE).collect { recent ->
                     _recentMessages.value = recent
                     _hasMoreMessages.value = recent.size >= PAGE_SIZE && !_reachedEnd
-                    System.err.println("[ChatVM] Room Flow emit: ${recent.size} recent messages")
+                    ChatDebugLog.log("[ChatVM] Room Flow emit: ${recent.size} recent messages")
                 }
             } catch (e: CancellationException) {
-                System.err.println("[ChatVM] observeMessages CANCELLED (viewModelScope cancelled)")
+                ChatDebugLog.log("[ChatVM] observeMessages CANCELLED (viewModelScope cancelled)")
                 throw e
             } catch (e: Exception) {
                 SecureLog.e("ChatViewModel", "observeMessages Flow crashed, restarting...", e)
-                System.err.println("[ChatVM] observeMessages CRASHED: ${e.javaClass.simpleName}: ${e.message}")
+                ChatDebugLog.log("[ChatVM] observeMessages CRASHED: ${e.javaClass.simpleName}: ${e.message}")
                 // 延迟重启，避免快速重试风暴
                 delay(500)
                 observeMessages()
             }
-            System.err.println("[ChatVM] observeMessages ENDED normally")
+            ChatDebugLog.log("[ChatVM] observeMessages ENDED normally")
         }
     }
 
@@ -620,7 +620,7 @@ private val MAX_BATCH_SIZE = 10
      * 如果 AI 正在处理中，消息会排队等待，不丢弃。
      */
     fun sendMessage(content: String) {
-        System.err.println("[ChatVM] sendMessage called, content='${content.take(30)}', apis=${_availableApis.value.size}")
+        ChatDebugLog.log("[ChatVM] sendMessage called, content='${content.take(30)}', apis=${_availableApis.value.size}")
 
         // 乐观存储：用户消息立即存库显示，不等AI回复
         val userMessage = ChatMessage(
@@ -638,7 +638,7 @@ private val MAX_BATCH_SIZE = 10
             _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
         }
         val result = messageQueue.trySend(content)
-        System.err.println("[ChatVM] trySend result=$result, queueDepth=${_queueDepth.value}")
+        ChatDebugLog.log("[ChatVM] trySend result=$result, queueDepth=${_queueDepth.value}")
         if (result.isSuccess) {
             _queueDepth.value += 1
         } else {
@@ -657,7 +657,7 @@ private val MAX_BATCH_SIZE = 10
      */
     private suspend fun doSendMessage(batch: List<String>) {
         val content = if (batch.size == 1) batch[0] else batch.joinToString("\n")
-        System.err.println("[ChatVM] doSendMessage ENTER, batchSize=${batch.size}, mergedContent='${content.take(50)}', apis=${_availableApis.value.size}")
+        ChatDebugLog.log("[ChatVM] doSendMessage ENTER, batchSize=${batch.size}, mergedContent='${content.take(50)}', apis=${_availableApis.value.size}")
 
         // 封禁检查：已封禁用户禁止发送
         if (com.lianyu.ai.common.BanManager.isBanned(getApplication())) {
@@ -669,7 +669,7 @@ private val MAX_BATCH_SIZE = 10
             } else {
                 "账号已被封禁，原因：${banInfo.levelName}。第${banInfo.violationCount}次违规。请完成安全答题以解除封禁。"
             }
-            System.err.println("[ChatVM] doSendMessage BLOCKED: account is banned - $banMsg")
+            ChatDebugLog.log("[ChatVM] doSendMessage BLOCKED: account is banned - $banMsg")
             _events.tryEmit(ChatUiEvent.Error(banMsg))
             return
         }
@@ -717,14 +717,14 @@ private val MAX_BATCH_SIZE = 10
         if (pipelineOk == false) {
             // 明确违规 → 阻止发送
             val err = pipeline.pipelineState.value.error ?: "内容可能违规"
-            System.err.println("[ChatVM] doSendMessage BLOCKED by pipeline: $err")
+            ChatDebugLog.log("[ChatVM] doSendMessage BLOCKED by pipeline: $err")
             _events.tryEmit(ChatUiEvent.ContentBlocked(err))
             return@doSendMessage
         }
         // pipelineOk == null（超时）→ fail-open，允许继续发送
         // pipelineOk == true → 正常通过
         if (pipelineOk == null) {
-            System.err.println("[ChatVM] doSendMessage: pipeline TIMEOUT, proceeding anyway (fail-open)")
+            ChatDebugLog.log("[ChatVM] doSendMessage: pipeline TIMEOUT, proceeding anyway (fail-open)")
         }
 
         // cancel已由消费者端统一处理（新批次开始时取消旧批次的AI Job），此处不再重复cancel
@@ -739,14 +739,14 @@ private val MAX_BATCH_SIZE = 10
         val lastUserMsgInDb = fetchedHistory.lastOrNull { it.isFromUser }?.content
         val batchLastMsg = batch.last()
         if (lastUserMsgInDb != batchLastMsg && batch.size == 1) {
-            System.err.println("[ChatVM] CONTEXT WARNING: processing '$batchLastMsg' but DB lastUserMsg='$lastUserMsgInDb'")
+            ChatDebugLog.log("[ChatVM] CONTEXT WARNING: processing '$batchLastMsg' but DB lastUserMsg='$lastUserMsgInDb'")
         }
         if (batch.size > 1) {
-            System.err.println("[ChatVM] Processing batch of ${batch.size} messages, last='${batchLastMsg.take(30)}', DB lastUser='$lastUserMsgInDb'")
+            ChatDebugLog.log("[ChatVM] Processing batch of ${batch.size} messages, last='${batchLastMsg.take(30)}', DB lastUser='$lastUserMsgInDb'")
         }
 
         val chatSettings = chatDetailSettingsStore.getSettings(companionId)
-        System.err.println("[ChatVM] doSendMessage: starting AI response, historySize=${fetchedHistory.size}, stickerProb=${chatSettings.stickerProbability}")
+        ChatDebugLog.log("[ChatVM] doSendMessage: starting AI response, historySize=${fetchedHistory.size}, stickerProb=${chatSettings.stickerProbability}")
         // [P0 FIX] AI 请求运行在应用级作用域，避免退出聊天页面后因 ViewModel 销毁而取消。
         turnState.sendMessageJob = chatBackgroundScope.startAiResponse(
             history = fetchedHistory,
@@ -755,16 +755,16 @@ private val MAX_BATCH_SIZE = 10
             batchMessageCount = batch.size,   // 告诉AI这是批量消息（用于prompt优化）
             ntpTimeEnabled = chatSettings.ntpTimeEnabled
         )
-        System.err.println("[ChatVM] doSendMessage: AI job started, isActive=${turnState.sendMessageJob?.isActive}, joining...")
+        ChatDebugLog.log("[ChatVM] doSendMessage: AI job started, isActive=${turnState.sendMessageJob?.isActive}, joining...")
         // 串行等待当前批次AI回复完成（超时15s）
         try {
             turnState.sendMessageJob?.join()
-            System.err.println("[ChatVM] doSendMessage: AI job completed normally")
+            ChatDebugLog.log("[ChatVM] doSendMessage: AI job completed normally")
         } catch (e: CancellationException) {
             // [P0 FIX] 批量替换是预期行为：新批次开始时会取消旧批次。
             // 如果在这里重新抛出 CancellationException，会导致整个消息消费者协程退出，
             // 后续所有消息只被乐观存库但永远不会触发 AI 回复。
-            System.err.println("[ChatVM] AI job cancelled (superseded by newer batch), returning to consumer")
+            ChatDebugLog.log("[ChatVM] AI job cancelled (superseded by newer batch), returning to consumer")
             return@doSendMessage
         }
     }
@@ -784,13 +784,13 @@ private val MAX_BATCH_SIZE = 10
         batchMessageCount: Int = 1,
         ntpTimeEnabled: Boolean = false
     ) = launch {
-        System.err.println("[ChatVM] startAiResponse LAUNCHED, companionId=$companionId, imagePath=$imagePath, batchMsgCount=$batchMessageCount")
+        ChatDebugLog.log("[ChatVM] startAiResponse LAUNCHED, companionId=$companionId, imagePath=$imagePath, batchMsgCount=$batchMessageCount")
         enterLoading()
         try {
             val companion = _companionData.value
             if (companion == null) {
                 SecureLog.e("ChatViewModel", "Companion data not loaded yet for id=$companionId")
-                System.err.println("[ChatVM] startAiResponse: companion is NULL, storing placeholder")
+                ChatDebugLog.log("[ChatVM] startAiResponse: companion is NULL, storing placeholder")
                 val errorMessage = ChatMessage(
                     companionId = companionId,
                     content = "系统正在加载伴侣信息，请稍后再试",
@@ -801,7 +801,7 @@ private val MAX_BATCH_SIZE = 10
                 return@launch
             }
 
-            System.err.println("[ChatVM] startAiResponse: companion loaded, calling AI service...")
+            ChatDebugLog.log("[ChatVM] startAiResponse: companion loaded, calling AI service...")
             val aiResponse = if (imagePath != null) {
                 withTimeoutOrNull(VISION_API_TIMEOUT_MS) {
                     aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, stickerProbability, ntpTimeEnabled)
@@ -817,7 +817,7 @@ private val MAX_BATCH_SIZE = 10
             }
 
             val aiContent = aiResponse.content
-            System.err.println("[ChatVM] startAiResponse: AI response received, length=${aiContent.length}, startsWithToast=${aiContent.startsWith("[TOAST]")}")
+            ChatDebugLog.log("[ChatVM] startAiResponse: AI response received, length=${aiContent.length}, startsWithToast=${aiContent.startsWith("[TOAST]")}")
             if (aiContent.startsWith("[TOAST]")) {
                 _events.tryEmit(ChatUiEvent.Error(aiContent.removePrefix("[TOAST]")))
                 return@launch
@@ -833,7 +833,7 @@ private val MAX_BATCH_SIZE = 10
             )
         } catch (e: CancellationException) {
             SecureLog.e("ChatViewModel", "API call cancelled", e)
-            System.err.println("[ChatVM] startAiResponse CANCELLED: reason='${e.message}'")
+            ChatDebugLog.log("[ChatVM] startAiResponse CANCELLED: reason='${e.message}'")
             // [FIX] 所有取消都给用户反馈，不再静默
             // 即使是"正常批量替换"，新批次的回复可能也会失败，用户需要知道当前请求被取消了
             val cancelReason = e.message ?: ""
@@ -842,15 +842,15 @@ private val MAX_BATCH_SIZE = 10
                                       cancelReason.contains("stale")
             if (!isExpectedSupersede) {
                 // 非预期的取消——可能是网络超时或系统级中断
-                System.err.println("[ChatVM] UNEXPECTED cancellation: $cancelReason")
+                ChatDebugLog.log("[ChatVM] UNEXPECTED cancellation: $cancelReason")
                 _events.tryEmit(ChatUiEvent.Error("回复被打断，请重试"))
             } else {
                 // 预期的取消（新批次替换）——新回复马上到来，不存占位消息
-                System.err.println("[ChatVM] Expected cancellation (batch superseded): $cancelReason")
+                ChatDebugLog.log("[ChatVM] Expected cancellation (batch superseded): $cancelReason")
             }
         } catch (e: Exception) {
             val rawMessage = e.message ?: "发送失败"
-            System.err.println("[ChatVM] startAiResponse EXCEPTION: ${e.javaClass.simpleName}: $rawMessage")
+            ChatDebugLog.log("[ChatVM] startAiResponse EXCEPTION: ${e.javaClass.simpleName}: $rawMessage")
             if (rawMessage.startsWith("[TOAST]")) {
                 _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
             } else {
@@ -858,7 +858,7 @@ private val MAX_BATCH_SIZE = 10
             }
             SecureLog.e("ChatViewModel", "AI response failed", e)
         } finally {
-            System.err.println("[ChatVM] startAiResponse FINALLY: exitLoading, activeRequests=${_activeRequests.get()}")
+            ChatDebugLog.log("[ChatVM] startAiResponse FINALLY: exitLoading, activeRequests=${_activeRequests.get()}")
             exitLoading()
         }
     }
@@ -905,7 +905,7 @@ private val MAX_BATCH_SIZE = 10
         // [FIX] AI 生成的内容不应记录用户封禁——模型输出不是用户的责任
         if (modelKw.isViolating && modelKw.level >= ContentFilter.ViolationLevel.HIGH) {
             SecureLog.w("ChatViewModel", "Output keyword violation: ${modelKw.level} - ${modelKw.reason}")
-            System.err.println("[ChatVM] AI output blocked by keyword check: ${modelKw.level} - ${modelKw.reason}")
+            ChatDebugLog.log("[ChatVM] AI output blocked by keyword check: ${modelKw.level} - ${modelKw.reason}")
             // 不再调用 BanManager.recordViolation()——AI 回复不应累加用户违规
             val safeFallback = "抱歉，我无法继续这个话题。"
             val fallbackMsg = ChatMessage(
@@ -943,7 +943,7 @@ private val MAX_BATCH_SIZE = 10
         }
         if (modelBayesian.isDangerous) {
             SecureLog.w("ChatViewModel", "Bayesian model output blocked (" + "%.3f".format(modelBayesian.score) + "): " + modelBayesian.explanation)
-            System.err.println("[ChatVM] AI output blocked by Bayesian: score=${"%.3f".format(modelBayesian.score)}, reason=${modelBayesian.explanation}")
+            ChatDebugLog.log("[ChatVM] AI output blocked by Bayesian: score=${"%.3f".format(modelBayesian.score)}, reason=${modelBayesian.explanation}")
             // [FIX] AI 生成的内容不应记录用户封禁
             val safeFallback = "抱歉，我无法继续这个话题。"
             val fallbackMsg = ChatMessage(
