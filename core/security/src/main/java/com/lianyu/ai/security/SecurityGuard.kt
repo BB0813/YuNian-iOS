@@ -500,4 +500,12 @@ object SecurityGuard {
             actual.contentEquals(expected)
         }.getOrDefault(false)
     }
+    // ════════════════ UI Protection — anti-screenshot/recording ════════════════
+    @JvmStatic
+    fun enableScreenProtection(activity: android.app.Activity) {
+        try {
+            activity.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        } catch (_: Exception) {}
+    }
 }
+
