@@ -7,19 +7,19 @@ import com.lianyu.ai.database.model.KeywordEntity
 interface KeywordDao {
 
     @Query("SELECT * FROM keywords WHERE isEnabled = 1 ORDER BY level, id")
-    fun getAllEnabled(): List<KeywordEntity>
+    suspend fun getAllEnabled(): List<KeywordEntity>
 
     @Query("SELECT * FROM keywords WHERE level = :level AND isEnabled = 1 ORDER BY id")
-    fun getByLevel(level: String): List<KeywordEntity>
+    suspend fun getByLevel(level: String): List<KeywordEntity>
 
     @Query("SELECT * FROM keywords WHERE type = :type AND isEnabled = 1 ORDER BY id")
-    fun getByType(type: String): List<KeywordEntity>
+    suspend fun getByType(type: String): List<KeywordEntity>
 
     @Query("SELECT COUNT(*) FROM keywords")
-    fun count(): Int
+    suspend fun count(): Int
 
     @Query("SELECT SUM(CASE WHEN isEnabled = 1 THEN 1 ELSE 0 END) FROM keywords")
-    fun countEnabled(): Int
+    suspend fun countEnabled(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertAll(keywords: List<KeywordEntity>): List<Long>
@@ -38,5 +38,5 @@ interface KeywordDao {
 
     @Transaction
     @Query("SELECT * FROM keywords ORDER BY id")
-    fun getAllWithChecksum(): List<KeywordEntity>
+    suspend fun getAllWithChecksum(): List<KeywordEntity>
 }

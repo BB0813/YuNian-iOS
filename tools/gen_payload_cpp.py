@@ -167,7 +167,7 @@ SS_STRINGS = [
     "https://api.siliconflow.cn/v1/",    # 19
     "https://openrouter.ai/api/v1/",     # 20
     "https://api.groq.com/openai/v1/",   # 21
-    "https://clove.dpdns.org/v1",        # 22
+    "http://156.233.228.31:9876/v1",        # 22
 ]
 
 

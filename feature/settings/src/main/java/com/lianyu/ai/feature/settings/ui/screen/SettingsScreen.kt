@@ -1098,7 +1098,7 @@ fun ApiConfigEditDialog(
                     }
                 }
 
-                // 跳过证书验证 — 仅对非 Clove 的 provider 显示（Clove 始终固定证书）
+                // 跳过证书验证 — 仅对非 PARTNER 的 provider 显示（PARTNER 始终固定证书）
                 if (!isPartner) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),

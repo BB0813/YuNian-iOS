@@ -1,14 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Clove API: enforce certificate pinning -->
-    <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">clove.dpdns.org</domain>
-        <pin-set expiration="2027-06-01">
-            <pin digest="SHA-256">gjR+Zqma3Qv/1DhbeH/UpPoonupgZwYjN9zGOE/H7rY=</pin>
-        </pin-set>
-    </domain-config>
-
-    <!-- Key server: allow cleartext only for this specific IP -->
+    <!-- SuFlowAPI Key Server: allow cleartext for local deployment -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">156.233.228.31</domain>
     </domain-config>

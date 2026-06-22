@@ -643,3 +643,121 @@ Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeDecryptVmp1Blocks(
     return n;
 }
 
+
+
+// ═══════════════════════════════════════════════════════════════
+// Memory-Layout Binding — CRC64 of permissions+path from /proc/self/maps
+// ═══════════════════════════════════════════════════════════════
+
+#include <cstdio>
+#include <cinttypes>
+#include "hmac_sha256.h"
+
+static uint64_t crc64_table[256];
+static int crc64_done;
+
+static void crc64_init(void) {
+    if (crc64_done) return;
+    for (int i = 0; i < 256; i++) {
+        uint64_t c = i;
+        for (int j = 0; j < 8; j++)
+            c = (c >> 1) ^ ((c & 1) ? 0xC96C5795D7870F42ULL : 0);
+        crc64_table[i] = c;
+    }
+    crc64_done = 1;
+}
+
+static uint64_t crc64_buf(const uint8_t* data, size_t len) {
+    crc64_init();
+    uint64_t c = 0xFFFFFFFFFFFFFFFFULL;
+    for (size_t i = 0; i < len; i++)
+        c = crc64_table[((c >> 56) ^ data[i]) & 0xFF] ^ (c << 8);
+    return c ^ 0xFFFFFFFFFFFFFFFFULL;
+}
+
+/* Extract stable parts: "r-xp /data/app/.../lib.so" — no ASLR, no inode */
+static uint64_t maps_crc64_stable(const char* line, size_t len) {
+    if (len < 20) return 0;
+    const char* p = strchr(line, ' ');   /* skip address range */
+    if (!p) return 0;
+    p++;
+    const char* path = strrchr(p, '/');  /* find absolute path */
+    if (!path) return 0;
+    const char* perm_end = strchr(p, ' ');
+    if (!perm_end) return 0;
+
+    char stable[512];
+    int out = 0;
+    memcpy(stable + out, p, perm_end - p); out += (int)(perm_end - p);
+    stable[out++] = ' ';
+    size_t plen = line + len - path;
+    memcpy(stable + out, path, plen); out += (int)plen;
+    return crc64_buf((const uint8_t*)stable, out);
+}
+
+static uint64_t maps_crc64_for_lib(const char* libname) {
+    FILE* fp = fopen("/proc/self/maps", "r");
+    if (!fp) return 0;
+    char line[512];
+    uint64_t result = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, libname) && strstr(line, "r-xp")) {
+            size_t len = strlen(line);
+            if (len && line[len-1] == '\n') len--;
+            result = maps_crc64_stable(line, len);
+            break;
+        }
+    }
+    fclose(fp);
+    return result;
+}
+
+extern "C" {
+
+static void verify_maps_layout(void) {
+    uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
+    if (maps_crc == 0) {
+        __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
+            "maps: cannot read /proc/self/maps");
+        return;
+    }
+    /* Expected value computed on first build; replaces placeholder */
+    static const uint64_t EXPECTED_MAPS_CRC = 0x8e7beee5d9b3c6e4ULL;
+    if (maps_crc != EXPECTED_MAPS_CRC) {
+        __android_log_print(ANDROID_LOG_FATAL, "LianYuShell",
+            "MEMORY LAYOUT TAMPERED! maps_crc=%016llx expected=%016llx",
+            (unsigned long long)maps_crc,
+            (unsigned long long)EXPECTED_MAPS_CRC);
+        abort();
+    }
+    __android_log_print(ANDROID_LOG_DEBUG, "LianYuShell",
+        "maps OK (%016llx)", (unsigned long long)maps_crc);
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
+    JNIEnv* env, jclass cls) {
+    verify_maps_layout();
+
+    /* Key = HMAC-SHA256(cert_hash, "lianyu_dex_v3___") */
+    static const uint8_t cert_obs[32] = {
+        0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
+        0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec
+    };
+    uint8_t cert_hash[32];
+    for (int i = 0; i < 32; i++)
+        cert_hash[i] = cert_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
+
+    static const char salt[] = "lianyu_dex_v3___";
+    uint8_t key[32];
+    hmac_sha256(cert_hash, 32, (const uint8_t*)salt, 16, key);
+
+    jbyteArray result = env->NewByteArray(32);
+    if (result)
+        env->SetByteArrayRegion(result, 0, 32, (jbyte*)key);
+    memset(key, 0, 32);
+    memset(cert_hash, 0, 32);
+    return result;
+}
+
+} /* extern "C" */

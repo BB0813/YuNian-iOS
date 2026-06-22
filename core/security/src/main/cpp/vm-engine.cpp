@@ -50,9 +50,13 @@ int kms_init(void);
 int tee_attest_bridge(void);
 int sig_verify_bridge(void);
 
-/* Bridge stubs for VMP hypercalls — forward to native-bridge.cpp */
-int tee_attest_bridge(void) { return 1; }
-int sig_verify_bridge(void) { return 1; }
+/* Bridge stubs for VMP hypercalls — forward to native-bridge.cpp implementations.
+   Called from VM bytecode via hypercall opcodes. */
+extern int native_vmp_tee_attest_wrapper(void);
+extern int native_vmp_apk_sig_verify_wrapper(void);
+
+int tee_attest_bridge(void) { return native_vmp_tee_attest_wrapper(); }
+int sig_verify_bridge(void) { return native_vmp_apk_sig_verify_wrapper(); }
 }
 
 #ifdef PRODUCTION_BUILD

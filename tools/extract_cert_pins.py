@@ -39,7 +39,7 @@ def get_pin(host, port=443):
     return f'sha256/{pin}'
 
 if __name__ == '__main__':
-    hosts = sys.argv[1:] if len(sys.argv) > 1 else ['clove.dpdns.org']
+    hosts = sys.argv[1:] if len(sys.argv) > 1 else ['clove.dpdns.org']  # Legacy — kept for historical reference
     for host in hosts:
         port = 443
         if ':' in host:

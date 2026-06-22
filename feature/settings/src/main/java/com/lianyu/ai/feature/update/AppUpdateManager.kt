@@ -29,7 +29,8 @@ import kotlinx.serialization.json.Json
 class AppUpdateManager(private val context: Context) {
 
     companion object {
-        private const val GITHUB_API_URL = "https://api.github.com/repos/linruoxi666/LianYu/releases/latest"
+        // Update URL configured per build — empty = disabled
+        private const val UPDATE_API_URL = ""
     }
 
     private val okHttpClient = OkHttpClient()
@@ -60,7 +61,7 @@ class AppUpdateManager(private val context: Context) {
         try {
             withContext(Dispatchers.IO) {
                 val request = Request.Builder()
-                    .url(GITHUB_API_URL)
+                    .url(UPDATE_API_URL)
                     .header("Accept", "application/vnd.github.v3+json")
                     .build()
                 val response = okHttpClient.newCall(request).execute()

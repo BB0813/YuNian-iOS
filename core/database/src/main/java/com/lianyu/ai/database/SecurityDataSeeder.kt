@@ -28,11 +28,9 @@ class SecurityDataSeeder(
          * 从 Context 初始化安全数据，封装 DAO 获取和 seedIfEmpty 调用。
          * 供 app 模块调用，避免 app 直接操作 DAO。
          */
-        fun seedIfNeeded(context: Context) {
-            runCatching {
-                AppDatabase.getDatabase(context.applicationContext).let {
-                    SecurityDataSeeder(it.keywordDao(), it.quizQuestionDao()).seedIfEmpty()
-                }
+        suspend fun seedIfNeeded(context: Context) {
+            AppDatabase.getDatabase(context.applicationContext).let {
+                SecurityDataSeeder(it.keywordDao(), it.quizQuestionDao()).seedIfEmpty()
             }
         }
 
@@ -40,7 +38,7 @@ class SecurityDataSeeder(
          * 获取所有启用的关键词列表，供 ContentSafetyVerifier 引导使用。
          * 封装 DAO 操作，避免 app 模块直接访问 keywordDao。
          */
-        fun getEnabledKeywords(context: Context): List<Pair<String, String>> {
+        suspend fun getEnabledKeywords(context: Context): List<Pair<String, String>> {
             return runCatching {
                 AppDatabase.getDatabase(context.applicationContext).keywordDao().getAllEnabled()
                     .filter { it.type == "KEYWORD" }
@@ -49,7 +47,7 @@ class SecurityDataSeeder(
         }
     }
 
-    fun seedIfEmpty() {
+    suspend fun seedIfEmpty() {
         try {
             if (keywordDao.count() == 0) {
                 Log.i(TAG, "开始初始化关键词数据...")

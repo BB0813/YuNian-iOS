@@ -145,7 +145,7 @@ object ChunkedResponseHandler {
             }
 
         val source = body.source()
-        var accumulatedText = ""
+        val accumulatedText = StringBuilder()
         var chunkCount = 0
         var bufferText = ""
         var lastEmitTime = System.currentTimeMillis()
@@ -184,7 +184,7 @@ object ChunkedResponseHandler {
                         }
 
                         if (!content.isNullOrEmpty()) {
-                            accumulatedText += content
+                            accumulatedText.append(content)
                             chunkCount++
                             bufferText += content
 
@@ -222,7 +222,7 @@ object ChunkedResponseHandler {
                         val chunk = json.decodeFromString(StreamChunk.serializer(), line)
                         val content = chunk.choices?.firstOrNull()?.delta?.content
                         if (!content.isNullOrEmpty()) {
-                            accumulatedText += content
+                            accumulatedText.append(content)
                             chunkCount++
                             bufferText += content
                             val now = System.currentTimeMillis()

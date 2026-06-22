@@ -55,16 +55,15 @@ object SecureLog {
 
     /**
      * CRITICAL: 仅在发生严重错误时调用，release 也输出
-     * Uses System.err as fallback to survive ProGuard -assumenosideeffects stripping.
+     * 🔒 SecurityConstants.Level.MEDIUM: 使用 android.util.Log 而非 System.err
+     *    System.err.println 在 ProGuard 剥离后仍存在，且可能泄露到 logcat。
+     *    改用 Log.wtf() (What a Terrible Failure) — Android 原生严重错误级别。
      */
     @JvmStatic
     fun critical(msg: String) {
-        if (isDebug) {
-            Log.e(TAG, "[CRITICAL] $msg")
-        } else {
-            // System.err survives ProGuard stripping — intentional production output
-            System.err.println("[$TAG] [CRITICAL] $msg")
-        }
+        // Log.wtf is always visible in logcat, even in release builds
+        // But does NOT route to stderr — stays within Android's log buffer
+        Log.wtf(TAG, "[CRITICAL] $msg")
     }
 
     /**

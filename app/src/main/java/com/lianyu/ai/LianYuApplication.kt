@@ -138,7 +138,7 @@ class LianYuApplication : Application(), ImageLoaderFactory {
             }
         }
 
-        private fun initSecurityData(app: Application) {
+        private suspend fun initSecurityData(app: Application) {
             SecurityDataSeeder.seedIfNeeded(app)
         }
 
@@ -163,7 +163,7 @@ class LianYuApplication : Application(), ImageLoaderFactory {
             }
         }
 
-        private fun initSafetyVerifier(app: Application) {
+        private suspend fun initSafetyVerifier(app: Application) {
             runCatching {
                 ContentSafetyVerifier.init(app)
                 val keywords = SecurityDataSeeder.getEnabledKeywords(app)

@@ -1,29 +1,8 @@
-# LianYu Dex2C Transpiler — Method Whitelist
-# One method per line: com.package.ClassName.methodName
-# Methods listed here are transpiled from DEX bytecode to C++ native.
-# Priority: security-critical methods that actually have Dalvik bodies (NOT external).
-
-# === KMS Key Management (highest priority) ===
-com.lianyu.ai.security.KmsProvider.decryptWithMetadata
-com.lianyu.ai.security.KmsProvider.encryptWithMetadata
-com.lianyu.ai.security.KmsProvider.decryptWithSession
-com.lianyu.ai.security.KmsProvider.encryptWithSession
-
-# === Security Orchestration ===
-com.lianyu.ai.security.SecurityOrchestrator.encrypt
-com.lianyu.ai.security.SecurityOrchestrator.decrypt
-
-# === SM4 Cipher ===
-com.lianyu.ai.security.Sm4Cipher.encrypt
-com.lianyu.ai.security.Sm4Cipher.decrypt
-com.lianyu.ai.security.Sm4Cipher.encryptWithMetadata
-com.lianyu.ai.security.Sm4Cipher.decryptWithMetadata
-
-# === VMP Runtime / Trust Anchors ===
-com.lianyu.ai.security.CompositeVmpRuntime.verifyApkSignature
-com.lianyu.ai.security.CompositeVmpRuntime.verifyBeforePayload
-com.lianyu.ai.security.CompositeVmpRuntime.decryptPayload
-
-# === Security Gates ===
-com.lianyu.ai.security.SecurityGuard.isSafe
-com.lianyu.ai.security.SecurityGuard.performFullCheck
+# LianYu Dex2C Class-Merge Whitelist
+# @class = merge ALL methods in class into one switch-dispatch native function
+# @class Foo:methodA,methodB = merge only specific methods
+# Legacy single-method format still supported (auto-grouped)
+@class com.lianyu.ai.security.KmsProvider
+@class com.lianyu.ai.security.Sm4Cipher
+@class com.lianyu.ai.security.SecurityOrchestrator
+@class com.lianyu.ai.security.CompositeVmpRuntime

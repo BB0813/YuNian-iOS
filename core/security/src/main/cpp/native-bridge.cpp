@@ -92,6 +92,7 @@ static int _xstrstr_idx(const char* haystack, int idx) {
         { _obs_1, sizeof(_obs_1), OB_KEY(1) },
         { _obs_2, sizeof(_obs_2), OB_KEY(2) },
         { _obs_3, sizeof(_obs_3), OB_KEY(3) },
+
         { _obs_4, sizeof(_obs_4), OB_KEY(4) },
         { _obs_5, sizeof(_obs_5), OB_KEY(5) },
         { _obs_6, sizeof(_obs_6), OB_KEY(6) },
@@ -321,8 +322,11 @@ extern const uint8_t g_vmp_code_integrity[];
 extern const uint32_t g_vmp_code_integrity_size;
 extern const uint8_t g_vmp_sm3_hash[];
 extern const uint32_t g_vmp_sm3_hash_size;
+extern const uint8_t g_vmp_trust_anchors_verify[];
+extern const uint32_t g_vmp_trust_anchors_verify_size;
 extern const uint8_t g_vmp_frida_heartbeat[];
 extern const uint32_t g_vmp_frida_heartbeat_size;
+
 
 // === Control-flow obfuscation macros (anti-IDA/Ghidra) ===
 // These create opaque predicates — conditional branches that always
@@ -2067,20 +2071,19 @@ static jint native_vmp_apk_sig_verify(JNIEnv*, jclass) {
 // APK Integrity Verification — DEX / SO / Resources
 // ================================================================
 
-/* XOR-obfuscated expected SM3 hashes for APK components.
- * Key: 0xC3 ^ (hash_offset * 0x9D) per byte.
- * Deobfuscated: 3 × 32-byte SM3 digests [dex | so_text | arsc].
- * These are placeholder values — replace with actual hashes after
- * the first release build with R8+ProGuard enabled. */
+/* XOR-obfuscated SHA-256 hash of APK signing certificate (first 32 bytes).
+ * Key: 0xC3 ^ (i * 0x9D). Remaining 64 bytes reserved for DEX/SO integrity.
+ * Generated during build from release.keystore certificate. */
 static const uint8_t g_apk_digests_obs[96] = {
-    0x6f, 0x7b, 0xaf, 0x56, 0x6b, 0x80, 0xcb, 0x28, 0x80, 0x8c, 0x48, 0x12,
-    0xb2, 0x04, 0xcb, 0x35, 0x2f, 0xa1, 0xd5, 0xc8, 0x7b, 0xea, 0xc5, 0xc9,
-    0xcf, 0x6e, 0x28, 0x05, 0xca, 0x30, 0x8a, 0x83, 0x98, 0x90, 0xde, 0x8a,
-    0xeb, 0x78, 0x53, 0x49, 0xfc, 0x2b, 0xd4, 0x13, 0x73, 0x62, 0xed, 0x42,
-    0xaf, 0x70, 0x95, 0x48, 0xf7, 0x9a, 0xae, 0xaa, 0x44, 0x1f, 0x11, 0x8a,
-    0x5d, 0xc6, 0x82, 0x01, 0xd9, 0x34, 0xd2, 0x01, 0xf0, 0x8e, 0x57, 0x0d,
-    0xfc, 0xaa, 0x18, 0xbd, 0xfc, 0x04, 0xb3, 0xb2, 0x96, 0xc4, 0x12, 0x4e,
-    0x71, 0xbd, 0x7b, 0xfa, 0x50, 0x83, 0x45, 0x92, 0xaa, 0x3d, 0xe5, 0xb7,
+    // Certificate SHA-256 (32 bytes, XOR-obfuscated)
+    0x4e, 0x0d, 0xa5, 0x67, 0x7e, 0xc7, 0x29, 0x22, 0x5f, 0xbc, 0x9e, 0xf0, 0x7a, 0x73, 0xf0, 0x88,
+    0x41, 0x64, 0x2b, 0x4f, 0x39, 0xef, 0x22, 0xca, 0xe1, 0x5f, 0x78, 0x49, 0x9a, 0x41, 0x13, 0xec,
+    // Reserved: DEX integrity hash (32 bytes, zero for now)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Reserved: SO integrity hash (32 bytes, zero for now)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
 static void apk_hash_deobfuscate(uint8_t out[96]) {
@@ -2088,6 +2091,19 @@ static void apk_hash_deobfuscate(uint8_t out[96]) {
         uint8_t key = (uint8_t)(0xC3 ^ ((uint8_t)i * 0x9D));
         out[i] = g_apk_digests_obs[i] ^ key;
     }
+}
+
+/* Trust anchors verification — cert hash + config integrity + opcode CRC in VM. */
+static jint native_vmp_trust_anchors_verify(JNIEnv*, jclass) {
+    VMState vm;
+    vm_init(&vm, g_vmp_trust_anchors_verify, g_vmp_trust_anchors_verify_size);
+    vm_set_reg(&vm, 12, (uint32_t)(uintptr_t)g_apk_digests_obs);
+    // g_vmp_opcode_map not yet defined
+    // VMP_OP_COUNT not yet defined
+    vm_set_reg(&vm, 13, 0);
+    vm_set_reg(&vm, 14, 0);
+    vm_run(&vm, 150);
+    return (int)vm_get_reg(&vm, 0);
 }
 
 /* Use SM3 from sm-cipher.h */
@@ -2320,7 +2336,7 @@ extern "C" int check_resources_integrity(void) {
 }
 
 // Forward declarations for functions in this file
-static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context);
+static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context) __attribute__((used));
 static int getTracerPid(void);
 static int check_maps_for_magisk(void);
 
@@ -2360,9 +2376,35 @@ static int check_maps_for_magisk(void) {
     return strstr(buf, _m) != NULL ? 1 : 0;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// APK Signature Binding Key — SM3(cert) → decryption key
+// ═══════════════════════════════════════════════════════════════
+#include "apk-sig-key.h"
+
 static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context) {
-    // APK signature verification using g_apk_digests_obs
-    // Simplified: return 1 (OK) for now
+    // Derive key from APK signing certificate (SM3 of certificate DER)
+    uint8_t derived_key[32];
+    if (!derive_key_from_apk_sig(env, context, derived_key, sizeof(derived_key))) {
+        __android_log_print(ANDROID_LOG_ERROR, "LianYu",
+            "APK signature verification FAILED — refusing to run");
+        return 0;  // Fail-close: no key = no execution
+    }
+    // Compare with embedded SM3 hash (XOR-obfuscated, deobfuscated below)
+    const uint8_t* expected = g_apk_digests_obs;
+    uint8_t deobfuscated[32];
+    for (int i = 0; i < 32; i++) {
+        deobfuscated[i] = expected[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
+    }
+    if (memcmp(derived_key, deobfuscated, 32) != 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "LianYu",
+            "APK signature MISMATCH — re-packaging detected");
+        memset(derived_key, 0, sizeof(derived_key));
+        return 0;
+    }
+    // Store derived key for runtime use (DEX decryption, body encryption, etc.)
+    extern uint8_t g_kms_apk_bound_key[32];
+    memcpy(g_kms_apk_bound_key, derived_key, 32);
+    memset(derived_key, 0, sizeof(derived_key));
     return 1;
 }
 
@@ -2694,7 +2736,12 @@ extern "C" {
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpTeeAttest(
     JNIEnv* env, jobject thiz) {
-    return 0;
+    return native_vmp_tee_attest(env, (jclass)thiz);
+}
+
+/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpTrustAnchorsVerify(
+    JNIEnv* env, jobject thiz) {
+    return native_vmp_trust_anchors_verify(env, (jclass)thiz);
 }
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpApkSigVerify(
@@ -3045,6 +3092,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
             {const_cast<char*>("vmpCodeIntegrity"), const_cast<char*>("(I)I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpCodeIntegrity},
             {const_cast<char*>("vmpSm3Hash"), const_cast<char*>("(JI)J"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpSm3Hash},
             {const_cast<char*>("vmpFridaHeartbeat"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpFridaHeartbeat},
+            {const_cast<char*>("vmpTrustAnchorsVerify"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpTrustAnchorsVerify},
             {const_cast<char*>("ptraceSelfAttach"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_ptraceSelfAttach},
             {const_cast<char*>("antiDebugInit"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_antiDebugInit},
             {const_cast<char*>("zeroTrustInit"), const_cast<char*>("()V"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustInit},
@@ -3084,4 +3132,16 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 
     LS_LOGE("JNI_OnLoad: NativeBridge ready");
     return JNI_VERSION_1_6;
+}
+
+/* Trust anchors VMP bytecode placeholder — real via vmp_protect.py */
+const uint8_t g_vmp_trust_anchors_verify[8] = {0x01, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0xFF};
+const uint32_t g_vmp_trust_anchors_verify_size = 8;
+
+/*
+
+/* VMP hypercall wrappers — called from vm-engine.cpp bridge functions */
+extern "C" {
+int native_vmp_tee_attest_wrapper(void) { return native_vmp_tee_attest(nullptr, nullptr); }
+int native_vmp_apk_sig_verify_wrapper(void) { return native_vmp_apk_sig_verify(nullptr, nullptr); }
 }

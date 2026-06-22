@@ -110,6 +110,6 @@ object SecureStrings {
     /** Groq base URL */
     val groqBaseUrl: String by lazy { NativeBridge.getSecureString(21) }
 
-    /** Clove (Partner) base URL */
+    /** SuFlowAPI (Partner) base URL */
     val partnerBaseUrl: String by lazy { NativeBridge.getSecureString(22) }
 }

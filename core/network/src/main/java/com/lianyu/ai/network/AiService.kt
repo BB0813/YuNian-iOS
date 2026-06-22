@@ -379,6 +379,11 @@ class AiService(context: Context) : AiServiceProvider {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
+        /** 🔒 Shared thread pool for fetchModels() — prevents per-call thread leak. */
+        private val fetchModelsExecutor = java.util.concurrent.Executors.newFixedThreadPool(2) { r ->
+            Thread(r, "AiService-fetchModels").apply { isDaemon = true }
+        }
+
         /**
          * Check if a model requires temperature=1 (no other values supported)
          */
@@ -523,11 +528,11 @@ class AiService(context: Context) : AiServiceProvider {
         /**
          * Returns the appropriate OkHttpClient for the given API config.
          * - Any provider with skipCertVerify (except PARTNER) → unpinnedClient (trusts all certs)
-         * - PARTNER provider → partnerHttpClient (always pinned, never skips)
+         * - PARTNER provider → partnerHttpClient (SuFlowAPI, HTTP for now)
          * - All others → okHttpClient (with cert pinning + TLS enforcement)
          */
         private fun getEffectiveClient(config: ApiConfig): OkHttpClient {
-            // PARTNER (Clove relay) is always pinned — skipCertVerify does not apply
+            // PARTNER (SuFlowAPI relay) — uses dedicated client
             if (config.provider == ApiProvider.PARTNER) {
                 return partnerHttpClient
             }
@@ -538,14 +543,13 @@ class AiService(context: Context) : AiServiceProvider {
             return okHttpClient
         }
 
-        // Dedicated client for self-hosted (PARTNER) providers — avoids creating a new
+        // Dedicated client for SuFlowAPI (PARTNER) — avoids creating a new
         // OkHttpClient on every call (which leaks connection pools and dispatcher threads).
         // Uses longer timeouts since self-hosted servers may be slower.
         private val partnerHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .certificatePinner(CertificatePins.certificatePinner)
                 .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
-                // [P0 FIX] 自托管服务器超时从45s降至25s（原值过于保守）
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(25, TimeUnit.SECONDS)
                 .writeTimeout(10, TimeUnit.SECONDS)
@@ -747,7 +751,7 @@ class AiService(context: Context) : AiServiceProvider {
             )
 
             val allKeys = resolveKeysWithPartnerFallback(config).second
-            var accumulatedText = ""
+            val accumulatedText = StringBuilder()
             var hasEmittedContent = false  // Track whether any Text chunk has been emitted to the collector
             var hasError = false
             var streamSuccess = false
@@ -761,13 +765,13 @@ class AiService(context: Context) : AiServiceProvider {
                     SecureLog.w("AiService", "Stream already emitted content, cannot retry with next key")
                     break
                 }
-                accumulatedText = ""
+                accumulatedText.clear()
                 hasError = false
                 try {
                     ChunkedResponseHandler.streamChatCompletion(url, currentKey, streamRequest, okHttpClient).collect { result ->
                         when (result) {
                             is ChunkedResponseHandler.ChunkResult.Text -> {
-                                accumulatedText += result.content
+                                accumulatedText.append(result.content)
                                 hasEmittedContent = true
                                 emit(result)
                             }
@@ -783,7 +787,7 @@ class AiService(context: Context) : AiServiceProvider {
                                 if (!hasError) {
                                     streamSuccess = true
                                     if (accumulatedText.isNotEmpty()) {
-                                        val cleaned = applyPersonaPostProcessing(accumulatedText, sanitizedHistory)
+                                        val cleaned = applyPersonaPostProcessing(accumulatedText.toString(), sanitizedHistory)
                                         val safetyResult = ContentFilter.checkOutputSafety(cleaned)
                                         if (!safetyResult.isSafe) {
                                             SecureLog.w("AiService", "Stream output safety violation: ${safetyResult.level} - ${safetyResult.reason}")
@@ -836,7 +840,7 @@ class AiService(context: Context) : AiServiceProvider {
 
                 val sortedHistory = history.sortedBy { it.timestamp }
                 // C4: Differential privacy — sanitize PII from messages sent to 3rd-party APIs.
-                // Clove (self-hosted) skips sanitization; user data stays on their server.
+                // SuFlowAPI (self-hosted) skips sanitization; user data stays on your server.
                 val sanitizedHistory = if (config.provider == ApiProvider.PARTNER) {
                     sortedHistory
                 } else {
@@ -863,7 +867,6 @@ class AiService(context: Context) : AiServiceProvider {
                 val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
                 SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
-                System.err.println("[AiService] sendMessage: provider=${config.provider}, model=${config.model}, url=${config.baseUrl}, messages=${messages.size}, keys=${config.getAllApiKeys().size}")
 
                 try {
                     val (rawResponse, reasoning) = when (config.provider) {
@@ -1290,13 +1293,15 @@ class AiService(context: Context) : AiServiceProvider {
                 SecureLog.api("MODELS", "Fetching models from ${url.take(60)}...")
 
                 val fetchClient = when {
-                    provider == ApiProvider.PARTNER -> partnerHttpClient  // Clove always pinned
+                    provider == ApiProvider.PARTNER -> partnerHttpClient  // SuFlowAPI
                     skipCertVerify -> unpinnedClient  // any user-configured provider can skip
                     else -> okHttpClient
                 }
 
                 val response = runCatching {
-                val future = java.util.concurrent.Executors.newSingleThreadExecutor().submit<okhttp3.Response> {
+                // 🔒 FIX: Use shared thread pool instead of per-call newSingleThreadExecutor
+                //    Prevents native thread leak from repeated fetchModels() calls
+                val future = fetchModelsExecutor.submit<okhttp3.Response> {
                     try {
                         fetchClient.newCall(request).execute()
                     } catch (e: javax.net.ssl.SSLPeerUnverifiedException) {
@@ -2223,7 +2228,7 @@ $chatText
                                     // Use dedicated client per config (PARTNER, CUSTOM+skipCert, or default pinned)
                                     val client = getEffectiveClient(config)
                                     val response = executeAdaptive(config, request, client)
-                System.err.println("[AiService] HTTP response: code=${response.code}, protocol=${response.protocol}")
+                SecureLog.api("HTTP", "code=${response.code}, protocol=${response.protocol}")
                 val body = response.body?.string() ?: throw Exception("Empty response")
 
                 if (!response.isSuccessful) {
@@ -2242,7 +2247,7 @@ $chatText
                 val message = parsed.choices?.firstOrNull()?.message
                 val rawContent = message?.content
                 val reasoning = message?.reasoning_content
-                System.err.println("[AiService] Response: rawContent=${if (rawContent != null) "'${rawContent.take(80)}'(${rawContent.length}chars)" else "null"}, reasoning=${if (reasoning != null) "'${reasoning.take(80)}'(${reasoning.length}chars)" else "null"}")
+                SecureLog.api("RESPONSE", "len=${rawContent?.length ?: 0}, reasoningLen=${reasoning?.length ?: 0}")
 
                 // [FIX] 推理模型可能 content=null 但 reasoning_content 有值
                 // 也可能 content 只有思考标签，stripThinkingContent 后变空

@@ -239,6 +239,50 @@
 -dontwarn com.vivo.push.**
 -dontwarn com.xiaomi.mipush.sdk.**
 -dontwarn com.xiaomi.push.**
+# ═══════════════════════════════════════════════════════════════
+# Ultimate Shell — protect shell DEX + assets from R8/strip
+# ═══════════════════════════════════════════════════════════════
+
+# Keep shell bootstrapping classes (in shell DEX, referenced by manifest)
+-keep class com.lianyu.ai.security.StaticApkShell { *; }
+-keep class com.lianyu.ai.security.SActivity { *; }
+-keep class com.lianyu.ai.security.MethodRecoveryEngine { *; }
+-keep class com.lianyu.ai.security.G0 { *; }
+
+# Keep MainActivity (manifest LAUNCHER → must be resolvable by ClassLoader)
+-keep class com.lianyu.ai.MainActivity { *; }
+-keep class com.lianyu.ai.LianYuApplication { *; }
+
+# Keep all native method declarations
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Keep AndroidX runtime (for WorkManager initialization in shell)
+-keep class androidx.work.WorkManager { *; }
+-keep class androidx.work.Configuration { *; }
+-keep class androidx.work.Configuration$Builder { *; }
+-keep class androidx.work.impl.WorkManagerInitializer { *; }
+
+# Keep InMemoryDexClassLoader (used by shell at runtime)
+-keep class dalvik.system.InMemoryDexClassLoader { *; }
+-keep class dalvik.system.BaseDexClassLoader { *; }
+-keep class dalvik.system.DexPathList { *; }
+-keep class dalvik.system.DexPathList$Element { *; }
+
+# ═══════════════════════════════════════════════════════════════
+# WorkManager — preserve reflection-based initialization
+# ═══════════════════════════════════════════════════════════════
+-keep class * extends androidx.work.Worker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keepattributes *Annotation*
+-keep class androidx.work.impl.** { *; }
+-keep class androidx.work.WorkManager { *; }
+-keep class androidx.work.Configuration { *; }
+-keep class androidx.work.Configuration$Builder { *; }
+-keep class androidx.work.impl.WorkManagerInitializer { *; }
+
 -dontwarn com.huawei.hms.**
 -dontwarn com.huawei.android.os.**
 -dontwarn com.huawei.hianalytics.**

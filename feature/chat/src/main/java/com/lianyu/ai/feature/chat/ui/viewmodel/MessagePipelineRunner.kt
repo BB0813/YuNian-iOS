@@ -34,9 +34,9 @@ class MessagePipelineRunner(
 
         return try {
             ChatDebugLog.log("[Pipeline] calling ContentFilter.checkInput...")
-            System.err.println("[Pipeline] STEP1: checkInput start")
+            ChatDebugLog.log("[Pipeline] STEP1: checkInput start")
             val filterResult = ContentFilter.checkInput(input.rawText)
-            System.err.println("[Pipeline] STEP1: checkInput done, violating=${filterResult.isViolating}")
+            ChatDebugLog.log("[Pipeline] STEP1: checkInput done, violating=${filterResult.isViolating}")
             ChatDebugLog.log("[Pipeline] ContentFilter returned: violating=${filterResult.isViolating}")
             if (filterResult.isViolating) {
                 onViolation?.invoke(filterResult.level)
@@ -49,12 +49,12 @@ class MessagePipelineRunner(
             }
 
             _pipelineState.value = MessagePipeline.PipelineState(stage = MessagePipeline.Stage.CLASSIFY)
-            System.err.println("[Pipeline] STEP2: checkVector start")
+            ChatDebugLog.log("[Pipeline] STEP2: checkVector start")
             val vectorResult = ContentFilter.checkVector(input.rawText)
-            System.err.println("[Pipeline] STEP2: checkVector done")
+            ChatDebugLog.log("[Pipeline] STEP2: checkVector done")
 
             _pipelineState.value = MessagePipeline.PipelineState(stage = MessagePipeline.Stage.CLASSIFY)
-            System.err.println("[Pipeline] STEP3: Bayesian start (timeout=${TimeoutBudgets.SAFETY_CLASSIFY_MS}ms)")
+            ChatDebugLog.log("[Pipeline] STEP3: Bayesian start (timeout=${TimeoutBudgets.SAFETY_CLASSIFY_MS}ms)")
             val bayesianScore = withTimeoutOrNull(TimeoutBudgets.SAFETY_CLASSIFY_MS) {
                 ContentSafetyVerifier.verifyUserInputAsync(input.rawText, filterResult, vectorResult)
             } ?: com.lianyu.ai.common.safety.SafetyScore(
@@ -62,7 +62,7 @@ class MessagePipelineRunner(
                 source = com.lianyu.ai.common.safety.ScoreSource.USER_INPUT,
                 explanation = "Safety check timed out, fail-closed"
             )
-            System.err.println("[Pipeline] STEP3: Bayesian done, dangerous=${bayesianScore.isDangerous}")
+            ChatDebugLog.log("[Pipeline] STEP3: Bayesian done, dangerous=${bayesianScore.isDangerous}")
 
             if (bayesianScore.isDangerous) {
                 onViolation?.invoke(ContentFilter.ViolationLevel.HIGH)
@@ -84,12 +84,11 @@ class MessagePipelineRunner(
 
         } catch (e: kotlinx.coroutines.CancellationException) {
             // [CRITICAL] 必须重新抛出 CancellationException，否则 withTimeoutOrNull 失效
-            // 吞掉 CancellationException 会导致外层 withTimeoutOrNull 无法正确返回 null
             _queueDepth.value = maxOf(0, _queueDepth.value - 1)
             throw e
         } catch (e: Throwable) {
             SecureLog.e("MessagePipeline", "[${_pipelineState.value.stage}] 失败", e)
-            System.err.println("[MessagePipeline] error at stage=${_pipelineState.value.stage}: ${e.javaClass.simpleName}: ${e.message}")
+            ChatDebugLog.log("[MessagePipeline] error at stage=${_pipelineState.value.stage}: ${e.javaClass.simpleName}: ${e.message}")
             _pipelineState.value = MessagePipeline.PipelineState(
                 stage = _pipelineState.value.stage,
                 error = e.message

@@ -9,75 +9,31 @@
 
 // ── LCG parameters for scatter_key_positions ──────────────────────
 // state = (state * VMP_LCG_MUL + VMP_LCG_ADD) & 0xFFFFFFFF
-#define VMP_LCG_MUL  0x5E00B3C7u
-#define VMP_LCG_ADD  0x5C09C627u
+#define VMP_LCG_MUL  0x3D16D707u
+#define VMP_LCG_ADD  0x74FEA504u
 
 // ── XOR deobfuscation parameters for deobfuscate_key ──────────────
 // key_out[i] = obf_key[i] ^ seed[(i * VMP_XOR_STRIDE) & 3] ^ (i * VMP_XOR_MULT)
-#define VMP_XOR_MULT    0xC4u
-#define VMP_XOR_STRIDE  0x07u
+#define VMP_XOR_MULT    0xA4u
+#define VMP_XOR_STRIDE  0x05u
 
 // ── Integrity seed multiplier (vm-engine.cpp vm_init) ─────────────
 // Replaces hardcoded 1103515245 with per-build random value.
-#define VMP_INTEGRITY_MUL  0x07C33447u
+#define VMP_INTEGRITY_MUL  0xF67087CFu
 
 // ── Seed (cert CRC32, for reference only — not used at runtime) ───
-#define VMP_BUILD_SEED  0xAAF0BF89u
+#define VMP_BUILD_SEED  0xDEADBEEFu
 
 // ── Shell method/field name obfuscation (per-build random) ─────────
 // These replace the hardcoded JNI names in Kotlin shell + C++ gMethods.
 // C++:  RegisterNatives with VMP_SHELL_LOAD_PAYLOAD instead of "nativeLoadPayload"
 //       GetStaticFieldID with VMP_SHELL_DEX_LOADER instead of "sDexClassLoader"
 //       GetStaticFieldID with VMP_SHELL_REAL_APP_CLASS instead of "sRealAppClass"
-// Kotlin: external fun dJ414UTwisYq(...) replaces nativeLoadPayload
-//         @JvmStatic var ceAPV7xKK1YDE replaces sDexClassLoader
-//         @JvmStatic var _pg9fWGG63DU7 replaces sRealAppClass
-#define VMP_SHELL_LOAD_PAYLOAD   "dJ414UTwisYq"
-#define VMP_SHELL_DEX_LOADER     "ceAPV7xKK1YDE"
-#define VMP_SHELL_REAL_APP_CLASS "_pg9fWGG63DU7"
-
-
-// ── Per-build VMP opcode mapping (randomized per APK) ──
-// Seed: 0xAAF0BF89
-
-// ── Per-build VMP opcode mapping (randomized per APK) ──
-// Seed: 0xAAF0BF89
-
-// ── Per-build VMP opcode mapping (randomized per APK) ──
-// Seed: 0xAAF0BF89
-
-// ── Per-build VMP opcode mapping (randomized per APK) ──
-// Seed: 0xAAF0BF89
-#define VMP_OP_ADD 0x29
-#define VMP_OP_ADD_IMM 0xC5
-#define VMP_OP_AND 0xBB
-#define VMP_OP_CALL 0x09
-#define VMP_OP_CMP 0x25
-#define VMP_OP_CMP_IMM 0x5E
-#define VMP_OP_GFMUL 0x85
-#define VMP_OP_HALT 0xFF
-#define VMP_OP_HYPERCALL 0xA2
-#define VMP_OP_JE 0x0C
-#define VMP_OP_JG 0xBA
-#define VMP_OP_JGE 0x53
-#define VMP_OP_JL 0xE4
-#define VMP_OP_JMP 0xBE
-#define VMP_OP_JNE 0xD8
-#define VMP_OP_LOAD_IMM 0xBD
-#define VMP_OP_LOAD_MEM 0xCC
-#define VMP_OP_LOAD_REG 0x6B
-#define VMP_OP_MUL 0xAD
-#define VMP_OP_MUL_IMM 0xC3
-#define VMP_OP_NOP 0x78
-#define VMP_OP_OR 0x9C
-#define VMP_OP_RET 0xF9
-#define VMP_OP_SBOX 0xF7
-#define VMP_OP_SHL 0xC4
-#define VMP_OP_SHR 0xD0
-#define VMP_OP_STORE_MEM 0x20
-#define VMP_OP_STORE_REG 0x97
-#define VMP_OP_SUB 0x86
-#define VMP_OP_XOR 0x47
-#define VMP_OP_XTIME 0x7D
+// Kotlin: external fun dByscKBZMeif(...) replaces nativeLoadPayload
+//         @JvmStatic var c6J4mqpREjD5 replaces sDexClassLoader
+//         @JvmStatic var aU4jD26mJ7SXoRd replaces sRealAppClass
+#define VMP_SHELL_LOAD_PAYLOAD   "dByscKBZMeif"
+#define VMP_SHELL_DEX_LOADER     "c6J4mqpREjD5"
+#define VMP_SHELL_REAL_APP_CLASS "aU4jD26mJ7SXoRd"
 
 #endif // LIANYU_VMP_CONFIG_H

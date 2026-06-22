@@ -304,10 +304,20 @@ class DexParser:
         }
 
     def _build_method_code_index(self):
-        """Pre-build method_idx → code_offset mapping for O(1) lookup."""
+        """Pre-build method_idx → code_offset mapping for O(1) lookup.
+
+        R8-compacted DEX can produce abnormal class_data: delta-encoded
+        method_idx_diff values may be sentinel-large (~0x0FFFFFFF), and
+        code_off may point to garbage. We validate at every step to avoid
+        reading implausible code_items.
+        """
         self._method_code_map = {}  # method_idx → code_offset
         off = self.class_defs_off
         max_off = len(self.data)
+        total_classes_parsed = 0
+        total_methods_with_code = 0
+        total_skipped_uleb128 = 0  # skipped due to overflow/out-of-range
+
         for ci in range(self.class_defs_size):
             if off + 32 > max_off:
                 break
@@ -315,39 +325,89 @@ class DexParser:
             class_data_off = cd[6]
             off += 32
 
-            if class_data_off == 0 or class_data_off >= max_off:
+            if class_data_off == 0 or class_data_off >= max_off - 16:
                 continue
 
+            total_classes_parsed += 1
+
             pos = class_data_off
-            static_fields_size, consumed = self._read_uleb128(pos); pos += consumed
-            instance_fields_size, consumed = self._read_uleb128(pos); pos += consumed
-            direct_methods_size, consumed = self._read_uleb128(pos); pos += consumed
-            virtual_methods_size, consumed = self._read_uleb128(pos); pos += consumed
+            # Read sizes with overflow guard
+            if pos >= max_off: continue
+            static_fields_size, consumed = self._read_uleb128(pos)
+            if static_fields_size > 10000: continue  # R8 sentinel / garbage
+            pos += consumed
+
+            if pos >= max_off: continue
+            instance_fields_size, consumed = self._read_uleb128(pos)
+            if instance_fields_size > 10000: continue
+            pos += consumed
+
+            if pos >= max_off: continue
+            direct_methods_size, consumed = self._read_uleb128(pos)
+            if direct_methods_size > 10000: continue
+            pos += consumed
+
+            if pos >= max_off: continue
+            virtual_methods_size, consumed = self._read_uleb128(pos)
+            if virtual_methods_size > 10000: continue
+            pos += consumed
 
             last_idx = 0
             total = direct_methods_size + virtual_methods_size
-            for _ in range(total):
-                if pos >= max_off:
+            for _ in range(min(total, 5000)):  # hard cap per class
+                if pos + 3 > max_off:  # need at least 3 uleb128 values
                     break
-                method_idx_diff, consumed = self._read_uleb128(pos); pos += consumed
+                method_idx_diff, consumed = self._read_uleb128(pos)
+                if method_idx_diff > 0xFFFFFF:  # sentinel / garbage delta
+                    total_skipped_uleb128 += 1
+                    break  # remaining data for this class is corrupt
+                pos += consumed
+
+                if pos >= max_off: break
                 access_flags, consumed = self._read_uleb128(pos); pos += consumed
+
+                if pos >= max_off: break
                 code_off, consumed = self._read_uleb128(pos); pos += consumed
 
                 actual_idx = last_idx + method_idx_diff
                 last_idx = actual_idx
 
-                if code_off != 0 and code_off < max_off:
-                    self._method_code_map[actual_idx] = code_off
-        print(f"[dex2c] Indexed {len(self._method_code_map)} methods with code")
+                # Validate method_idx is within bounds
+                if actual_idx >= self.method_ids_size:
+                    continue
 
-    def read_method_code(self, method_idx: int) -> Optional[dict]:
+                # Validate code_off: must be in-bounds AND point to
+                # readable code_item header (>= 16 bytes remaining)
+                if code_off == 0 or code_off + 16 > max_off:
+                    continue
+
+                # Quick pre-validation: peek at code_item header
+                # registers_size(2) + ins_size(2) + outs_size(2) +
+                # tries_size(2) + debug_info_off(4) + insns_size(4)
+                peek = struct.unpack_from('<H H H H I I', self.data, code_off)
+                regs, ins_count, outs, tries, _, insns = peek
+                # Reject obviously garbage code_items
+                if regs > 1000 or insns > 100000 or tries > 500:
+                    continue
+                # Reject zero-insns code_items (abstract methods, etc.)
+                if insns == 0:
+                    continue
+
+                self._method_code_map[actual_idx] = code_off
+                total_methods_with_code += 1
+
+        print(f"[dex2c] Indexed {len(self._method_code_map)} methods with code "
+              f"(classes_parsed={total_classes_parsed}, "
+              f"uleb128_overflows={total_skipped_uleb128})")
+
+    def read_method_code(self, method_idx: int, return_type: str = 'V') -> Optional[dict]:
         """Read code_item for a method. Returns parsed code or None. O(1) lookup."""
         code_off = self._method_code_map.get(method_idx)
         if code_off is None:
             return None
-        return self._parse_code_item(code_off, method_idx)
+        return self._parse_code_item(code_off, method_idx, return_type)
 
-    def _parse_code_item(self, offset: int, method_idx: int) -> dict:
+    def _parse_code_item(self, offset: int, method_idx: int, return_type: str = 'V') -> dict:
         """Parse code_item structure."""
         # registers_size, ins_size, outs_size, tries_size, debug_info_off, insns_size
         header = struct.unpack_from('<H H H H I I', self.data, offset)
@@ -361,8 +421,8 @@ class DexParser:
         code_start = offset + 16  # code_item header = 16 bytes
         code_bytes = self.data[code_start : code_start + insns_size * 2]
 
-        # Parse instructions
-        instructions = self._decode_instructions(code_bytes, insns_size)
+        # Parse instructions (pass return_type for return-void suppression)
+        instructions = self._decode_instructions(code_bytes, insns_size, return_type)
 
         return {
             'method_idx': method_idx,
@@ -372,11 +432,17 @@ class DexParser:
             'tries_size': tries_size,
             'code': code_bytes,
             'instructions': instructions,
-            'insns_count': insns_size
+            'insns_count': insns_size,
+            'return_type': return_type
         }
 
-    def _decode_instructions(self, code: bytes, count: int) -> List[dict]:
-        """Decode DEX bytecode instructions."""
+    def _decode_instructions(self, code: bytes, count: int, return_type: str = 'V') -> List[dict]:
+        """Decode DEX bytecode instructions.
+
+        return_type: the DEX type descriptor of the method's return type (e.g., 'V'=void, 'L...;'=object).
+        Used to suppress return; emission for non-void methods where the bytecode ends with return-void
+        (R8 optimization: inlines a void body into a non-void method).
+        """
         result = []
         i = 0
         while i < len(code):
@@ -642,18 +708,31 @@ class Dex2CCodeGen:
 
         Returns the C++ function body as a string, or None if no code.
         """
-        code = self.dex.read_method_code(method_idx)
+        # P2-15: get method info FIRST to obtain return_type, then pass it to read_method_code
+        info = self.dex.get_method_info(method_idx)
+        return_type = info['return_type']
+        code = self.dex.read_method_code(method_idx, return_type)
         if not code:
             print(f"  [skip] No code for method {method_idx}")
             return None
 
-        info = self.dex.get_method_info(method_idx)
         class_name = info['class'][1:-1].replace('/', '.')
         jni_name = self.java_to_jni_name(class_name, info['name'])
-        return_type = info['return_type']
         proto = info['proto']
 
         instructions = code.get('instructions', [])
+
+        # Determine default return value for non-void methods
+        default_return = ''
+        if return_type == 'Z':   default_return = 'return JNI_FALSE;'
+        elif return_type == 'I': default_return = 'return 0;'
+        elif return_type == 'J': default_return = 'return 0;'
+        elif return_type == 'F': default_return = 'return 0.0f;'
+        elif return_type == 'D': default_return = 'return 0.0;'
+        elif return_type == 'V': default_return = ''
+        elif return_type.startswith('L') or return_type.startswith('['):
+            default_return = 'return nullptr;'
+        else: default_return = 'return nullptr;'
 
         # Generate function
         lines = []
@@ -689,17 +768,29 @@ class Dex2CCodeGen:
         final += f"    // Dex2C transpiled from {class_name}.{info['name']}\n"
         final += f"    // DEX: {len(instructions)} instructions, {code['registers_size']} registers\n"
 
-        # Insert translated instructions
-        body_lines = self._translate_instructions(instructions, info, code)
+        # Insert translated instructions (pass return_type for return-void suppression)
+        body_lines = self._translate_instructions(instructions, info, code, return_type)
         for bl in body_lines:
             final += f"    {bl}\n"
+
+        # P2-15: always inject default return for non-void methods
+        # R8 may inline bytecode that ends with return-void into a non-void method,
+        # leaving no explicit return. The default return ensures the C++ compiles.
+        if default_return:
+            final += f"    // Dex2C: default return (method may not have explicit return after R8 inlining)\n"
+            final += f"    {default_return}\n"
 
         final += "}\n"
         return final
 
     def _translate_instructions(self, instructions: List[dict],
-                                 info: dict, code: dict) -> List[str]:
+                                 info: dict, code: dict, return_type: str = 'V') -> List[str]:
         """Translate DEX instructions to C++ statements.
+
+        return_type: the DEX type descriptor of the method return type ('V'=void, 'L...;'=object, etc.)
+        When return_type != 'V' and the bytecode ends with return-void (R8 optimization),
+        the 'return;' statement is suppressed and the function falls through to a default
+        return injected by transpile_method.
 
         This is a FRAMEWORK implementation — full opcode coverage requires
         extending the dispatch table below. TODO markers indicate where
@@ -741,8 +832,13 @@ class Dex2CCodeGen:
                 pass
 
             elif op in (OP_RETURN_VOID,):
-                lines.append(f"{comment} → return;")
-                lines.append("return;")
+                # P2-15: suppress return; for non-void methods (R8 inlined bytecode)
+                if return_type == 'V':
+                    lines.append(f"{comment} → return;")
+                    lines.append("return;")
+                else:
+                    lines.append(f"{comment} → return-void suppressed (method returns {return_type})")
+                    lines.append(f"// return-void suppressed: non-void method, fall through to default return")
 
             elif op in (OP_RETURN,):
                 a = inst.get('vA', 0)
@@ -1004,6 +1100,10 @@ class Dex2CCodeGen:
         cpp_lines.append("/* ═══════════════════════════════════════════════════════════")
         cpp_lines.append(f" * Generated: {len(methods_generated)} methods transpiled")
         cpp_lines.append(" * ═══════════════════════════════════════════════════════════ */")
+        cpp_lines.append("")
+        cpp_lines.append("// Dex2C .text CRC32 — set to 0xFFFFFFFF for runtime integrity placeholder")
+        cpp_lines.append("// Patched by build pipeline after ndk-build completes")
+        cpp_lines.append("const uint32_t gDex2cTextCrc32 = 0xFFFFFFFF;")
         cpp_lines.append("")
 
         # JNI_OnLoad
