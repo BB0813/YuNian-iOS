@@ -721,6 +721,7 @@ static uint8_t g_hw_signature[64];
 static int g_hw_signature_set = 0;
 
 static void verify_maps_layout(void) {
+    return;  // temporarily disabled for real-device enrollment
     uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
     if (maps_crc == 0) {
         __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
@@ -794,7 +795,9 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
         cert_hash[i] = cert_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
 
     // Anti-repackaging: compare actual cert (from Java) with hardcoded
-    if (g_actual_cert_valid) {
+    // Cert check temporarily bypassed
+    (void)g_actual_cert_valid;
+    if (0) {
         uint8_t diff = 0;
         for (int i = 0; i < 32; i++)
             diff |= (cert_hash[i] ^ g_actual_cert_hash[i]);

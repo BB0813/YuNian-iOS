@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name="com.lianyu.ai.security.StaticApkShell"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="LianYu"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LianYu"
+        tools:replace="android:name,android:label,android:allowBackup">
+
+        <activity android:exported="true" android:hardwareAccelerated="true"
+            android:name="com.lianyu.ai.security.SActivity"
+            android:theme="@style/Theme.LianYu"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <activity android:exported="false" android:hardwareAccelerated="true"
+            android:launchMode="singleTask"
+            android:name="com.lianyu.ai.MainActivity"
+            android:theme="@style/Theme.LianYu"
+            android:windowSoftInputMode="adjustResize"/>
+
+        <!-- Fix: remove HMS InitProvider that lacks implementation in APK -->
+        <provider android:name="com.huawei.hms.aaid.InitProvider" tools:node="remove"/>
+
+    </application>
+</manifest>
