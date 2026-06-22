@@ -28,7 +28,7 @@ LOCAL_CPPFLAGS += -fmerge-all-constants -fno-inline-functions-called-once
 LOCAL_LDLIBS := -llog -landroid -ljnigraphics
 LOCAL_CPP_FEATURES := exceptions rtti
 LOCAL_STATIC_LIBRARIES := lianyu_vmp_bytecode
-LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script.map -Wl,--gc-sections -Wl,-s -Wl,-z,separate-code -Wl,-u,_lianyu_text_decrypt_ptr -Wl,-u,g_vmp_payload -Wl,-u,Java_com_lianyu_ai_security_KmsProvider_nativeInit -Wl,-u,kms_provider_register_natives -Wl,-u,derive_key_from_apk_sig
+LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script.map -Wl,--gc-sections -Wl,-s -Wl,-z,separate-code -Wl,-u,_lianyu_text_decrypt_ptr -Wl,-u,g_vmp_payload -Wl,-u,Java_com_lianyu_ai_security_KmsProvider_nativeInit -Wl,-u,kms_provider_register_natives -Wl,-u,derive_key_from_apk_sig -Wl,-u,Java_com_lianyu_ai_security_NativeBridge_nativeGetVmpFingerprint -Wl,-u,Java_com_lianyu_ai_security_NativeBridge_enterDeadLoop
 
 include $(BUILD_SHARED_LIBRARY)
 
@@ -56,5 +56,5 @@ LOCAL_CPPFLAGS := -Os -fvisibility=hidden -fdata-sections -ffunction-sections
 LOCAL_CPPFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
 LOCAL_LDLIBS := -llog
 LOCAL_CPP_FEATURES := exceptions rtti
-LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script-shell.map -Wl,--gc-sections -Wl,-u,JNI_OnLoad -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey
+LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script-shell.map -Wl,--gc-sections -Wl,-u,JNI_OnLoad -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer -Wl,-u,Java_com_lianyu_ai_security_NativeBridge_nativeGetAadChecksums -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetHardwareSignature -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeHasHardwareKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey
 include $(BUILD_SHARED_LIBRARY)

@@ -739,7 +739,17 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     JNIEnv* env, jclass cls) {
     verify_maps_layout();
 
-    /* Key = HMAC-SHA256(cert_hash, "lianyu_dex_v3___") */
+    /* Key = HMAC-SHA256(cert_hash, maps_crc || "lianyu_dex_v3___")
+       Pipeline encrypts with the same derivation using EXPECTED maps_crc.
+       If maps layout changed at runtime, maps_crc differs → key mismatches → DEX garbage. */
+    uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
+    static const uint64_t EXPECTED = 0x8e7beee5d9b3c6e4ULL;
+    if (maps_crc == 0) {
+        maps_crc = EXPECTED;  // SELinux blocks /proc on some devices
+    } else if (maps_crc != EXPECTED) {
+        maps_crc ^= 0x9E3779B97F4A7C15ULL;  // poison
+    }
+
     static const uint8_t cert_obs[32] = {
         0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
         0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec
@@ -748,9 +758,23 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     for (int i = 0; i < 32; i++)
         cert_hash[i] = cert_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
 
-    static const char salt[] = "lianyu_dex_v3___";
+    // Anti-repackaging: compare actual cert (from Java) with hardcoded
+    if (g_actual_cert_valid) {
+        uint8_t diff = 0;
+        for (int i = 0; i < 32; i++)
+            diff |= (cert_hash[i] ^ g_actual_cert_hash[i]);
+        if (diff) {
+            maps_crc ^= 0xDEADBEEFCAFEBABEULL;  // poison → wrong key
+            __android_log_print(ANDROID_LOG_ERROR, "LianYuShell",
+                "RE-SIGNING DETECTED — DEX key poisoned");
+        }
+    }
+
+    uint8_t salt[8 + 16];
+    memcpy(salt, &maps_crc, 8);
+    memcpy(salt + 8, "lianyu_dex_v3___", 16);
     uint8_t key[32];
-    hmac_sha256(cert_hash, 32, (const uint8_t*)salt, 16, key);
+    hmac_sha256(cert_hash, 32, salt, 24, key);
 
     jbyteArray result = env->NewByteArray(32);
     if (result)
@@ -758,6 +782,110 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     memset(key, 0, 32);
     memset(cert_hash, 0, 32);
     return result;
+}
+
+} /* extern "C" */
+
+
+// ════════════════════════════════
+// Recovered: nativeSetDexBuffer
+// ════════════════════════════════
+static const uint8_t* g_dex_buf = nullptr;
+static uint32_t g_dex_size = 0;
+static uint8_t g_actual_cert_hash[32] = {0};
+static int g_actual_cert_valid = 0;
+
+extern "C" {
+
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer(
+    JNIEnv* env, jclass, jbyteArray data) {
+    if (!data) return;
+    g_dex_size = (uint32_t)env->GetArrayLength(data);
+    g_dex_buf = (const uint8_t*)env->GetByteArrayElements(data, nullptr);
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_lianyu_ai_security_NativeBridge_nativeGetAadChecksums(
+    JNIEnv* env, jclass) {
+    jbyteArray result = env->NewByteArray(16);
+    if (!result) return nullptr;
+    uint8_t out[16] = {0};
+    if (g_dex_buf && g_dex_size > 0) {
+        uint32_t scan = (g_dex_size > 65536) ? 65536 : g_dex_size;
+        uint64_t crc = crc64_buf(g_dex_buf, scan);
+        struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t nonce = ((uint64_t)ts.tv_sec*1000 + ts.tv_nsec/1000000) ^ 0xDEAD;
+        memcpy(out, &crc, 8);
+        memcpy(out+8, &nonce, 8);
+    }
+    env->SetByteArrayRegion(result, 0, 16, (jbyte*)out);
+    return result;
+}
+
+static uint8_t g_hw_signature[64];
+static int g_hw_signature_set = 0;
+
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeSetHardwareSignature(
+    JNIEnv* env, jclass, jbyteArray sig) {
+    if (!sig) return;
+    jsize len = env->GetArrayLength(sig);
+    if (len > 64) len = 64;
+    jbyte* bytes = env->GetByteArrayElements(sig, nullptr);
+    if (bytes) {
+        memcpy(g_hw_signature, bytes, (size_t)len);
+        g_hw_signature_set = 1;
+        env->ReleaseByteArrayElements(sig, bytes, JNI_ABORT);
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeHasHardwareKey(
+    JNIEnv*, jclass) {
+    return g_hw_signature_set ? 1 : 0;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey(
+    JNIEnv* env, jclass) {
+    static const uint8_t cert_obs[32] = {
+        0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
+        0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec
+    };
+    uint8_t cert_hash[32];
+    for (int i=0;i<32;i++) cert_hash[i]=cert_obs[i]^(uint8_t)(0xC3^(i*0x9D));
+    uint64_t maps_crc=maps_crc64_for_lib("liblianyu_shell.so");
+    static const uint64_t E=0x8e7beee5d9b3c6e4ULL;
+    if(maps_crc==0) maps_crc=E;
+    else if(maps_crc!=E) maps_crc^=0x9E3779B97F4A7C15ULL;
+    uint8_t salt[8+32+16];
+    memcpy(salt,&maps_crc,8);
+    memcpy(salt+8,g_hw_signature,32);
+    memcpy(salt+40,"lianyu_session_v1",16);
+    uint8_t key[32];
+    hmac_sha256(cert_hash,32,salt,56,key);
+    jbyteArray r=env->NewByteArray(32);
+    if(r) env->SetByteArrayRegion(r,0,32,(jbyte*)key);
+    memset(key,0,32); memset(cert_hash,0,32);
+    return r;
+}
+
+/* ═══════════ Anti-repackaging: store actual APK signing cert ═══════════ */
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert(
+    JNIEnv* env, jclass, jbyteArray certBytes) {
+    if (!certBytes) return;
+    jsize len = env->GetArrayLength(certBytes);
+    if (len < 32) return;
+    jbyte* bytes = env->GetByteArrayElements(certBytes, nullptr);
+    if (!bytes) return;
+    extern void sha256_hash(const uint8_t*, size_t, uint8_t[32]);
+    sha256_hash((const uint8_t*)bytes, (size_t)len, g_actual_cert_hash);
+    g_actual_cert_valid = 1;
+    env->ReleaseByteArrayElements(certBytes, bytes, JNI_ABORT);
+    __android_log_print(ANDROID_LOG_INFO, "LianYuShell",
+        "APK cert stored — anti-repackaging active");
 }
 
 } /* extern "C" */

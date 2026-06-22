@@ -50,6 +50,10 @@ object NativeBridge {
     @JvmStatic
     external fun isHookDetected(): Boolean
     @JvmStatic
+    external fun enterDeadLoop()
+    @JvmStatic
+    external fun nativeGetVmpFingerprint(): Int
+    @JvmStatic
     external fun isEmulator(): Boolean
     @JvmStatic
     external fun isDebugged(): Boolean

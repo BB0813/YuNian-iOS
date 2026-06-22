@@ -179,10 +179,13 @@ def phase4_apktool():
         old.unlink()
     count = 0
     # Key matches nativeDeriveDexKey: SHELL_INTEGRITY_COOKIE XOR g_vmp_config
-    XOR_KEY = bytes([0x4C, 0x69, 0x61, 0x6E, 0x59, 0x75, 0x53, 0x68,
-                     0x65, 0x6C, 0x6C, 0x56, 0x32, 0x4B, 0x4D, 0x53,
-                     0xA5, 0x3C, 0x7F, 0xE1, 0x9D, 0x42, 0xB8, 0x66,
-                     0x11, 0xCC, 0x88, 0x34, 0xDE, 0xFA, 0x07, 0x99])
+    # Key = HMAC-SHA256(cert_SHA256, maps_crc64 || "lianyu_dex_v3___")
+    # maps_crc64 = 0x8e7beee5d9b3c6e4 (reference device, LE)
+    # Matches nativeDeriveDexKey() in dex-extractor.cpp
+    XOR_KEY = bytes([0xb6, 0x14, 0xbd, 0xe8, 0x48, 0x68, 0xa2, 0xe8,
+                     0x68, 0x68, 0x37, 0x60, 0x4b, 0x69, 0x1d, 0x64,
+                     0x2c, 0x8d, 0xd8, 0x2a, 0x23, 0x42, 0x63, 0xd7,
+                     0x29, 0xb4, 0x1d, 0x36, 0x50, 0x12, 0xda, 0x17])
     with zipfile.ZipFile(str(gradle_apk), 'r') as z:
         for f in sorted(z.namelist()):
             if f.endswith('.dex'):
@@ -297,6 +300,33 @@ def phase5_assemble():
     print(f"   Path: {RELEASE_APK}")
 
 
+def phase6_patch_crc32():
+    """Post-build: inject SO .text CRC32 via patch_so_crc32.py, then re-sign."""
+    print("\n═══ Phase 6: SO .text CRC32 Injection ═══")
+    patch_py = PROJECT / "tools" / "patch_so_crc32.py"
+    if not patch_py.exists():
+        print("  Skipped — patch_so_crc32.py not found")
+        return
+    # Remove signature, patch, re-sign
+    tmp_unsigned = RELEASE_APK.with_suffix(".unsigned.apk")
+    with zipfile.ZipFile(RELEASE_APK, 'r') as zin:
+        with zipfile.ZipFile(tmp_unsigned, 'w', zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                if not item.filename.startswith('META-INF/'):
+                    zout.writestr(item, zin.read(item.filename))
+    shutil.move(str(tmp_unsigned), str(RELEASE_APK))
+    run([sys.executable, str(patch_py), "--apk", str(RELEASE_APK),
+         "--config-dir", str(PROJECT / "core/security/src/main/cpp")], "patch_crc32")
+    # Re-sign
+    signed = str(RELEASE_APK).replace('.apk', '-signed.apk')
+    run(['cmd', '/c', str(APKSIGNER), 'sign',
+         '--ks', str(KEYSTORE), '--ks-pass', f'pass:{KS_PASS}',
+         '--key-pass', f'pass:{KS_PASS}', '--ks-key-alias', KS_ALIAS,
+         '--out', signed, str(RELEASE_APK)], "sign")
+    shutil.move(signed, str(RELEASE_APK))
+    print(f"  CRC32 patched + re-signed. APK: {os.path.getsize(str(RELEASE_APK))/1024/1024:.1f}MB")
+
+
 def main():
     print("=" * 60)
     print("LianYu Ultimate Shell — 一键构建")
@@ -313,6 +343,7 @@ def main():
     phase3_compile_shell()
     phase4_apktool()
     phase5_assemble()
+    phase6_patch_crc32()
 
     print("\n" + "=" * 60)
     print("Build complete. Install:")
