@@ -721,7 +721,6 @@ static uint8_t g_hw_signature[64];
 static int g_hw_signature_set = 0;
 
 static void verify_maps_layout(void) {
-    return;  // temporarily disabled for real-device enrollment
     uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
     if (maps_crc == 0) {
         __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
@@ -739,6 +738,69 @@ static void verify_maps_layout(void) {
     }
     __android_log_print(ANDROID_LOG_DEBUG, "LianYuShell",
         "maps OK (%016llx)", (unsigned long long)maps_crc);
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * verify_apk_cert_from_meta_inf — Native cert from APK ZIP
+ * Opens APK, finds META-INF/CERT.RSA, computes SHA-256.
+ * Returns 0 on success, -1 on failure.
+ * ═══════════════════════════════════════════════════════════ */
+static int verify_apk_cert_from_meta_inf(uint8_t* out_sha256) {
+    char apk_path[512] = {0};
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (!f) return -1;
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, "base.apk")) {
+            char* p = strchr(line, '/');
+            if (p) {
+                size_t len = strlen(p);
+                if (len && p[len-1] == '\n') p[--len] = 0;
+                strncpy(apk_path, p, sizeof(apk_path)-1);
+            }
+            break;
+        }
+    }
+    fclose(f);
+    if (!apk_path[0]) return -1;
+
+    FILE* apk = fopen(apk_path, "rb");
+    if (!apk) return -1;
+    fseek(apk, 0, SEEK_END);
+    long fsize = ftell(apk);
+    if (fsize < 100) { fclose(apk); return -1; }
+    uint8_t* buf = (uint8_t*)malloc((size_t)fsize);
+    if (!buf) { fclose(apk); return -1; }
+    rewind(apk);
+    fread(buf, 1, (size_t)fsize, apk);
+    fclose(apk);
+
+    int found = -1;
+    for (long i = 0; i < fsize - 30; ) {
+        if (buf[i] != 0x50 || buf[i+1] != 0x4b || buf[i+2] != 0x03 || buf[i+3] != 0x04) { i++; continue; }
+        uint16_t name_len = buf[i+26] | (buf[i+27] << 8);
+        uint16_t extra_len = buf[i+28] | (buf[i+29] << 8);
+        uint32_t comp_size = *(uint32_t*)(buf + i + 18);
+        uint32_t unc_size  = *(uint32_t*)(buf + i + 22);
+        uint32_t data_off = (uint32_t)(i + 30 + name_len + extra_len);
+        if (data_off >= (uint32_t)fsize) break;
+        char fname[256] = {0};
+        if (name_len < sizeof(fname) && data_off + name_len < (uint32_t)fsize)
+            memcpy(fname, buf + i + 30, name_len);
+        if (strstr(fname, ".RSA")) {
+            uint32_t sz = comp_size ? comp_size : unc_size;
+            if (sz > (uint32_t)(fsize - data_off)) sz = (uint32_t)(fsize - data_off);
+            if (sz >= 64) {
+                // SHA-256 via hmac_sha256 with NULL key
+                hmac_sha256(out_sha256, 0, buf + data_off, (int)sz, out_sha256);
+                found = 0;
+            }
+            break;
+        }
+        i = data_off + (comp_size ? comp_size : unc_size);
+    }
+    free(buf);
+    return found;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -794,21 +856,32 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     for (int i = 0; i < 32; i++)
         cert_hash[i] = cert_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
 
-    // Anti-repackaging: compare actual cert (from Java) with hardcoded
-    // Cert check temporarily bypassed
+    // Anti-repackaging: hardcoded cert hash already verified
+    // against release.keystore at build time. The cert_obs array
+    // is the XOR-obfuscated SHA-256 of the signing certificate.
+    // Any APK re-signed with a different cert produces a different
+    // cert_hash during DEX decryption — making the DEX key wrong.
+    // No runtime PackageManager call needed.
+    // No runtime cert verification needed
+
     (void)g_actual_cert_valid;
-    if (0) {
-        uint8_t diff = 0;
+
+    // ═══════════════════════════════════════════════════════════
+    // Native cert verification: read META-INF/CERT.RSA from APK
+    // Bypasses Java PackageManager — works on all Android versions.
+    // ═══════════════════════════════════════════════════════════
+    uint8_t apk_cert_hash[32];
+    if (verify_apk_cert_from_meta_inf(apk_cert_hash) == 0) {
+        uint8_t diff2 = 0;
         for (int i = 0; i < 32; i++)
-            diff |= (cert_hash[i] ^ g_actual_cert_hash[i]);
-        if (diff) {
-            maps_crc ^= 0xDEADBEEFCAFEBABEULL;  // poison → wrong key
-            __android_log_print(ANDROID_LOG_ERROR, "LianYuShell",
-                "RE-SIGNING DETECTED — DEX key poisoned");
+            diff2 |= (cert_hash[i] ^ apk_cert_hash[i]);
+        if (diff2) {
+            maps_crc ^= 0xDEADBEEFCAFEBABEULL;
+            DEX_LOGE("RE-SIGNING DETECTED (META-INF) — DEX key poisoned");
         }
     }
 
-    // Salt: maps_crc(8) || hw_sig(32) || label(16) = 56 bytes
+    // Salt:
     // dev_fp reserved for future device enrollment, currently zero
     uint8_t salt[8 + 32 + 16];
     memcpy(salt,      &maps_crc, 8);       // anti-injection

@@ -74,6 +74,9 @@ android {
         getByName("debug") {
             manifest.srcFile("src/shell/AndroidManifest.xml")
         }
+        getByName("release") {
+            manifest.srcFile("src/shell/AndroidManifest.xml")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
