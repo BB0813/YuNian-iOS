@@ -132,6 +132,15 @@ object SecurityGuard {
             NativeBridge.wbAesInit()
             wbAesReady = true
         } catch (e: Exception) {
+
+        // Hardware Key Attestation — trust anchor binding to TEE/StrongBox
+        try {
+            HardwareKeyAttestation.ensureKeyPair()
+            val securityLevel = HardwareKeyAttestation.getSecurityLevel()
+            android.util.Log.i(TAG, "Hardware key attestation: level=$securityLevel (2=StrongBox 1=TEE 0=SW)")
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Hardware key attestation unavailable", e)
+        }
             AuditLogger.log(context, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.TAMPER_DETECTED, "white-box AES init failed")
             tampered = true
@@ -187,15 +196,28 @@ object SecurityGuard {
                 AuditLogger.Event.TAMPER_DETECTED, "Integrity digest binding failed")
         }
 
+        // ═══════════════════════════════════════════════════
+        // P0: RELEASE builds must NEVER run on emulators.
+        // Emulators have no TEE, can be snapshot-debugged, and
+        // expose all security internals to dynamic analysis.
+        // ═══════════════════════════════════════════════════
+        if (isEmulator && (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+            android.util.Log.e(TAG, "FATAL: emulator detected on release build — locking up")
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "emulator_detected_deadloop")
+            // Sleep 10s to trigger sandbox timeout, then enter VMP dead loop.
+            // No exit — sandbox can't intercept a busy-wait.
+            try { Thread.sleep(10000) } catch (e: Exception) {}
+            NativeBridge.enterDeadLoop()
+            return
+        }
+
         // Start native CRC32 heartbeat (runs every 30s in background thread)
-        // SKIP on emulators — can trigger false-positive /proc/self/maps detection
-        if (!isEmulator) {
-            try {
-                NativeBridge.startHeartbeat()
-            } catch (e: Exception) {
-                AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                    AuditLogger.Event.TAMPER_DETECTED, "heartbeat start failed")
-            }
+        try {
+            NativeBridge.startHeartbeat()
+        } catch (e: Exception) {
+            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, "heartbeat start failed")
         }
 
         // Phase 5 was done above. Integrity check deferred to background.

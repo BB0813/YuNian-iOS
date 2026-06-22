@@ -3145,3 +3145,10 @@ extern "C" {
 int native_vmp_tee_attest_wrapper(void) { return native_vmp_tee_attest(nullptr, nullptr); }
 int native_vmp_apk_sig_verify_wrapper(void) { return native_vmp_apk_sig_verify(nullptr, nullptr); }
 }
+
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_NativeBridge_enterDeadLoop(
+    JNIEnv*, jclass) {
+    volatile int i = 0;
+    while (1) { i = (i + 1) & 0x7FFFFFFF; }
+}
