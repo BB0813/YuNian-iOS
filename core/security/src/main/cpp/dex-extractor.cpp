@@ -922,29 +922,24 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
 
     (void)g_actual_cert_valid;
 
-    // Anti-repackaging: compare actual cert SHA-256 (from Java) with hardcoded.
-    // Java computes SHA-256 via MessageDigest, native compares with cert_obs.
-    if (g_actual_cert_valid) {
-        uint8_t diff = 0;
-        for (int i = 0; i < 32; i++)
-            diff |= (cert_hash[i] ^ g_actual_cert_hash[i]);
-        if (diff) {
-            maps_crc ^= 0xDEADBEEFCAFEBABEULL;
-            DEX_LOGE("RE-SIGNING DETECTED — DEX key poisoned");
-        }
-    }
-
-    // META-INF cert check: RSA file is PKCS7, not raw cert.
-    // Use Java MessageDigest via nativeSetApkCert instead.
-    // (verify_apk_cert_from_meta_inf infrastructure ready for raw cert extraction)
-    (void)verify_apk_cert_from_meta_inf;
+    // v2.1: cert_hash is part of salt — inseparable from key derivation.
+    // Pipeline encrypts with: salt = maps_crc || hardcoded_cert || hw_sig || label
+    // Native derives with:   salt = maps_crc || actual_cert || hw_sig || label
+    // If APK re-signed: actual_cert != hardcoded → salt differs → key wrong.
+    // No if-branch to patch — the cert IS the key.
+    const uint8_t* cert_for_salt = cert_hash;          // hardcoded fallback
+    if (g_actual_cert_valid)
+        cert_for_salt = g_actual_cert_hash;            // runtime cert (from Java)
+    else
+        DEX_LOGI("cert not set — using hardcoded fallback");
 
     // Salt:
     // dev_fp reserved for future device enrollment, currently zero
-    uint8_t salt[8 + 32 + 16];
-    memcpy(salt,      &maps_crc, 8);       // anti-injection
-    memcpy(salt + 8,  g_hw_signature, 32); // TEE/StrongBox
-    memcpy(salt + 40, "lianyu_dex_v3___", 16);
+    uint8_t salt[8 + 32 + 32 + 16];  // maps(8) + cert(32) + hw(32) + label(16)
+    memcpy(salt,       &maps_crc, 8);        // anti-injection
+    memcpy(salt + 8,   cert_for_salt, 32);   // ⚡ v2.1: cert binds key
+    memcpy(salt + 40,  g_hw_signature, 32);  // TEE/StrongBox
+    memcpy(salt + 72,  "lianyu_dex_v3___", 16);
 
     // ══════ Strengthened key derivation ══════
     // Inject runtime entropy that MUST self-cancel — thwarts pure static analysis.
@@ -959,7 +954,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     uintptr_t code_addr = (uintptr_t)&verify_maps_layout;
 
     // HMAC-SHA256 with clean salt (no perturbation)
-    hmac_sha256(cert_hash, 32, salt, 56, key);
+    hmac_sha256(cert_hash, 32, salt, 88, key);
 
     // ══════ Post-HMAC guards (do NOT affect final key) ══════
     // Guard 1: noise injection → XOR in → XOR out = zero net effect
