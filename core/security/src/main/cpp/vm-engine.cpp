@@ -734,9 +734,9 @@ break;
                     case VM_HYPER_DERIVE_SHELL_KEY: {
                         // P0-3: Key derivation in VMP. Constants = VMP immediates.
                         extern void derive_shell_key_for_vmp(uint8_t out[32]);
-                        uint8_t* buf = (uint8_t*)vm_alloc_scratch(32);
-                        if (buf) { derive_shell_key_for_vmp(buf); WR(rd, (uint32_t)(uintptr_t)buf); }
-                        else WR(rd, 0);
+                        static uint8_t vmp_key_buf[32];
+                        derive_shell_key_for_vmp(vmp_key_buf);
+                        WR(rd, (uint32_t)(uintptr_t)vmp_key_buf);
                         break;
                     }
                     default:
