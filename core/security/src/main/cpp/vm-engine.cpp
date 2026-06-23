@@ -761,16 +761,14 @@ break;
                         break;
                     }
                     case VM_HYPER_EXECUTION_HASH: {
-                        // F2: VMP execution fingerprint for AAD embedding.
-                        // Hash of: instruction counter + last 4 dispatches + salt.
-                        extern uint64_t g_vmp_execution_hash;
-                        extern uint64_t g_vmp_instruction_count;
-                        g_vmp_execution_hash ^= g_vmp_instruction_count << 32;
-                        g_vmp_execution_hash ^= (uint64_t)RD(0) << 16;
-                        g_vmp_execution_hash ^= (uint64_t)RD(1);
-                        g_vmp_execution_hash = (g_vmp_execution_hash * 0x9E3779B97F4A7C15ULL) ^
-                                               (g_vmp_execution_hash >> 33);
-                        WR(rd, (uint32_t)(g_vmp_execution_hash & 0xFFFFFFFF));
+                        // F2: VMP execution fingerprint (self-contained, no globals).
+                        static uint64_t vmp_hash = 0x6A09E667BB67AE85ULL;
+                        static uint64_t vmp_icount = 0;
+                        vmp_hash ^= ++vmp_icount << 32;
+                        vmp_hash ^= (uint64_t)RD(0) << 16;
+                        vmp_hash ^= (uint64_t)RD(1);
+                        vmp_hash = (vmp_hash * 0x9E3779B97F4A7C15ULL) ^ (vmp_hash >> 33);
+                        WR(rd, (uint32_t)(vmp_hash & 0xFFFFFFFF));
                         break;
                     }
                     default:
