@@ -33,7 +33,7 @@
 <div class="header">
   <div class="header-row">
     <div class="pulse-dot"></div>
-    <h1>LianYu (恋语) 安全架构全景图</h1>
+    <h1>LianYu (恋语) 安全架构全景图 — v1.9.1</h1>
   </div>
   <p class="subtitle">Android 安全六维防御体系 — 构建流水线 → Native层 → VMP虚拟机 → Kotlin层 → 网络层 → 检测响应</p>
 </div>
@@ -410,8 +410,10 @@
   <div class="card">
     <div class="card-header"><div class="card-dot rose"></div><h3>防御机制 (Defense)</h3></div>
     <ul>
-      <li>• 三代壳: 8阶段构建 → 最小壳DEX(3.4KB) + Native载荷</li>
-      <li>• White-Box AES-256: 密钥永不在RAM, L1~L4四级加固</li>
+      <li>• 三代壳: 7KB Shell DEX + parent ClassLoader override (API 34-36兼容)</li>
+      <li>• 防重打包: Java证书SHA-256绑定 + META-INF mmap解析(就绪)</li>
+      <li>• VMP v3.0: 9函数VM字节码 + dispatch混洗 + CNTVCT + 死循环陷阱</li>
+      <li>• Dex2C v2.1: 10个胶水方法, 11KB Native诱饵层(三层异构)</li>
       <li>• KMS v2.0: 5级密钥体系, DK在NEON寄存器, dc civac清除</li>
       <li>• VMP v3.0: 9个安全函数以VM字节码运行, 永不以ARM64存在</li>
       <li>• Memory Guard: Guard Pages + Stack Canary + W^X检测</li>
@@ -436,8 +438,9 @@
   <div class="card">
     <div class="card-header"><div class="card-dot violet"></div><h3>安全机制 (Security Controls)</h3></div>
     <ul>
-      <li>• Fail-Close原则: SO丢失→RuntimeException, 签名失败→SIGABRT</li>
-      <li>• 持续检测: SecurityGuard 30s周期 + CRC32心跳 + 零信任100ms评估</li>
+      <li>• Fail-Close: DEX密钥绑定maps_crc→HMAC-SHA256, 注入检测+中毒</li>
+      <li>• ContentProvider: 剥离5个库Provider (HMS/AGConnect/WorkManager)</li>
+      <li>• Manifest: MainActivity单LAUNCHER, Gradle sourceSet壳修复</li>
       <li>• 反逆向: 字符串XOR混淆 · OLLVM控制流平坦化 · 代码在VM内</li>
       <li>• 反调试: ptrace自附加 · SW断点快照 · inotify监控 · signal handler</li>
       <li>• 反注入: Frida/GUMJS/Gadget/Xposed/LSPosed/Magisk/Substrate检测</li>
@@ -446,8 +449,19 @@
       <li>• 零信任: PDP+PEP连续评估 → 威胁评分≥3 → KMS销毁+锁定降级</li>
     </ul>
   </div>
+  <div class="card">
+    <div class="card-header"><div class="card-dot amber"></div><h3>v1.9.1 交付状态</h3></div>
+    <ul>
+      <li>• 真机: Vivo V2324A API36, Displayed +504ms, 0 FATAL</li>
+      <li>• APK: 76MB(ZIP) / 113MB(解压), V2+V3签名</li>
+      <li>• Shell DEX: 6.8KB | SO: 154KB(壳) + 9.4MB(安全) + 3.9KB(Dex2C)</li>
+      <li>• 加密载荷: classes.dat 10MB + code_items 5.8MB + payload 8.7MB</li>
+      <li>• 防重打包: 假签APK MainActivity ClassNotFound (cert阻断)</li>
+      <li>• 构建: Gradle assembleRelease → build.py一键Pipeline</li>
+    </ul>
+  </div>
 </div>
-<p class="footer">LianYu (恋语) Security Architecture · 2025-06 · Six-Dimension Defense · Build Pipeline → Native → VMP → Kotlin → Network → Hardware</p>
+<p class="footer">LianYu (恋语) Security Architecture · 2025-06 · v1.9.1 · Six-Dimension Defense</p>
 </div>
 </body>
 </html>
