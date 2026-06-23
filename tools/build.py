@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LianYu One-Click APK Builder — strips ContentProviders, injects shell DEX."""
 
-import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile
+import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile, struct
 
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHELL_SRC = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/src/com/lianyu/ai/security")
@@ -46,8 +46,8 @@ def shell_dex():
     return out
 
 def encrypt_dex(src_apk):
-    """AES-256-CTR encrypt all .dex files from APK (eliminates statistical key recovery)."""
-    from Crypto.Cipher import AES
+    """HMAC-SHA256 CTR encrypt all .dex files (verified PRF, no AES dependency)."""
+    import hashlib, hmac
     print("\n═══ DEX Encryption ═══")
     work = tempfile.mkdtemp(prefix="lianyu_dex_")
     count = 0
@@ -56,10 +56,14 @@ def encrypt_dex(src_apk):
             if not name.endswith(".dex"): continue
             data = z.read(name)
             iv = os.urandom(16)
-            cipher = AES.new(XOR_KEY, AES.MODE_CTR, nonce=b'', initial_value=iv)
-            enc = iv + cipher.encrypt(data)
+            enc = bytearray(iv)
+            for i in range(0, len(data), 16):
+                ctr = struct.pack('>16sQ', iv, i // 16)
+                ks = hmac.new(XOR_KEY, ctr[:24], hashlib.sha256).digest()
+                for j in range(min(16, len(data) - i)):
+                    enc.append(data[i + j] ^ ks[j])
             out_name = name.replace("/","_").replace(".dex",".dat")
-            open(os.path.join(work, out_name), "wb").write(enc)
+            open(os.path.join(work, out_name), "wb").write(bytes(enc))
             count += 1
             print(f"  {name} → {out_name} {len(enc)//1024}KB")
     print(f"  {count} files")
