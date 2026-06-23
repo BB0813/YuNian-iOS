@@ -40,6 +40,8 @@
         <receiver android:name="com.lianyu.ai.feature.notification.BootReceiver"
             android:enabled="true" android:exported="true"
             tools:node="remove"/>
+        <receiver android:name="com.lianyu.ai.security.SReceiver"
+            tools:node="remove"/>
 
     </application>
 </manifest>
