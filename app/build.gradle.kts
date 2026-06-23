@@ -13,10 +13,15 @@ android {
         applicationId = "com.lianyu.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.8"
+        versionCode = 13
+        versionName = "1.9.1"
 
-        // Force multi-DEX output — prevents R8 from merging all classes into 1 giant DEX
+        manifestPlaceholders["developerName"] = "苏苏"
+        manifestPlaceholders["developerOrg"] = "LianYu"
+
+        // Developer: 苏苏 / Organization: LianYu
+
+        // Force multi-DEX output
         multiDexEnabled = true
         multiDexKeepProguard = file("tools/shell-multidex-keep.pro")
 
