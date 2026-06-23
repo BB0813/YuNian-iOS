@@ -2,6 +2,7 @@ package com.lianyu.ai.database.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.lianyu.ai.common.SuFlowApi
 import kotlinx.serialization.Serializable
 
 @Entity(tableName = "api_configs")
@@ -76,7 +77,7 @@ enum class ApiProvider(val displayName: String, val defaultBaseUrl: String, val 
     SILICONFLOW("硅基流动", "https://api.siliconflow.cn/v1/", "Qwen/Qwen2.5-7B-Instruct"),
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1/", "openai/gpt-4o-mini"),
     GROQ("Groq", "https://api.groq.com/openai/v1/", "llama-3.1-8b-instant"),
-    PARTNER("Clove API", "http://156.233.228.31:9876/v1", "claude-sonnet-4-20250514"),
+    PARTNER("Clove API", SuFlowApi.BASE_URL, "auto"),
     CUSTOM("自定义 API", "", ""),
     IFLYTEK("讯飞星火", "https://spark-api-open.xf-yun.com/v1/", "generalv3.5")
 }

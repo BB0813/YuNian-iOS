@@ -922,14 +922,16 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
 
     (void)g_actual_cert_valid;
 
-    // v2.1: cert_hash is part of salt — inseparable from key derivation.
-    // Pipeline encrypts with: salt = maps_crc || hardcoded_cert || hw_sig || label
-    // Native derives with:   salt = maps_crc || actual_cert || hw_sig || label
-    // If APK re-signed: actual_cert != hardcoded → salt differs → key wrong.
-    // No if-branch to patch — the cert IS the key.
-    const uint8_t* cert_for_salt = cert_hash;          // hardcoded fallback
+    // v2.1: cert is part of salt. If cert not set (patched Java), key is WRONG.
+    // Pipeline encrypts with: salt = maps || hardcoded_cert || hw || label
+    // Native derives with:   salt = maps || actual_cert || hw || label
+    // If attacker skips cert binding → g_actual_cert_valid=0 → poisoned fallback.
+    uint8_t poisoned_cert[32];
+    memcpy(poisoned_cert, cert_hash, 32);
+    poisoned_cert[0] ^= 0xDE; poisoned_cert[15] ^= 0xAD;  // ≠ pipeline cert
+    const uint8_t* cert_for_salt = poisoned_cert;          // wrong key if no cert
     if (g_actual_cert_valid)
-        cert_for_salt = g_actual_cert_hash;            // runtime cert (from Java)
+        cert_for_salt = g_actual_cert_hash;                // correct only with cert
     else
         DEX_LOGI("cert not set — using hardcoded fallback");
 

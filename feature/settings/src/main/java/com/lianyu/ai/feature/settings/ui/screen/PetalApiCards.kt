@@ -219,6 +219,39 @@ private fun PetalApiConfigEditDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // PARTNER / Clove API: 简化界面，仅显示连接状态
+                if (isPartner) {
+                    connectionResult.errorMessage?.let { error ->
+                        Text(text = error, fontSize = 12.sp, color = PetalError)
+                    }
+                    if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
+                        Text(
+                            text = "✅ SuFlow API 已连接",
+                            color = PetalGreen,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.TESTING) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = PetalPrimary,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("正在测试连接...", fontSize = 14.sp, color = textSecondaryColor)
+                        }
+                    } else {
+                        Text(
+                            text = "点击下方「测试」验证 SuFlow API 连接",
+                            color = textSecondaryColor,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (!isPartner) {
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
@@ -517,6 +550,7 @@ private fun PetalApiConfigEditDialog(
                         )
                     }
                 }
+                } // end !isPartner
             }
         },
         confirmButton = {
@@ -525,7 +559,7 @@ private fun PetalApiConfigEditDialog(
             ) {
                 Button(
                     onClick = {
-                        val currentConfig = config.copy(
+                        val currentConfig = if (isPartner) config else config.copy(
                             apiKey = apiKey.trim(),
                             extraApiKeys = extraApiKeys.trim(),
                             baseUrl = baseUrl.trim(),
@@ -557,7 +591,7 @@ private fun PetalApiConfigEditDialog(
                 Button(
                     onClick = {
                         onSave(
-                            config.copy(
+                            if (isPartner) config else config.copy(
                                 apiKey = apiKey.trim(),
                                 extraApiKeys = extraApiKeys.trim(),
                                 baseUrl = baseUrl.trim(),
@@ -695,7 +729,10 @@ fun PetalApiCard(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Model info
-                if (config.model.isNotEmpty()) {
+                if (config.provider == ApiProvider.PARTNER) {
+                    Text("模型: 自动分配 (SuFlow API)", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(12.dp))
+                } else if (config.model.isNotEmpty()) {
                     Text(
                         text = "模型: ${config.model}",
                         color = textSecondaryColor,
@@ -705,7 +742,7 @@ fun PetalApiCard(
                 }
 
                 // Base URL
-                if (config.baseUrl.isNotEmpty()) {
+                if (config.baseUrl.isNotEmpty() && config.provider != ApiProvider.PARTNER) {
                     Text(
                         text = "地址: ${config.baseUrl}",
                         color = textSecondaryColor.copy(alpha = 0.7f),
@@ -922,7 +959,10 @@ fun PetalSavedApiCard(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Model info
-                if (config.model.isNotEmpty()) {
+                if (config.provider == ApiProvider.PARTNER) {
+                    Text("模型: 自动分配 (SuFlow API)", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(12.dp))
+                } else if (config.model.isNotEmpty()) {
                     Text(
                         text = "模型: ${config.model}",
                         color = textSecondaryColor,
@@ -932,7 +972,7 @@ fun PetalSavedApiCard(
                 }
 
                 // Base URL
-                if (config.baseUrl.isNotEmpty()) {
+                if (config.baseUrl.isNotEmpty() && config.provider != ApiProvider.PARTNER) {
                     Text(
                         text = "地址: ${config.baseUrl}",
                         color = textSecondaryColor.copy(alpha = 0.7f),
@@ -960,14 +1000,14 @@ fun PetalSavedApiCard(
                         if (balanceInfo.remainingBalance != null) {
                             val bal = balanceInfo.remainingBalance
                             Text(
-                                text = "$%.2f".format(bal),
+                                text = "$${"%.2f".format(bal)}",
                                 color = PetalGreen,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         } else {
                             Text(
-                                text = "余额: 未知",
+                                text = "查询中...",
                                 color = textSecondaryColor,
                                 fontSize = 12.sp
                             )

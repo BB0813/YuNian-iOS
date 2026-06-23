@@ -42,7 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class LianYuApplication : Application(), ImageLoaderFactory {
+class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Configuration.Provider {
 
     private val _startupState = MutableStateFlow<AppStartupState>(AppStartupState.CriticalInit)
     val startupState: StateFlow<AppStartupState> = _startupState.asStateFlow()
@@ -52,6 +52,11 @@ class LianYuApplication : Application(), ImageLoaderFactory {
             MemoryCache.Builder(this).maxSizeBytes(128 * 1024 * 1024).build()
         }
         .build()
+
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = androidx.work.Configuration.Builder()
+            .setMinimumLoggingLevel(android.util.Log.WARN)
+            .build()
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
