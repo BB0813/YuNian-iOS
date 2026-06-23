@@ -725,19 +725,18 @@ break;
                         if (ptr && len > 0 && len < 65536) {
                             volatile uint8_t* p = (volatile uint8_t*)(uintptr_t)ptr;
                             for (uint32_t i = 0; i < len; i++) p[i] = 0;
-#if defined(__aarch64__)
-                            __asm__ __volatile__("dc civac, %0" :: "r"(p) : "memory");
-                            __asm__ __volatile__("dmb sy" ::: "memory");
-#elif defined(__arm__)
-                            __asm__ __volatile__("mcr p15, 0, %0, c7, c14, 1" :: "r"(p) : "memory");
-                            __asm__ __volatile__("dmb sy" ::: "memory");
-#elif defined(__i386__) || defined(__x86_64__)
-                            __asm__ __volatile__("mfence" ::: "memory");
-#endif
                             WR(rd, 1);
                         } else {
                             WR(rd, 0);
                         }
+                        break;
+                    }
+                    case VM_HYPER_DERIVE_SHELL_KEY: {
+                        // P0-3: Key derivation in VMP. Constants = VMP immediates.
+                        extern void derive_shell_key_for_vmp(uint8_t out[32]);
+                        uint8_t* buf = (uint8_t*)vm_alloc_scratch(32);
+                        if (buf) { derive_shell_key_for_vmp(buf); WR(rd, (uint32_t)(uintptr_t)buf); }
+                        else WR(rd, 0);
                         break;
                     }
                     default:
