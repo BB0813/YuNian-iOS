@@ -46,19 +46,22 @@ def shell_dex():
     return out
 
 def encrypt_dex(src_apk):
-    """Encrypt all .dex files from APK into work directory."""
+    """AES-256-CTR encrypt all .dex files from APK (eliminates statistical key recovery)."""
+    from Crypto.Cipher import AES
     print("\n═══ DEX Encryption ═══")
     work = tempfile.mkdtemp(prefix="lianyu_dex_")
     count = 0
     with zipfile.ZipFile(src_apk, "r") as z:
         for name in sorted(z.namelist()):
             if not name.endswith(".dex"): continue
-            data = bytearray(z.read(name))
-            for i in range(len(data)): data[i] ^= XOR_KEY[i % len(XOR_KEY)]
+            data = z.read(name)
+            iv = os.urandom(16)
+            cipher = AES.new(XOR_KEY, AES.MODE_CTR, nonce=b'', initial_value=iv)
+            enc = iv + cipher.encrypt(data)
             out_name = name.replace("/","_").replace(".dex",".dat")
-            open(os.path.join(work, out_name), "wb").write(data)
+            open(os.path.join(work, out_name), "wb").write(enc)
             count += 1
-            print(f"  {name} → {out_name} {len(data)//1024}KB")
+            print(f"  {name} → {out_name} {len(enc)//1024}KB")
     print(f"  {count} files")
     return work, count
 
