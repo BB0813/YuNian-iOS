@@ -19,8 +19,8 @@ XOR_KEY = bytes([
     0x0b,0x3c,0x1f,0x48,0x3e,0x20,0xc7,0xd7,0x32,0x60,0x17,0xcc,0x23,0xf1,0xe9,0x53,
 ])
 
-SHELL_SO_LIST = ["lib/arm64-v8a/liblianyu_shell.so", "lib/x86_64/liblianyu_shell.so",
-                 "lib/arm64-v8a/liblianyu_security.so", "lib/x86_64/liblianyu_security.so"]
+SHELL_SO_LIST = ["lib/arm64-v8a/liblianyu_shell.so",
+                 "lib/arm64-v8a/liblianyu_security.so"]
 
 def run(cmd, timeout=120):
     print(f"  $ {' '.join(cmd) if isinstance(cmd,list) else cmd}")
@@ -93,7 +93,7 @@ def strip_manifest(src_apk):
 def assemble(shell_dex, dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass):
     """Replace DEX + SOs + encrypted DEX → sign."""
     print("\n═══ Assembly ═══")
-    out = os.path.join(PROJECT, "app/build/outputs/apk", variant, f"LianYu-{variant}.apk")
+    out = os.path.join(PROJECT, f"LianYu-v2.apk")
     tmp = out + ".tmp"
     shell = open(shell_dex, "rb").read()
 
