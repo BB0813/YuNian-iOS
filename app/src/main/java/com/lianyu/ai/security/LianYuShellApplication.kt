@@ -16,9 +16,13 @@ import com.lianyu.ai.LianYuApplication
  *   Native SO absent → falls back to direct LianYuApplication loading.
  *   NativeBridge is never referenced unless VMP payload exists.
  */
-class LianYuShellApplication : Application() {
+class LianYuShellApplication : Application(), androidx.work.Configuration.Provider {
 
     private var realApp: LianYuApplication? = null
+
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = realApp?.workManagerConfiguration ?: androidx.work.Configuration.Builder()
+            .setMinimumLoggingLevel(android.util.Log.WARN).build()
 
     // ── VMP 路径：仅在 payload SO 存在时激活 ──
     // 提前检查 SO 文件，避免 Class.forName 触发 System.loadLibrary → JNI_OnLoad → ptrace SIGABRT
