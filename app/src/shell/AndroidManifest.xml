@@ -36,5 +36,10 @@
         <!-- Remove duplicate LAUNCHER activities from libraries -->
         <activity-alias android:name="com.lianyu.ai.SplashActivity" tools:node="remove"/>
 
+        <!-- Remove receivers that load before ClassLoader override -->
+        <receiver android:name="com.lianyu.ai.feature.notification.BootReceiver"
+            android:enabled="true" android:exported="true"
+            tools:node="remove"/>
+
     </application>
 </manifest>
