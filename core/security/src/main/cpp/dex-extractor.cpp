@@ -1435,3 +1435,32 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeGetHwPublicKey(
         env->SetByteArrayRegion(result, 0, 65, (jbyte*)g_hw_public_key);
     return result;
 }
+
+/* ═══════════════════════════════════════════════════════════
+ * Offline fallback restrictions:
+ *  - Key binds to Android ID + Build.SERIAL (prevents cross-device)
+ *  - First launch requires online attestation
+ * ═══════════════════════════════════════════════════════════ */
+static uint8_t g_device_fingerprint[32] = {0};
+static int g_device_fingerprint_set = 0;
+
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeBindDeviceFingerprint(
+    JNIEnv* env, jclass, jstring androidId, jstring buildSerial) {
+    if (g_device_fingerprint_set) return;
+    const char* id = androidId ? env->GetStringUTFChars(androidId, nullptr) : "";
+    const char* ser = buildSerial ? env->GetStringUTFChars(buildSerial, nullptr) : "";
+    char combined[256];
+    snprintf(combined, sizeof(combined), "%s:%s:lianyu_device_bind_v2", id, ser);
+    hmac_sha256((uint8_t*)"device_bind_salt_v2___", 20,
+                (uint8_t*)combined, strlen(combined), g_device_fingerprint);
+    g_device_fingerprint_set = 1;
+    if (id[0]) env->ReleaseStringUTFChars(androidId, id);
+    if (ser[0]) env->ReleaseStringUTFChars(buildSerial, ser);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeHasCompletedAttestation(
+    JNIEnv* env, jclass) {
+    return g_attest_cert_chain_len > 0 ? JNI_TRUE : JNI_FALSE;
+}
