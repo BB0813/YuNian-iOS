@@ -42,6 +42,10 @@
             tools:node="remove"/>
         <receiver android:name="com.lianyu.ai.security.SReceiver"
             tools:node="remove"/>
+        <receiver android:name="com.huawei.hms.support.api.push.PushReceiver"
+            tools:node="remove"/>
+        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:node="remove"/>
 
     </application>
 </manifest>
