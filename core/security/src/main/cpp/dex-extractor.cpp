@@ -1219,13 +1219,11 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveShellKeyVmp(
     JNIEnv* env, jclass cls) {
 
-    extern const uint8_t g_vmp_derive_shell_key[];
-    extern int vm_run(const uint8_t* bc, uint32_t sz, void* ctx);
-    extern uint8_t g_vmp_derived_key[32];
-
-    // Bytecode size = 8*6 (LOAD_IMM) + 6 (HYPERCALL) + 6 (HALT) = 60
-    int ret = vm_run(g_vmp_derive_shell_key, 60, nullptr);
-    if (ret != 0) return nullptr;
+    // Key derivation kept in same SO — no cross-SO VMP dependency.
+    // VMP hypercall (VM_HYPER_DERIVE_SHELL_KEY) in liblianyu_security
+    // for future server-side binding.
+    extern void derive_shell_key_for_vmp(uint8_t out[32]);
+    derive_shell_key_for_vmp(g_vmp_derived_key);
 
     jbyteArray result = env->NewByteArray(32);
     if (result)
