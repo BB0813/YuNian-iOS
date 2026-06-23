@@ -54,7 +54,9 @@ LOCAL_MODULE := lianyu_shell
 LOCAL_SRC_FILES := dex-extractor.cpp
 LOCAL_CPPFLAGS := -Os -fvisibility=hidden -fdata-sections -ffunction-sections
 LOCAL_CPPFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
+LOCAL_CPPFLAGS += -fno-inline-functions -fno-if-conversion  # preserve CFG obfuscation
+LOCAL_CPPFLAGS += -mbranch-protection=none                 # allow opaque branch patterns
 LOCAL_LDLIBS := -llog
 LOCAL_CPP_FEATURES := exceptions rtti
-LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script-shell.map -Wl,--gc-sections -Wl,-u,JNI_OnLoad -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer -Wl,-u,Java_com_lianyu_ai_security_NativeBridge_nativeGetAadChecksums -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetHardwareSignature -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeHasHardwareKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey
+LOCAL_LDFLAGS := -Wl,--version-script=$(LOCAL_PATH)/version-script-shell.map -Wl,--gc-sections -Wl,-u,JNI_OnLoad -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer -Wl,-u,Java_com_lianyu_ai_security_NativeBridge_nativeGetAadChecksums -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeSetHardwareSignature -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeHasHardwareKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey -Wl,-u,Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex
 include $(BUILD_SHARED_LIBRARY)
