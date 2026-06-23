@@ -6,31 +6,31 @@
 
     <application
         android:name="com.lianyu.ai.security.StaticApkShell"
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="LianYu"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.LianYu"
-        tools:replace="android:name,android:label,android:allowBackup">
+        tools:replace="android:name">
 
         <activity android:exported="true" android:hardwareAccelerated="true"
             android:name="com.lianyu.ai.security.SActivity"
             android:theme="@style/Theme.LianYu"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            tools:replace="android:exported"/>
+
+        <activity android:exported="true" android:hardwareAccelerated="true"
+            android:launchMode="singleTask"
+            android:name="com.lianyu.ai.MainActivity"
+            android:theme="@style/Theme.LianYu"
+            android:windowSoftInputMode="adjustResize"
+            tools:replace="android:exported">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
 
-        <activity android:exported="false" android:hardwareAccelerated="true"
-            android:launchMode="singleTask"
-            android:name="com.lianyu.ai.MainActivity"
-            android:theme="@style/Theme.LianYu"
-            android:windowSoftInputMode="adjustResize"/>
-
-        <!-- Fix: remove HMS InitProvider that lacks implementation in APK -->
         <provider android:name="com.huawei.hms.aaid.InitProvider" tools:node="remove"/>
+        <provider android:name="com.huawei.hms.support.api.push.PushProvider" tools:node="remove"/>
+        <provider android:name="com.huawei.agconnect.core.provider.AGConnectInitializeProvider" tools:node="remove"/>
+        <provider android:name="androidx.startup.InitializationProvider" tools:node="remove"/>
+        <provider android:name="androidx.core.content.FileProvider" tools:node="remove"/>
 
     </application>
 </manifest>
