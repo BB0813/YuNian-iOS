@@ -19,7 +19,8 @@
             android:name="com.lianyu.ai.MainActivity"
             android:theme="@style/Theme.LianYu"
             android:windowSoftInputMode="adjustResize"
-            tools:replace="android:exported">
+            tools:replace="android:exported"
+            tools:node="merge">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -31,6 +32,9 @@
         <provider android:name="com.huawei.agconnect.core.provider.AGConnectInitializeProvider" tools:node="remove"/>
         <provider android:name="androidx.startup.InitializationProvider" tools:node="remove"/>
         <provider android:name="androidx.core.content.FileProvider" tools:node="remove"/>
+
+        <!-- Remove duplicate LAUNCHER activities from libraries -->
+        <activity-alias android:name="com.lianyu.ai.SplashActivity" tools:node="remove"/>
 
     </application>
 </manifest>
