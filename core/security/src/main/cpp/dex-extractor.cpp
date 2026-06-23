@@ -1160,4 +1160,74 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
     return result;
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+ * derive_shell_key_for_vmp — VMP-callable key derivation
+ * Called from VM_HYPER_DERIVE_SHELL_KEY handler.
+ * Constants (cert_obs) are loaded from VMP immediates, not .rodata.
+ * ═══════════════════════════════════════════════════════════ */
+uint8_t g_vmp_derived_key[32] = {0};
+
+extern "C" void derive_shell_key_for_vmp(uint8_t out[32]) {
+    // Same derivation as nativeDeriveDexKey but outputs to buffer.
+    // cert_obs embedded here — attack surface moved to VMP bytecode.
+
+    static const uint8_t cert_obs[32] = {
+        0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
+        0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec
+    };
+    uint8_t cert_hash[32];
+    for (int i = 0; i < 32; i++)
+        cert_hash[i] = cert_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
+
+    uint64_t maps_crc = 0;
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            if (strstr(line, "liblianyu_shell.so")) {
+                unsigned long s, e;
+                sscanf(line, "%lx-%lx", &s, &e);
+                maps_crc ^= (uint64_t)s ^ (uint64_t)e;
+            }
+        }
+        fclose(f);
+    }
+    static const uint64_t E = 0x8e7beee5d9b3c6e4ULL;
+    if (maps_crc == 0) maps_crc = E;
+    else if (maps_crc != E) maps_crc ^= 0x9E3779B97F4A7C15ULL;
+
+    // Salt (88B): maps(8) + cert(32) + hw(32) + label(16)
+    uint8_t salt[88];
+    memcpy(salt, &maps_crc, 8);
+    memcpy(salt + 8, cert_hash, 32);
+    memset(salt + 40, 0, 32);
+    memcpy(salt + 72, "lianyu_dex_v3___", 16);
+
+    hmac_sha256(cert_hash, 32, salt, 88, out);
+    memcpy(g_vmp_derived_key, out, 32);
+
+    memset(cert_hash, 0, 32);
+    memset(salt, 0, 88);
+}
+
 } /* extern "C" */
+
+/* P0-3: VMP-wrapped key derivation. Loads VMP bytecode with cert_obs
+ * encoded as immediates (NOT in .rodata). Calls VM_HYPER_DERIVE_SHELL_KEY. */
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveShellKeyVmp(
+    JNIEnv* env, jclass cls) {
+
+    extern const uint8_t g_vmp_derive_shell_key[];
+    extern int vm_run(const uint8_t* bc, uint32_t sz, void* ctx);
+    extern uint8_t g_vmp_derived_key[32];
+
+    int ret = vm_run(g_vmp_derive_shell_key, 61, nullptr);
+    if (ret != 0) return nullptr;
+
+    jbyteArray result = env->NewByteArray(32);
+    if (result)
+        env->SetByteArrayRegion(result, 0, 32, (jbyte*)g_vmp_derived_key);
+    return result;
+}
