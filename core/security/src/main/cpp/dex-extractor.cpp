@@ -1129,13 +1129,11 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
 
     jbyte* out = env->GetByteArrayElements(result, nullptr);
 
-    // HMAC-SHA256 CTR keystream generation
-    // Uses verified HMAC-SHA256 (already in use for key derivation)
-    // Counter = IV(16 bytes) || block_index(8 bytes big-endian)
+    // HMAC-SHA256 CTR — counter = IV(16) + block_idx(8) + zero_pad(8) = 32B
     uint64_t block_idx = 0;
     for (size_t i = 0; i < ctLen; i += 16) {
-        uint8_t ctr_input[24];
-        memcpy(ctr_input, counter, 16);       // IV (first 16 bytes)
+        uint8_t ctr_input[32];
+        memcpy(ctr_input, counter, 16);
         ctr_input[16] = (uint8_t)(block_idx >> 56);
         ctr_input[17] = (uint8_t)(block_idx >> 48);
         ctr_input[18] = (uint8_t)(block_idx >> 40);
@@ -1144,9 +1142,10 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
         ctr_input[21] = (uint8_t)(block_idx >> 16);
         ctr_input[22] = (uint8_t)(block_idx >> 8);
         ctr_input[23] = (uint8_t)(block_idx);
+        memset(ctr_input + 24, 0, 8);          // pad to 32B
 
         uint8_t keystream[32];
-        hmac_sha256((const uint8_t*)keyBytes, 32, ctr_input, 24, keystream);
+        hmac_sha256((const uint8_t*)keyBytes, 32, ctr_input, 32, keystream);
 
         size_t block = (ctLen - i < 16) ? (ctLen - i) : 16;
         for (size_t j = 0; j < block; j++)

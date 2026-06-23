@@ -58,8 +58,8 @@ def encrypt_dex(src_apk):
             iv = os.urandom(16)
             enc = bytearray(iv)
             for i in range(0, len(data), 16):
-                ctr = struct.pack('>16sQ', iv, i // 16)
-                ks = hmac.new(XOR_KEY, ctr[:24], hashlib.sha256).digest()
+                ctr = struct.pack('>16sQ8x', iv, i // 16)
+                ks = hmac.new(XOR_KEY, ctr[:32], hashlib.sha256).digest()
                 for j in range(min(16, len(data) - i)):
                     enc.append(data[i + j] ^ ks[j])
             out_name = name.replace("/","_").replace(".dex",".dat")
