@@ -250,6 +250,7 @@ uint32_t vm_get_reg(VMState* vm, int reg);
 #define VM_HYPER_WB_AES_KEYCHECK 14 // → rd=1 if WB-AES T-Box integrity OK
 #define VM_HYPER_SM4_KEY_EXPAND   15 // rs1=key_ptr(16B), rs2=rk_ptr(128B out) → rd=1 ok
 #define VM_HYPER_SM4_DECRYPT_BLOCK 16 // rs1=rk_ptr, rs2=block_ptr(16B in/out) → rd=1 ok
+#define VM_HYPER_DERIVE_SHELL_KEY 17  // → rd=buf_ptr(32B key in scratch)
 
 /* Encode instructions into bytecode buffer.
  * Returns bytes written. */
