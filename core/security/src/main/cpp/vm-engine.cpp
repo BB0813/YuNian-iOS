@@ -14,6 +14,7 @@
  */
 
 #include "vm-engine.h"
+#include "hmac_sha256.h"
 #include "g_vmp_config.h"
 #include "vm_hardening.h"
 #include <cstring>
@@ -732,11 +733,31 @@ break;
                         break;
                     }
                     case VM_HYPER_DERIVE_SHELL_KEY: {
-                        // P0-3: Key derivation in VMP. Constants = VMP immediates.
-                        extern void derive_shell_key_for_vmp(uint8_t out[32]);
-                        static uint8_t vmp_key_buf[32];
-                        derive_shell_key_for_vmp(vmp_key_buf);
-                        WR(rd, (uint32_t)(uintptr_t)vmp_key_buf);
+                        // P0-3: cert_obs in VMP bytecode. Key derivation runs here.
+                        uint8_t cert_hash[32];
+                        static const uint8_t co[32] = {
+                            0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
+                            0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec
+                        };
+                        for (int i = 0; i < 32; i++) cert_hash[i] = co[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
+                        uint64_t mc = 0;
+                        FILE* fp = fopen("/proc/self/maps","r");
+                        if(fp){char ln[512];while(fgets(ln,512,fp)){
+                            if(strstr(ln,"liblianyu_shell.so")){
+                                unsigned long s,e;sscanf(ln,"%lx-%lx",&s,&e);
+                                mc ^= (uint64_t)s ^ (uint64_t)e;
+                            }}fclose(fp);}
+                        static const uint64_t E = 0x8e7beee5d9b3c6e4ULL;
+                        if (mc == 0) mc = E; else if (mc != E) mc ^= 0x9E3779B97F4A7C15ULL;
+                        uint8_t salt[88];
+                        memcpy(salt, &mc, 8);
+                        memcpy(salt+8, cert_hash, 32);
+                        memset(salt+40, 0, 32);
+                        memcpy(salt+72, "lianyu_dex_v3___", 16);
+                        static uint8_t key[32];
+                        hmac_sha256(cert_hash,32,salt,88,key);
+                        memset(cert_hash,0,32); memset(salt,0,88);
+                        WR(rd, (uint32_t)(uintptr_t)key);
                         break;
                     }
                     default:
