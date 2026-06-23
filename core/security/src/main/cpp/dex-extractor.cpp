@@ -953,8 +953,17 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     // Self-code-address entropy — different per build
     uintptr_t code_addr = (uintptr_t)&verify_maps_layout;
 
-    // HMAC-SHA256 with clean salt (no perturbation)
-    hmac_sha256(cert_hash, 32, salt, 88, key);
+    // Opaque predicate — always true, indistinguishable from actual branch
+    // Use volatile to prevent compiler optimization
+    volatile uint8_t opaque = (uint8_t)(noise ^ (noise >> 8));
+    if (opaque == opaque) { // always-true: breaks static CFG analysis
+        // HMAC-SHA256 with clean salt (no perturbation)
+        hmac_sha256(cert_hash, 32, salt, 88, key);
+    } else {
+        // dead path — never executed, confuses disassembler
+        key[0] ^= (uint8_t)(code_addr & 0xFF);
+        key[0] ^= (uint8_t)(code_addr & 0xFF); // self-cancel
+    }
 
     // ══════ Post-HMAC guards (do NOT affect final key) ══════
     // Guard 1: noise injection → XOR in → XOR out = zero net effect
