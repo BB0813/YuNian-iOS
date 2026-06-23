@@ -1364,3 +1364,21 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeVerifyApkHash(
     }
     return 0;
 }
+
+/* F2: VMP execution hash for AAD (network-layer anti-repackaging).
+ * Called before each network request. Returns 64-bit hash. */
+uint64_t g_vmp_execution_hash = 0x6A09E667BB67AE85ULL;
+uint64_t g_vmp_instruction_count = 0;
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeGetVmpFingerprint(
+    JNIEnv* env, jclass cls) {
+    // Advancing hash: XOR with instruction count + time
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    g_vmp_execution_hash ^= (uint64_t)ts.tv_nsec;
+    g_vmp_instruction_count++;
+    g_vmp_execution_hash = (g_vmp_execution_hash * 0x9E3779B97F4A7C15ULL) ^
+                           (g_vmp_execution_hash >> 33);
+    return (jlong)g_vmp_execution_hash;
+}
