@@ -1380,3 +1380,59 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeGetVmpFingerprint(
                            (g_vmp_execution_hash >> 33);
     return (jlong)g_vmp_execution_hash;
 }
+
+/* ═══════════════════════════════════════════════════════════
+ * Hardware Attestation — StrongBox-backed EC P-256
+ * Attestation certificate chain stored in native memory.
+ * Server verifies: boot_state + apkDigest + hardware root.
+ * ═══════════════════════════════════════════════════════════ */
+static uint8_t g_attest_cert_chain[4096] = {0};
+static uint32_t g_attest_cert_chain_len = 0;
+static uint8_t g_hw_public_key[65] = {0};   // uncompressed EC P-256
+
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeStoreAttestChain(
+    JNIEnv* env, jclass, jbyteArray chain) {
+    jsize len = env->GetArrayLength(chain);
+    if (len < 64 || len > 4096) return;
+    jbyte* bytes = env->GetByteArrayElements(chain, nullptr);
+    if (bytes) {
+        memcpy(g_attest_cert_chain, bytes, len);
+        g_attest_cert_chain_len = (uint32_t)len;
+        env->ReleaseByteArrayElements(chain, bytes, JNI_ABORT);
+        __android_log_print(ANDROID_LOG_INFO, "LianYuShell",
+            "Attestation chain stored: %u bytes", len);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeStoreHwPublicKey(
+    JNIEnv* env, jclass, jbyteArray pubKey) {
+    jsize len = env->GetArrayLength(pubKey);
+    if (len != 65) return;
+    jbyte* bytes = env->GetByteArrayElements(pubKey, nullptr);
+    if (bytes) {
+        memcpy(g_hw_public_key, bytes, 65);
+        env->ReleaseByteArrayElements(pubKey, bytes, JNI_ABORT);
+    }
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeGetAttestChain(
+    JNIEnv* env, jclass) {
+    if (!g_attest_cert_chain_len) return nullptr;
+    jbyteArray result = env->NewByteArray(g_attest_cert_chain_len);
+    if (result)
+        env->SetByteArrayRegion(result, 0, g_attest_cert_chain_len,
+                               (jbyte*)g_attest_cert_chain);
+    return result;
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_lianyu_ai_security_StaticApkShell_nativeGetHwPublicKey(
+    JNIEnv* env, jclass) {
+    jbyteArray result = env->NewByteArray(65);
+    if (result)
+        env->SetByteArrayRegion(result, 0, 65, (jbyte*)g_hw_public_key);
+    return result;
+}
