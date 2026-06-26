@@ -1380,6 +1380,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeGetVmpFingerprint(
     return (jlong)g_vmp_execution_hash;
 }
 
+extern "C" {
 /* ═══════════════════════════════════════════════════════════
  * Hardware Attestation — StrongBox-backed EC P-256
  * Attestation certificate chain stored in native memory.
@@ -1435,7 +1436,9 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeGetHwPublicKey(
         env->SetByteArrayRegion(result, 0, 65, (jbyte*)g_hw_public_key);
     return result;
 }
+} /* extern "C" hardware attestation */
 
+extern "C" {
 /* ═══════════════════════════════════════════════════════════
  * Offline fallback restrictions:
  *  - Key binds to Android ID + Build.SERIAL (prevents cross-device)
@@ -1464,3 +1467,4 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeHasCompletedAttestation(
     JNIEnv* env, jclass) {
     return g_attest_cert_chain_len > 0 ? JNI_TRUE : JNI_FALSE;
 }
+} /* extern "C" offline fallback */

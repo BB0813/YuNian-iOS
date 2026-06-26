@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // WorkManager must be initialized before any schedule() call
+        try { androidx.work.WorkManager.initialize(this, androidx.work.Configuration.Builder().setMinimumLoggingLevel(android.util.Log.WARN).build()) } catch (_: Exception) {}
         enableEdgeToEdge()
         window.decorView.post { SystemBarController.applySystemBars(this) }
 

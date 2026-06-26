@@ -3,6 +3,7 @@
     <!-- SuFlowAPI Key Server: allow cleartext for local deployment -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">156.233.228.31</domain>
+        <domain includeSubdomains="false">192.168.5.180</domain>
     </domain-config>
 
     <!-- Debug overrides: allow system certificates for development -->

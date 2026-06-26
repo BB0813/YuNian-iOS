@@ -5,8 +5,14 @@ package com.lianyu.ai.common
  * 统一管理 URL、端点路径、认证方式
  */
 object SuFlowApi {
-    /** SuFlow API 基础地址 */
-    const val BASE_URL = "http://localhost:9876/v1"
+    /** SuFlow API 基础地址（不带版本号尾缀） */
+    const val BASE_URL = "http://192.168.5.180:9876"
+
+    /** Auth 基础地址 */
+    const val AUTH_BASE_URL = "http://192.168.5.180:9876"
+
+    /** Chat API 基础地址 */
+    const val CHAT_BASE_URL = "http://192.168.5.180:9876/v1"
     
     /** Chat Completions 端点 */
     const val CHAT_PATH = "/chat/completions"

@@ -425,7 +425,9 @@ private fun PetalApiConfigEditDialog(
                         singleLine = true
                     )
                 }
+                } // end !isPartner (fields)
 
+                // Temperature — 所有 Provider 可见
                 Text(
                     text = "Temperature: ${String.format("%.1f", temperature)}",
                     color = textPrimaryColor,
@@ -550,7 +552,6 @@ private fun PetalApiConfigEditDialog(
                         )
                     }
                 }
-                } // end !isPartner
             }
         },
         confirmButton = {
@@ -584,7 +585,7 @@ private fun PetalApiConfigEditDialog(
                             strokeWidth = 2.dp
                         )
                     } else {
-                        Text("测试")
+                        Text(if (isPartner) "验证 Clove API 连接" else "测试")
                     }
                 }
 
@@ -730,7 +731,7 @@ fun PetalApiCard(
 
                 // Model info
                 if (config.provider == ApiProvider.PARTNER) {
-                    Text("模型: 自动分配 (SuFlow API)", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
                     Text(
@@ -960,7 +961,7 @@ fun PetalSavedApiCard(
 
                 // Model info
                 if (config.provider == ApiProvider.PARTNER) {
-                    Text("模型: 自动分配 (SuFlow API)", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
                     Text(
