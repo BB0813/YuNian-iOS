@@ -33,9 +33,9 @@
 <div class="header">
   <div class="header-row">
     <div class="pulse-dot"></div>
-    <h1>LianYu (恋语) 安全架构全景图 — v1.9.1</h1>
+    <h1>LianYu (恋语) 安全架构全景图 — v2.0</h1>
   </div>
-  <p class="subtitle">Android 安全六维防御体系 — 构建流水线 → Native层 → VMP虚拟机 → Kotlin层 → 网络层 → 检测响应</p>
+  <p class="subtitle">Android 物理级防重打包体系 — HMAC-CTR | cert-in-salt | VMP P0-3 | InMemoryDEX | StrongBox证明 | F1 emulator | F2 APK hash | VMP指纹AAD</p>
 </div>
 
 <div class="diagram-container">
@@ -410,9 +410,11 @@
   <div class="card">
     <div class="card-header"><div class="card-dot rose"></div><h3>防御机制 (Defense)</h3></div>
     <ul>
-      <li>• 三代壳: 7KB Shell DEX + parent ClassLoader override (API 34-36兼容)</li>
-      <li>• 防重打包: Java证书SHA-256绑定 + META-INF mmap解析(就绪)</li>
-      <li>• VMP v3.0: 9函数VM字节码 + dispatch混洗 + CNTVCT + 死循环陷阱</li>
+      <li>• 内核级: HMAC-SHA256 CTR流密码 + 随机IV (阻统计攻击)</li>
+      <li>• cert-in-salt 88B: 证书哈希嵌入盐值,零if分支可Patch</li>
+      <li>• VMP P0-3: cert_obs[]→VMP bytecode LOAD_IMM,无.rodata常量</li>
+      <li>• InMemoryDexClassLoader: 业务DEX零磁盘落盘</li>
+      <li>• Poison fallback: cert^DE/AD,剥离Java cert=密钥全错</li>
       <li>• Dex2C v2.1: 10个胶水方法, 11KB Native诱饵层(三层异构)</li>
       <li>• KMS v2.0: 5级密钥体系, DK在NEON寄存器, dc civac清除</li>
       <li>• VMP v3.0: 9个安全函数以VM字节码运行, 永不以ARM64存在</li>
@@ -450,18 +452,22 @@
     </ul>
   </div>
   <div class="card">
-    <div class="card-header"><div class="card-dot amber"></div><h3>v1.9.1 交付状态</h3></div>
+    <div class="card-header"><div class="card-dot amber"></div><h3>v2.0 交付状态 (2026-06-25)</h3></div>
     <ul>
-      <li>• 真机: Vivo V2324A API36, Displayed +504ms, 0 FATAL</li>
-      <li>• APK: 76MB(ZIP) / 113MB(解压), V2+V3签名</li>
-      <li>• Shell DEX: 6.8KB | SO: 154KB(壳) + 9.4MB(安全) + 3.9KB(Dex2C)</li>
-      <li>• 加密载荷: classes.dat 10MB + code_items 5.8MB + payload 8.7MB</li>
-      <li>• 防重打包: 假签APK MainActivity ClassNotFound (cert阻断)</li>
-      <li>• 构建: Gradle assembleRelease → build.py一键Pipeline</li>
-    </ul>
+      <li>• 真机: Vivo V2324A API36 ✅ Displayed +1.5s, 0 FATAL</li>
+      <li>• APK: 60MB arm64-only, V2+V3签名</li>
+      <li>• Shell DEX: 5.8KB | SO: 181KB(壳) + 9.2MB(安全) + 3KB(Dex2C)</li>
+      <li>• 加密: HMAC-SHA256 CTR 32B计数器 + 随机IV (阻统计攻击)</li>
+      <li>• cert-in-salt 88B: 证书=密钥, 0 if分支可Patch</li>
+      <li>• VMP P0-3: VM_HYPER_DERIVE_SHELL_KEY=17 (cert_obs→VMP)</li>
+      <li>• InMemoryDexClassLoader: 零磁盘落盘</li>
+      <li>• F1: emulator deadloop | F2: APK hash SIGABRT</li>
+      <li>• StrongBox: 硬件证明链 (19 JNI全部接入SO)</li>
+      <li>• Poison fallback: cert^DE/AD防Java剥离</li>
+      <li>• 载荷: classes.bin 8.5MB + code_items 5.7MB + payload 8.5MB</li>
   </div>
 </div>
-<p class="footer">LianYu (恋语) Security Architecture · 2025-06 · v1.9.1 · Six-Dimension Defense</p>
+<p class="footer">LianYu (恋语) Security Architecture · 2026-06 · v2.0 · Physical Anti-Repackaging</p>
 </div>
 </body>
 </html>
