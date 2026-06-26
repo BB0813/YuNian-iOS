@@ -926,12 +926,17 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     // Pipeline encrypts with: salt = maps || hardcoded_cert || hw || label
     // Native derives with:   salt = maps || actual_cert || hw || label
     // If attacker skips cert binding → g_actual_cert_valid=0 → poisoned fallback.
+    // Debug builds pass all-zero cert → native recognizes it → use hardcoded cert.
+    int is_debug = 1;
+    for (int i = 0; i < 32; i++) if (g_actual_cert_hash[i]) { is_debug = 0; break; }
     uint8_t poisoned_cert[32];
     memcpy(poisoned_cert, cert_hash, 32);
     poisoned_cert[0] ^= 0xDE; poisoned_cert[15] ^= 0xAD;  // ≠ pipeline cert
     const uint8_t* cert_for_salt = poisoned_cert;          // wrong key if no cert
     if (g_actual_cert_valid)
         cert_for_salt = g_actual_cert_hash;                // correct only with cert
+    else if (is_debug)
+        cert_for_salt = cert_hash;                         // debug: use hardcoded
     else
         DEX_LOGI("cert not set — using hardcoded fallback");
 
