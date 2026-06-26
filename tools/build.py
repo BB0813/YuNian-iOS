@@ -156,8 +156,11 @@ def main():
     repacked = gradle_apk
 
     if args.release:
-        ks = os.path.join(PROJECT, "release.keystore"); kp = "3498762309"
-        alias = "your_alias"
+        ks = os.path.join(PROJECT, "release.keystore")
+        kp = os.environ.get("LIANYU_KEYSTORE_PASS", "")
+        alias = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
+        if not kp:
+            sys.exit("ERROR: set LIANYU_KEYSTORE_PASS environment variable")
     else:
         ks = os.path.join(os.environ["USERPROFILE"], ".android", "debug.keystore")
         kp = "android"; alias = "androiddebugkey"
