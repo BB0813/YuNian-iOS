@@ -17,77 +17,28 @@ CERT_OBS = bytes([
     0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
     0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec,
 ])
-# Expected maps CRC64 from nativeDeriveDexKey
-# Can be auto-detected from SO: python tools/build.py --detect-maps
+# Expected maps CRC64 from nativeDeriveDexKey — maps_crc64_stable() formula:
+#   CRC64(permissions + ' ' + '/' + basename)
+# = CRC64(\"r-xp /liblianyu_shell.so\") = 0x8e7beee5d9b3c6e4
+# Stable across SO recompiles (extracts only metadata, not .text content).
 EXPECTED_MAPS = 0x8e7beee5d9b3c6e4
 
-def detect_maps_crc_from_so():
-    """Extract CRC64 from liblianyu_shell.so .text section — sync with native EXPECTED_MAPS.
-       The native side reads /proc/self/maps line CRC64 for the SO's r-xp segment.
-       This function approximates it by CRC64-ing the SO file's .text section.
-       Call with --detect-maps flag or run: python tools/build.py --detect-maps"""
-    import struct as _st
-    so_path = None
-    for search in [
-        "core/security/build/intermediates/stripped_native_libs/release/stripReleaseDebugSymbols/out/lib/arm64-v8a/liblianyu_shell.so",
-        "core/security/build/intermediates/cxx/Release/*/obj/local/arm64-v8a/liblianyu_shell.so",
-    ]:
-        matches = glob.glob(os.path.join(PROJECT, search))
-        if matches:
-            so_path = sorted(matches, key=os.path.getmtime)[-1]
-            break
-    if not so_path:
-        print("  WARNING: Cannot find liblianyu_shell.so — using hardcoded EXPECTED_MAPS")
-        return EXPECTED_MAPS
-
-    data = open(so_path, "rb").read()
-    # Parse ELF: find .text section offset + size
-    if data[:4] != b'\x7fELF':
-        print("  WARNING: Not a valid ELF — using hardcoded EXPECTED_MAPS")
-        return EXPECTED_MAPS
-
-    is_64bit = data[4] == 2
-    if is_64bit:
-        e_shoff = _st.unpack_from('<Q', data, 0x28)[0]
-        e_shentsize, e_shnum, e_shstrndx = _st.unpack_from('<HHH', data, 0x3A)
-    else:
-        e_shoff = _st.unpack_from('<I', data, 0x20)[0]
-        e_shentsize, e_shnum, e_shstrndx = _st.unpack_from('<HHH', data, 0x2E)
-
-    # Find .shstrtab
-    shstr_offset = e_shoff + e_shstrndx * e_shentsize
-    shstrtab_off = _st.unpack_from('<I' if not is_64bit else '<Q', data, shstr_offset + 0x18)[0]
-
-    # Find .text section
-    for i in range(e_shnum):
-        sh_off = e_shoff + i * e_shentsize
-        sh_name_idx = _st.unpack_from('<I', data, sh_off)[0]
-        sh_name = data[shstrtab_off + sh_name_idx:].split(b'\x00')[0].decode('ascii', errors='replace')
-        if sh_name == '.text':
-            sh_addr = _st.unpack_from('<I' if not is_64bit else '<Q', data, sh_off + 0x10)[0]
-            sh_size = _st.unpack_from('<I' if not is_64bit else '<Q', data, sh_off + 0x20)[0]
-            sh_offset = _st.unpack_from('<I' if not is_64bit else '<Q', data, sh_off + 0x18)[0]
-            if sh_offset > 0 and sh_size > 0 and sh_offset + sh_size <= len(data):
-                text_crc = crc64(data[sh_offset:sh_offset + sh_size])
-                print(f"  Detected EXPECTED_MAPS from SO .text: 0x{text_crc:016x} (was 0x{EXPECTED_MAPS:016x})")
-                return text_crc
-            break
-
-    print("  WARNING: Cannot find .text section — using hardcoded EXPECTED_MAPS")
-    return EXPECTED_MAPS
-
 def crc64(data):
-    """CRC64-ECMA-182 for SO maps matching."""
+    """CRC64 matching native crc64_buf() — poly 0xC96C5795D7870F42, init=~0, xorout=~0.
+       LEFT-shift table-driven (matching native non-standard implementation).
+       EXPECTED_MAPS = CRC64('r-xp /liblianyu_shell.so') = 0x8e7beee5d9b3c6e4
+       This value is STABLE across SO recompilations — maps_crc64_stable()
+       extracts only permissions + '/' + basename, NOT .text content."""
     table = []
     for i in range(256):
-        crc = i
+        c = i
         for _ in range(8):
-            crc = (crc >> 1) ^ (0x42F0E1EBA9EA3693 if crc & 1 else 0)
-        table.append(crc)
-    crc = 0xFFFFFFFFFFFFFFFF
+            c = (c >> 1) ^ (0xC96C5795D7870F42 if (c & 1) else 0)
+        table.append(c)
+    c = 0xFFFFFFFFFFFFFFFF
     for b in data:
-        crc = table[(crc ^ b) & 0xFF] ^ (crc >> 8)
-    return crc ^ 0xFFFFFFFFFFFFFFFF
+        c = (table[((c >> 56) ^ b) & 0xFF] ^ (c << 8)) & 0xFFFFFFFFFFFFFFFF
+    return c ^ 0xFFFFFFFFFFFFFFFF
 
 def derive_dex_key(cert_sha256):
     """Derive DEX encryption key matching nativeDeriveDexKey()."""
@@ -238,13 +189,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--release", action="store_true")
     p.add_argument("--no-build", action="store_true")
-    p.add_argument("--detect-maps", action="store_true",
-                   help="Auto-detect EXPECTED_MAPS from liblianyu_shell.so .text CRC64")
     args = p.parse_args()
-
-    global EXPECTED_MAPS
-    if args.detect_maps:
-        EXPECTED_MAPS = detect_maps_crc_from_so()
     variant = "release" if args.release else "debug"
     print(f"═══ LianYu {variant.upper()} Build ═══")
     if VIVO_MULTIDEX:
