@@ -13,11 +13,13 @@ ANDROID_JAR = os.path.join(SDK, "platforms", "android-35", "android.jar")
 APKTOOL = os.path.join(PROJECT, "tools", "apktool.jar")
 
 # HMAC-SHA256(cert_SHA256, maps_crc64 || "lianyu_dex_v3___")
-# v2.1: 88-byte salt = maps(8) + cert(32) + hw(32) + label(16)
 XOR_KEY = bytes([
     0x50,0x59,0x65,0x1c,0xb6,0xac,0x74,0xf7,0xf5,0x4c,0x5d,0x32,0x75,0x80,0x1f,0x51,
     0x0b,0x3c,0x1f,0x48,0x3e,0x20,0xc7,0xd7,0x32,0x60,0x17,0xcc,0x23,0xf1,0xe9,0x53,
 ])
+
+# Vivo multi-DEX: put unencrypted business DEX as classes2.dex (system auto-loads)
+VIVO_MULTIDEX = os.environ.get("LIANYU_VIVO_MULTIDEX", "").lower() in ("1", "true", "yes")
 
 SHELL_SO_LIST = ["lib/arm64-v8a/liblianyu_shell.so",
                  "lib/arm64-v8a/liblianyu_security.so"]
@@ -46,15 +48,23 @@ def shell_dex():
     return out
 
 def encrypt_dex(src_apk):
-    """HMAC-SHA256 CTR encrypt all .dex files (verified PRF, no AES dependency)."""
+    """HMAC-SHA256 CTR encrypt all .dex files. Returns encrypted dir + unencrypted copies."""
     import hashlib, hmac
     print("\n═══ DEX Encryption ═══")
     work = tempfile.mkdtemp(prefix="lianyu_dex_")
+    extra_dex = tempfile.mkdtemp(prefix="lianyu_extra_dex_")
     count = 0
     with zipfile.ZipFile(src_apk, "r") as z:
         for name in sorted(z.namelist()):
             if not name.endswith(".dex"): continue
             data = z.read(name)
+            # Save unencrypted copy for Vivo multi-DEX
+            if VIVO_MULTIDEX:
+                extra_name = name  # classes.dex, classes2.dex, ...
+                # Rename first business DEX to classes2.dex (classes.dex is shell)
+                if count == 0 and extra_name == "classes.dex":
+                    extra_name = "classes2.dex"
+                open(os.path.join(extra_dex, extra_name), "wb").write(data)
             iv = os.urandom(16)
             enc = bytearray(iv)
             for i in range(0, len(data), 16):
@@ -67,37 +77,15 @@ def encrypt_dex(src_apk):
             count += 1
             print(f"  {name} → {out_name} {len(enc)//1024}KB")
     print(f"  {count} files")
-    return work, count
+    return work, count, extra_dex
 
-def strip_manifest(src_apk):
-    """Apktool decode, strip ContentProviders, repack."""
-    print("\n═══ Manifest Strip ═══")
-    decoded = tempfile.mkdtemp(prefix="lianyu_decode_")
-    run(["java","-jar",APKTOOL,"d","-f","-o",decoded,src_apk], timeout=120)
-    mf = os.path.join(decoded, "AndroidManifest.xml")
-    lines = open(mf, encoding="utf-8").readlines()
-    clean = []; skip = 0
-    for line in lines:
-        if "<provider" in line: skip += 1; continue
-        if skip > 0:
-            if "</provider>" in line or "/>" in line: skip -= 1; continue
-        line = re.sub(r'\s+android:appComponentFactory="[^"]*"', '', line)
-        clean.append(line)
-    open(mf, "w", encoding="utf-8").writelines(clean)
-    print(f"  Manifest: {len(lines)} → {len(clean)} lines ({len(lines)-len(clean)} removed)")
-    repacked = tempfile.mktemp(suffix=".apk", prefix="lianyu_repacked_")
-    run(["java","-jar",APKTOOL,"b","-f","-o",repacked,decoded], timeout=120)
-    shutil.rmtree(decoded, ignore_errors=True)
-    return repacked
-
-def assemble(shell_dex, dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass):
-    """Replace DEX + SOs + encrypted DEX → sign."""
+def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass):
+    """Replace DEX + SOs + encrypted DEX → sign. Optionally add extra DEX for Vivo."""
     print("\n═══ Assembly ═══")
     out = os.path.join(PROJECT, f"LianYu-v2.apk")
     tmp = out + ".tmp"
     shell = open(shell_dex, "rb").read()
 
-    # Find SOs
     so_base = None
     for v in [variant.capitalize(), "Release", "Debug"]:
         dirs = glob.glob(os.path.join(PROJECT,"core/security/build/intermediates/cxx",v,"*","obj","local"))
@@ -108,6 +96,15 @@ def assemble(shell_dex, dex_dir, repacked, variant, keystore, ks_pass, key_alias
     for f in os.listdir(dex_dir):
         p = os.path.join(dex_dir, f)
         dex_files[f"assets/shell/{f}"] = open(p, "rb").read()
+
+    # Extra unencrypted DEX for Vivo (classes2.dex, classes3.dex, ...)
+    extra_dex_entries = {}
+    if os.path.isdir(extra_dex_dir):
+        for f in sorted(os.listdir(extra_dex_dir)):
+            if f == "classes.dex": continue
+            extra_dex_entries[f] = open(os.path.join(extra_dex_dir, f), "rb").read()
+    if extra_dex_entries:
+        print(f"  Adding {len(extra_dex_entries)} unencrypted DEX: {list(extra_dex_entries.keys())}")
 
     with zipfile.ZipFile(repacked, "r") as zin:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -124,6 +121,7 @@ def assemble(shell_dex, dex_dir, repacked, variant, keystore, ks_pass, key_alias
                             if os.path.exists(sp): data = open(sp,"rb").read(); break
                 zout.writestr(item, data)
             for name, data in dex_files.items(): zout.writestr(name, data)
+            for name, data in extra_dex_entries.items(): zout.writestr(name, data)
 
     shutil.move(tmp, out)
     apksigner = os.path.join(BT, "apksigner.bat") if os.name=="nt" else os.path.join(BT,"apksigner")
@@ -132,6 +130,7 @@ def assemble(shell_dex, dex_dir, repacked, variant, keystore, ks_pass, key_alias
          "--ks-key-alias",key_alias,"--key-pass",f"pass:{key_pass}","--out",signed,out])
     shutil.move(signed, out)
     shutil.rmtree(dex_dir, ignore_errors=True)
+    if os.path.isdir(extra_dex_dir): shutil.rmtree(extra_dex_dir, ignore_errors=True)
     print(f"  {os.path.getsize(out)//1048576}MB → {out}")
     return out
 
@@ -142,6 +141,8 @@ def main():
     args = p.parse_args()
     variant = "release" if args.release else "debug"
     print(f"═══ LianYu {variant.upper()} Build ═══")
+    if VIVO_MULTIDEX:
+        print(f"  VIVO mode: unencrypted multi-DEX (system auto-loads)")
 
     sdex = shell_dex()
     if args.no_build:
@@ -151,8 +152,7 @@ def main():
         run([gradlew, f"assemble{variant.capitalize()}", "--no-daemon", "-q"], timeout=600)
         gradle_apk = os.path.join(PROJECT, "app/build/outputs/apk", variant, f"app-{variant}.apk")
 
-    dex_dir, count = encrypt_dex(gradle_apk)
-    # Gradle uses stripped manifest (src/shell/AndroidManifest.xml) — no apktool needed
+    dex_dir, count, extra_dex = encrypt_dex(gradle_apk)
     repacked = gradle_apk
 
     if args.release:
@@ -160,7 +160,6 @@ def main():
         kp = os.environ.get("LIANYU_KEYSTORE_PASS", "")
         alias = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
         if not kp:
-            # Fall back to debug keystore for dev builds
             ks = os.path.join(os.environ["USERPROFILE"], ".android", "debug.keystore")
             kp = "android"; alias = "androiddebugkey"
             print("  WARNING: LIANYU_KEYSTORE_PASS not set — using debug keystore")
@@ -168,7 +167,7 @@ def main():
         ks = os.path.join(os.environ["USERPROFILE"], ".android", "debug.keystore")
         kp = "android"; alias = "androiddebugkey"
 
-    final = assemble(sdex, dex_dir, repacked, variant, ks, kp, alias, kp)
+    final = assemble(sdex, dex_dir, extra_dex, repacked, variant, ks, kp, alias, kp)
 
     if args.release:
         desk = os.path.join(os.environ.get("USERPROFILE",""), "Desktop", "LianYu-Release.apk")
