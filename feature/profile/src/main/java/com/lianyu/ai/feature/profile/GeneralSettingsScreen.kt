@@ -27,14 +27,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Token
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -89,7 +92,10 @@ fun GeneralSettingsScreen(
     onCheckUpdateClick: () -> Unit,
     onWeChatClick: () -> Unit,
     onQQBotClick: () -> Unit,
-    onDataBackupClick: () -> Unit
+    onDataBackupClick: () -> Unit,
+    onOriginOSAdaptionClick: () -> Unit = {},
+    onCoffeeClick: () -> Unit = {},
+    onExperimentalFeaturesClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -126,6 +132,7 @@ fun GeneralSettingsScreen(
                 items = listOf(
                     MenuItemData(Icons.Filled.Language, stringResource(R.string.language), stringResource(R.string.language_desc), onLanguageClick),
                     MenuItemData(Icons.Filled.Refresh, stringResource(R.string.framerate), currentFrameRate.label, onFrameRateClick),
+                    MenuItemData(Icons.Filled.Science, stringResource(R.string.experimental_features), stringResource(R.string.experimental_features_desc), onExperimentalFeaturesClick),
                     ThinkingSettingsEntry()
                 ),
                 isVisible = isVisible, delayMillis = 100
@@ -137,7 +144,8 @@ fun GeneralSettingsScreen(
             SolidMenuGroup(
                 items = listOf(
                     MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.wechat_settings), stringResource(R.string.wechat_settings_desc), onWeChatClick),
-                    MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.qqbot_settings), stringResource(R.string.qqbot_settings_desc), onQQBotClick)
+                    MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.qqbot_settings), stringResource(R.string.qqbot_settings_desc), onQQBotClick),
+                    MenuItemData(Icons.Filled.Coffee, stringResource(R.string.coffee_title), stringResource(R.string.coffee_desc), onCoffeeClick)
                 ),
                 isVisible = isVisible, delayMillis = 160
             )
@@ -151,7 +159,7 @@ fun GeneralSettingsScreen(
                     MenuItemData(Icons.Filled.Token, stringResource(R.string.token_usage), stringResource(R.string.token_usage_desc), onTokenUsageClick),
                     MenuItemData(Icons.Filled.SystemUpdate, stringResource(R.string.check_new_version), stringResource(R.string.check_new_version_desc), onCheckUpdateClick),
                     MenuItemData(Icons.Filled.SaveAlt, stringResource(R.string.data_backup), stringResource(R.string.data_backup_desc), onDataBackupClick),
-                    MenuItemData(Icons.Filled.PowerSettingsNew, stringResource(R.string.permission_background), stringResource(R.string.permission_background_desc)) { }
+                    MenuItemData(Icons.Filled.Tune, stringResource(R.string.originos_adaption), stringResource(R.string.originos_adaption_desc), onOriginOSAdaptionClick)
                 ),
                 isVisible = isVisible, delayMillis = 220
             )

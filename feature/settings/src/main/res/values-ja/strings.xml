@@ -8,6 +8,12 @@
     <string name="language_korean">韓国語</string>
     <string name="cd_back">戻る</string>
     <string name="cd_selected">選択済み</string>
+    <string name="back">戻る</string>
+
+    <!-- Experimental Features -->
+    <string name="experimental_features">実験的機能</string>
+    <string name="experimental_features_desc">まだ正式リリースされていないテスト機能を探索</string>
+    <string name="experimental_features_hint">以下の機能は実験段階であり、不安定な場合があります。慎重に有効化してください。</string>
 
     <string name="theme_title">テーマ</string>
     <string name="theme_light">ライト</string>

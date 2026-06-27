@@ -26,6 +26,19 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- IQOO/OriginOS JobScheduler 保活 -->
+    <uses-permission android:name="android.permission.BIND_JOB_SERVICE"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- 病娇模式：读取应用使用统计（需用户在系统设置中授权） -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- 瑞幸咖啡：定位附近门店 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <!-- OPPO / vivo 厂商 Push 权限 -->
     <uses-permission android:name="com.coloros.mcs.permission.RECEIVE_MCS_MESSAGE" />
     <uses-permission android:name="com.heytap.mcs.permission.RECEIVE_MCS_MESSAGE" />
@@ -85,6 +98,13 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
+
+        <!-- IQOO/OriginOS 第三层兜底保活 JobService -->
+        <service
+            android:name=".IqooKeepAliveJobService"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <receiver
             android:name="com.lianyu.ai.feature.notification.BootReceiver"

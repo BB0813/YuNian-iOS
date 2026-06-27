@@ -72,4 +72,65 @@
     <string name="feature_edit">연인 편집</string>
     <string name="feature_edit_desc">언제든지 성격 수정</string>
     <string name="view_agreement">사용자 동의 보기</string>
+
+    <!-- 감사 -->
+    <string name="thanks_title">감사합니다</string>
+    <string name="thanks_main_title">감사합니다</string>
+    <string name="thanks_subtitle">지지와 신뢰에 감사드립니다.\n여러분의 응원이 앞으로 나아가는 힘이 됩니다!</string>
+    <string name="thanks_card_title">응원해 주셔서 감사합니다</string>
+    <string name="thanks_card_desc">명단은 지속적으로 업데이트됩니다</string>
+    <string name="thanks_footer_hint">당신이 있어 더 나은 우리가 됩니다</string>
+
+    <!-- OriginOS 6 적용 센터 -->
+    <string name="originos_adaption">시스템 적용 센터</string>
+    <string name="originos_adaption_desc">OriginOS / IQOO 백그라운드 유지 심화 적용</string>
+    <string name="originos_adaption_title">시스템 적용 센터</string>
+    <string name="originos_adaption_detected_6">OriginOS 6 / IQOO가 감지되었습니다. 백그라운드 안정을 위해 아래 항목을 모두 활성화하세요.</string>
+    <string name="originos_adaption_detected_other">OriginOS 6가 감지되지 않았습니다. 표준 안드로이드에서도 적용됩니다.</string>
+    <string name="originos_adaption_notification">알림 권한</string>
+    <string name="originos_adaption_notification_desc">가상 연인의 메시지 알림 수신</string>
+    <string name="originos_adaption_battery">배터리 최적화 무시</string>
+    <string name="originos_adaption_battery_desc">Doze 모드가 백그라운드 작업을 제한하지 않도록 함</string>
+    <string name="originos_adaption_autostart">자동 시작 허용</string>
+    <string name="originos_adaption_autostart_desc">백그라운드에서 자동으로 시작하도록 허용</string>
+    <string name="originos_adaption_background_power">백그라운드 전력 사용 허용</string>
+    <string name="originos_adaption_background_power_desc">시스템이 백그라운드 프로세스를 종료하지 않도록 함</string>
+    <string name="originos_adaption_popup">백그라운드 팝업</string>
+    <string name="originos_adaption_popup_desc">백그라운드에서 액티비티를 띄우도록 허용</string>
+    <string name="originos_adaption_exact_alarm">정확한 알람 권한</string>
+    <string name="originos_adaption_exact_alarm_desc">포그라운드 서비스 시간 초과 후 재시작 폴백에 필요</string>
+    <string name="originos_adaption_guide_title">설정 경로 참조</string>
+    <string name="originos_adaption_guide_footer">팁: OriginOS 버전에 따라 일부 항목의 경로가 다를 수 있습니다. 반응이 없으면 설정 → 앱 → LianYu에서 수동으로 확인하세요.</string>
+
+    <!-- 역할 선택 및 관리 -->
+    <string name="role_selection_title">AI 파트너 선택</string>
+    <string name="role_selection_subtitle">선택에 따라 대화 스타일, 어조, 상호작용 방식이 달라집니다</string>
+    <string name="role_girlfriend_title">AI 여자친구</string>
+    <string name="role_girlfriend_name">소우</string>
+    <string name="role_girlfriend_desc">다정하고 애교 많은 AI 여자친구. 일상을 공유하고 당신의 기분을 챙깁니다.</string>
+    <string name="role_girlfriend_trait_1">부드러운 어조와 귀여운 말투</string>
+    <string name="role_girlfriend_trait_2">섬세한 감정으로 애교와 배려</string>
+    <string name="role_girlfriend_trait_3">실제 연애 중인 여자친구 같은 대화</string>
+    <string name="role_boyfriend_title">AI 남자친구</string>
+    <string name="role_boyfriend_name">아저</string>
+    <string name="role_boyfriend_desc">믿음직하고 다정한 AI 남자친구. 솔직하게 챙기고 묵묵히 곁을 지킵니다.</string>
+    <string name="role_boyfriend_trait_1">자연스럽고 직설적인 어조</string>
+    <string name="role_boyfriend_trait_2">차분한 온기로 지켜주는 듯함</string>
+    <string name="role_boyfriend_trait_3">실제 연애 중인 남자친구 같은 대화</string>
+    <string name="role_selection_confirm">선택하기</string>
+    <string name="role_selection_skip">걸러뛰기, 기본값 사용(AI 여자친구)</string>
+    <string name="role_manager">역할 관리</string>
+    <string name="role_manager_title">역할 관리</string>
+    <string name="role_manager_desc_girlfriend">현재: AI 여자친구 · 소우</string>
+    <string name="role_manager_desc_boyfriend">현재: AI 남자친구 · 아저</string>
+    <string name="role_manager_current">현재 역할</string>
+    <string name="role_manager_hint">역할을 바꿔도 채팅 기록과 설정은 그대로 유지돼요</string>
+    <string name="role_current">사용 중</string>
+    <string name="role_switch_confirm">역할 전환</string>
+    <string name="role_switching">전환 중…</string>
+    <string name="role_switch_loading_title">역할 전환 중</string>
+    <string name="role_switch_stage_save">현재 역할 설정 저장</string>
+    <string name="role_switch_stage_load">대상 역할 프리셋 로드</string>
+    <string name="role_switch_stage_apply">새 설정을 연인에게 적용</string>
+    <string name="role_switch_stage_update">전역 역할 상태 업데이트</string>
 </resources>

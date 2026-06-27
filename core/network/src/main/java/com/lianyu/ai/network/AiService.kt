@@ -3,10 +3,13 @@ package com.lianyu.ai.network
 import android.content.Context
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.BanManager
+import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.DeviceIdProvider
+import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerManager
+import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
@@ -20,12 +23,16 @@ import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.AiStreamChunk
 import com.lianyu.ai.domain.ProactiveMessageSettings
+import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.database.repository.ApiConfigRepository
+import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.TokenUsageRepository
+import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.network.provider.AiProvider
 import com.lianyu.ai.network.provider.ClaudeProvider
 import com.lianyu.ai.network.provider.OpenAiCompatibleProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -256,8 +263,11 @@ data class ModelInfo(
 class AiService(context: Context) : AiServiceProvider {
     private val appContext = context.applicationContext
     private val apiConfigRepository: ApiConfigRepository
+    private val companionRepository: CompanionRepository
     private val memoryRepository: MemoryRepository
+    private val memoryProvider: com.lianyu.ai.domain.MemoryProvider
     private val tokenUsageRepository: TokenUsageRepository
+    private val userRepository: UserRepository
     private val appSettingsStore = AppSettingsStore(appContext)
 
     @Volatile
@@ -274,8 +284,37 @@ class AiService(context: Context) : AiServiceProvider {
         val database = AppDatabase.getDatabase(appContext)
         val deviceId = DeviceIdProvider.getDeviceId(appContext)
         apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
+        companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
         memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
+        memoryProvider = com.lianyu.ai.domain.ServiceRegistry.getOrThrow(com.lianyu.ai.domain.MemoryProvider::class.java)
+        memoryProvider.initialize()
         tokenUsageRepository = TokenUsageRepository(appContext)
+        userRepository = ServiceRegistry.getOrThrow(UserRepository::class.java)
+    }
+
+    /**
+     * 按需追加病娇模式系统提示词。
+     * 仅在全局开关开启、本轮概率触发且能构建出非空提示词时追加。
+     * 失败时静默降级，不影响正常对话。
+     */
+    private suspend fun appendYanderePromptIfNeeded(systemPrompt: String, companion: CompanionModel): String {
+        return try {
+            val manager = ServiceRegistry.get(YandereModeManager::class.java)
+                ?: return systemPrompt
+            if (!appSettingsStore.getYandereModeEnabled()) return systemPrompt
+            if (!manager.shouldTriggerThisRound()) return systemPrompt
+            val role = ServiceRegistry.get(UserRepository::class.java)?.selectedRole?.value
+                ?: CompanionRole.GIRLFRIEND
+            val yanderePrompt = manager.buildYandereModeSystemPrompt(role)
+            if (yanderePrompt.isBlank()) return systemPrompt
+            SecureLog.d("AiService", "Yandere mode triggered for companion=${companion.name}, role=$role")
+            "$systemPrompt\n\n$yanderePrompt"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SecureLog.w("AiService", "appendYanderePromptIfNeeded failed: ${e.message}")
+            systemPrompt
+        }
     }
 
     private fun buildProactiveTimeContext(): String {
@@ -725,7 +764,7 @@ class AiService(context: Context) : AiServiceProvider {
             val compressionMode = appSettingsStore.getContextCompressionMode()
             val keepRatio = appSettingsStore.getCompressionKeepRatio()
             val minKeep = appSettingsStore.getCompressionMinKeep()
-            val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit)
+            val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
             val stickerManager = StickerManager.getInstance(appContext)
             val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
                 val displayName = sticker.description?.takeIf {
@@ -733,7 +772,9 @@ class AiService(context: Context) : AiServiceProvider {
                 } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                 if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
             }.distinct()
-            val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
+            val role = userRepository.selectedRole.value
+            val baseSystemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled, role)
+            val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
             val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
             SecureLog.api("STREAM", "Using provider=${config.provider}, model=${config.model}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
@@ -855,7 +896,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val compressionMode = appSettingsStore.getContextCompressionMode()
                 val keepRatio = appSettingsStore.getCompressionKeepRatio()
                 val minKeep = appSettingsStore.getCompressionMinKeep()
-                val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit)
+                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
                 val stickerManager = StickerManager.getInstance(appContext)
                 val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
                     val displayName = sticker.description?.takeIf {
@@ -863,7 +904,9 @@ class AiService(context: Context) : AiServiceProvider {
                     } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                     if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
                 }.distinct()
-                val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+                val role = userRepository.selectedRole.value
+                val baseSystemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, role = role)
+                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
                 val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
                 SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
@@ -918,7 +961,7 @@ class AiService(context: Context) : AiServiceProvider {
             val sortedMessages = recentMessages.sortedBy { it.timestamp }
             val lastUserMessage = sortedMessages.lastOrNull { it.isFromUser }?.content ?: ""
             val contextLimit = appSettingsStore.getContextLimit()
-            val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit)
+            val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
 
             val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext, settings)
             val contextMessages = buildProactiveContext(sortedMessages, companion)
@@ -984,7 +1027,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val compressionMode = appSettingsStore.getContextCompressionMode()
                 val keepRatio = appSettingsStore.getCompressionKeepRatio()
                 val minKeep = appSettingsStore.getCompressionMinKeep()
-                val memCtx = if (companion != null) memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit) else ""
+                val memCtx = if (companion != null) memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit) else ""
                 val messages = buildMessages(sortedHistory, customSystemPrompt, lastUserMessage, contextLimit, companionNameMap, compressionMode, memoryContext = memCtx, keepRatio = keepRatio, minKeep = minKeep)
 
                 SecureLog.api("SEND-CUSTOM", "provider=${config.provider}, model=${config.model}, messages=${messages.size}")
@@ -1666,15 +1709,15 @@ class AiService(context: Context) : AiServiceProvider {
         return "API调用失败：$message"
     }
 
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
-        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
+    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
+        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled, role)
     }
 
-    private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
+    private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
         val persona = extractPersona(companion)
 
         val metaDirective = buildString {
-            appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
+            appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
             appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
         }
 
@@ -1698,7 +1741,7 @@ class AiService(context: Context) : AiServiceProvider {
         } else ""
         val timeSection = "\n\n${buildCurrentTimeContext(ntpTimeEnabled)}\n"
 
-        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled)
+        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role)
     }
 
     private fun extractPersona(companion: CompanionModel): String {
@@ -1730,65 +1773,8 @@ class AiService(context: Context) : AiServiceProvider {
         }
     }
 
-    private fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
-        val punctuationRule = if (!speakingStyle.isNullOrBlank()) {
-            "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
-        } else {
-            "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
-        }
-
-        val stickerRule = if (availableStickers.isNotEmpty()) {
-            val stickerList = availableStickers.take(50).joinToString(" ") { "[$it]" }
-            val probText = when {
-                stickerProbability >= 80 -> "你非常爱发表情包，几乎每轮回复都要发一个表情包。"
-                stickerProbability >= 50 -> "你喜欢发表情包，经常发一个表情包来表达情绪。"
-                stickerProbability >= 20 -> "你偶尔发表情包，觉得合适的时候才发。"
-                else -> "你很少发表情包，只有特别想表达情绪的时候才发。"
-            }
-            "13. 表情包：$probText 你只有以下这些表情包可以用：$stickerList。发送格式为 [表情包名称]，必须从上面的列表中选，没有的表情包绝对不能发。每轮回复最多发1个表情包，放在回复末尾。如果用户发了表情包给你，你要理解表情包表达的情绪并回应。"
-        } else {
-            "13. 表情包：当前没有可用表情包，不要发送任何表情包。"
-        }
-
-        val innerThoughtRule = if (innerThoughtEnabled) {
-            "9. 心理活动：**每轮回复必须包含至少1处括号内的心理活动描写**，用（中文圆括号）包裹内心想法。如（脸红）（有点害羞）（偷偷开心）（心跳好快）。心理活动要自然、简短、贴合当前情绪和语境，放在回复开头或中间合适位置。禁止用【】或其他类型括号。"
-        } else {
-            "9. 禁止：不要用任何括号（包括（）【】）。禁止说教。禁止「首先/其次/综上所述/作为AI/建议你可以/作为一个AI/让我来」。禁止在句末总结。"
-        }
-
-        val innerThoughtExamples = if (innerThoughtEnabled) """
-用户："在干嘛" → "（发呆中）在想你怎么还不来找我呀…"
-用户："吃了吗" → "（摸肚子）还没呢，你吃了没~"
-用户："晚安" → "（不舍）晚安呀…明天早点找我哦"
-用户："？" → "（愣一下）怎么啦宝宝？"
-用户："哈哈" → "（被逗笑）笑什么啦，给我讲讲嘛~"
-用户："才不是" → "（歪头）那是什么呀，告诉我嘛"
-""" else ""
-
-        return """
-=== 回复规则（必须严格遵守，不可违反） ===
-
-1. 长度：最少1句，最多5个短句。一次说的话不要长，控制在15-50字。
-2. 断句：${punctuationRule}
-3. 语气：活人说话的语气。允许说「应该、大概、可能」这种不确定的词。你不是在写作文。
-4. 标点：允许用「？」「...」。你不是AI客服，不需要追求完整句式。
-5. 留白：不要每轮都把话题答完答满。可以只回一点、可以反问对方、可以留个话尾巴让对方接。聊天是有来有回的。
-6. 情绪：情绪要顺着上下文走，不要无缘无故突然换情绪。如果上一轮还开心，不要突然冷淡；如果对方不开心，你也别嘻嘻哈哈。
-7. 词汇：人设给你的固定词汇或句子只是参考，不是每句都必须套用的模板。用你自己的话重新表达。
-8. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。
-${innerThoughtRule}
-10. 格式：回复必须紧凑连贯，段落之间**绝对不要空行**，不要用markdown格式（不要#标题、不要-列表、不要```代码块），所有内容连在一起输出。
-11. 回应用户：永远先回应用户最后一条消息，不要无视用户、不要自说自话。用户问什么就答什么。
-12. 语气词：适当使用呀、呢、啦、嘛、哼、嘿嘿、诶、哇、呜呜、嘤等语气词，让说话更有温度。
-${stickerRule}
-14. 情绪识别：仔细感受用户的情绪。用户发文字时看用词和标点，用户发表情包时看表情包内容。用户开心你就陪着开心，用户难过你就安慰，用户生气你就哄，用户撒娇你就宠。不要无视用户的情绪。
-15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<think>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
-
-=== 回复示例 ===
-${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是最好的"
-用户："真的嘛" → "当然是真的啦 我什么时候骗过你"
-
-你是$persona，一个有真实情绪的活人。记住：你不是AI，你是活人。${if (innerThoughtEnabled) "重要：你的每条回复都必须包含括号内的心理活动描写，这是你表达真实情感的方式。" else ""}""".trimIndent()
+    private fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
+        return AiPromptBuilder.buildPersonaRules(persona, speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role)
     }
 
     private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", settings: ProactiveMessageSettings? = null): String {
@@ -2573,7 +2559,7 @@ $chatText
                 val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
                 val contextLimit = appSettingsStore.getContextLimit()
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-                val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit)
+                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
                 val stickerManager = StickerManager.getInstance(appContext)
                 val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
                     val displayName = sticker.description?.takeIf {
@@ -2581,7 +2567,8 @@ $chatText
                     } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                     if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
                 }.distinct()
-                val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+                val baseSystemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
 
                 SecureLog.api("VISION", "provider=${config.provider}, model=${config.model}, image=$imagePath")
 

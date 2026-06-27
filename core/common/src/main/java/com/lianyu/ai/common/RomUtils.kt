@@ -31,13 +31,21 @@ object RomUtils {
 
     private const val KEY_VERSION_OPPO = "ro.build.version.opporom"
     private const val KEY_VERSION_VIVO = "ro.vivo.os.version"
+    private const val KEY_VERSION_VIVO_NAME = "ro.vivo.os.name"
+    private const val KEY_VERSION_VIVO_SDK = "ro.vivo.os.version.sdk"
+    // OriginOS 6 设备上可能只存在这些属性，需要一并检测
+    private const val KEY_VERSION_VIVO_PRODUCT = "ro.vivo.product.version"
+    private const val KEY_VERSION_VIVO_MODEL = "ro.vivo.hardware.subproduct"
+    private const val KEY_VERSION_VIVO_DISPLAY = "ro.vivo.display.version"
     private const val KEY_VERSION_MIUI = "ro.miui.ui.version.name"
+    private const val KEY_VERSION_MIUI_OS = "ro.miui.os.version.name"
     private const val KEY_VERSION_EMUI = "ro.build.version.emui"
     private const val KEY_VERSION_HARMONY = "hw_sc.build.platform.version"
     private const val KEY_VERSION_ONEPLUS = "ro.rom.version"
 
     private var cachedType: RomType? = null
     private var cachedVersion: String? = null
+    private var cachedMajorVersion: Int? = null
 
     val romType: RomType
         get() {
@@ -53,6 +61,17 @@ object RomUtils {
                 cachedVersion = detectRomVersion()
             }
             return cachedVersion ?: ""
+        }
+
+    /**
+     * 主版本号缓存，避免重复解析字符串。
+     */
+    private val majorVersion: Int
+        get() {
+            if (cachedMajorVersion == null) {
+                cachedMajorVersion = parseMajorVersion(romVersion)
+            }
+            return cachedMajorVersion ?: 0
         }
 
     val isOppo: Boolean
@@ -74,13 +93,7 @@ object RomUtils {
      */
     fun isColorOS12OrAbove(): Boolean {
         if (!isOppo) return false
-        val ver = romVersion
-        return try {
-            val major = ver.substringBefore(".").toIntOrNull() ?: 0
-            major >= 12
-        } catch (_: Exception) {
-            false
-        }
+        return majorVersion >= 12
     }
 
     /**
@@ -88,12 +101,41 @@ object RomUtils {
      */
     fun isOriginOS3OrAbove(): Boolean {
         if (romType != RomType.ORIGIN_OS) return false
-        val ver = romVersion
+        return majorVersion >= 3
+    }
+
+    /**
+     * 判断当前 ROM 是否属于 OriginOS 5+。
+     */
+    fun isOriginOS5OrAbove(): Boolean {
+        if (romType != RomType.ORIGIN_OS) return false
+        return majorVersion >= 5
+    }
+
+    /**
+     * 判断当前 ROM 是否属于 OriginOS 6+（基于 Android 15，后台限制最严格）。
+     */
+    fun isOriginOS6OrAbove(): Boolean {
+        if (romType != RomType.ORIGIN_OS) return false
+        return majorVersion >= 6
+    }
+
+    /**
+     * 解析版本字符串，兼容 "OriginOS 6" / "OriginOS 6.1" / "6" / "6.0" 等格式。
+     */
+    private fun parseMajorVersion(version: String): Int {
+        if (version.isBlank()) return 0
+        val normalized = version
+            .replace("OriginOS", "", ignoreCase = true)
+            .replace("FuntouchOS", "", ignoreCase = true)
+            .replace("origin", "", ignoreCase = true)
+            .replace("funtouch", "", ignoreCase = true)
+            .replace("OS", "", ignoreCase = true)
+            .trim()
         return try {
-            val major = ver.substringBefore(".").toIntOrNull() ?: 0
-            major >= 3
+            normalized.substringBefore(".").toIntOrNull() ?: 0
         } catch (_: Exception) {
-            false
+            0
         }
     }
 
@@ -105,12 +147,10 @@ object RomUtils {
             !props.getProperty(KEY_VERSION_ONEPLUS).isNullOrBlank() -> RomType.ONEPLUS
             !props.getProperty(KEY_VERSION_HARMONY).isNullOrBlank() -> RomType.HARMONY_OS
             !props.getProperty(KEY_VERSION_EMUI).isNullOrBlank() -> RomType.EMUI
+            isHyperOs(props) -> RomType.HYPER_OS
             !props.getProperty(KEY_VERSION_MIUI).isNullOrBlank() -> RomType.MIUI
-            !props.getProperty(KEY_VERSION_VIVO).isNullOrBlank() -> {
-                val vivoVer = props.getProperty(KEY_VERSION_VIVO, "")
-                if (vivoVer.startsWith("OriginOS", ignoreCase = true) ||
-                    vivoVer.startsWith("origin", ignoreCase = true)
-                ) {
+            isVivoDevice(props) -> {
+                if (isOriginOsByProps(props)) {
                     RomType.ORIGIN_OS
                 } else {
                     RomType.FUNTOUCH_OS
@@ -118,6 +158,86 @@ object RomUtils {
             }
             else -> matchByManufacturer()
         }
+    }
+
+    /**
+     * 判断当前设备是否为 vivo / iQOO 设备。
+     */
+    private fun isVivoDevice(props: Properties): Boolean {
+        if (Build.MANUFACTURER.contains("vivo", ignoreCase = true) ||
+            Build.MANUFACTURER.contains("iqoo", ignoreCase = true) ||
+            Build.BRAND.contains("vivo", ignoreCase = true) ||
+            Build.BRAND.contains("iqoo", ignoreCase = true)
+        ) {
+            return true
+        }
+
+        // 通过 vivo 专属属性二次确认
+        val hasVivoProp = listOf(
+            KEY_VERSION_VIVO,
+            KEY_VERSION_VIVO_NAME,
+            KEY_VERSION_VIVO_SDK,
+            KEY_VERSION_VIVO_PRODUCT,
+            KEY_VERSION_VIVO_MODEL,
+            KEY_VERSION_VIVO_DISPLAY
+        ).any { !props.getProperty(it, "").isNullOrBlank() }
+
+        return hasVivoProp
+    }
+
+    /**
+     * 判断 vivo 设备上运行的 ROM 是否为 OriginOS（新版）。
+     * OriginOS 6+ 的 build.prop 中，ro.vivo.os.version / ro.vivo.os.name 可能缺失或返回
+     * 类似 "PD2415B_A_6.12.2" 的版本号，导致按名称前缀匹配失败。本方法综合利用
+     * 多个属性以及 Build 字段，提高识别准确率。
+     */
+    private fun isOriginOsByProps(props: Properties): Boolean {
+        val vivoVersion = props.getProperty(KEY_VERSION_VIVO, "")
+        val vivoName = props.getProperty(KEY_VERSION_VIVO_NAME, "")
+
+        // 1. 明确名称匹配
+        if (vivoVersion.startsWith("OriginOS", ignoreCase = true) ||
+            vivoVersion.startsWith("origin", ignoreCase = true) ||
+            vivoName.startsWith("OriginOS", ignoreCase = true) ||
+            vivoName.startsWith("origin", ignoreCase = true)
+        ) {
+            return true
+        }
+
+        // 2. vivo 相关属性任一存在，则大概率是 OriginOS/FuntouchOS；进一步通过版本号判断。
+        // OriginOS 4+ 开始，ro.vivo.os.version 通常包含主版本号（如 "6.1" / "5.12"）。
+        val rawVersion = vivoVersion.ifBlank { vivoName }
+        val major = parseMajorVersion(rawVersion)
+        if (major >= 4) {
+            return true
+        }
+
+        // 3. 通过其他 vivo 属性综合判断
+        val hasVivoProp = listOf(
+            KEY_VERSION_VIVO,
+            KEY_VERSION_VIVO_NAME,
+            KEY_VERSION_VIVO_SDK,
+            KEY_VERSION_VIVO_PRODUCT,
+            KEY_VERSION_VIVO_MODEL,
+            KEY_VERSION_VIVO_DISPLAY
+        ).any { !props.getProperty(it, "").isNullOrBlank() }
+
+        // 4. Build 字段兜底：vivo 较新的设备通常是 OriginOS
+        if (hasVivoProp || Build.MANUFACTURER.contains("vivo", ignoreCase = true)) {
+            // 版本号 >= 3 认为 OriginOS；版本号缺失时，默认把近年 vivo 视为 OriginOS
+            return major >= 3 || rawVersion.isBlank()
+        }
+
+        return false
+    }
+
+    private fun isHyperOs(props: Properties): Boolean {
+        // HyperOS 通常保留 MIUI version name，但会新增 os version name 或特定 mod device 标记
+        val miuiVersion = props.getProperty(KEY_VERSION_MIUI, "")
+        val miuiOsVersion = props.getProperty(KEY_VERSION_MIUI_OS, "")
+        return miuiOsVersion.contains("HyperOS", ignoreCase = true) ||
+            miuiOsVersion.contains("hyperos", ignoreCase = true) ||
+            miuiVersion.contains("HyperOS", ignoreCase = true)
     }
 
     private fun matchByManufacturer(): RomType {
@@ -167,7 +287,13 @@ object RomUtils {
             arrayOf(
                 KEY_VERSION_OPPO,
                 KEY_VERSION_VIVO,
+                KEY_VERSION_VIVO_NAME,
+                KEY_VERSION_VIVO_SDK,
+                KEY_VERSION_VIVO_PRODUCT,
+                KEY_VERSION_VIVO_MODEL,
+                KEY_VERSION_VIVO_DISPLAY,
                 KEY_VERSION_MIUI,
+                KEY_VERSION_MIUI_OS,
                 KEY_VERSION_EMUI,
                 KEY_VERSION_HARMONY,
                 KEY_VERSION_ONEPLUS
@@ -228,6 +354,14 @@ object RomUtils {
             RomType.ONEPLUS -> "OxygenOS/ColorOS"
             RomType.SAMSUNG -> "OneUI"
             RomType.OTHER -> Build.MANUFACTURER
+        }
+    }
+
+    private fun String.contains(other: String, ignoreCase: Boolean): Boolean {
+        return if (ignoreCase) {
+            this.lowercase(Locale.getDefault()).contains(other.lowercase(Locale.getDefault()))
+        } else {
+            this.contains(other)
         }
     }
 }

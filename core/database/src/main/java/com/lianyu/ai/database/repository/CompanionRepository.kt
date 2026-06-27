@@ -1,5 +1,6 @@
 package com.lianyu.ai.database.repository
 
+import com.lianyu.ai.database.DefaultCompanionSeeder
 import com.lianyu.ai.database.dao.CompanionDao
 import com.lianyu.ai.database.model.CompanionEntity
 import kotlinx.coroutines.flow.Flow
@@ -22,4 +23,15 @@ class CompanionRepository(private val companionDao: CompanionDao) {
     suspend fun increaseIntimacy(id: Long, amount: Int = 1) = companionDao.increaseIntimacy(id, amount)
 
     suspend fun getIntimacy(id: Long): Int? = companionDao.getIntimacy(id)
+
+    /**
+     * 查找默认体验伴侣（按默认标签匹配）。
+     * 角色切换时依赖此入口定位需要更新的实体，保证聊天记录不换 companionId。
+     */
+    suspend fun getDefaultExperienceCompanion(): CompanionEntity? {
+        val tag = DefaultCompanionSeeder.defaultExperienceCompanionTag
+        return companionDao.getAllCompanionsSync().firstOrNull { companion ->
+            companion.tags.orEmpty().split(',').map { it.trim() }.any { it == tag }
+        }
+    }
 }

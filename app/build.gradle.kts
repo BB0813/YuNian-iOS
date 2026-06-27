@@ -154,6 +154,7 @@ dependencies {
     implementation(project(":feature:wechat"))
     implementation(project(":feature:qqbot"))
     implementation(project(":feature:backup"))
+    implementation(project(":feature:coffee"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
