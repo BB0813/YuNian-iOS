@@ -407,7 +407,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             SecureLog.d("SettingsViewModel", "isPARTNER=${config.provider == ApiProvider.PARTNER}, providerName=${config.provider.name}")
 
             // 对于 PARTNER 类型：直接调用 handshake 端点
-            val startTime = System.currentTimeMillis()
             if (config.provider == ApiProvider.PARTNER) {
                 SecureLog.d("SettingsViewModel", "PARTNER: calling handshake endpoint...")
                 try {
