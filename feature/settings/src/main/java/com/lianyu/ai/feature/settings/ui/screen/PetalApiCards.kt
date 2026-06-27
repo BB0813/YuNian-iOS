@@ -729,14 +729,6 @@ fun PetalApiCard(
                         isDarkTheme = isDarkTheme
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    // Quick test button — always visible on the card
-                    TextButton(
-                        onClick = { onTest(config) },
-                        modifier = Modifier.height(32.dp),
-                        colors = ButtonDefaults.textButtonColors(contentColor = PetalPrimary)
-                    ) {
-                        Text("测试", fontSize = 12.sp)
-                    }
                     Icon(
                         imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                         contentDescription = if (isExpanded) "收起" else "展开",
@@ -987,14 +979,6 @@ fun PetalSavedApiCard(
                         isDarkTheme = isDarkTheme
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    // Quick test button — always visible on the card
-                    TextButton(
-                        onClick = { onTest(config) },
-                        modifier = Modifier.height(32.dp),
-                        colors = ButtonDefaults.textButtonColors(contentColor = PetalPrimary)
-                    ) {
-                        Text("测试", fontSize = 12.sp)
-                    }
                     Icon(
                         imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                         contentDescription = if (isExpanded) "收起" else "展开",
