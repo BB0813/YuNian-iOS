@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LianYu One-Click APK Builder — strips ContentProviders, injects shell DEX."""
 
-import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile, struct
+import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile, struct, hashlib, hmac
 
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHELL_SRC = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/src/com/lianyu/ai/security")
@@ -12,14 +12,46 @@ BT = os.path.join(SDK, "build-tools", "36.0.0")
 ANDROID_JAR = os.path.join(SDK, "platforms", "android-35", "android.jar")
 APKTOOL = os.path.join(PROJECT, "tools", "apktool.jar")
 
-# HMAC-SHA256(cert_SHA256, maps_crc64 || "lianyu_dex_v3___")
-XOR_KEY = bytes([
+# cert obs from nativeDeriveDexKey (obfuscation mask)
+CERT_OBS = bytes([
+    0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
+    0x41,0x64,0x2b,0x4f,0x39,0xef,0x22,0xca,0xe1,0x5f,0x78,0x49,0x9a,0x41,0x13,0xec,
+])
+# Expected maps CRC64 from nativeDeriveDexKey
+EXPECTED_MAPS = 0x8e7beee5d9b3c6e4
+
+def crc64(data):
+    """CRC64-ECMA-182 for SO maps matching."""
+    table = []
+    for i in range(256):
+        crc = i
+        for _ in range(8):
+            crc = (crc >> 1) ^ (0x42F0E1EBA9EA3693 if crc & 1 else 0)
+        table.append(crc)
+    crc = 0xFFFFFFFFFFFFFFFF
+    for b in data:
+        crc = table[(crc ^ b) & 0xFF] ^ (crc >> 8)
+    return crc ^ 0xFFFFFFFFFFFFFFFF
+
+def derive_dex_key(cert_sha256):
+    """Derive DEX encryption key matching nativeDeriveDexKey()."""
+    # XOR cert with obs mask → cert_hash
+    cert_hash = bytes(a ^ b for a, b in zip(cert_sha256[:32], CERT_OBS))
+    # Salt: maps_crc(8) || dev_fp(8) || hw_sig(32) || "lianyu_dex_v3"(16)
+    salt = struct.pack('<Q', EXPECTED_MAPS) + b'\x00' * 8 + b'\x00' * 32 + b'lianyu_dex_v3\x00\x00'
+    return hmac.new(cert_hash, salt, hashlib.sha256).digest()
+
+# Fallback XOR_KEY for when cert is unavailable
+_FALLBACK_KEY = bytes([
     0x50,0x59,0x65,0x1c,0xb6,0xac,0x74,0xf7,0xf5,0x4c,0x5d,0x32,0x75,0x80,0x1f,0x51,
     0x0b,0x3c,0x1f,0x48,0x3e,0x20,0xc7,0xd7,0x32,0x60,0x17,0xcc,0x23,0xf1,0xe9,0x53,
 ])
 
 # Vivo multi-DEX: put unencrypted business DEX as classes2.dex (system auto-loads)
 VIVO_MULTIDEX = os.environ.get("LIANYU_VIVO_MULTIDEX", "").lower() in ("1", "true", "yes")
+
+# Dynamically computed encryption key — populated in main()
+DEX_KEY = _FALLBACK_KEY
 
 SHELL_SO_LIST = ["lib/arm64-v8a/liblianyu_shell.so",
                  "lib/arm64-v8a/liblianyu_security.so"]
@@ -49,7 +81,7 @@ def shell_dex():
 
 def encrypt_dex(src_apk):
     """HMAC-SHA256 CTR encrypt all .dex files + app_meta.bin (real Application class name)."""
-    import hashlib, hmac
+    import hashlib as _hl, hmac as _hm
     print("\n═══ DEX Encryption ═══")
     work = tempfile.mkdtemp(prefix="lianyu_dex_")
     extra_dex = tempfile.mkdtemp(prefix="lianyu_extra_dex_")
@@ -67,7 +99,7 @@ def encrypt_dex(src_apk):
             enc = bytearray(iv)
             for i in range(0, len(data), 16):
                 ctr = struct.pack('>16sQ8x', iv, i // 16)
-                ks = hmac.new(XOR_KEY, ctr[:32], hashlib.sha256).digest()
+                ks = _hm.new(DEX_KEY, ctr[:32], _hl.sha256).digest()
                 for j in range(min(16, len(data) - i)):
                     enc.append(data[i + j] ^ ks[j])
             out_name = name.replace("/","_").replace(".dex",".dat")
@@ -82,7 +114,7 @@ def encrypt_dex(src_apk):
     enc = bytearray(iv)
     for i in range(0, len(data), 16):
         ctr = struct.pack('>16sQ8x', iv, i // 16)
-        ks = hmac.new(XOR_KEY, ctr[:32], hashlib.sha256).digest()
+        ks = _hm.new(DEX_KEY, ctr[:32], _hl.sha256).digest()
         for j in range(min(16, len(data) - i)):
             enc.append(data[i + j] ^ ks[j])
     open(os.path.join(work, "app_meta.bin"), "wb").write(bytes(enc))
@@ -164,9 +196,6 @@ def main():
         run([gradlew, f"assemble{variant.capitalize()}", "--no-daemon", "-q"], timeout=600)
         gradle_apk = os.path.join(PROJECT, "app/build/outputs/apk", variant, f"app-{variant}.apk")
 
-    dex_dir, count, extra_dex = encrypt_dex(gradle_apk)
-    repacked = gradle_apk
-
     if args.release:
         ks = os.path.join(PROJECT, "release.keystore")
         kp = os.environ.get("LIANYU_KEYSTORE_PASS", "")
@@ -178,6 +207,31 @@ def main():
     else:
         ks = os.path.join(os.environ["USERPROFILE"], ".android", "debug.keystore")
         kp = "android"; alias = "androiddebugkey"
+
+    # Derive DEX encryption key from actual signing cert (matches nativeDeriveDexKey)
+    global DEX_KEY
+    try:
+        kt = subprocess.run(
+            ["keytool", "-list", "-v", "-keystore", ks, "-storepass", kp, "-alias", alias],
+            capture_output=True, timeout=30
+        )
+        out = kt.stdout.decode('utf-8', errors='replace')
+        # Extract SHA-256 from keytool output (format: "SHA256: AB:CD:...")
+        for line in out.split('\n'):
+            if "SHA256:" in line:
+                cert_hex = line.split("SHA256:")[-1].strip().replace(':', '').replace(' ', '')
+                if len(cert_hex) == 64:
+                    cert_sha = bytes.fromhex(cert_hex)
+                    DEX_KEY = derive_dex_key(cert_sha)
+                    print(f"  Derived encryption key from cert SHA256: {cert_hex[:16]}...")
+                    break
+        if DEX_KEY == _FALLBACK_KEY:
+            print("  WARNING: Could not extract cert — using fallback key")
+    except Exception as e:
+        print(f"  WARNING: Key derivation failed ({e}) — using fallback key")
+
+    dex_dir, count, extra_dex = encrypt_dex(gradle_apk)
+    repacked = gradle_apk
 
     final = assemble(sdex, dex_dir, extra_dex, repacked, variant, ks, kp, alias, kp)
 
