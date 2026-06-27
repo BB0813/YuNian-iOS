@@ -759,9 +759,15 @@ fun PetalApiCard(
                             color = PetalGreen, fontSize = 12.sp)
                     } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        val errText = connectionResult.errorCode?.let { mapErrorCode(it) }
-                            ?: connectionResult.errorMessage ?: "连接失败"
-                        Text("原因: $errText", color = PetalError, fontSize = 12.sp)
+                        val errCode = connectionResult.errorCode ?: "unknown"
+                        val errLabel = mapErrorCode(errCode)
+                        Column {
+                            Text("$errLabel | error=${errCode} | latency=${connectionResult.latencyMs}ms",
+                                color = PetalError, fontSize = 12.sp)
+                            connectionResult.errorMessage?.let { msg ->
+                                Text(msg, color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
@@ -1011,9 +1017,15 @@ fun PetalSavedApiCard(
                             color = PetalGreen, fontSize = 12.sp)
                     } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        val errText = connectionResult.errorCode?.let { mapErrorCode(it) }
-                            ?: connectionResult.errorMessage ?: "连接失败"
-                        Text("原因: $errText", color = PetalError, fontSize = 12.sp)
+                        val errCode = connectionResult.errorCode ?: "unknown"
+                        val errLabel = mapErrorCode(errCode)
+                        Column {
+                            Text("$errLabel | error=${errCode} | latency=${connectionResult.latencyMs}ms",
+                                color = PetalError, fontSize = 12.sp)
+                            connectionResult.errorMessage?.let { msg ->
+                                Text(msg, color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
