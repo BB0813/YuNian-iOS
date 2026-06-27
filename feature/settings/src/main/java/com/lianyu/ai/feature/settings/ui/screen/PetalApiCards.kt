@@ -236,7 +236,7 @@ private fun PetalApiConfigEditDialog(
                     }
                     if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
                         Text(
-                            text = "✅ API 已连接",
+                            text = "API 已连接",
                             color = PetalGreen,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
