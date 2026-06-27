@@ -753,6 +753,16 @@ fun PetalApiCard(
                 // Model info
                 if (config.provider == ApiProvider.PARTNER) {
                     Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
+                            color = PetalGreen, fontSize = 12.sp)
+                    } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val errText = connectionResult.errorCode?.let { mapErrorCode(it) }
+                            ?: connectionResult.errorMessage ?: "连接失败"
+                        Text("原因: $errText", color = PetalError, fontSize = 12.sp)
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
                     Text(
@@ -995,6 +1005,16 @@ fun PetalSavedApiCard(
                 // Model info
                 if (config.provider == ApiProvider.PARTNER) {
                     Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
+                            color = PetalGreen, fontSize = 12.sp)
+                    } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val errText = connectionResult.errorCode?.let { mapErrorCode(it) }
+                            ?: connectionResult.errorMessage ?: "连接失败"
+                        Text("原因: $errText", color = PetalError, fontSize = 12.sp)
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
                     Text(
