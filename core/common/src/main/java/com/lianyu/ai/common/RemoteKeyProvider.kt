@@ -29,7 +29,7 @@ object RemoteKeyProvider {
     private const val KEY_SESSION_KEY = "session_key"
     // Server URL set at app init — no hardcoded default
     @Volatile
-    var serverUrl: String = ""
+    var serverUrl: String = SuFlowApi.BASE_URL
 
     private fun resolveServerUrl(): String = serverUrl
     private const val HANDSHAKE_PATH = "/api/auth/handshake"
