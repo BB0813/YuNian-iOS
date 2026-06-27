@@ -9,21 +9,32 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.edit
 import com.lianyu.ai.common.AppForegroundTracker
 import com.lianyu.ai.common.BatteryOptimizationHelper
+import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.FrameRateManager
+import com.lianyu.ai.common.RomUtils
+import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.notification.CompanionKeepAliveService
 import com.lianyu.ai.feature.notification.CompanionMessageWorker
 import com.lianyu.ai.feature.profile.AgreementScreen
+import com.lianyu.ai.feature.profile.ProfileViewModel
+import com.lianyu.ai.feature.profile.RoleSelectionScreen
 import com.lianyu.ai.feature.update.AppUpdateManager
 import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
@@ -103,24 +114,57 @@ class MainActivity : ComponentActivity() {
         setContent {
             val agreementPrefs = getSharedPreferences("agreement_prefs", android.content.Context.MODE_PRIVATE)
             val agreementAccepted = agreementPrefs.getBoolean("agreement_accepted", false)
+            val userPrefs = getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+            val roleSelected = userPrefs.contains("selected_role")
             val themeViewModel: ThemeViewModel = viewModel()
             val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
+            val profileViewModel: ProfileViewModel = viewModel()
+            var showRoleSelection by remember { mutableStateOf(agreementAccepted && !roleSelected) }
+
+            val isServiceReady by ServiceRegistry.initialized.collectAsStateWithLifecycle()
 
             LianYuTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    if (!agreementAccepted) {
-                        AgreementScreen(
-                            onAgree = {
-                                agreementPrefs.edit()
-                                    .putBoolean("agreement_accepted", true)
-                                    .putLong("agreement_time", System.currentTimeMillis())
-                                    .apply()
-                                activity.recreate()
-                            },
-                            onDisagree = { activity.finishAffinity() }
-                        )
-                    } else {
-                        MainScreen(activity)
+                    when {
+                        !agreementAccepted -> {
+                            AgreementScreen(
+                                onAgree = {
+                                    agreementPrefs.edit()
+                                        .putBoolean("agreement_accepted", true)
+                                        .putLong("agreement_time", System.currentTimeMillis())
+                                        .apply()
+                                    activity.recreate()
+                                },
+                                onDisagree = { activity.finishAffinity() }
+                            )
+                        }
+                        showRoleSelection -> {
+                            RoleSelectionScreen(
+                                onRoleSelected = { role ->
+                                    profileViewModel.switchRole(role) {
+                                        showRoleSelection = false
+                                    }
+                                },
+                                onSkip = {
+                                    profileViewModel.switchRole(CompanionRole.GIRLFRIEND) {
+                                        showRoleSelection = false
+                                    }
+                                }
+                            )
+                        }
+                        !isServiceReady -> {
+                            // 等待跨模块依赖注册中心就绪，避免冷启动后快速进入
+                            // 创建人设等页面时 ServiceRegistry.getOrThrow 抛异常导致闪退。
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        else -> {
+                            MainScreen(activity)
+                        }
                     }
                 }
             }
@@ -130,9 +174,45 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermission()
         CompanionKeepAliveService.start(this)
         CompanionMessageWorker.schedule(this)
+        // IQOO/OriginOS 设备启用 JobScheduler 第三层兜底保活
+        if (RomUtils.isVivo) {
+            scheduleIqooKeepAliveJob()
+        }
 
         appScope.launch { updateManager.checkForUpdates() }
         startMemoryMonitor()
+    }
+
+    /**
+     * IQOO/OriginOS 专用 JobScheduler 第三层保活调度。
+     *
+     * OriginOS 对前台服务和 WorkManager 都有严格限制，
+     * 使用 JobScheduler 作为兜底机制：每 15 分钟检查并重启保活服务。
+     */
+    private fun scheduleIqooKeepAliveJob() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                val jobScheduler = getSystemService(android.content.Context.JOB_SCHEDULER_SERVICE)
+                        as android.app.job.JobScheduler
+                jobScheduler.cancel(IQOO_KEEP_ALIVE_JOB_ID)
+                val componentName = android.content.ComponentName(this, IqooKeepAliveJobService::class.java)
+                val builder = android.app.job.JobInfo.Builder(IQOO_KEEP_ALIVE_JOB_ID, componentName)
+                    .setPeriodic(15 * 60 * 1000L)
+                    .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_ANY)
+                    .setPersisted(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    builder.setPriority(android.app.job.JobInfo.PRIORITY_HIGH)
+                }
+                jobScheduler.schedule(builder.build())
+                android.util.Log.i("MainActivity", "IQOO keep-alive JobScheduler scheduled")
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Failed to schedule IQOO keep-alive job: ${e.message}")
+            }
+        }
+    }
+
+    companion object {
+        private const val IQOO_KEEP_ALIVE_JOB_ID = 10001
     }
 
     /**

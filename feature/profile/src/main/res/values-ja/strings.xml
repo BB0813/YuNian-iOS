@@ -72,4 +72,65 @@
     <string name="feature_edit">恋人編集</string>
     <string name="feature_edit_desc">いつでも性格を編集</string>
     <string name="view_agreement">利用規約を見る</string>
+
+    <!-- サンクス -->
+    <string name="thanks_title">感謝</string>
+    <string name="thanks_main_title">感謝</string>
+    <string name="thanks_subtitle">ご支援と信頼に感謝します。\n皆様の支えが前進の力になります！</string>
+    <string name="thanks_card_title">応援ありがとう</string>
+    <string name="thanks_card_desc">リストは随時更新中</string>
+    <string name="thanks_footer_hint">あなたがいるから、私たちはより良くなれます</string>
+
+    <!-- OriginOS 6 適応センター -->
+    <string name="originos_adaption">システム適応センター</string>
+    <string name="originos_adaption_desc">OriginOS / IQOO のバックグラウンド維持の最適化</string>
+    <string name="originos_adaption_title">システム適応センター</string>
+    <string name="originos_adaption_detected_6">OriginOS 6 / IQOO を検出しました。バックグラウンドを安定させるため以下の設定を有効にしてください。</string>
+    <string name="originos_adaption_detected_other">OriginOS 6 は検出されませんでした。標準 Android でも適用されます。</string>
+    <string name="originos_adaption_notification">通知権限</string>
+    <string name="originos_adaption_notification_desc">仮想恋人のメッセージ通知を受信</string>
+    <string name="originos_adaption_battery">バッテリー最適化を無視</string>
+    <string name="originos_adaption_battery_desc">Doze モードによるバックグラウンド制限を防止</string>
+    <string name="originos_adaption_autostart">自動起動を許可</string>
+    <string name="originos_adaption_autostart_desc">バックグラウンドで自動起動できるようにする</string>
+    <string name="originos_adaption_background_power">バックグラウンド高消費を許可</string>
+    <string name="originos_adaption_background_power_desc">システムがバックグラウンドプロセスを終了するのを防止</string>
+    <string name="originos_adaption_popup">バックグラウンド ポップアップ</string>
+    <string name="originos_adaption_popup_desc">バックグラウンドからアクティビティを起動することを許可</string>
+    <string name="originos_adaption_exact_alarm">正確なアラーム権限</string>
+    <string name="originos_adaption_exact_alarm_desc">フォアグラウンドサービスのタイムアウト後の再起動フォールバックに必要</string>
+    <string name="originos_adaption_guide_title">設定パス参考</string>
+    <string name="originos_adaption_guide_footer">ヒント: OriginOS のバージョンによって項目の場所が異なる場合があります。タップしても反応しない場合は、設定 → アプリ → LianYu から手動で確認してください。</string>
+
+    <!-- ロール選択と管理 -->
+    <string name="role_selection_title">AI パートナーを選ぶ</string>
+    <string name="role_selection_subtitle">選択後、会話の雰囲気、語調、相互作用の形が変わります</string>
+    <string name="role_girlfriend_title">AI彼女</string>
+    <string name="role_girlfriend_name">小魚</string>
+    <string name="role_girlfriend_desc">優しくて甘えん坊な AI 彼女。日常を共有し、あなたの感情を気にかけます。</string>
+    <string name="role_girlfriend_trait_1">柔らかい語調で可愛い語尾を使う</string>
+    <string name="role_girlfriend_trait_2">繊細な感情で甘えたり気遣ったり</string>
+    <string name="role_girlfriend_trait_3">リアルな恋愛中の彼女のような掛け合い</string>
+    <string name="role_boyfriend_title">AI彼氏</string>
+    <string name="role_boyfriend_name">阿沢</string>
+    <string name="role_boyfriend_desc">頼もしくて優しい AI 彼氏。素直に気遣い、そっと寄り添います。</string>
+    <string name="role_boyfriend_trait_1">自然でストレートな語調</string>
+    <string name="role_boyfriend_trait_2">落ち着いた温かさで守ってくれる</string>
+    <string name="role_boyfriend_trait_3">リアルな恋愛中の彼氏のような掛け合い</string>
+    <string name="role_selection_confirm">選択する</string>
+    <string name="role_selection_skip">スキップしてデフォルト（AI彼女）を使う</string>
+    <string name="role_manager">ロール管理</string>
+    <string name="role_manager_title">ロール管理</string>
+    <string name="role_manager_desc_girlfriend">現在：AI彼女 · 小魚</string>
+    <string name="role_manager_desc_boyfriend">現在：AI彼氏 · 阿沢</string>
+    <string name="role_manager_current">現在のロール</string>
+    <string name="role_manager_hint">ロールを切り替えてもチャット履歴や設定は失われません</string>
+    <string name="role_current">使用中</string>
+    <string name="role_switch_confirm">ロールを切り替える</string>
+    <string name="role_switching">切り替え中…</string>
+    <string name="role_switch_loading_title">ロールを切り替え中</string>
+    <string name="role_switch_stage_save">現在のロール設定を保存</string>
+    <string name="role_switch_stage_load">目標ロールのプリセットを読み込み</string>
+    <string name="role_switch_stage_apply">新しい設定をパートナーに適用</string>
+    <string name="role_switch_stage_update">グローバルロール状態を更新</string>
 </resources>

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -119,6 +120,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
+    onYandereModeClick: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel()
 ) {
     val configs by viewModel.configs.collectAsState(initial = emptyList())
@@ -332,6 +334,68 @@ fun SettingsScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "进入设置",
+                        tint = textSecondaryColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ====== Yandere Mode Section ======
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(tween(400, delayMillis = 225)) +
+                        slideInVertically(tween(400, delayMillis = 225)) { it / 4 }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onYandereModeClick() }
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(PetalPrimaryContainer.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = null,
+                                tint = PetalPrimaryContainer,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = stringResource(R.string.yandere_mode),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textPrimaryColor
+                            )
+                            Text(
+                                text = stringResource(R.string.yandere_mode_desc),
+                                fontSize = 12.sp,
+                                color = textSecondaryColor
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.yandere_mode),
                         tint = textSecondaryColor,
                         modifier = Modifier.size(20.dp)
                     )

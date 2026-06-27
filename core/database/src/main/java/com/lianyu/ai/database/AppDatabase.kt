@@ -873,4 +873,5 @@ class Converters {
         if (value.isNullOrBlank()) return MemoryCategory.FACT
         return runCatching { MemoryCategory.valueOf(value.trim().uppercase()) }.getOrDefault(MemoryCategory.FACT)
     }
+
 }

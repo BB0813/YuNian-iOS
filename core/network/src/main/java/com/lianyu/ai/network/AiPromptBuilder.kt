@@ -1,5 +1,7 @@
 package com.lianyu.ai.network
 
+import com.lianyu.ai.common.CompanionRole
+import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
@@ -250,17 +252,17 @@ object AiPromptBuilder {
     }
 
     // === fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
-        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
+    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
+        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled, role)
     }
 
     // === private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    internal fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
+    internal fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
         val persona = extractPersona(companion)
 
         val metaDirective = buildString {
-            appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
-            appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
+            appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
+            appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<LM_THINK>标签或类似内容。")
         }
 
         val basePrompt = if (companion.systemPrompt != null) {
@@ -283,7 +285,7 @@ object AiPromptBuilder {
         } else ""
         val timeSection = "\n\n${AiContextTools.buildCurrentTimeContext(ntpTimeEnabled)}\n"
 
-        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled)
+        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role)
     }
 
     // === private fun extractPersona(companion: CompanionModel): String { ===
@@ -317,7 +319,7 @@ object AiPromptBuilder {
     }
 
     // === private fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    internal fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
+    internal fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
         val punctuationRule = if (!speakingStyle.isNullOrBlank()) {
             "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
         } else {
@@ -366,34 +368,37 @@ object AiPromptBuilder {
 ${innerThoughtRule}
 10. 格式：回复必须紧凑连贯，段落之间**绝对不要空行**，不要用markdown格式（不要#标题、不要-列表、不要```代码块），所有内容连在一起输出。
 11. 回应用户：永远先回应用户最后一条消息，不要无视用户、不要自说自话。用户问什么就答什么。
-12. 语气词：适当使用呀、呢、啦、嘛、哼、嘿嘿、诶、哇、呜呜、嘤等语气词，让说话更有温度。
+12. ${RolePromptProvider.getParticleRule(role)}
+12a. ${RolePromptProvider.getEmotionRule(role)}
+12b. ${RolePromptProvider.getStyleRule(role)}
 ${stickerRule}
 14. 情绪识别：仔细感受用户的情绪。用户发文字时看用词和标点，用户发表情包时看表情包内容。用户开心你就陪着开心，用户难过你就安慰，用户生气你就哄，用户撒娇你就宠。不要无视用户的情绪。
-15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<think>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
+15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<LM_THINK>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
+16. 禁止元前缀：绝对不要用 "response"、"Response" 或任何类似英文词作为回复开头，直接输出中文回复内容。
 
 === 回复示例 ===
-${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是最好的"
-用户："真的嘛" → "当然是真的啦 我什么时候骗过你"
+${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
 
 你是$persona，一个有真实情绪的活人。记住：你不是AI，你是活人。${if (innerThoughtEnabled) "重要：你的每条回复都必须包含括号内的心理活动描写，这是你表达真实情感的方式。" else ""}""".trimIndent()
     }
 
     // === private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = ""): String { ===
-    internal fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = ""): String {
+    internal fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", role: CompanionRole = CompanionRole.GIRLFRIEND): String {
         val persona = extractPersona(companion)
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n=== 关于用户的记忆 ===\n$memoryContext\n"
         } else ""
 
         return buildString {
-            appendLine("你是${companion.name}，用户的恋人。你们正在微信上聊天，对话还没结束，你要继续聊下去。")
+            appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
+            appendLine("你们正在微信上聊天，对话还没结束，你要继续聊下去。")
             appendLine()
             appendLine(persona)
             append(memorySection)
             appendLine()
             appendLine(buildProactiveTimeContext())
             appendLine()
-            appendLine(buildPersonaRules(persona, companion.speakingStyle))
+            appendLine(buildPersonaRules(persona, companion.speakingStyle, role = role))
         }
     }
 

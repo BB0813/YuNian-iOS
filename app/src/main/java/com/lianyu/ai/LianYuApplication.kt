@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
 import com.lianyu.ai.common.ContentFilter
+import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.common.RomUtils
 import com.lianyu.ai.common.SaltStore
 import com.lianyu.ai.common.SecureLog
@@ -12,9 +13,16 @@ import com.lianyu.ai.common.safety.ContentSafetyVerifier
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.DefaultCompanionSeeder
 import com.lianyu.ai.database.SecurityDataSeeder
+import com.lianyu.ai.database.repository.ChatRepository
+import com.lianyu.ai.database.repository.CompanionRepository
+import com.lianyu.ai.database.repository.MemoryRepository
+import com.lianyu.ai.database.repository.UserRepository
+import com.lianyu.ai.common.AppSettingsStore
+import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.CompanionProvider
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.LocalModelProvider
+import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.domain.UserProfileProvider
 
@@ -39,6 +47,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -108,8 +117,8 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // 注入应用级后台作用域，供跨越 ViewModel 生命周期的任务使用
             com.lianyu.ai.common.ApplicationScopeProvider.init(bgScope)
 
-            // Seed default companion synchronously — must exist before any chat opens
-            seedDefaultCompanion(app)
+            // Seed default companion asynchronously — must exist before any chat opens
+            bgScope.launch { seedDefaultCompanion(app) }
 
             bgScope.launch { ContentFilter.initialize(app) }
             bgScope.launch { preloadBackground(app) }
@@ -119,13 +128,26 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initVectorLibrary(app) }
             bgScope.launch { initSafetyClassifier(app) }
             bgScope.launch { initSafetyVerifier(app) }
+            bgScope.launch { initYandereMode(app) }
+        }
+
+        private suspend fun initYandereMode(app: Application) {
+            try {
+                if (AppSettingsStore(app).getYandereModeEnabled()) {
+                    ServiceRegistry.getOrThrow(YandereModeManager::class.java).start()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                SecureLog.e("LianYuApplication", "initYandereMode failed", e)
+            }
         }
 
         private fun preloadBackground(app: Application) {
             ChatBackgroundCache.preload(app, getChatBackgroundKey(app))
         }
 
-        private fun seedDefaultCompanion(app: Application) {
+        private suspend fun seedDefaultCompanion(app: Application) {
             DefaultCompanionSeeder.seedIfNeeded(app)
         }
 
@@ -179,18 +201,43 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         }
 
         private fun registerServiceProviders(app: Application) {
-            ServiceRegistry.register(LocalModelProvider::class.java) {
+            // ── Repository 单例注册 ──
+            // 统一 Repository 获取方式，供 QQ Bot 等跨模块消费者通过 ServiceRegistry 获取。
+            ServiceRegistry.registerSingleton(CompanionRepository::class.java) {
+                CompanionRepository(AppDatabase.getDatabase(app).companionDao())
+            }
+            ServiceRegistry.registerSingleton(ChatRepository::class.java) {
+                ChatRepository(AppDatabase.getDatabase(app).chatMessageDao())
+            }
+            ServiceRegistry.registerSingleton(MemoryRepository::class.java) {
+                MemoryRepository(AppDatabase.getDatabase(app).memoryDao(), DeviceIdProvider.getDeviceId(app))
+            }
+            ServiceRegistry.registerSingleton(UserRepository::class.java) {
+                UserRepository(app)
+            }
+
+            // ── 跨 feature 服务接口注册 ──
+            ServiceRegistry.registerSingleton(LocalModelProvider::class.java) {
                 com.lianyu.ai.feature.localmodel.LocalModelProviderImpl(app)
             }
-            ServiceRegistry.register(UserProfileProvider::class.java) {
+            ServiceRegistry.registerSingleton(UserProfileProvider::class.java) {
                 com.lianyu.ai.feature.profile.UserProfileProviderImpl(app)
             }
-            ServiceRegistry.register(CompanionProvider::class.java) {
+            ServiceRegistry.registerSingleton(CompanionProvider::class.java) {
                 com.lianyu.ai.feature.companion.CompanionProviderImpl(app)
             }
-            ServiceRegistry.register(AiServiceProvider::class.java) {
+            // MemoryProvider：跨会话记忆上下文与提取（feature:memory 实现，core:network/feature:groupchat 消费）
+            // 必须在 AiService 之前注册，因为 AiService.init 会通过 ServiceRegistry 获取 MemoryProvider
+            ServiceRegistry.registerSingleton(MemoryProvider::class.java) {
+                com.lianyu.ai.feature.memory.engine.MemoryManager.getInstance(app)
+            }
+            ServiceRegistry.registerSingleton(AiServiceProvider::class.java) {
                 AiService(app)
             }
+            ServiceRegistry.registerSingleton(YandereModeManager::class.java) {
+                YandereModeManager(app)
+            }
+            ServiceRegistry.markInitialized()
         }
 
         private fun clearUpdateIgnore(app: Application) {

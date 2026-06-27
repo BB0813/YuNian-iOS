@@ -162,6 +162,18 @@ open class CompanionKeepAliveService : Service() {
             }
         }
 
+        /**
+         * 安全启动前台保活服务：捕获启动失败（如后台限制），不抛异常。
+         * 供 JobScheduler 兜底保活调用。
+         */
+        fun safeStart(context: Context) {
+            try {
+                start(context)
+            } catch (e: Exception) {
+                // OriginOS/IQOO 等可能限制后台启动服务，忽略错误
+            }
+        }
+
         fun stop(context: Context) {
             val intent = Intent().setClassName(context.packageName, SHELL_SERVICE_CLASS)
             context.stopService(intent)

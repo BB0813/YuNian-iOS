@@ -30,15 +30,15 @@ object DefaultCompanionSeeder {
     /**
      * 检查默认伴侣是否被用户删除，若未删除则确保存在。
      * 封装 SharedPreferences 检查和 DAO 操作，供 app 模块调用。
+     *
+     * 注意：必须在后台协程中调用，禁止在主线程同步执行数据库 IO。
      */
-    fun seedIfNeeded(context: Context) {
+    suspend fun seedIfNeeded(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (prefs.getBoolean(KEY_DELETED_BY_USER, false)) return
         runCatching {
-            kotlinx.coroutines.runBlocking {
-                val db = AppDatabase.getDatabase(context.applicationContext)
-                ensureDefaultTestCompanion(db.companionDao())
-            }
+            val db = AppDatabase.getDatabase(context.applicationContext)
+            ensureDefaultTestCompanion(db.companionDao())
         }
     }
 

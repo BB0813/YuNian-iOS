@@ -46,6 +46,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.lianyu.ai.common.AppForegroundTracker
 import com.lianyu.ai.common.BatteryOptimizationHelper
+import com.lianyu.ai.common.YandereModeManager
+import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.chat.ui.screen.ChatDetailScreen
 import com.lianyu.ai.feature.chat.ui.screen.ChatScreen
 import com.lianyu.ai.feature.chat.ui.screen.VoiceCallScreen
@@ -62,6 +64,7 @@ import com.lianyu.ai.feature.wechat.ui.WeChatBindScreen
 import com.lianyu.ai.feature.wechat.ui.WeChatSettingsScreen
 import com.lianyu.ai.feature.qqbot.ui.QQBotSettingsScreen
 import com.lianyu.ai.feature.backup.BackupScreen
+import com.lianyu.ai.feature.coffee.ui.CoffeeScreen
 import com.lianyu.ai.uicommon.component.UpdateDialog
 import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
@@ -267,9 +270,12 @@ fun MainScreen(mainActivity: Activity) {
                                     onThemeClick = { navController.navigate(MainRoute.Theme.route) },
                                     // 总设置
                                     onGeneralSettingsClick = { navController.navigate(MainRoute.GeneralSettings.route) },
+                                    // 角色管理
+                                    onRoleManagerClick = { navController.navigate(MainRoute.RoleManager.route) },
                                     // 关于与支持
                                     onTeamClick = { navController.navigate(MainRoute.Team.route) },
                                     onSupportClick = { navController.navigate(MainRoute.Support.route) },
+                                    onThanksClick = { navController.navigate(MainRoute.Thanks.route) },
                                     onAboutClick = { navController.navigate(MainRoute.About.route) }
                                 )
                             }
@@ -310,19 +316,55 @@ fun MainScreen(mainActivity: Activity) {
                 composable(MainRoute.CreateGroup.route) { CreateGroupScreen(onNavigateBack = { navController.popBackStack() }) }
 
                 // === 设置 ===
-                composable(MainRoute.Settings.route) { SettingsScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.Settings.route) { SettingsScreen(onNavigateBack = { navController.popBackStack() }, onYandereModeClick = { navController.navigate(MainRoute.YandereMode.route) }) }
                 composable(MainRoute.TtsSettings.route) { TtsSettingsScreen(onNavigateBack = { navController.popBackStack() }, isDarkTheme = isDark) }
                 composable(MainRoute.TokenUsage.route) { TokenUsageScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.Memory.route) { MemoryScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.RoleManager.route) {
+                    val roleManagerViewModel: com.lianyu.ai.feature.profile.ProfileViewModel = viewModel()
+                    val managerCurrentRole by roleManagerViewModel.selectedRole.collectAsStateWithLifecycle()
+                    val managerSwitchState by roleManagerViewModel.switchState.collectAsStateWithLifecycle()
+                    com.lianyu.ai.feature.profile.RoleManagerScreen(
+                        currentRole = managerCurrentRole,
+                        switchState = managerSwitchState,
+                        onSwitchRole = { role -> roleManagerViewModel.switchRole(role) { navController.popBackStack() } },
+                        onNavigateBack = { navController.popBackStack() },
+                        onConsumeError = { roleManagerViewModel.consumeSwitchError() }
+                    )
+                }
                 composable(MainRoute.Theme.route) { ThemeScreen(onNavigateBack = { navController.popBackStack() }, activity = mainActivity) }
                 composable(MainRoute.Language.route) { LanguageScreen(onNavigateBack = { navController.popBackStack() }, activity = mainActivity) }
                 composable(MainRoute.CheckUpdate.route) { CheckUpdateScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.About.route) { AboutScreen(onNavigateBack = { navController.popBackStack() }, onAgreementClick = { navController.navigate(MainRoute.AgreementView.route) }) }
                 composable(MainRoute.AgreementView.route) { AgreementViewScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.FrameRate.route) { FrameRateScreen(onNavigateBack = { navController.popBackStack() }, activity = mainActivity) }
+                composable(MainRoute.YandereMode.route) {
+                    val manager = ServiceRegistry.get(YandereModeManager::class.java)
+                    if (manager != null) {
+                        YandereModeScreen(onNavigateBack = { navController.popBackStack() }, yandereModeManager = manager)
+                    }
+                }
                 composable(MainRoute.Team.route) { TeamScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.Support.route) { SupportScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.Thanks.route) {
+                    ThanksScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onViewFullList = { navController.navigate(MainRoute.ThanksFullList.route) }
+                    )
+                }
+                composable(MainRoute.ThanksFullList.route) {
+                    ThanksFullListScreen(onNavigateBack = { navController.popBackStack() })
+                }
                 composable(MainRoute.ContextMemory.route) { ContextMemoryScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.OriginOSAdaption.route) {
+                    OriginOSAdaptionScreen(onNavigateBack = { navController.popBackStack() })
+                }
+                composable(MainRoute.ExperimentalFeatures.route) {
+                    ExperimentalFeaturesScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                        onYandereModeClick = { navController.navigate(MainRoute.YandereMode.route) }
+                    )
+                }
                 composable(MainRoute.GeneralSettings.route) {
                     GeneralSettingsScreen(
                         onNavigateBack = { navController.popBackStack() },
@@ -333,7 +375,10 @@ fun MainScreen(mainActivity: Activity) {
                         onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) },
                         onWeChatClick = { navController.navigate(MainRoute.WeChatSettings.route) },
                         onQQBotClick = { navController.navigate(MainRoute.QQBotSettings.route) },
-                        onDataBackupClick = { navController.navigate(MainRoute.DataBackup.route) }
+                        onDataBackupClick = { navController.navigate(MainRoute.DataBackup.route) },
+                        onOriginOSAdaptionClick = { navController.navigate(MainRoute.OriginOSAdaption.route) },
+                        onCoffeeClick = { navController.navigate(MainRoute.Coffee.route) },
+                        onExperimentalFeaturesClick = { navController.navigate(MainRoute.ExperimentalFeatures.route) }
                     )
                 }
                 composable(MainRoute.WeChatSettings.route) {
@@ -342,6 +387,7 @@ fun MainScreen(mainActivity: Activity) {
                 composable(MainRoute.WeChatBind.route) { WeChatBindScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.QQBotSettings.route) { QQBotSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.DataBackup.route) { BackupScreen(onNavigateBack = { navController.popBackStack() }) }
+                composable(MainRoute.Coffee.route) { CoffeeScreen(onBack = { navController.popBackStack() }) }
             }
 
             // 更新弹窗

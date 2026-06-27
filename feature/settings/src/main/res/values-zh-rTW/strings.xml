@@ -8,6 +8,12 @@
     <string name="language_korean">韓文</string>
     <string name="cd_back">返回</string>
     <string name="cd_selected">已選中</string>
+    <string name="back">返回</string>
+
+    <!-- Experimental Features -->
+    <string name="experimental_features">實驗性功能</string>
+    <string name="experimental_features_desc">探索尚未正式發布的測試功能</string>
+    <string name="experimental_features_hint">以下功能處於實驗階段，可能不穩定，請謹慎開啟。</string>
 
     <string name="theme_title">主題模式</string>
     <string name="theme_light">淺色模式</string>

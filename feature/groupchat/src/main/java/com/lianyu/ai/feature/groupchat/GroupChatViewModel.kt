@@ -24,6 +24,7 @@ import com.lianyu.ai.feature.groupchat.mention.MentionMessageSnapshot
 import com.lianyu.ai.feature.groupchat.mention.MentionNormalizer
 import com.lianyu.ai.feature.groupchat.mention.MentionParser
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.database.repository.UserRepository
 import kotlinx.coroutines.CancellationException
@@ -68,6 +69,11 @@ class GroupChatViewModel(
     private val aiServiceProvider: AiServiceProvider by lazy {
         ServiceRegistry.get(AiServiceProvider::class.java)
             ?: throw IllegalStateException("AiServiceProvider not registered")
+    }
+
+    // 记忆提供者：跨会话记忆上下文与提取（通过 ServiceRegistry 解耦）
+    private val memoryProvider: MemoryProvider by lazy {
+        ServiceRegistry.getOrThrow(MemoryProvider::class.java).also { it.initialize() }
     }
 
     // 类型转换辅助方法
@@ -381,6 +387,18 @@ class GroupChatViewModel(
             enhancedContent
         }
         sendSplitAiMessages(safeContent, groupId, companion.id)
+
+        // AI 回复成功后提取记忆（跨会话共享）
+        val lastUserMsg = baseHistorySnapshot.lastOrNull { it.companionId == -1L }?.content ?: ""
+        if (lastUserMsg.isNotBlank() && safeContent.isNotBlank()) {
+            memoryProvider.extractAndSaveFromConversation(
+                userInput = lastUserMsg,
+                aiResponse = safeContent,
+                companionId = companion.id,
+                groupId = groupId
+            )
+        }
+
         Log.d("GroupChatM", "[${companion.name}] 第${round}轮回复完成 (${aiContent.length}字)")
     }
 

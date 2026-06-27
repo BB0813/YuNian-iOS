@@ -8,6 +8,12 @@
     <string name="language_korean">Korean</string>
     <string name="cd_back">Back</string>
     <string name="cd_selected">Selected</string>
+    <string name="back">Back</string>
+
+    <!-- Experimental Features -->
+    <string name="experimental_features">Experimental Features</string>
+    <string name="experimental_features_desc">Explore beta features not yet officially released</string>
+    <string name="experimental_features_hint">The following features are experimental and may be unstable. Enable with caution.</string>
 
     <string name="theme_title">Theme</string>
     <string name="theme_light">Light</string>

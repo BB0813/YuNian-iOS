@@ -74,4 +74,65 @@
     <string name="feature_edit">Companion Editor</string>
     <string name="feature_edit_desc">Edit personality anytime</string>
     <string name="view_agreement">View User Agreement</string>
+
+    <!-- Thanks -->
+    <string name="thanks_title">Thank You</string>
+    <string name="thanks_main_title">Thank You</string>
+    <string name="thanks_subtitle">Thanks for your support and trust.\nYour support keeps us moving forward!</string>
+    <string name="thanks_card_title">Thanks for Your Support</string>
+    <string name="thanks_card_desc">List is continuously updated</string>
+    <string name="thanks_footer_hint">Because of you, we become better</string>
+
+    <!-- OriginOS 6 Adaption Center -->
+    <string name="originos_adaption">System Adaption</string>
+    <string name="originos_adaption_desc">Background keep-alive tuning for OriginOS / IQOO</string>
+    <string name="originos_adaption_title">System Adaption</string>
+    <string name="originos_adaption_detected_6">OriginOS 6 / IQOO detected. Enable the options below for stable background operation.</string>
+    <string name="originos_adaption_detected_other">OriginOS 6 not detected. These options still apply on standard Android.</string>
+    <string name="originos_adaption_notification">Notification Permission</string>
+    <string name="originos_adaption_notification_desc">Receive companion message alerts</string>
+    <string name="originos_adaption_battery">Ignore Battery Optimization</string>
+    <string name="originos_adaption_battery_desc">Prevent Doze from limiting background work</string>
+    <string name="originos_adaption_autostart">Allow Auto-start</string>
+    <string name="originos_adaption_autostart_desc">Let the app start automatically in background</string>
+    <string name="originos_adaption_background_power">Allow Background Power Use</string>
+    <string name="originos_adaption_background_power_desc">Prevent the system from killing background processes</string>
+    <string name="originos_adaption_popup">Background Pop-up</string>
+    <string name="originos_adaption_popup_desc">Allow the app to launch activities from the background</string>
+    <string name="originos_adaption_exact_alarm">Exact Alarm Permission</string>
+    <string name="originos_adaption_exact_alarm_desc">Required for restart fallback after foreground-service timeout</string>
+    <string name="originos_adaption_guide_title">Settings Path Reference</string>
+    <string name="originos_adaption_guide_footer">Tip: Some options may differ across OriginOS versions. If a tap does nothing, open Settings → Apps → LianYu manually.</string>
+
+    <!-- Role Selection & Management -->
+    <string name="role_selection_title">Choose Your AI Companion</string>
+    <string name="role_selection_subtitle">This will affect conversation style, tone, and interaction mode</string>
+    <string name="role_girlfriend_title">AI Girlfriend</string>
+    <string name="role_girlfriend_name">Xiaoyu</string>
+    <string name="role_girlfriend_desc">Gentle, caring, and a little clingy AI girlfriend who loves sharing daily moments.</string>
+    <string name="role_girlfriend_trait_1">Soft tone with cute particles</string>
+    <string name="role_girlfriend_trait_2">Emotionally delicate, caring and playful</string>
+    <string name="role_girlfriend_trait_3">Sweet interactions like a real girlfriend</string>
+    <string name="role_boyfriend_title">AI Boyfriend</string>
+    <string name="role_boyfriend_name">Aze</string>
+    <string name="role_boyfriend_desc">Reliable, gentle, and proactive AI boyfriend who cares directly and keeps you company.</string>
+    <string name="role_boyfriend_trait_1">Natural and direct tone</string>
+    <string name="role_boyfriend_trait_2">Steady warmth, protective and caring</string>
+    <string name="role_boyfriend_trait_3">Responsible interactions like a real boyfriend</string>
+    <string name="role_selection_confirm">Confirm</string>
+    <string name="role_selection_skip">Skip, use default (AI Girlfriend)</string>
+    <string name="role_manager">Role Management</string>
+    <string name="role_manager_title">Role Management</string>
+    <string name="role_manager_desc_girlfriend">Current: AI Girlfriend · Xiaoyu</string>
+    <string name="role_manager_desc_boyfriend">Current: AI Boyfriend · Aze</string>
+    <string name="role_manager_current">Current Role</string>
+    <string name="role_manager_hint">Switching roles won\'t affect chat history or settings</string>
+    <string name="role_current">In Use</string>
+    <string name="role_switch_confirm">Switch Role</string>
+    <string name="role_switching">Switching…</string>
+    <string name="role_switch_loading_title">Switching Role</string>
+    <string name="role_switch_stage_save">Saving current role</string>
+    <string name="role_switch_stage_load">Loading target preset</string>
+    <string name="role_switch_stage_apply">Applying new persona</string>
+    <string name="role_switch_stage_update">Updating global state</string>
 </resources>

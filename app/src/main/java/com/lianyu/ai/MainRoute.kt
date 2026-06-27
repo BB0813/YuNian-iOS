@@ -34,9 +34,14 @@ sealed class MainRoute(val route: String) {
     object Language : MainRoute("language")
     object CheckUpdate : MainRoute("check_update")
     object FrameRate : MainRoute("frame_rate")
+    object YandereMode : MainRoute("yandere_mode")
+    object ExperimentalFeatures : MainRoute("experimental_features")
 
     // === 总设置 ===
     object GeneralSettings : MainRoute("general_settings")
+
+    // === 角色管理 ===
+    object RoleManager : MainRoute("role_manager")
 
     // === 个人中心 ===
     object Memory : MainRoute("memory")
@@ -45,6 +50,9 @@ sealed class MainRoute(val route: String) {
     object AgreementView : MainRoute("agreement_view")
     object Team : MainRoute("team")
     object Support : MainRoute("support")
+    object Thanks : MainRoute("thanks")
+    object ThanksFullList : MainRoute("thanks_full_list")
+    object OriginOSAdaption : MainRoute("originos_adaption")
 
     // === 微信 ===
     object WeChatSettings : MainRoute("wechat_settings")
@@ -55,6 +63,9 @@ sealed class MainRoute(val route: String) {
 
     // === 数据备份 ===
     object DataBackup : MainRoute("data_backup")
+
+    // === 瑞幸咖啡 ===
+    object Coffee : MainRoute("coffee")
 
     companion object {
         /** 从路由字符串解析（用于 NavHost currentRoute） */
@@ -70,19 +81,26 @@ sealed class MainRoute(val route: String) {
             route == "token_usage" -> TokenUsage
             route == "memory" -> Memory
             route == "context_memory" -> ContextMemory
+            route == "role_manager" -> RoleManager
             route == "theme" -> Theme
             route == "language" -> Language
             route == "check_update" -> CheckUpdate
             route == "about" -> About
             route == "agreement_view" -> AgreementView
             route == "frame_rate" -> FrameRate
+            route == "yandere_mode" -> YandereMode
+            route == "experimental_features" -> ExperimentalFeatures
             route == "general_settings" -> GeneralSettings
             route == "team" -> Team
             route == "support" -> Support
+            route == "thanks" -> Thanks
+            route == "thanks_full_list" -> ThanksFullList
+            route == "originos_adaption" -> OriginOSAdaption
             route == "wechat_settings" -> WeChatSettings
             route == "wechat_bind" -> WeChatBind
             route == "qqbot_settings" -> QQBotSettings
             route == "data_backup" -> DataBackup
+            route == "coffee" -> Coffee
             route?.startsWith("chat/") == true -> Chat(route.removePrefix("chat/").toLongOrNull() ?: 0L)
             route?.startsWith("chat_detail/") == true -> ChatDetail(route.removePrefix("chat_detail/").toLongOrNull() ?: 0L)
             route?.startsWith("voice_call/") == true -> VoiceCall(route.removePrefix("voice_call/").toLongOrNull() ?: 0L)

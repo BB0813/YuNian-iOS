@@ -65,6 +65,15 @@ class AppSettingsStore(context: Context) {
 
         private val COMPRESSION_MIN_KEEP_KEY = intPreferencesKey("compression_min_keep")
         private const val DEFAULT_COMPRESSION_MIN_KEEP = 6
+
+        private val YANDERE_MODE_ENABLED_KEY = booleanPreferencesKey("yandere_mode_enabled")
+        private const val DEFAULT_YANDERE_MODE_ENABLED = false
+
+        private val YANDERE_MODE_USAGE_STATS_KEY = booleanPreferencesKey("yandere_mode_usage_stats")
+        private const val DEFAULT_YANDERE_MODE_USAGE_STATS = true
+
+        private val YANDERE_MODE_INSTALLED_APPS_KEY = booleanPreferencesKey("yandere_mode_installed_apps")
+        private const val DEFAULT_YANDERE_MODE_INSTALLED_APPS = true
     }
 
     object CompressionMode {
@@ -261,5 +270,35 @@ class AppSettingsStore(context: Context) {
 
     suspend fun setCompressionMinKeep(count: Int) {
         dataStore.edit { prefs -> prefs[COMPRESSION_MIN_KEEP_KEY] = count.coerceIn(2, 20) }
+    }
+
+    val yandereModeEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[YANDERE_MODE_ENABLED_KEY] ?: DEFAULT_YANDERE_MODE_ENABLED
+    }
+
+    suspend fun getYandereModeEnabled(): Boolean = yandereModeEnabledFlow.first()
+
+    suspend fun setYandereModeEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[YANDERE_MODE_ENABLED_KEY] = enabled }
+    }
+
+    val yandereModeUsageStatsFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[YANDERE_MODE_USAGE_STATS_KEY] ?: DEFAULT_YANDERE_MODE_USAGE_STATS
+    }
+
+    suspend fun getYandereModeUsageStats(): Boolean = yandereModeUsageStatsFlow.first()
+
+    suspend fun setYandereModeUsageStats(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[YANDERE_MODE_USAGE_STATS_KEY] = enabled }
+    }
+
+    val yandereModeInstalledAppsFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[YANDERE_MODE_INSTALLED_APPS_KEY] ?: DEFAULT_YANDERE_MODE_INSTALLED_APPS
+    }
+
+    suspend fun getYandereModeInstalledApps(): Boolean = yandereModeInstalledAppsFlow.first()
+
+    suspend fun setYandereModeInstalledApps(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[YANDERE_MODE_INSTALLED_APPS_KEY] = enabled }
     }
 }

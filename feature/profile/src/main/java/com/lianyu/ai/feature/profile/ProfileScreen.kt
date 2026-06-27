@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -87,9 +88,12 @@ fun ProfileScreen(
     onThemeClick: () -> Unit,
     // 总设置
     onGeneralSettingsClick: () -> Unit,
+    // 角色管理
+    onRoleManagerClick: () -> Unit,
     // 关于与支持
     onTeamClick: () -> Unit = {},
     onSupportClick: () -> Unit = {},
+    onThanksClick: () -> Unit = {},
     onAboutClick: () -> Unit,
     viewModel: ProfileViewModel = viewModel()
 ) {
@@ -98,6 +102,7 @@ fun ProfileScreen(
 
     val userName by viewModel.userName.collectAsState()
     val userAvatar by viewModel.userAvatar.collectAsState()
+    val selectedRole by viewModel.selectedRole.collectAsState()
     var isEditingName by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(userName) }
     var isVisible by remember { mutableStateOf(false) }
@@ -216,7 +221,21 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // === 第一组：记忆与管理 ===
+        // === 第一组：角色管理 ===
+        val roleSubtitle = when (selectedRole) {
+            com.lianyu.ai.common.CompanionRole.GIRLFRIEND -> stringResource(R.string.role_manager_desc_girlfriend)
+            com.lianyu.ai.common.CompanionRole.BOYFRIEND -> stringResource(R.string.role_manager_desc_boyfriend)
+        }
+        SolidMenuGroup(
+            items = listOf(
+                MenuItemData(Icons.Filled.Favorite, stringResource(R.string.role_manager), roleSubtitle, onRoleManagerClick)
+            ),
+            isVisible = isVisible, delayMillis = 60
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // === 第二组：记忆与管理 ===
         SolidMenuGroup(
             items = listOf(
                 MenuItemData(Icons.Filled.Memory, stringResource(R.string.memory_management), stringResource(R.string.memory_management_desc), onMemoryClick),
@@ -227,7 +246,7 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // === 第二组：AI配置 ===
+        // === 第三组：AI配置 ===
         SolidMenuGroup(
             items = listOf(
                 MenuItemData(Icons.Filled.Settings, stringResource(R.string.api_settings), stringResource(R.string.api_settings_desc), onSettingsClick)
@@ -237,7 +256,7 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // === 第三组：外观 ===
+        // === 第四组：外观 ===
         SolidMenuGroup(
             items = listOf(
                 MenuItemData(Icons.Filled.Brush, stringResource(R.string.theme_mode), stringResource(R.string.theme_mode_desc), onThemeClick),
@@ -250,7 +269,7 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // === 第四组：总设置入口 ===
+        // === 第五组：总设置入口 ===
         SolidMenuGroup(
             items = listOf(
                 MenuItemData(Icons.Filled.Settings, stringResource(R.string.general_settings), stringResource(R.string.general_settings_desc), onGeneralSettingsClick)
@@ -260,11 +279,12 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // === 第五组：关于与支持 ===
+        // === 第六组：关于与支持 ===
         SolidMenuGroup(
             items = listOf(
                 MenuItemData(Icons.Filled.Groups, stringResource(R.string.dev_team), stringResource(R.string.dev_team_desc), onTeamClick),
                 MenuItemData(Icons.Filled.Favorite, stringResource(R.string.support_us), stringResource(R.string.support_us_desc), onSupportClick),
+                MenuItemData(Icons.Filled.ThumbUp, stringResource(R.string.thanks_title), stringResource(R.string.thanks_card_desc), onThanksClick),
                 MenuItemData(Icons.Filled.Info, stringResource(R.string.about_app), stringResource(R.string.about_app_desc), onAboutClick)
             ),
             isVisible = isVisible, delayMillis = 320

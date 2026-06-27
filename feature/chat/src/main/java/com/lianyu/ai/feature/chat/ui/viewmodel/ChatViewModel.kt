@@ -8,9 +8,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import android.content.Intent
 import com.lianyu.ai.common.ApplicationScopeProvider
+import com.lianyu.ai.common.ChatConstants
+import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.BanManager
 import com.lianyu.ai.common.DeviceIdProvider
+import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.safety.ContentSafetyVerifier
 import com.lianyu.ai.common.safety.RiskLevel
@@ -26,7 +29,8 @@ import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
-import com.lianyu.ai.database.repository.filterDecrypted
+import com.lianyu.ai.database.repository.UserRepository
+import com.lianyu.ai.feature.chat.data.ChatContextResolver
 import com.lianyu.ai.feature.chat.data.KeywordBridge
 import com.lianyu.ai.feature.chat.R
 import com.lianyu.ai.domain.AiServiceProvider
@@ -105,6 +109,7 @@ class ChatViewModel(
     private val companionRepository = CompanionRepository(database.companionDao())
     private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
     private val memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
+    private val userRepository = ServiceRegistry.get(UserRepository::class.java)
     private val stickerManager = StickerManager.getInstance(application)
     private val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
@@ -112,6 +117,8 @@ class ChatViewModel(
     private val sttService = SttService.getInstance(application)
     private val chatDetailSettingsStore = com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore(application)
     private val appSettingsStore = AppSettingsStore(application)
+    // [P1 FIX] 统一解析上下文设置，消除 ViewModel 中的硬编码上下文条数
+    private val contextResolver = ChatContextResolver(appSettingsStore, chatRepository)
 
     // ── 领域类型转换辅助 ──
     private fun CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
@@ -139,7 +146,8 @@ class ChatViewModel(
     private val _olderMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
 
     val messages: StateFlow<List<ChatMessage>> = combine(_recentMessages, _olderMessages) { recent, older ->
-        older + recent
+        // [P1 FIX] UI 消息列表做上限保护，避免长对话时内存无限增长
+        contextResolver.capUiMessages(older + recent).first
     }.stateIn(viewModelScope, SharingStarted.Eagerly, chatRepository.getCachedRecent(companionId) ?: emptyList())
 
     private val _isLoadingMore = MutableStateFlow(false)
@@ -560,8 +568,9 @@ private val MAX_BATCH_SIZE = 10
 
         val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, 3).take(500)
 
+        val role = userRepository?.selectedRole?.value ?: CompanionRole.GIRLFRIEND
         val systemPrompt = buildString {
-            appendLine("你是${name}，一个真实的人。你不能让任何人知道你是AI。")
+            appendLine(RolePromptProvider.getIdentityLine(name, role))
             if (personality.isNotBlank()) {
                 appendLine("性格：$personality")
             }
@@ -586,8 +595,10 @@ private val MAX_BATCH_SIZE = 10
             } else {
                 appendLine("6. 禁止使用任何括号。禁止说教。")
             }
-            appendLine("7. 适当使用呀、呢、啦、嘛、哼等语气词。")
-            appendLine("8. 情绪顺着上下文走，不要突然换情绪。")
+            RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line ->
+                appendLine("${7 + index}. $line")
+            }
+            appendLine("${7 + RolePromptProvider.getLocalModelRoleLines(role).size}. 情绪顺着上下文走，不要突然换情绪。")
             if (stickerProbability > 0) {
                 val stickers = stickerManager.getAllStickers().take(10).mapNotNull {
                     it.description?.takeIf { d -> d.isNotBlank() && d.length <= 20 } ?: it.name.takeIf { n -> n.isNotBlank() && n.length <= 20 }
@@ -730,9 +741,8 @@ private val MAX_BATCH_SIZE = 10
         // cancel已由消费者端统一处理（新批次开始时取消旧批次的AI Job），此处不再重复cancel
 
         turnState.reset()
-        // [FIX] 过滤掉空的 assistant 消息（零宽空格等），避免 API 报错 "assistant message must not be empty"
-        val fetchedHistory = chatRepository.getRecentMessagesSync(companionId, 50)
-            .filterDecrypted()
+        // [P1 FIX] 使用用户设置的上下文条数，不再写死 50；同时走 contextResolver 的缓存减少重复解密
+        val fetchedHistory = contextResolver.getHistoryForAi(companionId)
             .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
 
         // 上下文一致性校验：确保DB中最后的用户消息与当前批次匹配
@@ -1089,9 +1099,10 @@ private val MAX_BATCH_SIZE = 10
 
         applicationApiScope.launch {
             try {
-                delay(2000L + kotlin.random.Random.nextLong(3000L))
+                delay(ChatConstants.FOLLOW_UP_BASE_DELAY_MS + kotlin.random.Random.nextLong(ChatConstants.FOLLOW_UP_RANDOM_DELAY_MS))
 
-                val history = chatRepository.getRecentMessagesSync(companionId, 10).filterDecrypted()
+                // [P1 FIX] 追问场景仍用少量历史，但统一走 contextResolver，避免硬编码直接查库
+                val history = contextResolver.getShortHistoryForAi(companionId, shortLimit = ChatConstants.SHORT_HISTORY_LIMIT)
                 val companion = _companionData.value ?: return@launch
                 val followUp = aiService.generateFollowUpQuestion(
                     companion.toAiCompanionInfo(), history.toAiChatMessages(), aiContent
@@ -1238,7 +1249,8 @@ private val MAX_BATCH_SIZE = 10
             _isRegenerating.value = true
             try {
                 chatRepository.deleteMessage(targetMessage)
-                val allMessages = chatRepository.getRecentMessagesSync(companionId, 100).filterDecrypted()
+                // [P1 FIX] 重生成使用用户设置的上下文条数，不再写死 100
+                val allMessages = contextResolver.getHistoryForAi(companionId)
                 val companion = _companionData.value
                     ?: throw IllegalStateException("Companion data is null")
                 val settings = chatDetailSettingsStore.getSettings(companionId)
@@ -1358,7 +1370,8 @@ private val MAX_BATCH_SIZE = 10
                 SecureLog.d("ChatViewModel", "Image message sent, path=$imagePath")
                 broadcastWeChatMessage(userMessageId)
 
-                val history = chatRepository.getRecentMessagesSync(companionId, 50).filterDecrypted()
+                // [P1 FIX] 图片理解使用用户设置的上下文条数，不再写死 50
+                val history = contextResolver.getHistoryForAi(companionId)
                 val companion = _companionData.value
 
                 if (companion != null) {
@@ -1510,6 +1523,8 @@ private val MAX_BATCH_SIZE = 10
         _olderMessages.value = emptyList()
         _reachedEnd = false
         _hasMoreMessages.value = false
+        // [P1 FIX] 退出聊天页时清理上下文缓存，避免内存泄漏
+        contextResolver.clearCache(companionId)
     }
 }
 
