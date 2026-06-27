@@ -655,9 +655,9 @@ private fun ApiCardsSection(
                 isDarkTheme = isDarkTheme,
                 textPrimaryColor = textPrimaryColor,
                 textSecondaryColor = textSecondaryColor,
-                balanceInfo = balanceInfo,
-                balanceQueryFailed = balanceQueryFailed,
-                onQueryBalance = { viewModel.queryBalanceForConfig(partnerConfig) }
+                balanceInfo = null,
+                balanceQueryFailed = false,
+                onQueryBalance = null  // PARTNER uses handshake group quota, not /balance
             )
 
             configs.filter { it.provider != ApiProvider.PARTNER }.forEach { config ->
