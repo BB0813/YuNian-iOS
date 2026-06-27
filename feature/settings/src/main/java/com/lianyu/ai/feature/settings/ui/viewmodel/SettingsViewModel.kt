@@ -204,13 +204,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     enum class ConnectionStatus {
-        UNKNOWN, CONNECTED, FAILED, TESTING
+        UNKNOWN, TESTING, CONNECTED, FAILED
     }
-
     data class ConnectionResult(
         val status: ConnectionStatus,
         val latencyMs: Long = 0L,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val errorCode: String? = null
     )
 
     fun connectionKey(config: ApiConfig): String =
@@ -572,7 +572,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     else -> errorMsg
                 }
                 
-                _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, latencyMs, friendlyError)
+                _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, latencyMs, friendlyError,
+                    errorCode = when {
+                        errorMsg.contains("upstream_unreachable") -> "upstream_unreachable"
+                        errorMsg.contains("account_blocked") -> "account_blocked"
+                        errorMsg.contains("timeout") -> "timeout"
+                        errorMsg.contains("resolve host") || errorMsg.contains("refused") -> "network_error"
+                        else -> null
+                    }
+                )
             } else {
                 _connectionStatus[key] = ConnectionResult(ConnectionStatus.CONNECTED, latencyMs)
             }
