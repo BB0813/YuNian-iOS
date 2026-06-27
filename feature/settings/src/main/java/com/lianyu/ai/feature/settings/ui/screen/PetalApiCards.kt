@@ -747,8 +747,18 @@ fun PetalApiCard(
                     Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
-                            color = PetalGreen, fontSize = 12.sp)
+                        Column {
+                            Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
+                                color = PetalGreen, fontSize = 12.sp)
+                            connectionResult.groupName?.let { gn ->
+                                Text("组: $gn | 剩余: $${String.format("%.2f", connectionResult.remainingQuota)}",
+                                    color = PetalGreen.copy(alpha = 0.8f), fontSize = 11.sp)
+                            }
+                            if (connectionResult.rpmLimit > 0) {
+                                Text("RPM: ${connectionResult.rpmLimit} | 日限额: $${connectionResult.dailyLimit ?: "∞"}",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
                     } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
                         Spacer(modifier = Modifier.height(4.dp))
                         val errCode = connectionResult.errorCode ?: "unknown"
@@ -997,8 +1007,18 @@ fun PetalSavedApiCard(
                     Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
-                            color = PetalGreen, fontSize = 12.sp)
+                        Column {
+                            Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
+                                color = PetalGreen, fontSize = 12.sp)
+                            connectionResult.groupName?.let { gn ->
+                                Text("组: $gn | 剩余: $${String.format("%.2f", connectionResult.remainingQuota)}",
+                                    color = PetalGreen.copy(alpha = 0.8f), fontSize = 11.sp)
+                            }
+                            if (connectionResult.rpmLimit > 0) {
+                                Text("RPM: ${connectionResult.rpmLimit} | 日限额: $${connectionResult.dailyLimit ?: "∞"}",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
                     } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
                         Spacer(modifier = Modifier.height(4.dp))
                         val errCode = connectionResult.errorCode ?: "unknown"
