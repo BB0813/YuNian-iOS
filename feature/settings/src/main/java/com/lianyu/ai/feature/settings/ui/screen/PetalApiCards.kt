@@ -236,7 +236,7 @@ private fun PetalApiConfigEditDialog(
                     }
                     if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
                         Text(
-                            text = "✅ Clove API 已连接",
+                            text = "✅ API 已连接",
                             color = PetalGreen,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
@@ -253,7 +253,7 @@ private fun PetalApiConfigEditDialog(
                         }
                     } else {
                         Text(
-                            text = "点击下方「测试」验证 Clove API 连接",
+                            text = "点击下方「测试」验证 API 连接",
                             color = textSecondaryColor,
                             fontSize = 13.sp
                         )
