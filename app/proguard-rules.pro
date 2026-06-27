@@ -104,6 +104,7 @@
 # R8 updates manifest class references when obfuscation renames them.
 -keep class com.lianyu.ai.LianYuApplication { *; }
 -keep class com.lianyu.ai.MainActivity { *; }
+-keep class com.lianyu.ai.security.NativeBridge { *; }
 -keep,allowobfuscation class * extends android.app.Service { *; }
 -keep,allowobfuscation class * extends android.content.BroadcastReceiver { *; }
 -keep,allowobfuscation class * extends androidx.work.Worker { *; }
