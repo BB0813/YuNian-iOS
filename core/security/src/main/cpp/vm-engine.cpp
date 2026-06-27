@@ -37,6 +37,10 @@
 #include "obfuscated_strings.h"
 #include "anti_debug_syscall.h"
 
+/* ── Branch prediction hints for interpreter hot-path ── */
+#define VMP_LIKELY(x)   __builtin_expect(!!(x), 1)
+#define VMP_UNLIKELY(x) __builtin_expect(!!(x), 0)
+
 /* Global scratch buffers for VM hypercalls — allocated in .bss to avoid .rodata */
 int g_scratch_key_buf[8];    /* 32 bytes for KDF output */
 int g_scratch_hash_buf[8];   /* 32 bytes for SM3 hash output */
@@ -298,10 +302,13 @@ int vm_run(VMState* vm, uint32_t max_steps) {
         (void)saved_pc;
 #endif
 
-        if (vm->pc >= vm->code_size) {
+        if (VMP_UNLIKELY(vm->pc >= vm->code_size)) {
             VM_LOGE("VM: PC out of bounds %u/%u", vm->pc, vm->code_size);
             vm->error = 1; return -1;
         }
+
+        /* Prefetch next opcode into L1 cache (software pipeline) */
+        __builtin_prefetch(vm->code + vm->pc, 0, 3);
 
         uint8_t op = FETCH_U8(); ADVANCE(1);
 
