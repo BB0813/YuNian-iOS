@@ -88,6 +88,15 @@ internal val PetalGreen = Color(0xFF10A37F)
 internal val PetalGreenLight = Color(0xFFE8F5E9)
 internal val PetalOrange = Color(0xFFFFA726)
 
+// ═══ Clove API error code mapping ═══
+private fun mapErrorCode(code: String): String = when (code) {
+    "upstream_unreachable" -> "上游不通"
+    "account_blocked" -> "已冻结"
+    "network_error" -> "网络不通"
+    "timeout" -> "超时"
+    else -> "失败"
+}
+
 // ============================================================
 // PetalStatChip - 状态标签小组件
 // ============================================================
@@ -704,8 +713,12 @@ fun PetalApiCard(
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> textSecondaryColor
                     }
                     val statusText = when (connectionResult.status) {
-                        SettingsViewModel.ConnectionStatus.CONNECTED -> "已连接"
-                        SettingsViewModel.ConnectionStatus.FAILED -> "失败"
+                        SettingsViewModel.ConnectionStatus.CONNECTED ->
+                            if (connectionResult.latencyMs > 0) "已连接 ${connectionResult.latencyMs}ms" else "已连接"
+                        SettingsViewModel.ConnectionStatus.FAILED -> {
+                            val err = connectionResult.errorCode
+                            if (err != null) mapErrorCode(err) else "失败"
+                        }
                         SettingsViewModel.ConnectionStatus.TESTING -> "测试中"
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> "未测试"
                     }
@@ -934,8 +947,12 @@ fun PetalSavedApiCard(
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> textSecondaryColor
                     }
                     val statusText = when (connectionResult.status) {
-                        SettingsViewModel.ConnectionStatus.CONNECTED -> "已连接"
-                        SettingsViewModel.ConnectionStatus.FAILED -> "失败"
+                        SettingsViewModel.ConnectionStatus.CONNECTED ->
+                            if (connectionResult.latencyMs > 0) "已连接 ${connectionResult.latencyMs}ms" else "已连接"
+                        SettingsViewModel.ConnectionStatus.FAILED -> {
+                            val err = connectionResult.errorCode
+                            if (err != null) mapErrorCode(err) else "失败"
+                        }
                         SettingsViewModel.ConnectionStatus.TESTING -> "测试中"
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> "未测试"
                     }
