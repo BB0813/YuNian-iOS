@@ -48,7 +48,7 @@ def shell_dex():
     return out
 
 def encrypt_dex(src_apk):
-    """HMAC-SHA256 CTR encrypt all .dex files. Returns encrypted dir + unencrypted copies."""
+    """HMAC-SHA256 CTR encrypt all .dex files + app_meta.bin (real Application class name)."""
     import hashlib, hmac
     print("\n═══ DEX Encryption ═══")
     work = tempfile.mkdtemp(prefix="lianyu_dex_")
@@ -58,10 +58,8 @@ def encrypt_dex(src_apk):
         for name in sorted(z.namelist()):
             if not name.endswith(".dex"): continue
             data = z.read(name)
-            # Save unencrypted copy for Vivo multi-DEX
             if VIVO_MULTIDEX:
-                extra_name = name  # classes.dex, classes2.dex, ...
-                # Rename first business DEX to classes2.dex (classes.dex is shell)
+                extra_name = name
                 if count == 0 and extra_name == "classes.dex":
                     extra_name = "classes2.dex"
                 open(os.path.join(extra_dex, extra_name), "wb").write(data)
@@ -76,7 +74,21 @@ def encrypt_dex(src_apk):
             open(os.path.join(work, out_name), "wb").write(bytes(enc))
             count += 1
             print(f"  {name} → {out_name} {len(enc)//1024}KB")
-    print(f"  {count} files")
+
+    # Encrypt real Application class name as app_meta.bin
+    real_app_class = "com.lianyu.ai.LianYuApplication"
+    iv = os.urandom(16)
+    data = real_app_class.encode("utf-8")
+    enc = bytearray(iv)
+    for i in range(0, len(data), 16):
+        ctr = struct.pack('>16sQ8x', iv, i // 16)
+        ks = hmac.new(XOR_KEY, ctr[:32], hashlib.sha256).digest()
+        for j in range(min(16, len(data) - i)):
+            enc.append(data[i + j] ^ ks[j])
+    open(os.path.join(work, "app_meta.bin"), "wb").write(bytes(enc))
+    print(f"  app_meta.bin → {real_app_class} ({len(data)}B + 16B IV)")
+
+    print(f"  {count} DEX + 1 meta")
     return work, count, extra_dex
 
 def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass):

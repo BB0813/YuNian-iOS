@@ -90,6 +90,8 @@ object NativeBridge {
 
     // VMP v2.0 — Core Security Bytecode Programs (trust-anchor protection)
     @JvmStatic
+    external fun vmpTrustAnchorsVerify(): Int  // → 1 if trust anchors valid
+    @JvmStatic
     external fun vmpWbAesKeycheck(): Int       // → 1 if WB-AES T-Box integrity OK
     @JvmStatic
     external fun vmpKmsDeriveSk(ctxPtr: Long, ctxLen: Int): Long  // → sk_ptr or 0
