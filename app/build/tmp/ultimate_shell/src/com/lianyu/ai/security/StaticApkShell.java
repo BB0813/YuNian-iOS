@@ -37,23 +37,25 @@ public class StaticApkShell extends android.app.Application {
             nativeEnableMemoryGuard();
 
             // L2: VMP code items — async (5.8MB, not critical-path)
-            // Deferred to background to shave ~50ms off startup
-            final byte[] ci = loadAssetStream("lianyu_shell/code_items.bin");
+            byte[] ci = loadAssetStream("lianyu_shell/code_items.bin");
             if (ci != null && ci.length >= 4) {
                 new Thread("shell-vmp-init") {
                     @Override public void run() {
                         try { nativeShellInitWithBlob(ci); }
                         catch (Throwable t) { android.util.Log.w("LianYuShell", "VMP init deferred: " + t.getMessage()); }
+                        finally { java.util.Arrays.fill(ci, (byte)0); }
                     }
                 }.start();
             }
 
             // Decrypt real Application class name from app_meta.bin
             String realAppClass = FALLBACK_APP_CLASS;
+            byte[] encMeta = null;
+            byte[] k = null;
             try {
-                byte[] k = nativeDeriveDexKey();
+                k = nativeDeriveDexKey();
                 if (k != null && k.length > 0) {
-                    byte[] encMeta = loadAsset("shell/app_meta.bin");
+                    encMeta = loadAsset("shell/app_meta.bin");
                     if (encMeta != null && encMeta.length > 16) {
                         byte[] decMeta = nativeDecryptDex(encMeta, k);
                         if (decMeta != null && decMeta.length > 0) {
@@ -61,13 +63,15 @@ public class StaticApkShell extends android.app.Application {
                             java.util.Arrays.fill(decMeta, (byte)0);
                             if (dec.contains(".") && dec.matches("^[\u0021-\u007e]+$")) {
                                 realAppClass = dec;
-                                android.util.Log.i("LianYuShell", "App from app_meta.bin");
                             }
                         }
                     }
                 }
             } catch (Throwable e) {
                 android.util.Log.w("LianYuShell", "app_meta.bin fallback");
+            } finally {
+                if (k != null) java.util.Arrays.fill(k, (byte)0);
+                if (encMeta != null) java.util.Arrays.fill(encMeta, (byte)0);
             }
 
             // Instantiate real Application
