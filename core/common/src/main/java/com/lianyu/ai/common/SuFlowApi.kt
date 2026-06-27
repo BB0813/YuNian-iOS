@@ -9,12 +9,33 @@ object SuFlowApi {
     const val BASE_URL = "http://192.168.5.180:9876"
 
     /** Auth 基础地址 */
-    const val AUTH_BASE_URL="http...
+    const val AUTH_BASE_URL = "http://192.168.5.180:9876"
 
     /** Chat API 基础地址 */
-    const val CHAT_BASE_URL="http...
+    const val CHAT_BASE_URL = "http://192.168.5.180:9876/v1"
 
-    /** 请求超时(seconds) */
+    /** Chat Completions 端点 */
+    const val CHAT_PATH = "/chat/completions"
+
+    /** 模型列表端点 */
+    const val MODELS_PATH = "/models"
+
+    /** 用量查询端点 */
+    const val USAGE_PATH = "/usage"
+
+    /** Handshake 端点（客户端设备绑定 + 无感注册） */
+    const val HANDSHAKE_PATH = "/api/auth/handshake"
+
+    /** Key 分发端点 */
+    const val KEYS_FETCH_PATH = "/api/keys/fetch"
+
+    /** Clove App 自动注册端点 */
+    const val CLOVE_PROVISION = "/app/v1/provision"
+
+    /** Clove 用户状态查询 */
+    const val CLOVE_KEY_FETCH = "/api/keys/fetch"
+
+    /** 请求超时（秒） */
     const val TIMEOUT_SECONDS = 30L
 
     /** 连接测试模型 */
