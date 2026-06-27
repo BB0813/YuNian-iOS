@@ -210,7 +210,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val status: ConnectionStatus,
         val latencyMs: Long = 0L,
         val errorMessage: String? = null,
-        val errorCode: String? = null
+        val errorCode: String? = null,
+        // Group info from handshake
+        val groupName: String? = null,
+        val remainingQuota: Double = 0.0,
+        val dailyLimit: Double? = null,
+        val rpmLimit: Int = 0,
+        val discount: Double = 1.0,
     )
 
     fun connectionKey(config: ApiConfig): String =
@@ -418,11 +424,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     val sessionKey = handshakeJson.optString("session_key", null)
 
                     if (ok && clientId != null && sessionKey != null) {
-                        // Store session for subsequent API calls
+                        val groupName = handshakeJson.optString("group_name", null)
+                        val remaining = handshakeJson.optDouble("remaining", 0.0)
+                        val daily = if (handshakeJson.has("daily_quota_limit") && !handshakeJson.isNull("daily_quota_limit"))
+                            handshakeJson.optDouble("daily_quota_limit") else null
+                        val rpm = handshakeJson.optInt("rpm_limit", 0)
+                        val disc = handshakeJson.optDouble("discount", 1.0)
+
                         com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(
                             getApplication(), clientId, sessionKey)
                         _connectionStatus[key] = ConnectionResult(
-                            ConnectionStatus.CONNECTED, latency, null, null
+                            ConnectionStatus.CONNECTED, latency, null, null,
+                            groupName, remaining, daily, rpm, disc
                         )
                         SecureLog.d("SettingsViewModel", "PARTNER handshake OK clientId=$clientId latency=${latency}ms")
                         return@launch
