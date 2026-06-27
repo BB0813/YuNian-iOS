@@ -33,6 +33,31 @@ object RemoteKeyProvider {
 
     private fun resolveServerUrl(): String = serverUrl
     private const val HANDSHAKE_PATH = "/api/auth/handshake"
+
+    /** Direct handshake call — used by SettingsViewModel test button */
+    fun cloveHandshake(ctx: Context): JSONObject {
+        val url = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
+        val deviceId = android.os.Build.FINGERPRINT.take(40) + "_" + android.os.Build.MODEL.replace(" ", "_")
+        val body = JSONObject().apply {
+            put("device_id", deviceId)
+            put("user_id", deviceId.take(20))
+        }
+        val result = httpPost(url, body.toString())
+        return result ?: JSONObject().apply {
+            put("ok", false)
+            put("error", "network_error")
+        }
+    }
+
+    /** Save handshake result for subsequent API calls */
+    fun storeHandshakeResult(ctx: Context, clientId: String, sessionKey: String) {
+        val prefs = ctx.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("client_id", clientId)
+            .putString("session_key", sessionKey)
+            .putLong(KEY_LAST_FETCH, System.currentTimeMillis())
+            .apply()
+    }
     private const val KEYS_FETCH_PATH = "/api/keys/fetch"
     private const val CACHE_TTL_MS = 6 * 60 * 60 * 1000L
     private const val AES_GCM_ALGORITHM = "AES/GCM/NoPadding"
@@ -301,11 +326,12 @@ object RemoteKeyProvider {
         try {
             connection = url.openConnection() as HttpURLConnection
             connection.apply {
-                connectTimeout = 2_000
-                readTimeout = 2_000
+                connectTimeout = 5_000
+                readTimeout = 5_000
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
+                setRequestProperty("x-app-key", "suflow-app-2024")
                 doOutput = true
                 doInput = true
             }

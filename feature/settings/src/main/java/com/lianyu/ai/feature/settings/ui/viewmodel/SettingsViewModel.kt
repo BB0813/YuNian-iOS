@@ -406,40 +406,48 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             SecureLog.d("SettingsViewModel", "isEnabled=${config.isEnabled}, connectionTested=${config.connectionTested}")
             SecureLog.d("SettingsViewModel", "isPARTNER=${config.provider == ApiProvider.PARTNER}, providerName=${config.provider.name}")
 
-            // 对于 PARTNER 类型：总是从远程服务器获取最新密钥
-            var currentConfig = config
+            // 对于 PARTNER 类型：直接调用 handshake 端点
+            val startTime = System.currentTimeMillis()
             if (config.provider == ApiProvider.PARTNER) {
-                SecureLog.d("SettingsViewModel", "PARTNER mode: fetching fresh keys from remote server...")
-                var earlyReturn = false
+                SecureLog.d("SettingsViewModel", "PARTNER: calling handshake endpoint...")
                 try {
-                    val remoteKeys = com.lianyu.ai.common.RemoteKeyProvider.fetchKeysAsync(getApplication(), forceRefresh = true)
-                    if (remoteKeys.isNotEmpty()) {
-                        allKeys = remoteKeys
-                        // 更新 config 对象，让后续调用能使用远程密钥
-                        currentConfig = config.copy(
-                            apiKey = remoteKeys.first(),
-                            extraApiKeys = remoteKeys.drop(1).joinToString(",")
-                        )
-                        SecureLog.d("SettingsViewModel", "Fetched ${remoteKeys.size} remote keys for testing")
-                    } else {
+                    val handshakeJson = com.lianyu.ai.common.RemoteKeyProvider.cloveHandshake(getApplication())
+                    val ok = handshakeJson.optBoolean("ok", false)
+                    val latency = handshakeJson.optLong("latency_ms", 0)
+                    val errorCode = handshakeJson.optString("error", null)
+                    val clientId = handshakeJson.optString("client_id", null)
+                    val sessionKey = handshakeJson.optString("session_key", null)
+
+                    if (ok && clientId != null && sessionKey != null) {
+                        // Store session for subsequent API calls
+                        com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(
+                            getApplication(), clientId, sessionKey)
                         _connectionStatus[key] = ConnectionResult(
-                            ConnectionStatus.FAILED,
-                            0L,
-                            "无法从服务器获取密钥，请检查网络连接或服务器配置"
+                            ConnectionStatus.CONNECTED, latency, null, null
                         )
-                        earlyReturn = true
+                        SecureLog.d("SettingsViewModel", "PARTNER handshake OK clientId=$clientId latency=${latency}ms")
+                        return@launch
+                    } else {
+                        val err = errorCode ?: "unknown"
+                        _connectionStatus[key] = ConnectionResult(
+                            ConnectionStatus.FAILED, latency,
+                            "连接失败", err
+                        )
+                        SecureLog.e("SettingsViewModel", "PARTNER handshake FAILED error=$err")
+                        return@launch
                     }
                 } catch (e: Exception) {
-                    SecureLog.e("SettingsViewModel", "Failed to fetch remote keys: ${e.message}")
                     _connectionStatus[key] = ConnectionResult(
-                        ConnectionStatus.FAILED,
-                        0L,
-                        "远程密钥获取失败: ${e.message}"
+                        ConnectionStatus.FAILED, 0L,
+                        "无法连接服务器: ${e.message}", "network_error"
                     )
-                    earlyReturn = true
+                    SecureLog.e("SettingsViewModel", "PARTNER handshake exception: ${e.message}")
+                    return@launch
                 }
-                if (earlyReturn) return@launch
             }
+
+            // 非 PARTNER：原有逻辑
+            var currentConfig = config
 
             if (allKeys.isEmpty()) {
                 _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, 0L, "API Key 为空，请填写主密钥或检查远程Key服务")
