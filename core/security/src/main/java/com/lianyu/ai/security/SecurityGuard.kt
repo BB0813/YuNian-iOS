@@ -320,98 +320,99 @@ object SecurityGuard {
         lastCheckMs = System.currentTimeMillis()
         var detected = false
 
-        // 1. Signature verification
-        if (!NativeBridge.verifySignature(context)) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.SIGNATURE_FAIL, "APK signature verification failed")
-            detected = true
-        }
-
-        // 2. Debugger detection
+        // ═══ L1: Lightweight checks (system calls, <1ms each) ═══
+        // 1. Debugger detection
         if (Debug.isDebuggerConnected() || Debug.waitingForDebugger()) {
             AuditLogger.log(context, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.DEBUG_DETECTED, "Debugger connected")
             detected = true
         }
-
         if ((context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             AuditLogger.log(context, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.DEBUG_DETECTED, "Debuggable flag set")
             detected = true
         }
-
-        // 3. Native debug detection
         if (NativeBridge.isDebugged()) {
             AuditLogger.log(context, AuditLogger.Level.WARNING,
                 AuditLogger.Event.DEBUG_DETECTED, "Native debug detection triggered")
             detected = true
         }
 
-        // 4. Root detection
-        if (NativeBridge.isDeviceRooted()) {
-            AuditLogger.log(context, AuditLogger.Level.ERROR,
-                AuditLogger.Event.ROOT_DETECTED, "Root/Magisk/KernelSU detected")
-            detected = true
-        }
-
-        // 5. Hook detection
+        // 2. Hook/root/emulator (single JNI calls)
         if (NativeBridge.isHookDetected()) {
             AuditLogger.log(context, AuditLogger.Level.ERROR,
                 AuditLogger.Event.HOOK_DETECTED, "Xposed/Frida/LSPosed detected")
             detected = true
         }
-
-        // 6. Emulator detection
+        if (NativeBridge.isDeviceRooted()) {
+            AuditLogger.log(context, AuditLogger.Level.ERROR,
+                AuditLogger.Event.ROOT_DETECTED, "Root/Magisk/KernelSU detected")
+            detected = true
+        }
         if (NativeBridge.isEmulator()) {
             AuditLogger.log(context, AuditLogger.Level.WARNING,
                 AuditLogger.Event.EMULATOR_DETECTED, "Emulator/virtual environment detected")
             detected = true
         }
 
-        // 7. MITM detection
-        if (NativeBridge.isMitmDetected()) {
-            AuditLogger.log(context, AuditLogger.Level.ERROR,
-                AuditLogger.Event.MITM_DETECTED, "MITM/proxy detected")
-            detected = true
-        }
-
-        // 8. Threat score from native chain
-        val score = NativeBridge.getThreatScore()
-        if (score >= 3) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.THREAT_HIGH, "Threat score: $score (threshold: 3)")
-            detected = true
-        }
-
-        // 9. Database key integrity
-        if (!DatabaseKeyProvider.verifyKeyIntegrity(context)) {
-            AuditLogger.log(context, AuditLogger.Level.ERROR,
-                AuditLogger.Event.KEYSTORE_ERROR, "Database key integrity check failed")
-            detected = true
-        }
-
-        // 10. Native CRC32 heartbeat — detects in-memory code tampering
-        if (!NativeBridge.isHeartbeatOk()) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.TAMPER_DETECTED, "SO CRC32 heartbeat detected tampering")
-            detected = true
-        }
-
-        // 10b. Anti-Frida heartbeat — detects runtime Frida instrumentation
-        if (NativeBridge.isFridaDetected()) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.TAMPER_DETECTED, "Frida heartbeat detected instrumentation")
-            detected = true
-        }
+        // ═══ L2: Heavy checks → deferred to IdleHandler (IO/CPU intensive) ═══
+        // These run when UI thread is idle to avoid frame drops
+        val heavyContext = context.applicationContext
+        android.os.Looper.myQueue().addIdleHandler(object : android.os.MessageQueue.IdleHandler {
+            override fun queueIdle(): Boolean {
+                var heavyDetected = false
+                // Signature verification (JNI + PM)
+                if (!NativeBridge.verifySignature(heavyContext)) {
+                    AuditLogger.log(heavyContext, AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.SIGNATURE_FAIL, "APK signature verification failed")
+                    heavyDetected = true
+                }
+                // MITM detection
+                if (NativeBridge.isMitmDetected()) {
+                    AuditLogger.log(heavyContext, AuditLogger.Level.ERROR,
+                        AuditLogger.Event.MITM_DETECTED, "MITM/proxy detected")
+                    heavyDetected = true
+                }
+                // Threat score
+                val score = NativeBridge.getThreatScore()
+                if (score >= 3) {
+                    AuditLogger.log(heavyContext, AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.THREAT_HIGH, "Threat score: $score (threshold: 3)")
+                    heavyDetected = true
+                }
+                // CRC32 heartbeat
+                if (!NativeBridge.isHeartbeatOk()) {
+                    AuditLogger.log(heavyContext, AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.TAMPER_DETECTED, "SO CRC32 heartbeat detected tampering")
+                    heavyDetected = true
+                }
+                // Frida heartbeat
+                if (NativeBridge.isFridaDetected()) {
+                    AuditLogger.log(heavyContext, AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.TAMPER_DETECTED, "Frida heartbeat detected instrumentation")
+                    heavyDetected = true
+                }
+                // DB key integrity
+                if (!DatabaseKeyProvider.verifyKeyIntegrity(heavyContext)) {
+                    AuditLogger.log(heavyContext, AuditLogger.Level.ERROR,
+                        AuditLogger.Event.KEYSTORE_ERROR, "Database key integrity check failed")
+                    heavyDetected = true
+                }
+                if (heavyDetected) {
+                    tampered = true
+                    SecurityState.markTampered("Security tampering confirmed (L2)")
+                    AuditLogger.log(heavyContext, AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.TAMPER_DETECTED, "L2 heavy check: tampering confirmed")
+                }
+                return false  // one-shot IdleHandler
+            }
+        })
 
         if (detected) {
             tampered = true
-            SecurityState.markTampered("Security tampering confirmed")
+            SecurityState.markTampered("Security tampering confirmed (L1)")
             AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.TAMPER_DETECTED, "Security tampering confirmed")
-        } else {
-            AuditLogger.log(context, AuditLogger.Level.DEBUG,
-                AuditLogger.Event.APP_START, "Security check passed (score=$score)")
+                AuditLogger.Event.TAMPER_DETECTED, "L1 lightweight check: tampering confirmed")
         }
     }
 
