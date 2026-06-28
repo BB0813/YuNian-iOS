@@ -14,14 +14,12 @@ import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
-import com.lianyu.ai.domain.AiStreamChunk
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.qqbot.data.model.QQInboundEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -145,122 +143,64 @@ class QQBotChatBridge(
             companionRepository.updateTimestamp(companionId)
 
             val history = chatRepository.getRecentMessagesSync(companionId, limit = 30).filterDecrypted()
-            android.util.Log.d("QQBotBridge", "Calling streaming AI with ${history.size} history messages")
+            android.util.Log.d("QQBotBridge", "Calling AI with ${history.size} history messages")
 
-            // ── 流式生成 + 分段即时发送 ──
-            val stream = try {
-                aiServiceProvider.sendMessageStream(companion.toAiCompanionInfo(), history.toAiChatMessages(), 0)
+            // [R1 FIX] 改为非流式调用：原 sendMessageStream 违反「AI 输入/输出禁止流式」铁律，
+            // 且流式分段路径完全没有 ContentFilter.checkOutputSafety 检查，不安全输出直接发到 QQ。
+            // 现在全文接收 → 安全检查 → 分段发送。
+            val response = try {
+                aiServiceProvider.sendMessage(companion.toAiCompanionInfo(), history.toAiChatMessages(), 0)
             } catch (e: Exception) {
-                android.util.Log.e("QQBotBridge", "sendMessageStream failed", e)
+                android.util.Log.e("QQBotBridge", "sendMessage failed", e)
                 null
             }
 
-            if (stream == null) {
+            if (response == null || response.content.isBlank()) {
                 val fallback = "抱歉，我暂时无法处理这条消息。"
                 sendReply(event, fallback)
                 persistBlockedMessage(companionId, fallback)
                 return@withContext
             }
 
-            var accumulatedText = ""
-            var lastSendTime = 0L
-            val minGapMs = 500L // QQ API 频率保护：段间最小间隔 500ms
-
-            stream.collect { chunk ->
-                when (chunk) {
-                    is AiStreamChunk.Text -> {
-                        accumulatedText += chunk.content
-                        // 按句子边界分段：遇到完整句子时立即发送
-                        while (true) {
-                            val sentenceEnd = accumulatedText.indexOfAny(
-                                charArrayOf('。', '！', '？', '!', '?', '\n'),
-                                startIndex = 0
-                            ) + 1 // +1 包含分隔符
-                            if (sentenceEnd <= 0) break
-                            val sentence = accumulatedText.take(sentenceEnd).trim()
-                            if (sentence.length >= 5) {
-                                // 频率保护
-                                val elapsed = System.currentTimeMillis() - lastSendTime
-                                if (elapsed < minGapMs && lastSendTime > 0) {
-                                    delay(minGapMs - elapsed)
-                                }
-                                if (tokenStore.getForwardEnabled()) {
-                                    sendReply(event, sentence)
-                                }
-                                lastSendTime = System.currentTimeMillis()
-                                // 入库这条分段
-                                val segMsg = ChatMessage(
-                                    companionId = companionId,
-                                    content = sentence,
-                                    isFromUser = false,
-                                    timestamp = System.currentTimeMillis()
-                                )
-                                chatRepository.sendMessage(segMsg)
-                            }
-                            accumulatedText = accumulatedText.drop(sentenceEnd)
-                        }
-
-                        // 即使没有句子边界，≥30 字也先发一段
-                        if (accumulatedText.length >= 30) {
-                            val part = accumulatedText.trim()
-                            if (part.isNotBlank()) {
-                                val elapsed = System.currentTimeMillis() - lastSendTime
-                                if (elapsed < minGapMs && lastSendTime > 0) {
-                                    delay(minGapMs - elapsed)
-                                }
-                                if (tokenStore.getForwardEnabled()) {
-                                    sendReply(event, part)
-                                }
-                                lastSendTime = System.currentTimeMillis()
-                                val segMsg = ChatMessage(
-                                    companionId = companionId,
-                                    content = part,
-                                    isFromUser = false,
-                                    timestamp = System.currentTimeMillis()
-                                )
-                                chatRepository.sendMessage(segMsg)
-                                accumulatedText = ""
-                            }
-                        }
-                    }
-                    is AiStreamChunk.Error -> {
-                        android.util.Log.w("QQBotBridge", "Stream error: ${chunk.message}")
-                        // 如果还没发过任何文字，发送错误提示
-                        if (lastSendTime == 0L) {
-                            val errMsg = "抱歉，回复时出了点问题。"
-                            sendReply(event, errMsg)
-                            persistBlockedMessage(companionId, errMsg)
-                        }
-                    }
-                    is AiStreamChunk.Done -> {
-                        // 发送剩余文本
-                        val remaining = accumulatedText.trim()
-                        if (remaining.isNotBlank()) {
-                            val elapsed = System.currentTimeMillis() - lastSendTime
-                            if (elapsed < minGapMs && lastSendTime > 0) {
-                                delay(minGapMs - elapsed)
-                            }
-                            if (tokenStore.getForwardEnabled()) {
-                                sendReply(event, remaining)
-                            }
-                            val segMsg = ChatMessage(
-                                companionId = companionId,
-                                content = remaining,
-                                isFromUser = false,
-                                timestamp = System.currentTimeMillis()
-                            )
-                            chatRepository.sendMessage(segMsg)
-                        }
-                    }
-                }
+            // [R1 FIX] 全文安全检查：在发送和入库前对完整 AI 输出做 ContentFilter 校验。
+            val outputSafety = com.lianyu.ai.common.ContentFilter.checkOutputSafety(response.content)
+            val safeText = if (!outputSafety.isSafe) {
+                android.util.Log.w("QQBotBridge", "AI output blocked: ${outputSafety.reason}")
+                "抱歉，我无法回应这个话题。"
+            } else {
+                response.content
             }
+
+            // 按句子边界分段发送（频率保护），但入库存完整回复
+            var lastSendTime = 0L
+            val minGapMs = 500L
+            val sentences = splitIntoSentences(safeText)
+            for (sentence in sentences) {
+                if (sentence.isBlank()) continue
+                val elapsed = System.currentTimeMillis() - lastSendTime
+                if (elapsed < minGapMs && lastSendTime > 0) {
+                    delay(minGapMs - elapsed)
+                }
+                if (tokenStore.getForwardEnabled()) {
+                    sendReply(event, sentence)
+                }
+                lastSendTime = System.currentTimeMillis()
+            }
+
+            // 入库完整 AI 回复
+            val aiMessage = ChatMessage(
+                companionId = companionId,
+                content = safeText,
+                isFromUser = false,
+                timestamp = System.currentTimeMillis()
+            )
+            chatRepository.sendMessage(aiMessage)
 
             // 增加亲密度 + 异步提取记忆
             companionRepository.increaseIntimacy(companionId, 2)
             bridgeScope.launch {
                 runCatching {
-                    val fullResponse = accumulatedText.ifBlank { text }
-                    memoryRepository.extractAndSaveMemories(companionId, text, fullResponse)
+                    memoryRepository.extractAndSaveMemories(companionId, text, safeText)
                 }
             }
 
@@ -293,6 +233,30 @@ class QQBotChatBridge(
             .replace(Regex("^[\\[\\]\\s，。！？、]+"), "")
             .replace(Regex("[\\[\\]\\s，。！？、]+$"), "")
             .trim()
+    }
+
+    /**
+     * [R1 FIX] 将完整 AI 回复按句子边界拆分为可分次发送的段落。
+     * 替代原流式收集的分段逻辑——现在全文接收后再拆分，安全检查已对全文完成。
+     */
+    private fun splitIntoSentences(text: String): List<String> {
+        if (text.isBlank()) return emptyList()
+        val delimiters = charArrayOf('。', '！', '？', '!', '?', '\n')
+        val result = mutableListOf<String>()
+        var start = 0
+        while (start < text.length) {
+            val idx = text.indexOfAny(delimiters, startIndex = start)
+            if (idx < 0) {
+                val remaining = text.substring(start).trim()
+                if (remaining.isNotEmpty()) result.add(remaining)
+                break
+            }
+            val end = idx + 1
+            val sentence = text.substring(start, end).trim()
+            if (sentence.isNotEmpty()) result.add(sentence)
+            start = end
+        }
+        return result
     }
 
     fun close() {

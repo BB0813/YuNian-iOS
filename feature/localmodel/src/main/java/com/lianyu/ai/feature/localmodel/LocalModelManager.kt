@@ -167,6 +167,7 @@ class LocalModelManager(context: Context) {
 
     suspend fun disable() = withContext(Dispatchers.IO) {
         preferences.setEnabled(false)
+        // [M12 FIX] shutdownEngine 已改为 suspend（内部走 mutex.withLock 保护 engine）
         LocalAiService.getInstance(appContext).shutdownEngine()
         updateStateFromPreferences(
             preferences.state.first(),
@@ -179,6 +180,7 @@ class LocalModelManager(context: Context) {
         preferences.setModelDownloadId(model.id, null)
         preferences.setPendingAutoEnable(false)
         preferences.setEnabled(false)
+        // [M12 FIX] shutdownEngine 已改为 suspend
         LocalAiService.getInstance(appContext).shutdownEngine()
         val deletion = LocalModelFileDeletion.delete(model.modelFile(appContext))
         pollingJobs.remove(model.id)?.cancel()

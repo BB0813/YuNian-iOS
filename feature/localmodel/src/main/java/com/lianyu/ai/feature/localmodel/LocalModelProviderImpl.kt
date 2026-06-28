@@ -38,6 +38,7 @@ class LocalModelProviderImpl(context: Context) : LocalModelProvider {
                 )
             }
         } finally {
+            // [M12 FIX] close 已改为 suspend（内部走 mutex.withLock 保护 engine 关闭）
             ai.close()
         }
     }

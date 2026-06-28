@@ -79,13 +79,19 @@ class MemoryManager private constructor(
     // 是否已初始化
     @Volatile
     private var initialized = false
+    // [R5 FIX] 初始化原子化锁：原 check-then-set（@Volatile 但无锁）在 AiService.init 和
+    // GroupChatViewModel 冷启动并发调用时可同时通过判断，启动两个永久 while(true) 清理协程 + 重复磁盘加载。
+    private val initLock = Any()
 
     /**
      * 初始化：加载持久化记忆到内存
      */
     override fun initialize() {
-        if (initialized) return
-        initialized = true
+        // [R5 FIX] 用 synchronized 保证 check-then-set 原子性，避免并发重复初始化
+        synchronized(initLock) {
+            if (initialized) return
+            initialized = true
+        }
         ioScope.launch {
             runCatching {
                 loadPersistedMemories()
@@ -191,15 +197,21 @@ class MemoryManager private constructor(
         }
 
         // 中期记忆全局LRU淘汰
-        val totalMid = midTermCache.values.sumOf { it.size }
+        // [R10 FIX] 用快照遍历 + synchronized 保护，避免与 touchMemory/saveMemory 并发时 CME
+        val midSnapshot = midTermCache.entries.toList()
+        val totalMid = midSnapshot.sumOf { it.value.size }
         if (totalMid > MID_TERM_MAX_MEMORY) {
             // 按最后访问时间排序，淘汰最久未访问的
-            val allMid = midTermCache.entries
-                .flatMap { (key, items) -> items.map { key to it } }
+            val allMid = midSnapshot
+                .flatMap { (key, items) ->
+                    synchronized(items) { items.toList() }.map { key to it }
+                }
                 .sortedBy { it.second.lastAccessed }
             val toRemoveCount = totalMid - MID_TERM_MAX_MEMORY
             allMid.take(toRemoveCount).forEach { (key, item) ->
-                midTermCache[key]?.removeAll { it.id == item.id }
+                midTermCache[key]?.let { items ->
+                    synchronized(items) { items.removeAll { it.id == item.id } }
+                }
             }
         }
     }
@@ -446,9 +458,22 @@ class MemoryManager private constructor(
                 // 异步持久化
                 schedulePersist(scope, sourceId)
 
+                // [R9 FIX] 写入后清除查询缓存：原 queryCache 写入后不清除，saveMemory 后同 key
+                // 查询返回旧快照，新记忆最多被 32 条查询掩盖。
+                invalidateQueryCache()
+
                 item.id
             }.onFailure { Log.e(TAG, "保存记忆失败", it) }
                 .getOrNull()
+        }
+    }
+
+    /**
+     * [R9 FIX] 清除查询缓存：在任何写入操作后调用，保证后续查询读到最新数据。
+     */
+    private fun invalidateQueryCache() {
+        synchronized(queryCache) {
+            queryCache.clear()
         }
     }
 
@@ -548,7 +573,6 @@ class MemoryManager private constructor(
                 if (idx >= 0) items[idx] = item
             }
         }
-
         // 更新中期记忆
         midTermCache[key]?.let { items ->
             synchronized(items) {
@@ -563,6 +587,8 @@ class MemoryManager private constructor(
         }
 
         schedulePersist(scope, sourceId)
+        // [R9 FIX] 更新后也清除查询缓存
+        invalidateQueryCache()
     }
 
     /**
@@ -628,6 +654,8 @@ class MemoryManager private constructor(
 
         if (deleted) {
             schedulePersist(scope, sourceId)
+            // [R9 FIX] 删除后也清除查询缓存
+            invalidateQueryCache()
         }
 
         // 也检查长期记忆文件

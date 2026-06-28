@@ -34,7 +34,8 @@ class MemoryRepository(private val memoryDao: MemoryDao, private val deviceId: S
     }
 
     suspend fun getEnrichedContext(companionId: Long, lastUserMessage: String, contextLimit: Int): String {
-        val memories = searchMemories(companionId, lastUserMessage, limit = 10)
+        // [M7 FIX] 尊重 contextLimit 参数：原硬编码 limit=10，调用方传入的 contextLimit 无效。
+        val memories = searchMemories(companionId, lastUserMessage, limit = contextLimit.coerceIn(1, 20))
         if (memories.isEmpty()) return ""
         return memories.joinToString("\n") { memory ->
             "[${memory.category.name}] ${memory.content}"
@@ -50,10 +51,10 @@ class MemoryRepository(private val memoryDao: MemoryDao, private val deviceId: S
     ) {
         val existing = memoryDao.searchMemories(companionId, deviceId, content, 1)
         val similar = existing.firstOrNull()?.let { entry ->
-            val words1 = content.split(" ").toSet()
-            val words2 = entry.content.split(" ").toSet()
-            val overlap = words1.intersect(words2).size.toFloat() / maxOf(words1.size, words2.size)
-            if (overlap > 0.7f) entry else null
+            // [H2 FIX] 用字符 bigram Jaccard 替代空格分词：中文输入几乎不含空格，
+            // 原 split(" ") 对整句返回单元素，Jaccard 要么 0 要么 1，去重形同虚设。
+            // bigram 对中文短句有合理粒度，能识别语义相近的记忆。
+            if (jaccardSimilarity(content, entry.content) > 0.7f) entry else null
         }
 
         if (similar != null) {
@@ -131,19 +132,22 @@ class MemoryRepository(private val memoryDao: MemoryDao, private val deviceId: S
             addMemory(companionId, trimmedInput, MemoryCategory.FACT, 0.8f)
         }
 
+        // [H3 FIX] 收紧关键词：原列表含单字"爱/恨/怕/想/要/心/累/哭/笑"等高频字，几乎匹配每句话，
+        // 导致记忆库膨胀。改为更具体的短语，减少误判。
         if (containsAny(trimmedInput, listOf(
-            "我喜欢", "我讨厌", "我爱吃", "我不爱吃", "我最爱", "不喜欢", "最爱",
-            "爱", "恨", "怕", "想", "要", "觉得", "认为", "感觉",
-            "好吃", "难吃", "好看", "难看", "好听", "好玩", "无聊",
-            "感兴趣", "没兴趣", "热衷", "痴迷", "反感", "厌恶"
+            "我喜欢", "我讨厌", "我爱吃", "我不爱吃", "我最爱", "我不喜欢",
+            "我最讨厌", "我反感", "我厌恶", "我热衷", "我痴迷", "我感兴趣", "我没兴趣",
+            "好吃", "难吃", "好看", "难看", "好听", "好玩", "无聊"
         ))) {
             addMemory(companionId, trimmedInput, MemoryCategory.PREFERENCE, 0.7f)
         }
 
         if (containsAny(trimmedInput, listOf(
-            "开心", "难过", "生气", "感动", "惊喜", "伤心", "快乐", "郁闷", "焦虑", "兴奋",
-            "累", "烦", "爽", "委屈", "害怕", "担心", "期待", "失望",
-            "哭", "笑", "泪", "心", "情绪", "压力", "舒服", "难受"
+            "我很开心", "我很难过", "我很生气", "我很感动", "我很兴奋",
+            "好开心", "好难过", "好生气", "好感动", "好失望",
+            "好累", "好烦", "好爽", "好委屈", "好害怕", "好担心",
+            "压力大", "心情不好", "心情很好", "情绪不好",
+            "想哭", "哭了", "笑死", "笑哭了"
         ))) {
             addMemory(companionId, trimmedInput, MemoryCategory.EMOTION, 0.7f)
         }
@@ -167,5 +171,20 @@ class MemoryRepository(private val memoryDao: MemoryDao, private val deviceId: S
 
     private fun containsAny(text: String, keywords: List<String>): Boolean {
         return keywords.any { text.contains(it) }
+    }
+
+    /**
+     * [H2 FIX] 字符 bigram Jaccard 相似度：对中文短句有合理粒度。
+     * 例："我喜欢吃苹果" 与 "我喜欢吃香蕉" → bigram 重叠高 → 判定为相似。
+     */
+    private fun jaccardSimilarity(a: String, b: String): Float {
+        if (a.length < 2 || b.length < 2) {
+            return if (a == b) 1.0f else 0.0f
+        }
+        val bigrams1 = a.windowed(2).toSet()
+        val bigrams2 = b.windowed(2).toSet()
+        val intersection = bigrams1.intersect(bigrams2).size
+        val union = bigrams1.union(bigrams2).size
+        return if (union == 0) 0.0f else intersection.toFloat() / union
     }
 }

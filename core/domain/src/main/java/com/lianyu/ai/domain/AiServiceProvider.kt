@@ -75,17 +75,15 @@ interface AiServiceProvider {
     ): AiResponse
 
     /**
-     * 流式发送消息，逐块返回 AI 响应（打字机效果）。
+     * [M1 FIX] 已废弃：AI 输入/输出禁止流式（铁律）。保留接口仅为向后兼容，
+     * 实现内部已委托到非流式 [sendMessage]，不再做真正的 SSE 流式。
      *
-     * 用于降低首字延迟的场景（如 QQ 机器人边生成边发送）。
-     * 实现负责把内部 ChunkResult 映射为 [AiStreamChunk]，
-     * 思考过程(Reasoning)不暴露。
-     *
-     * @param companion 伴侣角色信息
-     * @param history 聊天历史消息
-     * @param stickerProbability 表情包发送概率 (0-100)
-     * @return 流式分块
+     * 新代码不应调用此方法，应直接使用 [sendMessage] 全量接收后再处理分段。
      */
+    @Deprecated(
+        "AI 输出禁止流式，请使用 sendMessage 全量接收后再分段处理",
+        ReplaceWith("sendMessage(companion, history, stickerProbability, ntpTimeEnabled)")
+    )
     fun sendMessageStream(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,

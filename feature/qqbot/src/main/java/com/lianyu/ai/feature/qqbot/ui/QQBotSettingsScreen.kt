@@ -1,9 +1,11 @@
 package com.lianyu.ai.feature.qqbot.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,13 +20,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Message
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,12 +53,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lianyu.ai.feature.qqbot.data.network.BindStatus
+import com.lianyu.ai.feature.qqbot.data.network.QQBotWebSocketClient
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,13 +76,14 @@ fun QQBotSettingsScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showCompanionDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var bindMode by remember { mutableStateOf<BindMode>(BindMode.QR) }
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
-                is QQBotEvent.LoginSuccess -> Toast.makeText(context, "QQ Bot 绑定成功", Toast.LENGTH_SHORT).show()
-                is QQBotEvent.LoginFailed -> Toast.makeText(context, "绑定失败: ${event.error}", Toast.LENGTH_LONG).show()
-                is QQBotEvent.LoggedOut -> Toast.makeText(context, "已解除绑定", Toast.LENGTH_SHORT).show()
+                is QQBotEvent.LoginSuccess -> Toast.makeText(context, QQBotStrings.BIND_SUCCESS, Toast.LENGTH_SHORT).show()
+                is QQBotEvent.LoginFailed -> Toast.makeText(context, QQBotStrings.bindFailed(event.error), Toast.LENGTH_LONG).show()
+                is QQBotEvent.LoggedOut -> Toast.makeText(context, QQBotStrings.UNBOUND, Toast.LENGTH_SHORT).show()
                 else -> {}
             }
         }
@@ -82,12 +92,12 @@ fun QQBotSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("QQ 机器人设置", color = MaterialTheme.colorScheme.onSurface) },
+                title = { Text(QQBotStrings.SETTINGS_TITLE, color = MaterialTheme.colorScheme.onSurface) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
+                            contentDescription = QQBotStrings.BACK,
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -107,25 +117,59 @@ fun QQBotSettingsScreen(
                 isLoggedIn = uiState.isLoggedIn,
                 accountId = uiState.account?.appId,
                 customName = uiState.customBotName,
+                connectionState = uiState.connectionState,
                 onBindClick = { /* bind handled inline below */ },
                 onUnbindClick = { showLogoutDialog = true },
                 onRenameClick = { showRenameDialog = true }
             )
 
             if (!uiState.isLoggedIn) {
-                QQBotBindForm(
-                    isLoading = uiState.isLoading,
-                    error = uiState.error,
-                    onBind = { appId, secret, name ->
-                        viewModel.saveAccount(appId, secret, name)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = bindMode == BindMode.QR,
+                        onClick = { bindMode = BindMode.QR },
+                        label = { Text(QQBotStrings.QR_BIND) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                    FilterChip(
+                        selected = bindMode == BindMode.MANUAL,
+                        onClick = { bindMode = BindMode.MANUAL },
+                        label = { Text(QQBotStrings.MANUAL_BIND) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                when (bindMode) {
+                    BindMode.QR -> QQBotQrBindSection(uiState = uiState, viewModel = viewModel)
+                    BindMode.MANUAL -> {
+                        QQBotBindForm(
+                            isLoading = uiState.isLoading,
+                            error = uiState.error,
+                            onBind = { appId, secret, name ->
+                                viewModel.saveAccount(appId, secret, name)
+                            }
+                        )
                     }
-                )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "功能设置",
+                text = QQBotStrings.FEATURE_SETTINGS,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -134,8 +178,8 @@ fun QQBotSettingsScreen(
 
             SettingItem(
                 icon = Icons.Outlined.Message,
-                title = "消息通知",
-                subtitle = "QQ 消息到达时推送通知",
+                title = QQBotStrings.MSG_NOTIFY,
+                subtitle = QQBotStrings.MSG_NOTIFY_SUB,
                 trailing = {
                     Switch(
                         checked = uiState.notifyEnabled,
@@ -148,8 +192,8 @@ fun QQBotSettingsScreen(
 
             SettingItem(
                 icon = Icons.Outlined.Link,
-                title = "自动回复",
-                subtitle = "收到 QQ 消息后自动调用 AI 回复",
+                title = QQBotStrings.AUTO_REPLY,
+                subtitle = QQBotStrings.AUTO_REPLY_SUB,
                 trailing = {
                     Switch(
                         checked = uiState.autoReply,
@@ -162,8 +206,8 @@ fun QQBotSettingsScreen(
 
             SettingItem(
                 icon = Icons.Outlined.Message,
-                title = "消息转发",
-                subtitle = "将 AI 消息同步发送到 QQ",
+                title = QQBotStrings.MSG_FORWARD,
+                subtitle = QQBotStrings.MSG_FORWARD_SUB,
                 trailing = {
                     Switch(
                         checked = uiState.forwardEnabled,
@@ -177,12 +221,12 @@ fun QQBotSettingsScreen(
 
                 SettingItem(
                     icon = Icons.Outlined.Message,
-                    title = "默认 AI 伴侣",
+                    title = QQBotStrings.DEFAULT_COMPANION,
                     subtitle = uiState.availableCompanions.find { it.id == uiState.defaultCompanionId }?.name
-                        ?: "未选择（使用第一个）",
+                        ?: QQBotStrings.NOT_SELECTED,
                     trailing = {
                         TextButton(onClick = { showCompanionDialog = true }) {
-                            Text("选择")
+                            Text(QQBotStrings.SELECT)
                         }
                     }
                 )
@@ -192,7 +236,7 @@ fun QQBotSettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
                 Text(
-                    text = "QQ 用户人设分配",
+                    text = QQBotStrings.USER_MAPPING_TITLE,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -203,21 +247,21 @@ fun QQBotSettingsScreen(
                     var showMappingDialog by remember { mutableStateOf(false) }
                     var showDeleteConfirm by remember { mutableStateOf(false) }
                     val mappedCompanionName = uiState.availableCompanions.find { it.id == companionId }?.name
-                        ?: "未知 (ID: $companionId)"
+                        ?: QQBotStrings.unknownCompanion(companionId)
 
                     SettingItem(
                         icon = Icons.Outlined.Link,
-                        title = "用户 $qqUserId",
-                        subtitle = "人设: $mappedCompanionName",
+                        title = QQBotStrings.userLabel(qqUserId),
+                        subtitle = QQBotStrings.personaLabel(mappedCompanionName),
                         trailing = {
                             Row {
                                 TextButton(onClick = { showMappingDialog = true }) {
-                                    Text("切换")
+                                    Text(QQBotStrings.SWITCH)
                                 }
                                 IconButton(onClick = { showDeleteConfirm = true }) {
                                     Icon(
                                         imageVector = Icons.Outlined.Delete,
-                                        contentDescription = "删除映射",
+                                        contentDescription = QQBotStrings.DELETE_MAPPING,
                                         tint = MaterialTheme.colorScheme.error,
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -233,7 +277,7 @@ fun QQBotSettingsScreen(
                     if (showMappingDialog) {
                         AlertDialog(
                             onDismissRequest = { showMappingDialog = false },
-                            title = { Text("为用户 $qqUserId 选择 AI 伴侣") },
+                            title = { Text(QQBotStrings.selectCompanionFor(qqUserId)) },
                             text = {
                                 Column {
                                     uiState.availableCompanions.forEach { companion ->
@@ -256,7 +300,7 @@ fun QQBotSettingsScreen(
                             confirmButton = {},
                             dismissButton = {
                                 TextButton(onClick = { showMappingDialog = false }) {
-                                    Text("取消")
+                                    Text(QQBotStrings.CANCEL)
                                 }
                             }
                         )
@@ -265,19 +309,19 @@ fun QQBotSettingsScreen(
                     if (showDeleteConfirm) {
                         AlertDialog(
                             onDismissRequest = { showDeleteConfirm = false },
-                            title = { Text("删除映射") },
-                            text = { Text("确定要删除用户 $qqUserId 的人设映射吗？删除后将使用默认 AI 伴侣。") },
+                            title = { Text(QQBotStrings.DELETE_MAPPING) },
+                            text = { Text(QQBotStrings.deleteMappingConfirm(qqUserId)) },
                             confirmButton = {
                                 TextButton(onClick = {
                                     viewModel.removeUserCompanionMapping(qqUserId)
                                     showDeleteConfirm = false
                                 }) {
-                                    Text("删除", color = MaterialTheme.colorScheme.error)
+                                    Text(QQBotStrings.DELETE_LABEL, color = MaterialTheme.colorScheme.error)
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showDeleteConfirm = false }) {
-                                    Text("取消")
+                                    Text(QQBotStrings.CANCEL)
                                 }
                             }
                         )
@@ -288,7 +332,7 @@ fun QQBotSettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "说明",
+                text = QQBotStrings.NOTES_TITLE,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -304,10 +348,7 @@ fun QQBotSettingsScreen(
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "• 基于 QQ 官方 Bot 平台（小龙虾/Hermes 同协议）\n" +
-                           "• 支持 C2C 私聊、群聊 @、频道消息\n" +
-                           "• 在 QQ 开放平台创建机器人后，填写 AppID 和 ClientSecret\n" +
-                           "• AccessToken 会自动刷新，无需手动维护",
+                    text = QQBotStrings.NOTES_BODY,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp
@@ -319,19 +360,19 @@ fun QQBotSettingsScreen(
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title = { Text("解除绑定") },
-            text = { Text("确定要解除 QQ Bot 绑定吗？解除后将无法通过 QQ 接收消息。") },
+            title = { Text(QQBotStrings.UNBIND) },
+            text = { Text(QQBotStrings.UNBIND_CONFIRM) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.logout()
                     showLogoutDialog = false
                 }) {
-                    Text("确定", color = MaterialTheme.colorScheme.error)
+                    Text(QQBotStrings.CONFIRM, color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("取消")
+                    Text(QQBotStrings.CANCEL)
                 }
             }
         )
@@ -340,7 +381,7 @@ fun QQBotSettingsScreen(
     if (showCompanionDialog) {
         AlertDialog(
             onDismissRequest = { showCompanionDialog = false },
-            title = { Text("选择默认 AI 伴侣") },
+            title = { Text(QQBotStrings.SELECT_DEFAULT_COMPANION) },
             text = {
                 Column {
                     TextButton(
@@ -351,7 +392,7 @@ fun QQBotSettingsScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "自动分配（使用第一个）",
+                            QQBotStrings.AUTO_ASSIGN,
                             color = if (uiState.defaultCompanionId == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -374,7 +415,7 @@ fun QQBotSettingsScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showCompanionDialog = false }) {
-                    Text("取消")
+                    Text(QQBotStrings.CANCEL)
                 }
             }
         )
@@ -384,12 +425,12 @@ fun QQBotSettingsScreen(
         var newName by remember { mutableStateOf(uiState.customBotName ?: "") }
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("设置机器人名字") },
+            title = { Text(QQBotStrings.SET_BOT_NAME) },
             text = {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
-                    label = { Text("名字") },
+                    label = { Text(QQBotStrings.NAME) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -399,16 +440,155 @@ fun QQBotSettingsScreen(
                     viewModel.setCustomBotName(newName.takeIf { it.isNotBlank() })
                     showRenameDialog = false
                 }) {
-                    Text("保存")
+                    Text(QQBotStrings.SAVE)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRenameDialog = false }) {
-                    Text("取消")
+                    Text(QQBotStrings.CANCEL)
                 }
             }
         )
     }
+}
+
+private enum class BindMode {
+    QR, MANUAL
+}
+
+@Composable
+private fun QQBotQrBindSection(
+    uiState: QQBotUiState,
+    viewModel: QQBotViewModel
+) {
+    // 二维码扫码绑定（Hermes 协议）
+    if (uiState.qrBitmap != null) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Image(
+                bitmap = uiState.qrBitmap.asImageBitmap(),
+                contentDescription = QQBotStrings.QR_CONTENT_DESC,
+                modifier = Modifier
+                    .size(240.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .padding(8.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            when (uiState.bindStatus) {
+                BindStatus.PENDING -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(
+                            text = QQBotStrings.WAITING_SCAN,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                BindStatus.COMPLETED -> {
+                    Text(
+                        text = QQBotStrings.BIND_OK,
+                        fontSize = 14.sp,
+                        color = Color(0xFF4CAF50)
+                    )
+                }
+                BindStatus.EXPIRED -> {
+                    Text(
+                        text = QQBotStrings.QR_EXPIRED,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                else -> {}
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = { viewModel.cancelQrBind() }) {
+                Text(QQBotStrings.CANCEL, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    } else if (uiState.isLoading) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(320.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(QQBotStrings.GENERATING_QR, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = Icons.Filled.QrCode,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = QQBotStrings.USE_QQ_SCAN,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = QQBotStrings.SCAN_HINT,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 18.sp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            TextButton(onClick = { viewModel.startQrBind() }) {
+                Text(QQBotStrings.GENERATE_QR, fontSize = 14.sp)
+            }
+        }
+    }
+
+    if (!uiState.bindError.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = uiState.bindError,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = QQBotStrings.QR_FOOTER,
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+        lineHeight = 18.sp
+    )
 }
 
 @Composable
@@ -430,7 +610,7 @@ private fun QQBotBindForm(
             .padding(16.dp)
     ) {
         Text(
-            text = "绑定 QQ 机器人",
+            text = QQBotStrings.BIND_QQBOT,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
@@ -455,7 +635,7 @@ private fun QQBotBindForm(
         OutlinedTextField(
             value = customName,
             onValueChange = { customName = it },
-            label = { Text("机器人名字（可选）") },
+            label = { Text(QQBotStrings.BOT_NAME_OPTIONAL) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -473,7 +653,7 @@ private fun QQBotBindForm(
             enabled = !isLoading && appId.isNotBlank() && clientSecret.isNotBlank(),
             modifier = Modifier.align(Alignment.End)
         ) {
-            Text(if (isLoading) "绑定中..." else "绑定")
+            Text(if (isLoading) QQBotStrings.BINDING else QQBotStrings.BIND)
         }
     }
 }
@@ -483,31 +663,50 @@ private fun QQBotStatusCard(
     isLoggedIn: Boolean,
     accountId: String?,
     customName: String?,
+    connectionState: QQBotWebSocketClient.ConnectionState,
     onBindClick: () -> Unit,
     onUnbindClick: () -> Unit,
     onRenameClick: () -> Unit
 ) {
+    val (statusText, statusColor) = when {
+        !isLoggedIn -> QQBotStrings.NOT_BOUND to Color(0xFFFFA000)
+        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED -> QQBotStrings.ONLINE to Color(0xFF4CAF50)
+        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTING -> QQBotStrings.CONNECTING to Color(0xFFFFA000)
+        connectionState == QQBotWebSocketClient.ConnectionState.RECONNECTING -> QQBotStrings.RECONNECTING to Color(0xFFFFA000)
+        connectionState == QQBotWebSocketClient.ConnectionState.AUTH_FAILED -> QQBotStrings.AUTH_FAILED to Color(0xFFFF5252)
+        else -> QQBotStrings.OFFLINE to Color(0xFF9E9E9E)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(if (isLoggedIn) Color(0xFF4CAF50).copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant)
+            .background(if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
+                Color(0xFF4CAF50).copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            imageVector = if (isLoggedIn) Icons.Filled.CheckCircle else Icons.Outlined.Warning,
+            imageVector = if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
+                Icons.Filled.CheckCircle else Icons.Outlined.Warning,
             contentDescription = null,
-            tint = if (isLoggedIn) Color(0xFF4CAF50) else Color(0xFFFFA000),
+            tint = if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
+                Color(0xFF4CAF50) else Color(0xFFFFA000),
             modifier = Modifier.size(40.dp)
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = if (isLoggedIn) customName ?: "QQ 机器人已绑定" else "未绑定 QQ 机器人",
+            text = if (isLoggedIn) customName ?: QQBotStrings.BOUND else QQBotStrings.NOT_BOUND_QQBOT,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = if (isLoggedIn) statusText else QQBotStrings.BIND_HINT,
+            fontSize = 13.sp,
+            color = if (isLoggedIn) statusColor else MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (isLoggedIn && !accountId.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
@@ -528,14 +727,14 @@ private fun QQBotStatusCard(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.size(4.dp))
-                    Text("改名", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(QQBotStrings.RENAME, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                 }
                 TextButton(onClick = onUnbindClick, modifier = Modifier.height(32.dp)) {
-                    Text("解除绑定", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    Text(QQBotStrings.UNBIND, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                 }
             } else {
                 TextButton(onClick = onBindClick, modifier = Modifier.height(32.dp)) {
-                    Text("立即绑定", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(QQBotStrings.BIND_NOW, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }

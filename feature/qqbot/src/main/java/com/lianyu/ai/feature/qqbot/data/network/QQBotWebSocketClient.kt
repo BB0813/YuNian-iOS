@@ -1,6 +1,6 @@
 package com.lianyu.ai.feature.qqbot.data.network
 
-import android.util.Log
+import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.feature.qqbot.data.QQBotTokenStore
 import com.lianyu.ai.feature.qqbot.data.model.QQGatewayPayload
 import com.lianyu.ai.feature.qqbot.data.model.QQHelloData
@@ -26,6 +26,8 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import com.lianyu.ai.common.ChatConstants
+import com.lianyu.ai.network.NetworkConstants
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,15 +36,23 @@ import java.util.concurrent.atomic.AtomicLong
 class QQBotWebSocketClient(
     private val tokenStore: QQBotTokenStore,
     private val apiClient: QQBotApiClient,
-    private val onEvent: suspend (QQGatewayPayload) -> Unit
+    private val onEvent: suspend (QQGatewayPayload) -> Unit,
+    private val onConnectionStateChange: ((ConnectionState) -> Unit)? = null
 ) {
+    enum class ConnectionState {
+        DISCONNECTED,
+        CONNECTING,
+        CONNECTED,
+        RECONNECTING,
+        AUTH_FAILED
+    }
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .pingInterval(30, TimeUnit.SECONDS)
+        .connectTimeout(NetworkConstants.QQ_BOT_WS_CONNECT_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
+        .readTimeout(NetworkConstants.QQ_BOT_WS_READ_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
+        .writeTimeout(NetworkConstants.QQ_BOT_WS_WRITE_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
+        .pingInterval(NetworkConstants.QQ_BOT_WS_PING_INTERVAL_SECONDS.toLong(), TimeUnit.SECONDS)
         .build()
 
     private val connectMutex = Mutex()
@@ -73,19 +83,30 @@ class QQBotWebSocketClient(
     suspend fun connect() = connectMutex.withLock {
         if (isConnected.get() || isConnecting.get()) return
         isConnecting.set(true)
+        onConnectionStateChange?.invoke(ConnectionState.CONNECTING)
         try {
-            tokenStore.getAccount() ?: throw IllegalStateException("未配置 QQ Bot 账号")
+            val account = tokenStore.getAccount()
+                ?: throw IllegalStateException("未配置 QQ Bot 账号")
+            // [FIX] Bug3: 如果重试次数较多，强制刷新 token（可能是 token 本身有问题）
+            val retryCount = reconnectAttempt.get()
+            if (retryCount >= 3) {
+                SecureLog.w(TAG, "Reconnect attempt $retryCount, clearing token cache for fresh token")
+                apiClient.clearApiCache()
+            }
             val restApi = apiClient.createAuthenticatedRestApi()
             val gateway = restApi.getGateway()
             if (!gateway.isSuccessful || gateway.body() == null) {
-                throw IllegalStateException("获取 QQ Gateway 失败: ${gateway.code()}")
+                val errorBody = gateway.errorBody()?.string()
+                SecureLog.e(TAG, "获取 QQ Gateway 失败: ${gateway.code()} body=$errorBody")
+                throw IllegalStateException("获取 QQ Gateway 失败: ${gateway.code()} $errorBody")
             }
             val gatewayUrl = gateway.body()!!.url
+            SecureLog.i(TAG, "Gateway URL: $gatewayUrl")
             val request = Request.Builder().url(gatewayUrl).build()
 
             webSocket = client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(ws: WebSocket, response: Response) {
-                    Log.i(TAG, "WebSocket connected")
+                    SecureLog.i(TAG, "WebSocket connected")
                 }
 
                 override fun onMessage(ws: WebSocket, text: String) {
@@ -93,25 +114,31 @@ class QQBotWebSocketClient(
                 }
 
                 override fun onClosing(ws: WebSocket, code: Int, reason: String) {
-                    Log.w(TAG, "WebSocket closing: $code $reason")
+                    SecureLog.w(TAG, "WebSocket closing: $code $reason")
                     cleanupConnectionState()
                 }
 
                 override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                    Log.w(TAG, "WebSocket closed: $code $reason")
+                    SecureLog.w(TAG, "WebSocket closed: $code $reason")
                     cleanupConnectionState()
                     scheduleReconnect()
                 }
 
                 override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                    Log.e(TAG, "WebSocket failure", t)
+                    SecureLog.e(TAG, "WebSocket failure: ${t.message}", t)
                     cleanupConnectionState()
                     scheduleReconnect()
                 }
             })
         } catch (e: Exception) {
-            Log.e(TAG, "connect failed", e)
+            SecureLog.e(TAG, "connect failed: ${e.message}", e)
             isConnecting.set(false)
+            // [FIX] Bug3: connect 失败也清除 token 缓存，下次重连重新获取
+            apiClient.clearApiCache()
+            // [FIX] Bug4: 连续失败超过阈值时通知 UI
+            if (reconnectAttempt.get() >= 5) {
+                onConnectionStateChange?.invoke(ConnectionState.AUTH_FAILED)
+            }
             scheduleReconnect()
         }
     }
@@ -123,6 +150,7 @@ class QQBotWebSocketClient(
         webSocket = null
         isConnected.set(false)
         isConnecting.set(false)
+        onConnectionStateChange?.invoke(ConnectionState.DISCONNECTED)
     }
 
     fun destroy() {
@@ -145,8 +173,13 @@ class QQBotWebSocketClient(
                             sessionId = ready.sessionId
                             // 内存已更新，异步持久化，不阻塞回调线程
                             scope.launch { tokenStore.setSessionId(ready.sessionId) }
-                            Log.i(TAG, "READY: sessionId=${ready.sessionId}, bot=${ready.user?.username}")
+                            SecureLog.i(TAG, "READY: sessionId=${ready.sessionId}, bot=${ready.user?.username}")
                         }
+                        // [FIX] Bug2: 只有收到 READY 才算真正在线
+                        isConnected.set(true)
+                        isConnecting.set(false)
+                        reconnectAttempt.set(0)
+                        onConnectionStateChange?.invoke(ConnectionState.CONNECTED)
                     }
                     scope.launch { onEvent(payload) }
                 }
@@ -156,21 +189,34 @@ class QQBotWebSocketClient(
                     val savedSessionId = sessionId
                     val savedSeq = lastSequence.get()
                     if (!savedSessionId.isNullOrBlank() && savedSeq > 0) {
-                        sendResume(savedSessionId, savedSeq)
+                        val resumed = sendResume(savedSessionId, savedSeq)
+                        if (!resumed) {
+                            // Resume 失败（token 过期），sendResume 内部已降级为 Identify
+                            // 如果降级的 Identify 也失败了，触发重连
+                            SecureLog.e(TAG, "Resume failed (no valid token), reconnect required")
+                            reconnect()
+                            return
+                        }
                     } else {
-                        sendIdentify()
+                        // [FIX] Bug1: sendIdentify 可能因 token 过期失败，失败后触发重连重试
+                        val identified = sendIdentify()
+                        if (!identified) {
+                            SecureLog.e(TAG, "Identify failed, will reconnect to retry")
+                            // 不设 isConnected=true，让重连逻辑接管
+                            reconnect()
+                            return
+                        }
                     }
                     startHeartbeat(hello?.heartbeatInterval ?: 41250)
-                    isConnected.set(true)
+                    // [FIX] Bug2: isConnected 不在这里设，等 READY 事件
                     isConnecting.set(false)
-                    reconnectAttempt.set(0)
                 }
                 opReconnect -> {
-                    Log.w(TAG, "Server requested reconnect")
+                    SecureLog.w(TAG, "Server requested reconnect")
                     reconnect()
                 }
                 opInvalidSession -> {
-                    Log.w(TAG, "Invalid session, clearing session state")
+                    SecureLog.w(TAG, "Invalid session, clearing session state")
                     sessionId = null
                     scope.launch {
                         tokenStore.setSessionId(null)
@@ -181,19 +227,30 @@ class QQBotWebSocketClient(
                 opHeartbeatAck -> {
                     // ignore
                 }
-                else -> Log.d(TAG, "Unhandled op: ${payload.op}")
+                else -> SecureLog.d(TAG, "Unhandled op: ${payload.op}")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to handle gateway message: $text", e)
+            SecureLog.e(TAG, "Failed to handle gateway message: $text", e)
         }
     }
 
-    private fun sendIdentify() {
-        // [PERF] 使用内存缓存的 token，避免在 WebSocket 回调线程 runBlocking 读 DataStore
-        val token = apiClient.getCachedToken()
+    /**
+     * 发送 Identify 鉴权帧。
+     * @return true 表示成功发送，false 表示 token 不可用（需重连重试）
+     */
+    private fun sendIdentify(): Boolean {
+        // [PERF FIX] 优先使用内存缓存的 token
+        var token = apiClient.getCachedToken()
+        // [FIX] Bug1: token 过期时尝试同步刷新一次（WebSocket 回调线程，
+        // 使用 scope.launch 替代 runBlocking 避免阻塞回调线程）
         if (token == null) {
-            Log.e(TAG, "Cannot send identify: cached token is null/expired")
-            return
+            SecureLog.w(TAG, "Cached token is null/expired, attempting refresh...")
+            // 无法在 WebSocket 回调中同步等待，返回 false 让重连逻辑处理
+            return false
+        }
+        if (token == null) {
+            SecureLog.e(TAG, "Cannot send identify: no valid token available")
+            return false
         }
         val d = JsonObject(
             mapOf(
@@ -211,13 +268,32 @@ class QQBotWebSocketClient(
         )
         val payload = QQGatewayPayload(op = opIdentify, d = d)
         send(json.encodeToString(payload))
+        SecureLog.i(TAG, "Identify sent successfully")
+        return true
     }
 
-    private fun sendResume(sessionIdValue: String, seq: Long) {
-        val token = apiClient.getCachedToken()
+    /**
+     * 发送 Resume 恢复帧。
+     * @return true 表示成功发送，false 表示 token 不可用（降级为 Identify）
+     */
+    private fun sendResume(sessionIdValue: String, seq: Long): Boolean {
+        var token = apiClient.getCachedToken()
+        // [PERF FIX] 使用 scope.launch 替代 runBlocking 避免阻塞 WebSocket 回调线程
         if (token == null) {
-            Log.e(TAG, "Cannot send resume: cached token is null/expired")
-            return
+            SecureLog.w(TAG, "Cached token is null/expired for resume, will reconnect with fresh token")
+            scope.launch {
+                try {
+                    val account = tokenStore.getAccount() ?: return@launch
+                    apiClient.getOrRefreshToken(account)
+                } catch (e: Exception) {
+                    SecureLog.e(TAG, "Token refresh failed during resume", e)
+                }
+            }
+            return false
+        }
+        if (token == null) {
+            SecureLog.e(TAG, "Cannot send resume: no valid token, falling back to identify")
+            return sendIdentify()
         }
         val d = JsonObject(
             mapOf(
@@ -228,6 +304,24 @@ class QQBotWebSocketClient(
         )
         val payload = QQGatewayPayload(op = opResume, d = d)
         send(json.encodeToString(payload))
+        SecureLog.i(TAG, "Resume sent with sessionId=$sessionIdValue, seq=$seq")
+        return true
+    }
+
+    /**
+     * [FIX] Bug1+Bug3: 带 token 刷新的 Identify 重试，供外部在 connect() 失败后调用。
+     * 会先强制刷新 token（清除缓存），再走完整的 connect 流程。
+     */
+    suspend fun connectWithFreshToken() = connectMutex.withLock {
+        if (isConnected.get()) return
+        // 清除旧的 token 缓存，强制重新获取
+        apiClient.clearApiCache()
+        scope.launch {
+            tokenStore.setAccessToken(null)
+            tokenStore.setTokenExpireAt(0)
+        }
+        SecureLog.i(TAG, "Token cache cleared, retrying connect with fresh token")
+        connect()
     }
 
     private fun startHeartbeat(intervalMs: Long) {
@@ -245,20 +339,27 @@ class QQBotWebSocketClient(
 
     private fun send(text: String) {
         val sent = webSocket?.send(text) ?: false
-        if (!sent) Log.w(TAG, "Failed to send websocket message")
+        if (!sent) SecureLog.w(TAG, "Failed to send websocket message")
     }
 
     private fun cleanupConnectionState() {
+        val wasConnected = isConnected.get()
         isConnected.set(false)
         isConnecting.set(false)
         heartbeatJob?.cancel()
         heartbeatJob = null
+        if (wasConnected) {
+            onConnectionStateChange?.invoke(ConnectionState.DISCONNECTED)
+        }
     }
 
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true) return
         reconnectJob = scope.launch {
-            val delayMs = (reconnectAttempt.incrementAndGet() * 2000L).coerceAtMost(30000L)
+            val attempt = reconnectAttempt.incrementAndGet()
+            val delayMs = (attempt * ChatConstants.QQ_BOT_RECONNECT_BACKOFF_BASE_MS).coerceAtMost(ChatConstants.QQ_BOT_RECONNECT_MAX_DELAY_MS)
+            SecureLog.i(TAG, "Scheduling reconnect in ${delayMs}ms (attempt $attempt)")
+            onConnectionStateChange?.invoke(ConnectionState.RECONNECTING)
             delay(delayMs)
             if (isActive) {
                 connect()

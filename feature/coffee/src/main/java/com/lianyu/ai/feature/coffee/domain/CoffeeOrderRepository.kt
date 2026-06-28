@@ -3,26 +3,19 @@ package com.lianyu.ai.feature.coffee.domain
 import com.lianyu.ai.feature.coffee.data.LuckinMcpClient
 import com.lianyu.ai.feature.coffee.data.LuckinTokenStore
 import com.lianyu.ai.feature.coffee.data.McpException
-import com.lianyu.ai.feature.coffee.data.model.CancelResult
-import com.lianyu.ai.feature.coffee.data.model.CreateOrderArgs
 import com.lianyu.ai.feature.coffee.data.model.OrderCreated
 import com.lianyu.ai.feature.coffee.data.model.OrderDetail
-import com.lianyu.ai.feature.coffee.data.model.OrderIdArgs
 import com.lianyu.ai.feature.coffee.data.model.OrderPreview
-import com.lianyu.ai.feature.coffee.data.model.PreviewOrderArgs
-import com.lianyu.ai.feature.coffee.data.model.ProductDetailResult
 import com.lianyu.ai.feature.coffee.data.model.ProductInfo
-import com.lianyu.ai.feature.coffee.data.model.ProductSearchResult
-import com.lianyu.ai.feature.coffee.data.model.QueryShopArgs
-import com.lianyu.ai.feature.coffee.data.model.SearchProductArgs
+import com.lianyu.ai.feature.coffee.data.model.ProductListItem
 import com.lianyu.ai.feature.coffee.data.model.ShopInfo
-import com.lianyu.ai.feature.coffee.data.model.ShopListResult
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -31,10 +24,10 @@ import kotlinx.serialization.json.putJsonObject
  * 瑞幸咖啡订单仓库。
  *
  * 封装 8 个 MCP 工具调用，对上层提供领域语义 API。
- * 严格遵循 SKILL.md 下单流程约束：
- *   确认门店 → 确认商品 → previewOrder → createOrder（不可跳步）
+ * 严格遵循下单流程约束：
+ *   确认门店 → 确认商品（含属性定制） → previewOrder → createOrder（不可跳步）
  *
- * @throws McpException 当 Token 无效或 MCP 调用失败时抛出
+ * @throws McpException 当 Token 无效或 MCP 调用失败 / 瑞幸业务 code != 0 时抛出
  */
 class CoffeeOrderRepository(
     private val client: LuckinMcpClient,
@@ -55,6 +48,13 @@ class CoffeeOrderRepository(
         return token
     }
 
+    /**
+     * 通用解码：callTool 返回的是业务 data 节点（JsonElement），
+     * 直接 decode 为目标类型。data 可能是对象、数组或基本类型。
+     */
+    private inline fun <reified T> JsonElement.decodeAsList(): List<T> =
+        json.decodeFromJsonElement(this)
+
     // ════════════════════════════════════════════════════════════════
     // 工具 1: queryShopList — 查询门店
     // ════════════════════════════════════════════════════════════════
@@ -72,33 +72,9 @@ class CoffeeOrderRepository(
                 put("deptName", deptName)
             }
         }
-        val text = client.callTool(token, "queryShopList", args)
-        return parseShopList(text)
-    }
-
-    private fun parseShopList(text: String): List<ShopInfo> {
-        // 瑞幸返回格式可能是 {list: [...]} 或直接 [...]
-        return try {
-            val element = json.parseToJsonElement(text)
-            when (element) {
-                is JsonObject -> {
-                    val listField = element["list"] as? JsonArray
-                        ?: element["data"] as? JsonArray
-                        ?: element["shops"] as? JsonArray
-                    listField?.map { json.decodeFromString(ShopInfo.serializer(), it.toString()) }
-                        ?: emptyList()
-                }
-                is JsonArray -> element.map { json.decodeFromString(ShopInfo.serializer(), it.toString()) }
-                else -> emptyList()
-            }
-        } catch (e: Exception) {
-            // 尝试直接解析为 ShopListResult
-            try {
-                json.decodeFromString(ShopListResult.serializer(), text).list
-            } catch (e2: Exception) {
-                emptyList()
-            }
-        }
+        val data = client.callTool(token, "queryShopList", args)
+        // data 是 List<ShopInfo>
+        return data.decodeAsList()
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -111,54 +87,29 @@ class CoffeeOrderRepository(
             put("deptId", deptId)
             put("query", query)
         }
-        val text = client.callTool(token, "searchProductForMcp", args)
-        return parseProductSearch(text)
-    }
-
-    private fun parseProductSearch(text: String): List<ProductInfo> {
-        return try {
-            val element = json.parseToJsonElement(text)
-            when (element) {
-                is JsonObject -> {
-                    val listField = element["list"] as? JsonArray
-                        ?: element["data"] as? JsonArray
-                        ?: element["products"] as? JsonArray
-                    listField?.map { json.decodeFromString(ProductInfo.serializer(), it.toString()) }
-                        ?: emptyList()
-                }
-                is JsonArray -> element.map { json.decodeFromString(ProductInfo.serializer(), it.toString()) }
-                else -> emptyList()
-            }
-        } catch (e: Exception) {
-            try {
-                json.decodeFromString(ProductSearchResult.serializer(), text).list
-            } catch (e2: Exception) {
-                emptyList()
-            }
-        }
+        val data = client.callTool(token, "searchProductForMcp", args)
+        // data 是 List<ProductInfo>
+        return data.decodeAsList()
     }
 
     // ════════════════════════════════════════════════════════════════
-    // 工具 3: queryProductDetailInfo — 商品详情（属性定制）
+    // 工具 3: queryProductDetailInfo — 商品详情（属性定制入口）
     // ════════════════════════════════════════════════════════════════
 
-    suspend fun queryProductDetail(deptId: Long, productId: Long): ProductDetailResult {
+    suspend fun queryProductDetail(deptId: Long, productId: Long): ProductInfo {
         val token = requireToken()
         val args = buildJsonObject {
             put("deptId", deptId)
             put("productId", productId)
-            put("delivery", "pick")
         }
-        val text = client.callTool(token, "queryProductDetailInfo", args)
-        return try {
-            json.decodeFromString(ProductDetailResult.serializer(), text)
-        } catch (e: Exception) {
-            ProductDetailResult(productId = productId)
-        }
+        val data = client.callTool(token, "queryProductDetailInfo", args)
+        // data 是单个 ProductInfo
+        return json.decodeFromJsonElement(data)
     }
 
     // ════════════════════════════════════════════════════════════════
-    // 工具 4: switchProduct — 切换 SKU（已知有 bug，可能失败）
+    // 工具 4: switchProduct — 切换 SKU（属性定制）
+    // operation=3 表示选中
     // ════════════════════════════════════════════════════════════════
 
     suspend fun switchProduct(
@@ -167,9 +118,9 @@ class CoffeeOrderRepository(
         skuCode: String,
         attributeId: Long,
         subAttributeId: Long,
-        operation: Int,
+        operation: Int = 3,
         amount: Int
-    ): ProductDetailResult? {
+    ): ProductInfo {
         val token = requireToken()
         val args = buildJsonObject {
             put("deptId", deptId)
@@ -184,13 +135,9 @@ class CoffeeOrderRepository(
                 }
             }
         }
-        return try {
-            val text = client.callTool(token, "switchProduct", args)
-            json.decodeFromString(ProductDetailResult.serializer(), text)
-        } catch (e: McpException) {
-            // switchProduct 已知有 bug（返回"非法参数"），返回 null 让上层降级
-            null
-        }
+        val data = client.callTool(token, "switchProduct", args)
+        // data 是切换后的 ProductInfo
+        return json.decodeFromJsonElement(data)
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -199,7 +146,7 @@ class CoffeeOrderRepository(
 
     suspend fun previewOrder(
         deptId: Long,
-        productList: List<com.lianyu.ai.feature.coffee.data.model.ProductListItem>
+        productList: List<ProductListItem>
     ): OrderPreview {
         val token = requireToken()
         val args = buildJsonObject {
@@ -214,25 +161,8 @@ class CoffeeOrderRepository(
                 }
             }
         }
-        val text = client.callTool(token, "previewOrder", args)
-        return try {
-            json.decodeFromString(OrderPreview.serializer(), text)
-        } catch (e: Exception) {
-            // 尝试从 JsonObject 提取
-            try {
-                val obj = json.parseToJsonElement(text) as JsonObject
-                OrderPreview(
-                    totalInitialPrice = obj["totalInitialPrice"]?.toString()?.toDoubleOrNull() ?: 0.0,
-                    privilegeMoney = obj["privilegeMoney"]?.toString()?.toDoubleOrNull() ?: 0.0,
-                    discountPrice = obj["discountPrice"]?.toString()?.toDoubleOrNull() ?: 0.0,
-                    couponCodeList = (obj["couponCodeList"] as? JsonArray)
-                        ?.map { it.toString().trim('"') }
-                        ?: emptyList()
-                )
-            } catch (e2: Exception) {
-                OrderPreview()
-            }
-        }
+        val data = client.callTool(token, "previewOrder", args)
+        return json.decodeFromJsonElement(data)
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -241,10 +171,11 @@ class CoffeeOrderRepository(
 
     suspend fun createOrder(
         deptId: Long,
-        productList: List<com.lianyu.ai.feature.coffee.data.model.ProductListItem>,
+        productList: List<ProductListItem>,
         longitude: Double,
         latitude: Double,
-        couponCodeList: List<String>? = null
+        couponCodeList: List<String>? = null,
+        remark: String? = null
     ): OrderCreated {
         val token = requireToken()
         val args = buildJsonObject {
@@ -265,20 +196,12 @@ class CoffeeOrderRepository(
                     couponCodeList.forEach { add(JsonPrimitive(it)) }
                 }
             }
+            if (!remark.isNullOrBlank()) {
+                put("remark", remark)
+            }
         }
-        val text = client.callTool(token, "createOrder", args)
-        return try {
-            json.decodeFromString(OrderCreated.serializer(), text)
-        } catch (e: Exception) {
-            val obj = json.parseToJsonElement(text) as? JsonObject
-            OrderCreated(
-                orderId = obj?.get("orderId")?.toString()?.trim('"') ?: "",
-                payOrderQrCodeUrl = obj?.get("payOrderQrCodeUrl")?.toString()?.trim('"') ?: "",
-                payOrderUrl = obj?.get("payOrderUrl")?.toString()?.trim('"') ?: "",
-                discountPrice = obj?.get("discountPrice")?.toString()?.toDoubleOrNull() ?: 0.0,
-                deptName = obj?.get("deptName")?.toString()?.trim('"') ?: ""
-            )
-        }
+        val data = client.callTool(token, "createOrder", args)
+        return json.decodeFromJsonElement(data)
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -290,16 +213,13 @@ class CoffeeOrderRepository(
         val args = buildJsonObject {
             put("orderId", orderId)
         }
-        val text = client.callTool(token, "queryOrderDetailInfo", args)
-        return try {
-            json.decodeFromString(OrderDetail.serializer(), text)
-        } catch (e: Exception) {
-            OrderDetail(orderId = orderId)
-        }
+        val data = client.callTool(token, "queryOrderDetailInfo", args)
+        return json.decodeFromJsonElement(data)
     }
 
     // ════════════════════════════════════════════════════════════════
     // 工具 8: cancelOrder — 取消订单
+    // 返回 data 是 boolean（是否取消成功）
     // ════════════════════════════════════════════════════════════════
 
     suspend fun cancelOrder(orderId: String): Boolean {
@@ -308,8 +228,12 @@ class CoffeeOrderRepository(
             put("orderId", orderId)
         }
         return try {
-            client.callTool(token, "cancelOrder", args)
-            true
+            val data = client.callTool(token, "cancelOrder", args)
+            // data 是 boolean，兼容 JsonPrimitive / 字符串
+            when (data) {
+                is JsonPrimitive -> data.content.toBooleanStrictOrNull() ?: false
+                else -> data.toString().trim('"').toBooleanStrictOrNull() ?: false
+            }
         } catch (e: McpException) {
             false
         }

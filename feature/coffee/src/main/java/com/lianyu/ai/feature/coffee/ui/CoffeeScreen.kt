@@ -7,7 +7,6 @@ import android.location.LocationManager
 import android.location.Location
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,10 +26,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -55,10 +56,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -69,10 +70,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import com.lianyu.ai.feature.coffee.data.model.OrderCreated
 import com.lianyu.ai.feature.coffee.data.model.OrderDetail
 import com.lianyu.ai.feature.coffee.data.model.OrderPreview
 import com.lianyu.ai.feature.coffee.data.model.ProductInfo
+import com.lianyu.ai.feature.coffee.data.model.SelectedProduct
 import com.lianyu.ai.feature.coffee.data.model.ShopInfo
 
 // 瑞幸品牌色
@@ -85,7 +89,10 @@ private val LuckinGray = Color(0xFFF5F5F5)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoffeeScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onProductClick: (Long, Long) -> Unit = { _, _ -> },
+    onSettingsClick: () -> Unit = {},
+    onOrderQueryClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: CoffeeViewModel = viewModel(factory = CoffeeViewModel.factory(context))
@@ -105,14 +112,14 @@ fun CoffeeScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Coffee, contentDescription = null, tint = LuckinBlue)
+                        Icon(Icons.Default.Coffee, contentDescription = null, tint = Color.White)
                         Spacer(Modifier.width(8.dp))
                         Text("瑞幸咖啡", fontWeight = FontWeight.Bold)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = {
-                        if (uiState.currentStep == OrderStep.TOKEN_CONFIG || uiState.currentStep == OrderStep.SHOP_SELECT) {
+                        if (uiState.currentStep == OrderStep.SHOP_SELECT) {
                             onBack()
                         } else {
                             viewModel.goBack()
@@ -121,10 +128,19 @@ fun CoffeeScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    IconButton(onClick = onOrderQueryClick) {
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "订单查询", tint = Color.White)
+                    }
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(Icons.Default.Settings, contentDescription = "瑞幸设置", tint = Color.White)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = LuckinBlue,
                     titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
+                    navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White
                 )
             )
         },
@@ -137,9 +153,8 @@ fun CoffeeScreen(
                 .padding(padding)
         ) {
             when (uiState.currentStep) {
-                OrderStep.TOKEN_CONFIG -> TokenConfigContent(viewModel, uiState)
                 OrderStep.SHOP_SELECT -> ShopSelectContent(viewModel, uiState)
-                OrderStep.PRODUCT_SELECT -> ProductSelectContent(viewModel, uiState)
+                OrderStep.PRODUCT_SELECT -> ProductSelectContent(viewModel, uiState, onProductClick)
                 OrderStep.ORDER_CONFIRM -> OrderConfirmContent(viewModel, uiState)
                 OrderStep.ORDER_PREVIEW -> OrderPreviewContent(viewModel, uiState)
                 OrderStep.PAYMENT -> PaymentContent(viewModel, uiState)
@@ -174,95 +189,7 @@ fun CoffeeScreen(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 步骤 1: Token 配置
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun TokenConfigContent(viewModel: CoffeeViewModel, state: CoffeeUiState) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(Modifier.height(32.dp))
-
-        Icon(
-            Icons.Default.Coffee,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = LuckinBlue
-        )
-
-        Spacer(Modifier.height(16.dp))
-        Text("瑞幸 MCP Token 配置", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = LuckinDarkBlue)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "访问 open.lkcoffee.com/mcp 登录获取 Token\n有效期约 30 天，与瑞幸账号绑定",
-            fontSize = 13.sp,
-            color = Color.Gray,
-            lineHeight = 20.sp
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = state.tokenInput,
-            onValueChange = viewModel::updateTokenInput,
-            label = { Text("Bearer Token") },
-            placeholder = { Text("粘贴你的瑞幸 MCP Token") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = false,
-            minLines = 2,
-            maxLines = 4
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Button(
-            onClick = viewModel::saveToken,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = LuckinBlue),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text("保存 Token", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
-        }
-
-        if (state.isTokenConfigured) {
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = viewModel::clearToken,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("清除已保存的 Token", color = LuckinRed)
-            }
-        }
-
-        Spacer(Modifier.height(32.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = LuckinLightBlue)
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("安全说明", fontWeight = FontWeight.Bold, color = LuckinDarkBlue)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "• Token 与瑞幸账号会话绑定，严禁泄露\n" +
-                        "• 存储在应用私有目录，卸载后清除\n" +
-                        "• 仅支持到店自取，不支持外送",
-                    fontSize = 12.sp,
-                    color = Color.DarkGray,
-                    lineHeight = 18.sp
-                )
-            }
-        }
-    }
-}
-
-// ════════════════════════════════════════════════════════════════
-// 步骤 2: 门店选择
+// 步骤 1: 门店选择
 // ════════════════════════════════════════════════════════════════
 
 @Composable
@@ -372,7 +299,7 @@ private fun ShopSelectContent(viewModel: CoffeeViewModel, state: CoffeeUiState) 
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(state.shops) { shop ->
+                items(state.shops, key = { it.deptId }) { shop ->
                     ShopCard(shop = shop, hasPreciseLocation = state.hasPreciseLocation) {
                         viewModel.selectShop(shop)
                     }
@@ -416,11 +343,15 @@ private fun ShopCard(shop: ShopInfo, hasPreciseLocation: Boolean, onSelect: () -
 }
 
 // ════════════════════════════════════════════════════════════════
-// 步骤 3: 商品搜索与选择
+// 步骤 2: 商品搜索与选择
 // ════════════════════════════════════════════════════════════════
 
 @Composable
-private fun ProductSelectContent(viewModel: CoffeeViewModel, state: CoffeeUiState) {
+private fun ProductSelectContent(
+    viewModel: CoffeeViewModel,
+    state: CoffeeUiState,
+    onProductClick: (Long, Long) -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize()) {
         // 已选门店
         state.selectedShop?.let { shop ->
@@ -472,8 +403,12 @@ private fun ProductSelectContent(viewModel: CoffeeViewModel, state: CoffeeUiStat
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(state.products) { product ->
-                    ProductCard(product = product, onAdd = { viewModel.addProduct(product) })
+                items(state.products, key = { it.productId }) { product ->
+                    ProductCard(
+                        product = product,
+                        onCustomize = { onProductClick(state.selectedShop?.deptId ?: 0L, product.productId) },
+                        onAddQuick = { viewModel.addProductQuick(product) }
+                    )
                 }
             }
         }
@@ -488,14 +423,15 @@ private fun ProductSelectContent(viewModel: CoffeeViewModel, state: CoffeeUiStat
                 Column(Modifier.padding(16.dp)) {
                     Text("已选商品 (${state.selectedProducts.size})", fontWeight = FontWeight.Bold, color = LuckinDarkBlue)
                     Spacer(Modifier.height(8.dp))
-                    state.selectedProducts.forEach { (product, amount) ->
+                    state.selectedProducts.forEach { sp ->
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("${product.name} x$amount", fontSize = 14.sp, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { viewModel.removeProduct(product.productId) }) {
+                            Text("${sp.productName} x${sp.amount}", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            Text("¥${"%.2f".format(sp.estimatePrice * sp.amount)}", fontSize = 14.sp, color = LuckinRed)
+                            TextButton(onClick = { viewModel.removeProduct(sp.productId) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "移除", tint = LuckinRed, modifier = Modifier.size(16.dp))
                             }
                         }
@@ -516,34 +452,78 @@ private fun ProductSelectContent(viewModel: CoffeeViewModel, state: CoffeeUiStat
 }
 
 @Composable
-private fun ProductCard(product: ProductInfo, onAdd: () -> Unit) {
+private fun ProductCard(
+    product: ProductInfo,
+    onCustomize: () -> Unit,
+    onAddQuick: () -> Unit
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            product.breviaryPicUrl?.let { url ->
+        Row(
+            Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val ctx = LocalContext.current
+            if (product.pictureUrl.isNotBlank()) {
                 AsyncImage(
-                    model = url,
-                    contentDescription = null,
+                    model = ImageRequest.Builder(ctx)
+                        .data(product.pictureUrl)
+                        .crossfade(true)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .build(),
+                    contentDescription = product.productName,
                     modifier = Modifier
                         .size(64.dp)
-                        .background(LuckinGray, RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(LuckinGray)
                 )
                 Spacer(Modifier.width(12.dp))
             }
-            Column(Modifier.weight(1f)) {
-                Text(product.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = LuckinDarkBlue)
-                if (product.description.isNotBlank()) {
-                    Text(product.description, fontSize = 12.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(
+                Modifier
+                    .weight(1f)
+                    .padding(end = 4.dp)
+            ) {
+                Text(
+                    product.productName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = LuckinDarkBlue
+                )
+                product.tags?.takeIf { it.isNotEmpty() }?.let {
+                    Text(it.joinToString(" · "), fontSize = 11.sp, color = LuckinBlue, maxLines = 1)
                 }
                 Spacer(Modifier.height(4.dp))
-                Text("¥${product.estimatePrice}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuckinRed)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    if (product.initialPrice > product.estimatePrice && product.initialPrice > 0) {
+                        Text(
+                            "¥${"%.0f".format(product.initialPrice)} ",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
+                        )
+                    }
+                    Text("¥${"%.0f".format(product.estimatePrice)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuckinRed)
+                    Spacer(Modifier.width(4.dp))
+                    Text("到手价", fontSize = 11.sp, color = LuckinRed)
+                }
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onCustomize,
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+                ) {
+                    Text("定制温度/杯型 ›", fontSize = 12.sp, color = LuckinBlue)
+                }
             }
             Button(
-                onClick = onAdd,
+                onClick = onAddQuick,
                 colors = ButtonDefaults.buttonColors(containerColor = LuckinBlue),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
@@ -555,7 +535,7 @@ private fun ProductCard(product: ProductInfo, onAdd: () -> Unit) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 步骤 4: 订单确认
+// 步骤 3: 订单确认
 // ════════════════════════════════════════════════════════════════
 
 @Composable
@@ -592,15 +572,15 @@ private fun OrderConfirmContent(viewModel: CoffeeViewModel, state: CoffeeUiState
                 Text("商品明细", fontWeight = FontWeight.Bold, color = LuckinDarkBlue)
                 Spacer(Modifier.height(8.dp))
                 var totalEstimate = 0.0
-                state.selectedProducts.forEach { (product, amount) ->
+                state.selectedProducts.forEach { sp ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("${product.name} x$amount", fontSize = 14.sp)
-                        val price = product.estimatePrice * amount
+                        Text("${sp.productName} x${sp.amount}", fontSize = 14.sp)
+                        val price = sp.estimatePrice * sp.amount
                         totalEstimate += price
                         Text("¥${"%.2f".format(price)}", fontSize = 14.sp, color = LuckinRed)
                     }
@@ -624,13 +604,25 @@ private fun OrderConfirmContent(viewModel: CoffeeViewModel, state: CoffeeUiState
             colors = CardDefaults.cardColors(containerColor = LuckinLightBlue)
         ) {
             Text(
-                "确认后将调用 previewOrder 获取真实价格和优惠。\n若最终价格不高于预估价，将直接创建订单。",
+                "确认后将调用 previewOrder 获取真实价格和优惠。\n最终价格以预览结果为准。",
                 Modifier.padding(16.dp),
                 fontSize = 12.sp,
                 color = LuckinDarkBlue,
                 lineHeight = 18.sp
             )
         }
+
+        Spacer(Modifier.height(12.dp))
+
+        // 订单备注（createOrder 可选 remark）
+        OutlinedTextField(
+            value = state.remark,
+            onValueChange = viewModel::updateRemark,
+            label = { Text("订单备注（可选）") },
+            placeholder = { Text("如：少冰、不要搅拌") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
 
         Spacer(Modifier.weight(1f))
 
@@ -646,7 +638,7 @@ private fun OrderConfirmContent(viewModel: CoffeeViewModel, state: CoffeeUiState
 }
 
 // ════════════════════════════════════════════════════════════════
-// 步骤 5: 订单预览
+// 步骤 4: 订单预览
 // ════════════════════════════════════════════════════════════════
 
 @Composable
@@ -667,7 +659,9 @@ private fun OrderPreviewContent(viewModel: CoffeeViewModel, state: CoffeeUiState
                 Text("订单预览", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = LuckinDarkBlue)
                 Spacer(Modifier.height(16.dp))
 
-                PriceRow("原价", preview.totalInitialPrice)
+                // 商品总面价
+                PriceRow("商品总面价", preview.totalInitialPrice)
+                // 优惠
                 PriceRow("优惠", -preview.privilegeMoney, color = LuckinRed)
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -685,11 +679,22 @@ private fun OrderPreviewContent(viewModel: CoffeeViewModel, state: CoffeeUiState
                     Text("已使用优惠券: ${preview.couponCodeList.size} 张", fontSize = 12.sp, color = LuckinBlue)
                 }
 
-                if (preview.products.isNotEmpty()) {
+                if (preview.productInfoList.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
                     Text("商品明细", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    preview.products.forEach { p ->
-                        Text("${p.name} x${p.amount}  ¥${"%.2f".format(p.price)}", fontSize = 13.sp, color = Color.Gray)
+                    preview.productInfoList.forEach { p ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "${p.name} x${p.amount}${if (p.additionDesc.isNotBlank()) " (${p.additionDesc})" else ""}",
+                                fontSize = 13.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("¥${"%.2f".format(p.estimateTotalPrice)}", fontSize = 13.sp, color = Color.Gray)
+                        }
                     }
                 }
             }
@@ -698,7 +703,7 @@ private fun OrderPreviewContent(viewModel: CoffeeViewModel, state: CoffeeUiState
         Spacer(Modifier.weight(1f))
 
         Button(
-            onClick = viewModel::createOrder,
+            onClick = { viewModel.createOrder() },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = LuckinBlue),
             shape = RoundedCornerShape(12.dp)
@@ -722,7 +727,7 @@ private fun PriceRow(label: String, price: Double, color: Color = Color.DarkGray
 }
 
 // ════════════════════════════════════════════════════════════════
-// 步骤 6: 支付
+// 步骤 5: 支付
 // ════════════════════════════════════════════════════════════════
 
 @Composable
@@ -740,41 +745,78 @@ private fun PaymentContent(viewModel: CoffeeViewModel, state: CoffeeUiState) {
 
         Text("订单已创建", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = LuckinDarkBlue)
         Spacer(Modifier.height(8.dp))
-        Text("订单号: ${order.orderId}", fontSize = 14.sp, color = Color.Gray)
-        if (order.deptName.isNotBlank()) {
-            Text("门店: ${order.deptName}", fontSize = 14.sp, color = Color.Gray)
+        // 优先用 orderIdStr（字符串类型），fallback 到 orderId
+        val displayOrderId = order.orderIdStr.ifBlank { order.orderId.toString() }
+        Text("订单号: $displayOrderId", fontSize = 14.sp, color = Color.Gray)
+
+        // needPay = false 表示无需支付（优惠券全额抵扣）
+        if (!order.needPay) {
+            Spacer(Modifier.height(8.dp))
+            Text("本单无需支付（优惠已全额抵扣）", fontSize = 13.sp, color = LuckinBlue, fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.height(24.dp))
 
-        // 支付二维码（仅使用 payOrderQrCodeUrl，不展示 payOrderUrl）
-        if (order.payOrderQrCodeUrl.isNotBlank()) {
-            Card(
-                modifier = Modifier.size(240.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                AsyncImage(
-                    model = order.payOrderQrCodeUrl,
-                    contentDescription = "支付二维码",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            Text("扫码支付", fontWeight = FontWeight.Bold, color = LuckinBlue)
+        // === 支付区 ===
+        // 瑞幸 createOrder 返回两个支付字段：
+        //   payOrderUrl        = weixin://wxpay/bizpayurl?pr=xxxx  （微信深链，本机拉起微信付款）
+        //   payOrderQrCodeUrl  = https://.../qrcode?token=xxxx      （二维码图片 URL，给另一台手机扫）
+        // 当前设备优先用 payOrderUrl 直接拉起微信；无法拉起或无该字段时降级为展示二维码图片扫码。
+        if (order.needPay) {
+            val canLaunchWeixin = order.payOrderUrl.isNotBlank() &&
+                order.payOrderUrl.startsWith("weixin://", ignoreCase = true)
 
-            Spacer(Modifier.height(8.dp))
-            // 可点击的支付链接（二维码无法展示时的备选）
-            TextButton(onClick = {
-                // 打开浏览器支付链接
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(order.payOrderQrCodeUrl))
-                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            }) {
-                Text("打开支付链接", color = LuckinBlue)
+            // 路径1：本机微信支付（首选）
+            if (canLaunchWeixin) {
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(order.payOrderUrl)
+                        )
+                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(intent) }
+                            .onFailure {
+                                // 极少数情况：深链存在但无微信，静默降级到二维码扫码
+                            }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = LuckinBlue),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("微信支付", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("点击拉起微信完成付款", fontSize = 12.sp, color = Color.Gray)
+            }
+
+            // 路径2：扫码支付（备选，或无深链时的主路径）
+            if (order.payOrderQrCodeUrl.isNotBlank()) {
+                if (canLaunchWeixin) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("— 或用另一台手机扫码 —", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(Modifier.height(12.dp))
+                }
+                Card(
+                    modifier = Modifier.size(240.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(order.payOrderQrCodeUrl)
+                            .crossfade(true)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .build(),
+                        contentDescription = "支付二维码",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("用微信扫上方二维码", fontSize = 12.sp, color = Color.Gray)
             }
         }
 
@@ -810,7 +852,7 @@ private fun PaymentContent(viewModel: CoffeeViewModel, state: CoffeeUiState) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 步骤 7: 订单状态
+// 步骤 6: 订单状态
 // ════════════════════════════════════════════════════════════════
 
 @Composable
@@ -832,7 +874,7 @@ private fun OrderStatusContent(viewModel: CoffeeViewModel, state: CoffeeUiState)
             )
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = viewModel::queryOrderStatus,
+                onClick = { viewModel.queryOrderStatus() },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = LuckinBlue),
                 shape = RoundedCornerShape(8.dp)
@@ -864,101 +906,6 @@ private fun OrderStatusContent(viewModel: CoffeeViewModel, state: CoffeeUiState)
     }
 }
 
-@Composable
-private fun OrderDetailCard(detail: OrderDetail) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            // 状态标签
-            val statusColor = when (detail.orderStatus) {
-                OrderDetail.STATUS_UNPAID -> Color(0xFFFF9800)
-                OrderDetail.STATUS_MAKING -> LuckinBlue
-                OrderDetail.STATUS_WAITING -> Color(0xFF4CAF50)
-                OrderDetail.STATUS_DONE -> Color(0xFF4CAF50)
-                OrderDetail.STATUS_CANCELED -> Color.Gray
-                else -> LuckinDarkBlue
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .background(statusColor, RoundedCornerShape(6.dp))
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(detail.orderStatusName, fontWeight = FontWeight.Bold, color = statusColor, fontSize = 16.sp)
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Text("订单号: ${detail.orderId}", fontSize = 13.sp, color = Color.Gray)
-            if (detail.deptName.isNotBlank()) {
-                Text("门店: ${detail.deptName}", fontSize = 13.sp, color = Color.Gray)
-            }
-            if (detail.address.isNotBlank()) {
-                Text("地址: ${detail.address}", fontSize = 13.sp, color = Color.Gray)
-            }
-
-            // 取餐码（仅已支付时展示）
-            detail.takeMealCodeInfo?.let { codeInfo ->
-                if (codeInfo.code.isNotBlank() && detail.orderStatus >= OrderDetail.STATUS_SUCCESS) {
-                    Spacer(Modifier.height(16.dp))
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = LuckinLightBlue)
-                    ) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("取餐码", fontSize = 13.sp, color = LuckinDarkBlue)
-                            Text(codeInfo.code, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = LuckinRed)
-                            if (detail.aboutTime > 0) {
-                                val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.CHINA)
-                                    .format(java.util.Date(detail.aboutTime * 1000))
-                                Text("预计取餐: $time", fontSize = 13.sp, color = Color.Gray)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 商品列表
-            detail.productInfoList?.let { products ->
-                if (products.isNotEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text("商品", fontWeight = FontWeight.Bold, color = LuckinDarkBlue)
-                    products.forEach { p ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("${p.name} x${p.amount}", fontSize = 13.sp)
-                            if (p.additionDesc.isNotBlank()) {
-                                Text(p.additionDesc, fontSize = 11.sp, color = Color.Gray)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("支付金额", fontWeight = FontWeight.Bold)
-                Text("¥${"%.2f".format(detail.orderPayAmount)}", fontWeight = FontWeight.Bold, color = LuckinRed)
-            }
-        }
-    }
-}
-
 /**
  * 获取当前位置（使用系统 LocationManager）
  * @param onResult 回调 (latitude, longitude, isPrecise)
@@ -973,12 +920,10 @@ private fun fetchLocation(
         val isNetworkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
 
         if (!isGpsEnabled && !isNetworkEnabled) {
-            // 定位服务未开启，使用默认位置（北京天安门）
             onResult(39.9087, 116.3975, false)
             return
         }
 
-        // 优先使用 GPS，其次网络定位
         val provider = when {
             isGpsEnabled -> LocationManager.GPS_PROVIDER
             else -> LocationManager.NETWORK_PROVIDER
@@ -991,12 +936,10 @@ private fun fetchLocation(
             if (location != null) {
                 onResult(location.latitude, location.longitude, provider == LocationManager.GPS_PROVIDER)
             } else {
-                // 最后已知位置为空，使用网络定位的默认值
                 val networkLocation = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 if (networkLocation != null) {
                     onResult(networkLocation.latitude, networkLocation.longitude, false)
                 } else {
-                    // 无法获取位置，使用默认位置（北京天安门）
                     onResult(39.9087, 116.3975, false)
                 }
             }
@@ -1004,7 +947,6 @@ private fun fetchLocation(
             onResult(39.9087, 116.3975, false)
         }
     } catch (e: SecurityException) {
-        // 权限被收回，使用默认位置
         onResult(39.9087, 116.3975, false)
     } catch (e: Exception) {
         onResult(39.9087, 116.3975, false)

@@ -1,17 +1,22 @@
 package com.lianyu.ai.feature.coffee.data
 
+import com.lianyu.ai.common.TimeoutBudgets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -29,6 +34,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 基于 JSON-RPC 2.0 over Streamable HTTP 协议，调用瑞幸 MCP Server。
  * 响应可能是普通 JSON 或 SSE（text/event-stream），本客户端统一解析。
+ *
+ * 响应层级（两层信封，务必区分）：
+ * 1. MCP JSON-RPC 层：{ jsonrpc, id, result: { content: [{ type:"text", text:"<json字符串>" }], isError } }
+ *    —— parseMcpEnvelope 负责提取 result.content[0].text
+ * 2. 瑞幸业务层：{ code, msg, data, success }
+ *    —— extractBusinessData 负责校验 code/success 并返回 data
  *
  * 标准流程：
  * 1. initialize 握手（获取 session-id）
@@ -55,9 +66,9 @@ class LuckinMcpClient(
         }
 
         private val defaultClient: OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(TimeoutBudgets.MCP_CONNECT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(TimeoutBudgets.MCP_READ_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(TimeoutBudgets.MCP_WRITE_MS, TimeUnit.MILLISECONDS)
             .build()
     }
 
@@ -69,21 +80,21 @@ class LuckinMcpClient(
     private var requestId = 1
 
     /**
-     * 调用 MCP 工具。
+     * 调用 MCP 工具，返回瑞幸业务信封里的 `data` 节点。
      *
      * @param token 用户瑞幸 MCP Token（完整原文，非占位符）
      * @param toolName 工具名（如 queryShopList）
      * @param arguments 工具参数（已序列化为 JsonElement）
-     * @return 工具返回的文本内容（result.content[0].text），需二次解析为业务模型
+     * @return 瑞幸业务信封 {code,msg,data,success} 中的 `data`（JsonElement）
+     * @throws McpException Token 无效 / MCP 错误 / 瑞幸业务 code != 0
      */
     suspend fun callTool(
         token: String,
         toolName: String,
         arguments: JsonObject
-    ): String = withContext(Dispatchers.IO) {
+    ): JsonElement = withContext(Dispatchers.IO) {
         require(token.isNotBlank()) { "Token 不能为空" }
 
-        // 确保 MCP 会话已初始化
         ensureInitialized(token)
 
         val request = buildToolCallRequest(token, toolName, arguments)
@@ -103,7 +114,11 @@ class LuckinMcpClient(
             )
         }
 
-        parseResponse(response)
+        // 步骤1: 解析 MCP JSON-RPC 信封，取出 result.content[0].text（一段 JSON 字符串）
+        val textPayload = parseMcpTextPayload(response)
+
+        // 步骤2: 解析瑞幸业务信封 {code,msg,data,success}，校验并返回 data
+        extractBusinessData(textPayload)
     }
 
     /**
@@ -113,10 +128,8 @@ class LuckinMcpClient(
         if (initialized.get() && sessionToken == token && sessionId != null) return
 
         initMutex.withLock {
-            // 双重检查
             if (initialized.get() && sessionToken == token && sessionId != null) return
 
-            // 执行 MCP 初始化握手
             doInitialize(token)
         }
     }
@@ -126,8 +139,7 @@ class LuckinMcpClient(
      * 步骤1: 发送 initialize 请求，获取 session-id
      * 步骤2: 发送 notifications/initialized 通知
      */
-    private fun doInitialize(token: String) {
-        // 步骤1: 发送 initialize 请求
+    private suspend fun doInitialize(token: String) {
         val initRequest = buildJsonObject {
             put("jsonrpc", JSON_RPC)
             put("method", "initialize")
@@ -154,7 +166,7 @@ class LuckinMcpClient(
         val response = client.newCall(request).execute()
 
         if (!response.isSuccessful) {
-            val body = response.body?.string().orEmpty()
+            response.body?.string()
             response.close()
             throw McpException(
                 "MCP 初始化失败: HTTP ${response.code}",
@@ -162,22 +174,13 @@ class LuckinMcpClient(
             )
         }
 
-        // 提取 session-id（Mcp-Session-Id header）
         sessionId = response.header("Mcp-Session-Id")
         sessionToken = token
 
-        // 读取并解析响应（确认握手成功）
-        val rawText = readResponseBody(response)
-        runCatching {
-            val rpcResponse = json.parseToJsonElement(rawText).jsonObject
-            val result = rpcResponse["result"] as? JsonObject
-            // 验证服务端返回的 protocolVersion
-            val serverVersion = result?.get("protocolVersion")?.jsonPrimitive?.contentOrNull
-            // 不论版本如何，继续后续操作
-        }
+        // 读取并解析响应（确认握手成功），不消费业务 data
+        readResponseBody(response)
 
-        // 步骤2: 发送 notifications/initialized 通知
-        // 通知不需要 id，服务端不会返回响应
+        // 步骤2: 发送 notifications/initialized 通知（无响应体）
         val notifyRequest = buildJsonObject {
             put("jsonrpc", JSON_RPC)
             put("method", "notifications/initialized")
@@ -194,7 +197,6 @@ class LuckinMcpClient(
             .build()
 
         val notifyResponse = client.newCall(notifyReq).execute()
-        // 通知响应可能是 202 Accepted 或无响应体，直接关闭
         notifyResponse.close()
 
         initialized.set(true)
@@ -231,25 +233,26 @@ class LuckinMcpClient(
     }
 
     /**
-     * 解析 MCP 响应。支持两种格式：
+     * 解析 MCP JSON-RPC 信封，提取 result.content[0].text（瑞幸业务 JSON 字符串）。
+     *
+     * 支持两种传输格式：
      * 1. 普通 JSON：直接解析为 JSON-RPC 信封
      * 2. SSE（text/event-stream）：逐行读取 data: 行，拼接后解析
      */
-    private fun parseResponse(response: Response): String {
+    private suspend fun parseMcpTextPayload(response: Response): String {
         val rawText = readResponseBody(response)
 
         if (rawText.isBlank()) {
             throw IOException("MCP 响应为空")
         }
 
-        // 解析 JSON-RPC 信封
         val rpcResponse = try {
             json.parseToJsonElement(rawText).jsonObject
         } catch (e: Exception) {
             throw IOException("MCP 响应解析失败: ${e.message}\n原始内容: $rawText", e)
         }
 
-        // 检查错误
+        // 检查 JSON-RPC 错误
         val error = rpcResponse["error"] as? JsonObject
         if (error != null) {
             val code = error["code"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
@@ -261,19 +264,22 @@ class LuckinMcpClient(
             }
             throw McpException(
                 "MCP 错误[$code]: $message",
-                isAuthError = code == -32001 || message.contains("oauth", ignoreCase = true) || message.contains("token", ignoreCase = true)
+                isAuthError = code == -32001 ||
+                    message.contains("oauth", ignoreCase = true) ||
+                    message.contains("token", ignoreCase = true)
             )
         }
 
-        // 提取 result.content[0].text
         val result = rpcResponse["result"] as? JsonObject
             ?: throw IOException("MCP 响应缺少 result 字段")
 
-        val isError = result["isError"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        val isError = result["isError"]?.jsonPrimitive?.contentOrNull
+            ?.toBooleanStrictOrNull() ?: false
 
         val contentArray = result["content"]
         val textContent = if (contentArray is JsonArray) {
-            contentArray.firstOrNull()?.let { (it as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull }
+            contentArray.firstOrNull()
+                ?.let { (it as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull }
         } else {
             null
         }
@@ -286,14 +292,51 @@ class LuckinMcpClient(
     }
 
     /**
+     * 解析瑞幸业务信封 { code, msg, data, success }，校验后返回 data。
+     *
+     * - code != 0 或 success == false → 抛 McpException(msg)
+     * - data 缺失 → 抛 IOException
+     * - data 为基本类型（如 cancelOrder 返回 true）→ 原样返回 JsonPrimitive
+     */
+    private fun extractBusinessData(textPayload: String): JsonElement {
+        val envelope = try {
+            json.parseToJsonElement(textPayload).jsonObject
+        } catch (e: Exception) {
+            throw IOException("瑞幸业务响应解析失败: ${e.message}\n原始: $textPayload", e)
+        }
+
+        val code = envelope["code"]?.jsonPrimitive?.intOrNull
+            ?: envelope["code"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+        val msg = envelope["msg"]?.jsonPrimitive?.contentOrNull
+        val success = envelope["success"]?.jsonPrimitive?.contentOrNull
+            ?.toBooleanStrictOrNull() ?: (code == 0)
+
+        if (code != null && code != 0 || !success) {
+            val message = msg?.takeIf { it.isNotBlank() } ?: "瑞幸接口返回错误 (code=$code)"
+            throw McpException(
+                message,
+                isAuthError = message.contains("token", ignoreCase = true) ||
+                    message.contains("登录", ignoreCase = true) ||
+                    message.contains("授权", ignoreCase = true)
+            )
+        }
+
+        return envelope["data"]
+            ?: throw IOException("瑞幸业务响应缺少 data 字段: $textPayload")
+    }
+
+    /**
      * 读取响应体，支持 SSE 和普通 JSON
      */
-    private fun readResponseBody(response: Response): String {
+    private suspend fun readResponseBody(response: Response): String {
         val contentType = response.header("Content-Type").orEmpty()
         val body = response.body ?: throw IOException("响应体为空")
 
         val rawText = if (contentType.contains("text/event-stream", ignoreCase = true)) {
-            readSseStream(body.byteStream())
+            // SSE 流：加 withTimeout 防止协程永久阻塞
+            withTimeout(TimeoutBudgets.MCP_SSE_READ_MS) {
+                readSseStream(body.byteStream())
+            }
         } else {
             body.string()
         }

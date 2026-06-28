@@ -66,6 +66,16 @@ sealed class MainRoute(val route: String) {
 
     // === 瑞幸咖啡 ===
     object Coffee : MainRoute("coffee")
+    /** 商品定制页：coffee/product/{deptId}/{productId} */
+    data class CoffeeProduct(val deptId: Long, val productId: Long) : MainRoute("coffee_product/$deptId/$productId")
+    /** 瑞幸独立设置页 */
+    object CoffeeSettings : MainRoute("coffee_settings")
+    /** Token 输入/替换页 */
+    object CoffeeToken : MainRoute("coffee_token")
+    /** 独立订单查询页（无参，手动输入订单号） */
+    object CoffeeOrderQuery : MainRoute("coffee_order")
+    /** 独立订单查询页（带初始订单号，从订单历史跳入） */
+    data class CoffeeOrderQueryWithId(val orderId: String) : MainRoute("coffee_order/$orderId")
 
     companion object {
         /** 从路由字符串解析（用于 NavHost currentRoute） */
@@ -101,6 +111,16 @@ sealed class MainRoute(val route: String) {
             route == "qqbot_settings" -> QQBotSettings
             route == "data_backup" -> DataBackup
             route == "coffee" -> Coffee
+            route == "coffee_settings" -> CoffeeSettings
+            route == "coffee_token" -> CoffeeToken
+            route == "coffee_order" -> CoffeeOrderQuery
+            route?.startsWith("coffee_order/") == true -> {
+                CoffeeOrderQueryWithId(route.removePrefix("coffee_order/"))
+            }
+            route?.startsWith("coffee_product/") == true -> {
+                val parts = route.removePrefix("coffee_product/").split("/")
+                CoffeeProduct(parts.getOrNull(0)?.toLongOrNull() ?: 0L, parts.getOrNull(1)?.toLongOrNull() ?: 0L)
+            }
             route?.startsWith("chat/") == true -> Chat(route.removePrefix("chat/").toLongOrNull() ?: 0L)
             route?.startsWith("chat_detail/") == true -> ChatDetail(route.removePrefix("chat_detail/").toLongOrNull() ?: 0L)
             route?.startsWith("voice_call/") == true -> VoiceCall(route.removePrefix("voice_call/").toLongOrNull() ?: 0L)

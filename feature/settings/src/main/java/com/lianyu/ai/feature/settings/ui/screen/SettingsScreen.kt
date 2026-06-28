@@ -49,7 +49,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -120,7 +119,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
-    onYandereModeClick: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel()
 ) {
     val configs by viewModel.configs.collectAsState(initial = emptyList())
@@ -130,6 +128,9 @@ fun SettingsScreen(
     val modelFetchStates by viewModel.modelFetchStates.collectAsState()
     val balanceInfo by viewModel.balanceInfo.collectAsState()
     val balanceQueryFailed by viewModel.balanceQueryFailed.collectAsState()
+    // [R7 FIX] connectionStatus/testedConfigs 现在是 StateFlow，需 collectAsState
+    val connectionStatus by viewModel.connectionStatus.collectAsState()
+    val testedConfigs by viewModel.testedConfigs.collectAsState()
     val visionEnabled by viewModel.visionEnabled.collectAsState()
     val visionModel by viewModel.visionModel.collectAsState()
     var expandedProvider by remember { mutableStateOf<ApiProvider?>(null) }
@@ -279,7 +280,10 @@ fun SettingsScreen(
                 balanceInfo = balanceInfo,
                 balanceQueryFailed = balanceQueryFailed,
                 showProviderPicker = showProviderPicker,
-                onShowProviderPickerChange = { showProviderPicker = it }
+                onShowProviderPickerChange = { showProviderPicker = it },
+                // [R7 FIX] 传入 StateFlow 解构后的 Map 值
+                connectionStatus = connectionStatus,
+                testedConfigs = testedConfigs
             )
 
             // ====== Vision Model Settings Section ======
@@ -334,68 +338,6 @@ fun SettingsScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "进入设置",
-                        tint = textSecondaryColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ====== Yandere Mode Section ======
-            AnimatedVisibility(
-                visible = isVisible,
-                enter = fadeIn(tween(400, delayMillis = 225)) +
-                        slideInVertically(tween(400, delayMillis = 225)) { it / 4 }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { onYandereModeClick() }
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(PetalPrimaryContainer.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Favorite,
-                                contentDescription = null,
-                                tint = PetalPrimaryContainer,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        Column {
-                            Text(
-                                text = stringResource(R.string.yandere_mode),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = textPrimaryColor
-                            )
-                            Text(
-                                text = stringResource(R.string.yandere_mode_desc),
-                                fontSize = 12.sp,
-                                color = textSecondaryColor
-                            )
-                        }
-                    }
-
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.yandere_mode),
                         tint = textSecondaryColor,
                         modifier = Modifier.size(20.dp)
                     )
@@ -670,7 +612,10 @@ private fun ApiCardsSection(
     balanceInfo: com.lianyu.ai.network.AiService.BalanceInfo?,
     balanceQueryFailed: Boolean,
     showProviderPicker: Boolean,
-    onShowProviderPickerChange: (Boolean) -> Unit
+    onShowProviderPickerChange: (Boolean) -> Unit,
+    // [R7 FIX] 传入 StateFlow 解构后的 Map 值
+    connectionStatus: Map<String, SettingsViewModel.ConnectionResult>,
+    testedConfigs: Map<String, ApiConfig>
 ) {
     AnimatedVisibility(
         visible = isVisible,
@@ -694,7 +639,7 @@ private fun ApiCardsSection(
 
             PetalApiCard(
                 config = partnerConfig,
-                connectionResult = viewModel.connectionStatus[viewModel.connectionKey(partnerConfig)]
+                connectionResult = connectionStatus[viewModel.connectionKey(partnerConfig)]
                     ?: SettingsViewModel.ConnectionResult(SettingsViewModel.ConnectionStatus.UNKNOWN),
                 isExpanded = partnerExpanded,
                 isActive = partnerConfig.isEnabled,
@@ -714,7 +659,7 @@ private fun ApiCardsSection(
                 },
                 fetchedModels = fetchedModels,
                 modelFetchStates = modelFetchStates,
-                testedConfigs = viewModel.testedConfigs,
+                testedConfigs = testedConfigs,
                 connectionKey = viewModel.connectionKey(partnerConfig),
                 isDarkTheme = isDarkTheme,
                 textPrimaryColor = textPrimaryColor,
@@ -725,7 +670,7 @@ private fun ApiCardsSection(
             )
 
             configs.filter { it.provider != ApiProvider.PARTNER }.forEach { config ->
-                val result = viewModel.connectionStatus[viewModel.connectionKey(config)]
+                val result = connectionStatus[viewModel.connectionKey(config)]
                     ?: SettingsViewModel.ConnectionResult(SettingsViewModel.ConnectionStatus.UNKNOWN)
                 val isExpanded = expandedProvider == config.provider
 
@@ -747,7 +692,7 @@ private fun ApiCardsSection(
                     },
                     fetchedModels = fetchedModels,
                     modelFetchStates = modelFetchStates,
-                    testedConfigs = viewModel.testedConfigs,
+                    testedConfigs = testedConfigs,
                     connectionKey = viewModel.connectionKey(config),
                     isDarkTheme = isDarkTheme,
                     textPrimaryColor = textPrimaryColor,

@@ -19,7 +19,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -48,6 +51,10 @@ class QQBotMessageRepository(
     val accountFlow = tokenStore.accountFlow
     val isLoggedInFlow = accountFlow.map { it != null }
     suspend fun isLoggedIn(): Boolean = tokenStore.isLoggedIn()
+
+    // [FIX] Bug4: 连接状态，供 UI 显示
+    private val _connectionState = MutableStateFlow(QQBotWebSocketClient.ConnectionState.DISCONNECTED)
+    val connectionState: StateFlow<QQBotWebSocketClient.ConnectionState> = _connectionState.asStateFlow()
 
     private var webSocketClient: QQBotWebSocketClient? = null
     private val sendMutex = Mutex()
@@ -88,9 +95,11 @@ class QQBotMessageRepository(
 
     suspend fun connect() {
         if (webSocketClient != null) return
-        val client = QQBotWebSocketClient(tokenStore, apiClient) { payload ->
+        val client = QQBotWebSocketClient(tokenStore, apiClient, onEvent = { payload ->
             handleGatewayPayload(payload)
-        }
+        }, onConnectionStateChange = { state ->
+            _connectionState.value = state
+        })
         webSocketClient = client
         client.connect()
     }
@@ -99,6 +108,7 @@ class QQBotMessageRepository(
         webSocketClient?.disconnect()
         webSocketClient?.destroy()
         webSocketClient = null
+        _connectionState.value = QQBotWebSocketClient.ConnectionState.DISCONNECTED
     }
 
     suspend fun sendTextMessage(event: QQInboundEvent, text: String): Result<SendMessageResponse?> = withContext(Dispatchers.IO) {

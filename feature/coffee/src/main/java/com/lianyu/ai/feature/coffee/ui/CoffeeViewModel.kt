@@ -8,9 +8,11 @@ import com.lianyu.ai.feature.coffee.data.LuckinTokenStore
 import com.lianyu.ai.feature.coffee.data.McpException
 import com.lianyu.ai.feature.coffee.data.model.OrderCreated
 import com.lianyu.ai.feature.coffee.data.model.OrderDetail
+import com.lianyu.ai.feature.coffee.data.model.OrderHistoryEntry
 import com.lianyu.ai.feature.coffee.data.model.OrderPreview
 import com.lianyu.ai.feature.coffee.data.model.ProductInfo
 import com.lianyu.ai.feature.coffee.data.model.ProductListItem
+import com.lianyu.ai.feature.coffee.data.model.SelectedProduct
 import com.lianyu.ai.feature.coffee.data.model.ShopInfo
 import com.lianyu.ai.feature.coffee.domain.CoffeeOrderRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,10 +23,9 @@ import kotlinx.coroutines.launch
 
 /**
  * 下单流程步骤（严格约束：不可跳步）
+ * TOKEN_CONFIG 已迁移到独立设置页，不再作为下单步骤
  */
 enum class OrderStep {
-    /** 配置 Token */
-    TOKEN_CONFIG,
     /** 选择门店 */
     SHOP_SELECT,
     /** 搜索并选择商品 */
@@ -46,20 +47,26 @@ data class CoffeeUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val isTokenConfigured: Boolean = false,
-    val tokenInput: String = "",
-    val currentStep: OrderStep = OrderStep.TOKEN_CONFIG,
+    val currentStep: OrderStep = OrderStep.SHOP_SELECT,
     val shops: List<ShopInfo> = emptyList(),
     val selectedShop: ShopInfo? = null,
     val searchQuery: String = "",
     val products: List<ProductInfo> = emptyList(),
-    val selectedProducts: List<Pair<ProductInfo, Int>> = emptyList(),
+    val selectedProducts: List<SelectedProduct> = emptyList(),
     val orderPreview: OrderPreview? = null,
     val createdOrder: OrderCreated? = null,
     val orderDetail: OrderDetail? = null,
     val queryOrderId: String = "",
     val longitude: Double = 0.0,
     val latitude: Double = 0.0,
-    val hasPreciseLocation: Boolean = false
+    val hasPreciseLocation: Boolean = false,
+    // === 商品定制状态 ===
+    val productCustomizing: ProductInfo? = null,
+    val customizingDeptId: Long = 0,
+    val customizingAmount: Int = 1,
+    val orderHistory: List<OrderHistoryEntry> = emptyList(),
+    /** 订单备注（createOrder 可选参数 remark） */
+    val remark: String = ""
 )
 
 class CoffeeViewModel(
@@ -72,49 +79,42 @@ class CoffeeViewModel(
 
     init {
         checkTokenStatus()
+        loadOrderHistory()
     }
 
     private fun checkTokenStatus() {
         viewModelScope.launch {
             val token = tokenStore.token.first()
             _uiState.value = _uiState.value.copy(
-                isTokenConfigured = token.isNotBlank(),
-                currentStep = if (token.isNotBlank()) OrderStep.SHOP_SELECT else OrderStep.TOKEN_CONFIG
+                isTokenConfigured = token.isNotBlank()
             )
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // Token 管理
-    // ════════════════════════════════════════════════════════════════
-
-    fun updateTokenInput(input: String) {
-        _uiState.value = _uiState.value.copy(tokenInput = input)
-    }
-
-    fun saveToken() {
-        val token = _uiState.value.tokenInput.trim()
-        if (token.isBlank()) {
-            _uiState.value = _uiState.value.copy(errorMessage = "Token 不能为空")
-            return
-        }
+    private fun loadOrderHistory() {
         viewModelScope.launch {
-            tokenStore.saveToken(token)
-            _uiState.value = _uiState.value.copy(
-                isTokenConfigured = true,
-                tokenInput = "",
-                currentStep = OrderStep.SHOP_SELECT,
-                errorMessage = null
-            )
+            val history = tokenStore.snapshotOrderHistory()
+            _uiState.value = _uiState.value.copy(orderHistory = history)
         }
     }
 
-    fun clearToken() {
-        viewModelScope.launch {
-            tokenStore.clearToken()
-            _uiState.value = CoffeeUiState(currentStep = OrderStep.TOKEN_CONFIG)
-        }
+    fun refreshTokenStatus() = checkTokenStatus()
+
+    // ════════════════════════════════════════════════════════════════
+    // Token 管理（仅做保存/清除，UI 在独立设置页）
+    // ════════════════════════════════════════════════════════════════
+
+    suspend fun saveToken(token: String) {
+        tokenStore.saveToken(token)
+        _uiState.value = _uiState.value.copy(isTokenConfigured = token.isNotBlank())
     }
+
+    suspend fun clearToken() {
+        tokenStore.clearToken()
+        _uiState.value = _uiState.value.copy(isTokenConfigured = false)
+    }
+
+    suspend fun tokenSavedDaysAgo(): Int = tokenStore.tokenSavedDaysAgo()
 
     // ════════════════════════════════════════════════════════════════
     // 门店查询
@@ -150,7 +150,7 @@ class CoffeeViewModel(
             } catch (e: McpException) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    errorMessage = if (e.isAuthError) "Token 无效或已过期，请重新获取" else e.message
+                    errorMessage = if (e.isAuthError) "Token 无效或已过期，请前往设置重新获取" else e.message
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -206,20 +206,148 @@ class CoffeeViewModel(
         }
     }
 
-    fun addProduct(product: ProductInfo, amount: Int = 1) {
-        val current = _uiState.value.selectedProducts.toMutableList()
-        val existing = current.indexOfFirst { it.first.productId == product.productId }
+    // ════════════════════════════════════════════════════════════════
+    // 商品定制（queryProductDetailInfo + switchProduct）
+    // ════════════════════════════════════════════════════════════════
+
+    /** 加载商品详情，进入定制页前调用 */
+    fun loadProductDetail(deptId: Long, productId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+            try {
+                val detail = repository.queryProductDetail(deptId, productId)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    productCustomizing = detail,
+                    customizingDeptId = deptId,
+                    customizingAmount = 1
+                )
+            } catch (e: McpException) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = if (e.isAuthError) "Token 无效或已过期" else "加载商品详情失败: ${e.message}"
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "加载商品详情失败: ${e.message}"
+                )
+            }
+        }
+    }
+
+    /**
+     * 切换属性选项（温度/杯型等）。
+     * 调用 switchProduct 拿到新的 skuCode + estimatePrice，更新定制状态。
+     */
+    fun switchAttribute(attributeId: Long, subAttributeId: Long) {
+        val state = _uiState.value
+        val customizing = state.productCustomizing ?: return
+        val deptId = state.customizingDeptId
+        if (deptId == 0L) return
+
+        viewModelScope.launch {
+            _uiState.value = state.copy(isLoading = true, errorMessage = null)
+            try {
+                val updated = repository.switchProduct(
+                    deptId = deptId,
+                    productId = customizing.productId,
+                    skuCode = customizing.skuCode,
+                    attributeId = attributeId,
+                    subAttributeId = subAttributeId,
+                    operation = 3,
+                    amount = state.customizingAmount
+                )
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    productCustomizing = updated
+                )
+            } catch (e: McpException) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = if (e.isAuthError) "Token 无效或已过期" else "属性切换失败: ${e.message}"
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "属性切换失败: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun changeCustomizingAmount(delta: Int) {
+        val newAmount = (_uiState.value.customizingAmount + delta).coerceAtLeast(1)
+        _uiState.value = _uiState.value.copy(customizingAmount = newAmount)
+    }
+
+    fun clearCustomizing() {
+        _uiState.value = _uiState.value.copy(
+            productCustomizing = null,
+            customizingAmount = 1
+        )
+    }
+
+    /**
+     * 把当前定制结果合并进 selectedProducts。
+     * 若同 productId 已存在则累加数量（取新 skuCode 和到手价）。
+     */
+    fun confirmCustomizedProduct() {
+        val state = _uiState.value
+        val customizing = state.productCustomizing ?: return
+        val amount = state.customizingAmount
+
+        val selected = SelectedProduct(
+            productId = customizing.productId,
+            productName = customizing.productName,
+            pictureUrl = customizing.pictureUrl,
+            skuCode = customizing.skuCode,
+            amount = amount,
+            estimatePrice = customizing.estimatePrice
+        )
+
+        val current = state.selectedProducts.toMutableList()
+        val existing = current.indexOfFirst { it.productId == selected.productId }
         if (existing >= 0) {
-            current[existing] = product to (current[existing].second + amount)
+            // 同商品不同 SKU：以最新定制结果覆盖（瑞幸一个商品通常只有一个有效 SKU）
+            current[existing] = selected.copy(amount = current[existing].amount + amount)
         } else {
-            current.add(product to amount)
+            current.add(selected)
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedProducts = current,
+            productCustomizing = null,
+            customizingAmount = 1
+        )
+    }
+
+    /** 快捷添加（用搜索返回的默认 SKU，不走进定制页） */
+    fun addProductQuick(product: ProductInfo, amount: Int = 1) {
+        if (product.skuCode.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "该商品暂无可下单规格")
+            return
+        }
+        val selected = SelectedProduct(
+            productId = product.productId,
+            productName = product.productName,
+            pictureUrl = product.pictureUrl,
+            skuCode = product.skuCode,
+            amount = amount,
+            estimatePrice = product.estimatePrice
+        )
+        val current = _uiState.value.selectedProducts.toMutableList()
+        val existing = current.indexOfFirst { it.productId == selected.productId }
+        if (existing >= 0) {
+            current[existing] = current[existing].copy(amount = current[existing].amount + amount)
+        } else {
+            current.add(selected)
         }
         _uiState.value = _uiState.value.copy(selectedProducts = current)
     }
 
     fun removeProduct(productId: Long) {
         _uiState.value = _uiState.value.copy(
-            selectedProducts = _uiState.value.selectedProducts.filterNot { it.first.productId == productId }
+            selectedProducts = _uiState.value.selectedProducts.filterNot { it.productId == productId }
         )
     }
 
@@ -240,13 +368,7 @@ class CoffeeViewModel(
         val shop = state.selectedShop
         if (shop == null || state.selectedProducts.isEmpty()) return
 
-        val productList = state.selectedProducts.map { (product, amount) ->
-            ProductListItem(
-                amount = amount,
-                productId = product.productId,
-                skuCode = product.skus.firstOrNull()?.skuCode ?: ""
-            )
-        }
+        val productList = state.selectedProducts.map { it.toListItem() }
 
         viewModelScope.launch {
             _uiState.value = state.copy(isLoading = true, errorMessage = null, currentStep = OrderStep.ORDER_PREVIEW)
@@ -272,19 +394,14 @@ class CoffeeViewModel(
         }
     }
 
-    fun createOrder() {
+    fun createOrder(remark: String? = null) {
         val state = _uiState.value
         val shop = state.selectedShop
         val preview = state.orderPreview
         if (shop == null || preview == null || state.selectedProducts.isEmpty()) return
 
-        val productList = state.selectedProducts.map { (product, amount) ->
-            ProductListItem(
-                amount = amount,
-                productId = product.productId,
-                skuCode = product.skus.firstOrNull()?.skuCode ?: ""
-            )
-        }
+        val productList = state.selectedProducts.map { it.toListItem() }
+        val actualRemark = remark ?: state.remark.takeIf { it.isNotBlank() }
 
         viewModelScope.launch {
             _uiState.value = state.copy(isLoading = true, errorMessage = null)
@@ -294,8 +411,12 @@ class CoffeeViewModel(
                     productList = productList,
                     longitude = shop.longitude,
                     latitude = shop.latitude,
-                    couponCodeList = preview.couponCodeList.ifEmpty { null }
+                    couponCodeList = preview.couponCodeList.ifEmpty { null },
+                    remark = actualRemark
                 )
+                // 写入订单历史
+                tokenStore.addOrderHistory(order, shop.deptName)
+                loadOrderHistory()
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     createdOrder = order,
@@ -323,16 +444,25 @@ class CoffeeViewModel(
         _uiState.value = _uiState.value.copy(queryOrderId = orderId)
     }
 
-    fun queryOrderStatus() {
-        val orderId = _uiState.value.queryOrderId.trim()
-        if (orderId.isBlank()) {
+    fun updateRemark(remark: String) {
+        _uiState.value = _uiState.value.copy(remark = remark)
+    }
+
+    /**
+     * 查询订单状态。可传 orderId（来自订单历史跳转），不传则用输入框的 queryOrderId。
+     * 成功后同时写入 queryOrderId，便于后续取消订单复用。
+     */
+    fun queryOrderStatus(orderId: String? = null) {
+        val target = orderId?.takeIf { it.isNotBlank() } ?: _uiState.value.queryOrderId.trim()
+        if (target.isBlank()) {
             _uiState.value = _uiState.value.copy(errorMessage = "请输入订单号")
             return
         }
+        _uiState.value = _uiState.value.copy(queryOrderId = target)
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null, currentStep = OrderStep.ORDER_STATUS)
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             try {
-                val detail = repository.queryOrderDetail(orderId)
+                val detail = repository.queryOrderDetail(target)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     orderDetail = detail
@@ -351,16 +481,20 @@ class CoffeeViewModel(
         }
     }
 
-    /** 支付完成后查询取餐码 */
+    /** 支付完成后查询取餐码（用 orderIdStr，fallback 到 orderId 数字） */
     fun queryCurrentOrderStatus() {
-        val orderId = _uiState.value.createdOrder?.orderId
+        val orderId = _uiState.value.createdOrder?.orderIdStr
+            ?.takeIf { it.isNotBlank() }
+            ?: _uiState.value.createdOrder?.orderId?.takeIf { it != 0L }?.toString()
         if (orderId.isNullOrBlank()) return
-        _uiState.value = _uiState.value.copy(queryOrderId = orderId)
-        queryOrderStatus()
+        _uiState.value = _uiState.value.copy(currentStep = OrderStep.ORDER_STATUS)
+        queryOrderStatus(orderId)
     }
 
     fun cancelOrder() {
-        val orderId = _uiState.value.createdOrder?.orderId ?: _uiState.value.queryOrderId
+        val orderId = _uiState.value.createdOrder?.orderIdStr
+            ?.takeIf { it.isNotBlank() }
+            ?: _uiState.value.queryOrderId
         if (orderId.isBlank()) return
 
         viewModelScope.launch {
@@ -420,6 +554,19 @@ class CoffeeViewModel(
         )
     }
 
+    /** 从订单历史跳转查询（独立订单查询页用，同 ViewModel scope） */
+    fun queryFromHistory(entry: OrderHistoryEntry) {
+        queryOrderStatus(entry.orderIdStr)
+    }
+
+    /** 清空订单历史 */
+    fun clearOrderHistory() {
+        viewModelScope.launch {
+            tokenStore.clearOrderHistory()
+            loadOrderHistory()
+        }
+    }
+
     companion object {
         fun factory(context: android.content.Context): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
@@ -433,3 +580,10 @@ class CoffeeViewModel(
             }
     }
 }
+
+/** SelectedProduct → MCP 下单用的 ProductListItem */
+private fun SelectedProduct.toListItem() = ProductListItem(
+    amount = amount,
+    productId = productId,
+    skuCode = skuCode
+)
