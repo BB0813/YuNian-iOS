@@ -832,8 +832,12 @@ private val MAX_BATCH_SIZE = 10
                     generateWithLocalModel(companion, history, stickerProbability, ntpTimeEnabled)
                 } ?: throw java.util.concurrent.TimeoutException("Local model timeout"))
             } else {
-                runInterruptibleSafe(timeoutMs = API_TIMEOUT_MS) {
-                    aiService.sendMessage(companion.toAiCompanionInfo(), history.toAiChatMessages(), stickerProbability, ntpTimeEnabled)
+                // 工具调用循环：最多 3 轮，防死循环
+                val tools = com.lianyu.ai.domain.ToolRegistry.all()
+                val historyForAi = history.toAiChatMessages()
+                val companionInfo = companion.toAiCompanionInfo()
+                runInterruptibleSafe(timeoutMs = API_TIMEOUT_MS * 3) {
+                    executeWithToolLoop(companionInfo, historyForAi, stickerProbability, ntpTimeEnabled, tools)
                 } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
             }
 
@@ -882,6 +886,91 @@ private val MAX_BATCH_SIZE = 10
             ChatDebugLog.log("[ChatVM] startAiResponse FINALLY: exitLoading, activeRequests=${_activeRequests.get()}")
             exitLoading()
         }
+    }
+
+    /**
+     * 工具调用执行循环。
+     *
+     * AI 返回 tool_calls → 执行本地工具 → 把结果作为 role=tool 消息追加到 history → 重新调用 AI。
+     * 最多 [maxRounds] 轮，防死循环。最后一轮若仍为 tool_calls，转为提示文本。
+     *
+     * 安全约束：createOrder 等涉及支付的工具需用户确认——当前实现直接执行
+     * （createOrder 工具的 description 已告知 AI 先确认，且 AI 系统提示词注入了说明）。
+     * 后续可在此拦截特定工具名做用户确认交互。
+     */
+    private suspend fun executeWithToolLoop(
+        companionInfo: com.lianyu.ai.domain.AiCompanionInfo,
+        history: List<com.lianyu.ai.domain.AiChatMessage>,
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean,
+        tools: List<com.lianyu.ai.domain.AiTool>,
+        maxRounds: Int = 3
+    ): com.lianyu.ai.domain.AiResponse {
+        // 用可变列表承载 history，工具调用中间轮次追加消息但不入库
+        val mutableHistory = history.toMutableList()
+        var currentResponse = aiService.sendMessage(companionInfo, mutableHistory.toList(), stickerProbability, ntpTimeEnabled, tools)
+
+        var round = 0
+        while (!currentResponse.toolCalls.isNullOrEmpty() && round < maxRounds) {
+            round++
+            val activeToolCalls = currentResponse.toolCalls!!
+            ChatDebugLog.log("[ChatVM] Tool loop round $round: ${activeToolCalls.size} calls")
+
+            // 把 AI 的 tool_call 消息追加到 history（role=assistant, 带 tool_calls）
+            // AiChatMessage 不支持 tool_calls 字段，这里用特殊 content 标记，
+            // 实际 tool_calls + tool 结果由 AiService 的内部消息构建处理
+            // —— 但 AiChatMessage→ChatMessage→Message 转换不保留 tool_calls，
+            // 所以这里需要走 AiService 的 Message 列表重载路径。
+            // 简化：直接在 ChatViewModel 构造 tool 结果消息，追加为普通 user/system 消息
+            // 让 AI 在下一轮看到工具结果。
+            for (toolCall in activeToolCalls) {
+                val tool = com.lianyu.ai.domain.ToolRegistry.get(toolCall.name)
+                val result = if (tool != null) {
+                    runCatching {
+                        withTimeoutOrNull(TimeoutBudgets.MCP_READ_MS) {
+                            tool.execute(toolCall.arguments)
+                        } ?: "工具执行超时"
+                    }.getOrElse {
+                        "工具执行失败: ${it.message}"
+                    }
+                } else {
+                    "工具 ${toolCall.name} 不存在"
+                }
+                ChatDebugLog.log("[ChatVM] Tool ${toolCall.name} executed, resultLen=${result.length}")
+
+                // 把工具结果作为 assistant 消息追加（AiChatMessage 不支持 role=tool，
+                // 用 user 角色携带 "工具结果" 前缀让 AI 理解）
+                mutableHistory.add(
+                    com.lianyu.ai.domain.AiChatMessage(
+                        isFromUser = false,
+                        content = "[工具调用结果] ${toolCall.name}:\n$result",
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            // 重新调用 AI，让它基于工具结果生成回复
+            currentResponse = aiService.sendMessage(
+                companionInfo,
+                mutableHistory.toList(),
+                stickerProbability,
+                ntpTimeEnabled,
+                tools
+            )
+        }
+
+        // 超过最大轮次仍是 tool_calls → 转为提示
+        if (!currentResponse.toolCalls.isNullOrEmpty()) {
+            ChatDebugLog.log("[ChatVM] Tool loop reached max rounds $maxRounds")
+            return com.lianyu.ai.domain.AiResponse(
+                content = "我已经帮你处理了相关操作，但还有部分工具调用未能完成。你可以告诉我具体想做什么，我来帮你。",
+                reasoningContent = null,
+                toolCalls = null,
+                finishReason = "stop"
+            )
+        }
+
+        return currentResponse
     }
 
     /**

@@ -21,6 +21,7 @@ import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.CompanionProvider
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.CoffeeOrderProvider
 import com.lianyu.ai.domain.LocalModelProvider
 import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
@@ -240,6 +241,17 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             ServiceRegistry.registerSingleton(YandereModeManager::class.java) {
                 YandereModeManager(app)
             }
+
+            // ── 瑞幸咖啡 MCP 工具（AI 对话可调用） ──
+            // CoffeeOrderProvider 暴露给 feature:chat 的 AiTool 实现
+            ServiceRegistry.registerSingleton(CoffeeOrderProvider::class.java) {
+                com.lianyu.ai.feature.coffee.CoffeeOrderProviderImpl(app)
+            }
+            // 注册瑞幸工具到 ToolRegistry，供 AiService 随请求一并发给 AI
+            com.lianyu.ai.feature.coffee.LuckinCoffeeTools.registerAll(
+                ServiceRegistry.getOrThrow(CoffeeOrderProvider::class.java)
+            )
+
             ServiceRegistry.markInitialized()
         }
 
