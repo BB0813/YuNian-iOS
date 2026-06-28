@@ -12,7 +12,9 @@ import com.lianyu.ai.common.ImageUtils
 import com.lianyu.ai.domain.ServiceRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,17 +42,32 @@ enum class SwitchStage {
     UPDATING_PREFERENCE
 }
 
+/**
+ * [R13 FIX] 一次性事件，通过 SharedFlow 发送，不再用 StateFlow 存。
+ */
+sealed class RoleSwitchEvent {
+    data class Error(val message: String) : RoleSwitchEvent()
+    data class StageUpdate(val stage: SwitchStage) : RoleSwitchEvent()
+    object Success : RoleSwitchEvent()
+}
+
 class ProfileViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = ServiceRegistry.getOrThrow(UserRepository::class.java)
-    private val companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
+    // [R12 FIX] 改为 by lazy 延迟获取，消除启动竞态闪退（与 CreateCompanionViewModel 修复一致）
+    private val repository by lazy { ServiceRegistry.getOrThrow(UserRepository::class.java) }
+    private val companionRepository by lazy { ServiceRegistry.getOrThrow(CompanionRepository::class.java) }
     private val rolePresetStore = RolePresetStore(application)
 
-    val userName: StateFlow<String> = repository.userName
-    val userAvatar: StateFlow<String?> = repository.userAvatar
-    val selectedRole: StateFlow<CompanionRole> = repository.selectedRole
+    val userName: StateFlow<String> by lazy { repository.userName }
+    val userAvatar: StateFlow<String?> by lazy { repository.userAvatar }
+    val selectedRole: StateFlow<CompanionRole> by lazy { repository.selectedRole }
 
+    // [R13 FIX] 一次性事件改用 SharedFlow（非 sticky）：原 StateFlow<RoleSwitchState.Error>
+    // 靠 UI 手动 consumeSwitchError() 清除，是教科书级反模式。
     private val _switchState = MutableStateFlow<RoleSwitchState>(RoleSwitchState.Idle)
     val switchState: StateFlow<RoleSwitchState> = _switchState.asStateFlow()
+
+    private val _switchEvent = MutableSharedFlow<RoleSwitchEvent>(extraBufferCapacity = 4)
+    val switchEvent: SharedFlow<RoleSwitchEvent> = _switchEvent
 
     /** 兼容旧 UI：只要处于 InProgress 状态即视为切换中。 */
     val isSwitchingRole: StateFlow<Boolean> = _switchState
@@ -144,12 +161,15 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
                 throw e
             } catch (e: Exception) {
                 SecureLog.e("ProfileViewModel", "switchRole failed", e)
-                _switchState.value = RoleSwitchState.Error(e.message ?: "切换失败")
+                _switchState.value = RoleSwitchState.Idle
+                // [R13 FIX] 错误通过 SharedFlow 发送一次性事件，不再用 sticky StateFlow
+                _switchEvent.tryEmit(RoleSwitchEvent.Error(e.message ?: "切换失败"))
                 false
             }
 
             if (success) {
                 _switchState.value = RoleSwitchState.Idle
+                _switchEvent.tryEmit(RoleSwitchEvent.Success)
                 // 保证所有导航/Compose 状态更新都在主线程执行
                 onComplete?.invoke()
             }
@@ -157,11 +177,10 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * 消费错误状态，避免 Toast/Dialog 重复触发。
+     * [R13 FIX] 保留向后兼容：原 consumeSwitchError 现在是 no-op，
+     * 因为错误已通过 SharedFlow 发送，不再需要手动清除 sticky 状态。
      */
     fun consumeSwitchError() {
-        if (_switchState.value is RoleSwitchState.Error) {
-            _switchState.value = RoleSwitchState.Idle
-        }
+        // no-op: errors now flow through _switchEvent SharedFlow
     }
 }

@@ -90,7 +90,8 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private fun buildDatabase(context: Context): AppDatabase {
-            autoBackupIfNeeded(context)
+            // [M6 FIX] autoBackupIfNeeded 做文件 copyTo IO，不应在 getDatabase 首次调用路径
+            // （可能在主线程）同步执行。这里只构建数据库，备份交给 Application.bgScope 异步触发。
             return openVerifiedDatabase(context, allowRecovery = true)
         }
 
@@ -814,10 +815,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        fun clearOldBackups(keepCount: Int = 5): Int {
+        fun clearOldBackups(context: Context, keepCount: Int = 5): Int {
             return try {
-                val backupDir = File(android.os.Environment.getDataDirectory(),
-                    "data/${java.lang.System.getProperty("package.name", "")}/files/db_backup")
+                // [M5 FIX] 原用未设置的 System property "package.name" 拼接路径，
+                // 结果是 /data/data//files/db_backup，永远找不到目录，旧备份永不清理。
+                // 改用 context.filesDir 获取正确的应用私有目录。
+                val backupDir = File(context.applicationContext.filesDir, "db_backup")
                 if (!backupDir.exists()) return 0
 
                 val backups = backupDir.listFiles()

@@ -65,6 +65,10 @@ import com.lianyu.ai.feature.wechat.ui.WeChatSettingsScreen
 import com.lianyu.ai.feature.qqbot.ui.QQBotSettingsScreen
 import com.lianyu.ai.feature.backup.BackupScreen
 import com.lianyu.ai.feature.coffee.ui.CoffeeScreen
+import com.lianyu.ai.feature.coffee.ui.CoffeeOrderQueryScreen
+import com.lianyu.ai.feature.coffee.ui.CoffeeSettingsScreen
+import com.lianyu.ai.feature.coffee.ui.CoffeeTokenInputScreen
+import com.lianyu.ai.feature.coffee.ui.ProductDetailScreen
 import com.lianyu.ai.uicommon.component.UpdateDialog
 import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
@@ -316,7 +320,7 @@ fun MainScreen(mainActivity: Activity) {
                 composable(MainRoute.CreateGroup.route) { CreateGroupScreen(onNavigateBack = { navController.popBackStack() }) }
 
                 // === 设置 ===
-                composable(MainRoute.Settings.route) { SettingsScreen(onNavigateBack = { navController.popBackStack() }, onYandereModeClick = { navController.navigate(MainRoute.YandereMode.route) }) }
+                composable(MainRoute.Settings.route) { SettingsScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.TtsSettings.route) { TtsSettingsScreen(onNavigateBack = { navController.popBackStack() }, isDarkTheme = isDark) }
                 composable(MainRoute.TokenUsage.route) { TokenUsageScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.Memory.route) { MemoryScreen(onNavigateBack = { navController.popBackStack() }) }
@@ -387,7 +391,57 @@ fun MainScreen(mainActivity: Activity) {
                 composable(MainRoute.WeChatBind.route) { WeChatBindScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.QQBotSettings.route) { QQBotSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.DataBackup.route) { BackupScreen(onNavigateBack = { navController.popBackStack() }) }
-                composable(MainRoute.Coffee.route) { CoffeeScreen(onBack = { navController.popBackStack() }) }
+                composable(MainRoute.Coffee.route) {
+                    CoffeeScreen(
+                        onBack = { navController.popBackStack() },
+                        onProductClick = { deptId, productId ->
+                            navController.navigate(MainRoute.CoffeeProduct(deptId, productId).route)
+                        },
+                        onSettingsClick = { navController.navigate(MainRoute.CoffeeSettings.route) },
+                        onOrderQueryClick = { navController.navigate(MainRoute.CoffeeOrderQuery.route) }
+                    )
+                }
+                composable(
+                    MainRoute.CoffeeProduct(0, 0).route.replace("0", "{deptId}/{productId}"),
+                    arguments = listOf(
+                        navArgument("deptId") { type = NavType.LongType },
+                        navArgument("productId") { type = NavType.LongType }
+                    )
+                ) { backStackEntry ->
+                    val deptId = backStackEntry.arguments?.getLong("deptId") ?: 0L
+                    val productId = backStackEntry.arguments?.getLong("productId") ?: 0L
+                    ProductDetailScreen(
+                        deptId = deptId,
+                        productId = productId,
+                        onBack = { navController.popBackStack() },
+                        onAddedToCart = { navController.popBackStack() }
+                    )
+                }
+                composable(MainRoute.CoffeeSettings.route) {
+                    CoffeeSettingsScreen(
+                        onBack = { navController.popBackStack() },
+                        onReplaceToken = { navController.navigate(MainRoute.CoffeeToken.route) },
+                        onQueryOrder = { orderId ->
+                            navController.navigate(MainRoute.CoffeeOrderQueryWithId(orderId).route)
+                        }
+                    )
+                }
+                composable(MainRoute.CoffeeToken.route) {
+                    CoffeeTokenInputScreen(onBack = { navController.popBackStack() })
+                }
+                composable(MainRoute.CoffeeOrderQuery.route) {
+                    CoffeeOrderQueryScreen(onBack = { navController.popBackStack() })
+                }
+                composable(
+                    MainRoute.CoffeeOrderQueryWithId("placeholder").route.replace("placeholder", "{orderId}"),
+                    arguments = listOf(navArgument("orderId") { type = NavType.StringType; nullable = false })
+                ) { backStackEntry ->
+                    val orderId = backStackEntry.arguments?.getString("orderId").orEmpty()
+                    CoffeeOrderQueryScreen(
+                        initialOrderId = orderId,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
             }
 
             // 更新弹窗

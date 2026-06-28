@@ -17,6 +17,11 @@ object WeChatServiceLocator {
     @Volatile
     private var sdkClientManager: WeChatSdkClientManager? = null
 
+    // [R8 FIX] 缓存 chatBridge 单例：原每次 chatBridge() 返回新实例（各带 bridgeScope），
+    // 用完不 close，每条消息泄漏一个 CoroutineScope。
+    @Volatile
+    private var chatBridge: WeChatChatBridge? = null
+
     fun tokenStore(context: Context): WeChatTokenStore {
         return tokenStore ?: synchronized(this) {
             tokenStore ?: WeChatTokenStore(context.applicationContext).also {
@@ -38,8 +43,29 @@ object WeChatServiceLocator {
     }
 
     fun chatBridge(context: Context): WeChatChatBridge {
-        val repo = messageRepository(context)
-        return WeChatChatBridge(context.applicationContext, repo)
+        // [R8 FIX] 双重检查锁定返回单例，不再每次新建
+        return chatBridge ?: synchronized(this) {
+            chatBridge ?: run {
+                val repo = messageRepository(context)
+                WeChatChatBridge(context.applicationContext, repo).also {
+                    chatBridge = it
+                }
+            }
+        }
+    }
+
+    /**
+     * [R8 FIX] 释放缓存的 bridge（关闭其内部 CoroutineScope）。
+     * 在微信服务停止时调用，避免 scope 泄漏。
+     */
+    fun shutdown() {
+        synchronized(this) {
+            chatBridge?.close()
+            chatBridge = null
+            messageRepository = null
+            sdkClientManager = null
+            tokenStore = null
+        }
     }
 
     fun sdkClientManager(context: Context): WeChatSdkClientManager {

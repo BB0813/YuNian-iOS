@@ -17,7 +17,8 @@ class LanguageViewModel(application: Application) : AndroidViewModel(application
 
     fun setLanguage(code: String) {
         _language.value = code
-        prefs.edit().putString("language", code).commit()
+        // [R18 FIX] commit() 同步写磁盘阻塞主线程，改用 apply() 异步写入
+        prefs.edit().putString("language", code).apply()
     }
 
     fun applyLanguage(activity: android.app.Activity) {

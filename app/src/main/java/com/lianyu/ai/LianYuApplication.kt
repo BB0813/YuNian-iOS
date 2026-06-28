@@ -170,7 +170,10 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         }
 
         private fun autoBackupDatabase(app: Application) {
+            // [M6 FIX] 备份涉及文件 IO，已从 AppDatabase.buildDatabase 主路径移除，
+            // 在此异步执行，不阻塞首屏渲染。同时顺带清理过期备份。
             runCatching { AppDatabase.autoBackupIfNeeded(app.applicationContext) }
+            runCatching { AppDatabase.clearOldBackups(app.applicationContext) }
         }
 
         private fun initVectorLibrary(app: Application) {

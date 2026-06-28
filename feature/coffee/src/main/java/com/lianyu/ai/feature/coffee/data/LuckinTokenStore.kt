@@ -6,18 +6,23 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.lianyu.ai.feature.coffee.data.model.OrderCreated
+import com.lianyu.ai.feature.coffee.data.model.OrderHistoryEntry
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 
 private val Context.coffeeDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "luckin_coffee_prefs"
 )
 
 /**
- * 瑞幸 MCP Token 存储。
+ * 瑞幸咖啡本地存储。
  *
- * 用户在 App 内输入从 https://open.lkcoffee.com/mcp 登录获取的 Token，
- * 持久化到 DataStore。Token 有效期约 30 天，过期后用户需重新获取。
+ * 持久化两类数据到同一个 DataStore（`luckin_coffee_prefs`）：
+ * 1. MCP Bearer Token（用户从 https://open.lkcoffee.com/mcp 登录获取，有效期约 30 天）
+ * 2. 订单历史（createOrder 成功后写入，最近 20 条，用于设置页展示）
  *
  * 安全说明：
  * - Token 与瑞幸账号会话绑定，严禁泄露
@@ -27,6 +32,13 @@ class LuckinTokenStore(private val context: Context) {
 
     private val tokenKey = stringPreferencesKey("luckin_mcp_token")
     private val tokenSaveTimeKey = stringPreferencesKey("luckin_mcp_token_save_time")
+    private val orderHistoryKey = stringPreferencesKey("luckin_order_history")
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        explicitNulls = false
+    }
 
     /** 获取已存储的 Token，空字符串表示未配置 */
     val token: Flow<String> = context.coffeeDataStore.data.map { it[tokenKey] ?: "" }
@@ -36,8 +48,13 @@ class LuckinTokenStore(private val context: Context) {
         it[tokenSaveTimeKey]?.toLongOrNull() ?: 0L
     }
 
+    /** 订单历史（按 createdAt 倒序，最近 20 条） */
+    val orderHistory: Flow<List<OrderHistoryEntry>> = context.coffeeDataStore.data.map { prefs ->
+        prefs[orderHistoryKey]?.let(::decodeHistory) ?: emptyList()
+    }
+
     /**
-     * 保存 Token。
+     * 保存 Token（覆盖旧值，用于"替换 Token"场景）。
      * @param token 用户从瑞幸开放平台获取的完整 Bearer Token
      */
     suspend fun saveToken(token: String) {
@@ -49,7 +66,10 @@ class LuckinTokenStore(private val context: Context) {
 
     /** 清除 Token（用户撤销授权时调用） */
     suspend fun clearToken() {
-        context.coffeeDataStore.edit { it.remove(tokenKey); it.remove(tokenSaveTimeKey) }
+        context.coffeeDataStore.edit {
+            it.remove(tokenKey)
+            it.remove(tokenSaveTimeKey)
+        }
     }
 
     /**
@@ -63,4 +83,48 @@ class LuckinTokenStore(private val context: Context) {
         val elapsed = System.currentTimeMillis() - saveTime
         return elapsed > 29L * 24 * 60 * 60 * 1000
     }
+
+    /** Token 保存距今天数（用于设置页展示），0 表示未配置 */
+    suspend fun tokenSavedDaysAgo(): Int {
+        var saveTime = 0L
+        tokenSaveTime.collect { saveTime = it; return@collect }
+        if (saveTime == 0L) return 0
+        val elapsed = System.currentTimeMillis() - saveTime
+        return (elapsed / (24L * 60 * 60 * 1000)).toInt().coerceAtLeast(0)
+    }
+
+    /** 新增一条订单历史（createOrder 成功后调用），自动截断到最近 20 条 */
+    suspend fun addOrderHistory(order: OrderCreated, deptName: String) {
+        if (order.orderIdStr.isBlank() && order.orderId == 0L) return
+        context.coffeeDataStore.edit { prefs ->
+            val current = prefs[orderHistoryKey]?.let(::decodeHistory) ?: emptyList()
+            val entry = OrderHistoryEntry(
+                orderIdStr = order.orderIdStr.ifBlank { order.orderId.toString() },
+                deptName = deptName,
+                discountPrice = order.discountPrice,
+                createdAt = System.currentTimeMillis()
+            )
+            val updated = (listOf(entry) + current).take(20)
+            prefs[orderHistoryKey] = json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(OrderHistoryEntry.serializer()),
+                updated
+            )
+        }
+    }
+
+    /** 清空全部订单历史 */
+    suspend fun clearOrderHistory() {
+        context.coffeeDataStore.edit { it.remove(orderHistoryKey) }
+    }
+
+    /** 同步读取一次订单历史（用于 ViewModel 一次性加载） */
+    suspend fun snapshotOrderHistory(): List<OrderHistoryEntry> = orderHistory.first()
+
+    private fun decodeHistory(raw: String): List<OrderHistoryEntry> =
+        runCatching {
+            json.decodeFromString(
+                kotlinx.serialization.builtins.ListSerializer(OrderHistoryEntry.serializer()),
+                raw
+            )
+        }.getOrElse { emptyList() }
 }

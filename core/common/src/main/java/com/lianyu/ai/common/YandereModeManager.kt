@@ -50,8 +50,13 @@ class YandereModeManager(private val context: Context) {
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    // [R11 FIX] 病娇触发计数器改为 @Volatile + synchronized 保护：
+    // 原为普通 Int，多请求并发下 lost increment，触发概率失准。
+    @Volatile
     private var lastTriggerRound = -MIN_TRIGGER_INTERVAL
+    @Volatile
     private var currentRound = 0
+    private val triggerLock = Any()
 
     private val cacheFile: File
         get() = File(appContext.filesDir, CACHE_FILE_NAME)
@@ -244,15 +249,18 @@ class YandereModeManager(private val context: Context) {
      * 基于最小间隔和概率控制，避免过度触发。
      */
     fun shouldTriggerThisRound(): Boolean {
-        currentRound++
-        if (currentRound - lastTriggerRound < MIN_TRIGGER_INTERVAL) {
-            return false
+        // [R11 FIX] 用 synchronized 保证自增+比较+更新的原子性
+        synchronized(triggerLock) {
+            currentRound++
+            if (currentRound - lastTriggerRound < MIN_TRIGGER_INTERVAL) {
+                return false
+            }
+            val shouldTrigger = Math.random() < 0.3
+            if (shouldTrigger) {
+                lastTriggerRound = currentRound
+            }
+            return shouldTrigger
         }
-        val shouldTrigger = Math.random() < 0.3
-        if (shouldTrigger) {
-            lastTriggerRound = currentRound
-        }
-        return shouldTrigger
     }
 
     private fun getAppName(packageName: String): String {

@@ -15,7 +15,9 @@ class ChatRepository(private val chatMessageDao: ChatMessageDao) {
      * 放在 companion object 中，所有 ChatRepository 实例共享同一份缓存。
      */
     companion object {
-        private val recentCache = mutableMapOf<Long, List<ChatMessage>>()
+        // [C2 FIX] 使用 ConcurrentHashMap 替代 mutableMapOf：多个 ViewModel/Worker 并发读写会触发
+        // ConcurrentModificationException 或丢失数据。ConcurrentHashMap 提供线程安全读写。
+        private val recentCache = java.util.concurrent.ConcurrentHashMap<Long, List<ChatMessage>>()
     }
 
     /** 缓存预热：由 HomeViewModel 在加载列表时调用 */
@@ -87,6 +89,9 @@ class ChatRepository(private val chatMessageDao: ChatMessageDao) {
     }
 
     suspend fun updateMessageContent(messageId: Long, content: String) {
-        chatMessageDao.updateMessageContent(messageId, content)
+        // [C3 FIX] 必须加密 content 列：sendMessage / sendMessageAndGetId 都会经过 ChatMessageCrypto.encryptForStorage，
+        // 但此处的直接 UPDATE 之前传明文，导致 content 列在流式更新路径上绕过加密层。
+        // searchContent 保持明文以支持 LIKE 查询（与 encryptForStorage 中 searchContent 的处理一致）。
+        chatMessageDao.updateMessageContent(messageId, ChatMessageCrypto.encrypt(content), content)
     }
 }

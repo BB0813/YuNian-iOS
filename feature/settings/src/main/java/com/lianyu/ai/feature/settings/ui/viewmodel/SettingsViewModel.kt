@@ -1,7 +1,6 @@
 package com.lianyu.ai.feature.settings.ui.viewmodel
 
 import android.app.Application
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lianyu.ai.common.AppSettingsStore
@@ -25,27 +24,54 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository: ApiConfigRepository
-    private val localModelProvider = ServiceRegistry.get(LocalModelProvider::class.java)
+
+    // [R6 FIX] 改为懒加载 ServiceRegistry 单例：原 6 处直接 new AiService(getApplication())，
+    // 每次点击都新建网关实例（含 OkHttpClient/Retrofit/重试器/限流器），绕过单例。
+    private val aiService: AiService by lazy {
+        ServiceRegistry.getOrThrow(AiService::class.java)
+    }
+    // [R6 FIX] localModelProvider 也改 lazy，避免构造时 ServiceRegistry.get 返回 null
+    private val localModelProvider by lazy {
+        ServiceRegistry.getOrThrow(LocalModelProvider::class.java)
+    }
     private val appSettingsStore = AppSettingsStore(application)
+    private lateinit var repository: ApiConfigRepository
     val configs: Flow<List<ApiConfig>>
     private val _localModelState = MutableStateFlow(ModelState())
     val localModelState: StateFlow<ModelState> = _localModelState.asStateFlow()
     private val _modelStates = MutableStateFlow<Map<String, ModelState>>(emptyMap())
     val modelStates: StateFlow<Map<String, ModelState>> = _modelStates.asStateFlow()
 
-    private val _connectionStatus = mutableStateMapOf<String, ConnectionResult>()
-    val connectionStatus: Map<String, ConnectionResult> = _connectionStatus
+    // [R7 FIX] 改为 StateFlow + ConcurrentHashMap 替代 Compose mutableStateMapOf：
+    // 原实现从多个 Dispatchers.IO 协程并发写 Compose 快照状态，违反数据流规范。
+    private val _connectionStatus = MutableStateFlow<Map<String, ConnectionResult>>(emptyMap())
+    val connectionStatus: StateFlow<Map<String, ConnectionResult>> = _connectionStatus.asStateFlow()
+    private val connectionStatusMap = java.util.concurrent.ConcurrentHashMap<String, ConnectionResult>()
 
     // 保存测试连接后更新的配置（包含远程密钥和随机选择的模型）
-    private val _testedConfigs = mutableStateMapOf<String, ApiConfig>()
-    val testedConfigs: Map<String, ApiConfig> = _testedConfigs
+    private val _testedConfigs = MutableStateFlow<Map<String, ApiConfig>>(emptyMap())
+    val testedConfigs: StateFlow<Map<String, ApiConfig>> = _testedConfigs.asStateFlow()
+    private val testedConfigsMap = java.util.concurrent.ConcurrentHashMap<String, ApiConfig>()
 
-    private val _saveResult = MutableSharedFlow<SaveResult>()
+    /** [R7 FIX] 线程安全更新 connectionStatus：合并到 ConcurrentMap 后整体发布到 StateFlow */
+    private fun updateConnectionStatus(key: String, value: ConnectionResult) {
+        connectionStatusMap[key] = value
+        _connectionStatus.value = connectionStatusMap.toMap()
+    }
+    private fun removeConnectionStatus(key: String) {
+        connectionStatusMap.remove(key)
+        _connectionStatus.value = connectionStatusMap.toMap()
+    }
+    private fun updateTestedConfig(key: String, value: ApiConfig) {
+        testedConfigsMap[key] = value
+        _testedConfigs.value = testedConfigsMap.toMap()
+    }
+
+    // [R14 FIX] _saveResult 加 extraBufferCapacity，避免无订阅者时 emit 永久挂起
+    private val _saveResult = MutableSharedFlow<SaveResult>(extraBufferCapacity = 8)
     val saveResult: SharedFlow<SaveResult> = _saveResult
 
     data class TestCompletionEvent(
@@ -187,7 +213,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     model = model
                 )
 
-                val aiService = AiService(getApplication())
+                val aiService = aiService
                 val testMessages = listOf(
                     com.lianyu.ai.network.Message("system", "You are a helpful assistant."),
                     com.lianyu.ai.network.Message("user", "Hi")
@@ -225,28 +251,34 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val database = AppDatabase.getDatabase(application)
         repository = ApiConfigRepository(database.apiConfigDao())
         configs = repository.getAllConfigs()
-        // P2-15: 同步恢复已保存配置的连接状态（不用 Flow.collect 异步等待）
-        kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+        // [C1 FIX] 改为异步恢复已保存配置的连接状态：原 runBlocking(Dispatchers.IO) 在主线程阻塞，
+        // 违反 ViewModel init 零容忍 runBlocking 铁律，冷启动/旋转屏幕时卡顿甚至 ANR。
+        viewModelScope.launch(Dispatchers.IO) {
             val saved = repository.getAllConfigs().first()
             saved.forEach { config ->
                 val key = connectionKey(config)
-                if (config.connectionTested && _connectionStatus[key] == null) {
-                    _connectionStatus[key] = ConnectionResult(ConnectionStatus.CONNECTED, config.latencyMs)
+                if (config.connectionTested && _connectionStatus.value[key] == null) {
+                    updateConnectionStatus(key, ConnectionResult(ConnectionStatus.CONNECTED, config.latencyMs))
                 }
             }
         }
         // 同时启动异步持续监听（供 refreshConnectionStatus 和后续配置变更）
         refreshConnectionStatus()
 
-        viewModelScope.launch {
-            localModelProvider?.let { provider ->
-                // Poll for model states periodically
-                while (true) {
-                    _modelStates.value = provider.getAllModelStates()
-                    val selected = _modelStates.value.values.find { it.isSelected }
-                    if (selected != null) _localModelState.value = selected
-                    kotlinx.coroutines.delay(500)
+        viewModelScope.launch(Dispatchers.IO) {
+            // [R15 FIX] 轮询移到 IO 线程 + distinctUntilChanged，避免每 500ms 主线程执行 + 无条件重组
+            // [R6 FIX] localModelProvider 现在是 non-null lazy，不再需要 ?.let
+            val provider = localModelProvider
+            while (true) {
+                val states = provider.getAllModelStates()
+                if (states != _modelStates.value) {
+                    _modelStates.value = states
                 }
+                val selected = states.values.find { it.isSelected }
+                if (selected != null && selected != _localModelState.value) {
+                    _localModelState.value = selected
+                }
+                kotlinx.coroutines.delay(500)
             }
         }
     }
@@ -255,10 +287,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val key = connectionKey(config)
-                val draftStatus = _connectionStatus[key]
+                val draftStatus = _connectionStatus.value[key]
                 
                 // 优先使用测试连接后保存的配置（包含远程密钥和测试结果）
-                val testedConfig = _testedConfigs[key]
+                val testedConfig = _testedConfigs.value[key]
 
                 val configToSave = if (testedConfig != null && draftStatus?.status == ConnectionStatus.CONNECTED) {
                     // 合并测试后的远程密钥/连接状态，但保留用户手动填写的字段
@@ -293,9 +325,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 repository.disableOtherConfigs(savedId)
                 repository.enableConfig(savedId)
                 val savedKey = connectionKey(configToSave.copy(id = savedId))
-                _connectionStatus[savedKey] = draftStatus ?: ConnectionResult(ConnectionStatus.UNKNOWN)
+                updateConnectionStatus(savedKey, draftStatus ?: ConnectionResult(ConnectionStatus.UNKNOWN))
                 // 同步测试后缓存，避免下次编辑时显示旧模型
-                _testedConfigs[savedKey] = configToSave
+                updateTestedConfig(savedKey, configToSave)
                 _saveResult.emit(SaveResult.Success("配置已保存并已启用"))
             } catch (e: Exception) {
                 SecureLog.e("SettingsViewModel", "Save config failed: ${e.message}")
@@ -332,7 +364,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val newKey = connectionKey(actualConfig)
                 // Migrate connection status if key changed (new config got an id)
                 if (oldKey != newKey) {
-                    _connectionStatus[oldKey]?.let { _connectionStatus[newKey] = it }
+                    _connectionStatus.value[oldKey]?.let { updateConnectionStatus(newKey, it) }
                 }
                 repository.disableOtherConfigs(actualConfig.id)
                 val updated = actualConfig.copy(isEnabled = true)
@@ -359,14 +391,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } else {
                 repository.deleteConfig(config.provider)
             }
-            _connectionStatus.remove(connectionKey(config))
+            removeConnectionStatus(connectionKey(config))
         }
     }
 
     fun deleteConfigByProvider(provider: ApiProvider) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteConfig(provider)
-            _connectionStatus.entries.removeAll { it.key.startsWith("id:") }
+            connectionStatusMap.entries.removeIf {  it.key.startsWith("id:")  }; _connectionStatus.value = connectionStatusMap.toMap()
         }
     }
 
@@ -376,7 +408,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             allConfigs.collect { list ->
                 list.forEach { config ->
                     val key = connectionKey(config)
-                    val current = _connectionStatus[key]
+                    val current = _connectionStatus.value[key]
                     val status = when {
                         // Preserve current status — don't downgrade from known state
                         current?.status == ConnectionStatus.TESTING -> ConnectionResult(ConnectionStatus.TESTING, current.latencyMs)
@@ -388,7 +420,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         current != null -> current
                         else -> ConnectionResult(ConnectionStatus.UNKNOWN)
                     }
-                    _connectionStatus[key] = status
+                    updateConnectionStatus(key, status)
                 }
             }
         }
@@ -397,7 +429,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun testConnection(config: ApiConfig) {
         viewModelScope.launch(Dispatchers.IO) {
             val key = connectionKey(config)
-            _connectionStatus[key] = ConnectionResult(ConnectionStatus.TESTING)
+            updateConnectionStatus(key, ConnectionResult(ConnectionStatus.TESTING))
+            // [R16 FIX] 顶层 try/finally：原实现若异常逃逸（非 runCatching 内），TESTING 状态永久卡住。
+            try {
             var allKeys = config.getAllApiKeys()
 
             SecureLog.d("SettingsViewModel", "=== TEST CONNECTION START ===")
@@ -422,27 +456,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         )
                         SecureLog.d("SettingsViewModel", "Fetched ${remoteKeys.size} remote keys for testing")
                     } else {
-                        _connectionStatus[key] = ConnectionResult(
-                            ConnectionStatus.FAILED,
-                            0L,
-                            "无法从服务器获取密钥，请检查网络连接或服务器配置"
-                        )
+                        updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "无法从服务器获取密钥，请检查网络连接或服务器配置"))
                         earlyReturn = true
                     }
                 } catch (e: Exception) {
                     SecureLog.e("SettingsViewModel", "Failed to fetch remote keys: ${e.message}")
-                    _connectionStatus[key] = ConnectionResult(
-                        ConnectionStatus.FAILED,
-                        0L,
-                        "远程密钥获取失败: ${e.message}"
-                    )
+                    updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "远程密钥获取失败: ${e.message}"))
                     earlyReturn = true
                 }
                 if (earlyReturn) return@launch
             }
 
             if (allKeys.isEmpty()) {
-                _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, 0L, "API Key 为空，请填写主密钥或检查远程Key服务")
+                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "API Key 为空，请填写主密钥或检查远程Key服务"))
                 return@launch
             }
 
@@ -456,7 +482,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 currentConfig.provider == ApiProvider.PARTNER ||
                 currentConfig.provider == ApiProvider.CUSTOM) {
 
-                val aiService = AiService(getApplication())
+                val aiService = aiService
                 val keyToUse = allKeys.firstOrNull() ?: currentConfig.apiKey
                 SecureLog.d("SettingsViewModel", "Fetching models with key: ${keyToUse.take(8)}...")
 
@@ -514,20 +540,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
             // 确保有有效的模型名
             if (testConfig.model.isBlank()) {
-                _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, 0L, "无法获取模型列表，请手动填写模型名称")
+                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "无法获取模型列表，请手动填写模型名称"))
                 return@launch
             }
             
+            // [R17 FIX] runCatching 会吞 CancellationException，这里手动 rethrow
             val result = runCatching {
-                val aiService = AiService(getApplication())
-                
+                val aiService = aiService
+
                 val testMessages = listOf(
                     com.lianyu.ai.network.Message("system", "You are a helpful assistant."),
                     com.lianyu.ai.network.Message("user", "Hi")
                 )
-                
+
                 SecureLog.d("SettingsViewModel", "Calling API with: url=${testConfig.baseUrl}, model=${testConfig.model}")
-                
+
                 when (currentConfig.provider) {
                     ApiProvider.OPENAI,
                     ApiProvider.GEMINI,
@@ -544,6 +571,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     ApiProvider.PARTNER -> aiService.callOpenAiCompatibleForTest(testConfig, testMessages)
                     ApiProvider.ANTHROPIC -> aiService.callAnthropicForTest(testConfig, testMessages, "Be helpful.")
                 }
+            }.also {
+                // [R17 FIX] runCatching 吞 CancellationException，这里重新抛出
+                val ex = it.exceptionOrNull()
+                if (ex is kotlinx.coroutines.CancellationException) throw ex
             }
             val latencyMs = System.currentTimeMillis() - startTime
 
@@ -572,9 +603,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     else -> errorMsg
                 }
                 
-                _connectionStatus[key] = ConnectionResult(ConnectionStatus.FAILED, latencyMs, friendlyError)
+                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, latencyMs, friendlyError))
             } else {
-                _connectionStatus[key] = ConnectionResult(ConnectionStatus.CONNECTED, latencyMs)
+                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.CONNECTED, latencyMs))
             }
 
             _testCompletionEvent.emit(TestCompletionEvent(
@@ -593,7 +624,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     latencyMs = latencyMs
                 )
                 // 保存到内存状态，供 saveConfig 使用
-                _testedConfigs[key] = finalConfig
+                updateTestedConfig(key, finalConfig)
                 
                 if (config.id > 0) {
                     repository.updateConfig(finalConfig)
@@ -608,12 +639,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 )
                 repository.updateConfig(updatedConfig)
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // [R17 FIX] 不吞 CancellationException，让结构化取消正常传播
+            throw e
+        } catch (e: Exception) {
+            SecureLog.e("SettingsViewModel", "testConnection unexpected error", e)
+            updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, e.message ?: "未知错误"))
+        } finally {
+            // [R16 FIX] 兜底：若异常逃逸导致状态仍为 TESTING，重置为 FAILED
+            if (_connectionStatus.value[key]?.status == ConnectionStatus.TESTING) {
+                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "测试中断"))
+            }
         }
+        } // end try
     }
 
     fun selectModel(modelId: String) {
         viewModelScope.launch {
-            localModelProvider?.enableModel(modelId)
+            localModelProvider.enableModel(modelId)
         }
     }
 
@@ -641,7 +684,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
             var earlyReturn = false
             try {
-                val aiService = AiService(getApplication())
+                val aiService = aiService
                 val resolvedProvider = try {
                     ApiProvider.valueOf(provider)
                 } catch (e: Exception) {
@@ -689,7 +732,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun queryBalance(configId: Long? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             _balanceQueryFailed.value = false
-            val aiService = AiService(getApplication())
+            val aiService = aiService
             val result = if (configId != null) {
                 aiService.queryBalance(configId)
             } else {
@@ -719,7 +762,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun queryBalanceForConfig(config: ApiConfig) {
         viewModelScope.launch(Dispatchers.IO) {
             _balanceQueryFailed.value = false
-            val aiService = AiService(getApplication())
+            val aiService = aiService
             aiService.queryBalanceWithConfig(config)
                 .onSuccess { balance ->
                     _balanceInfo.value = balance
@@ -733,7 +776,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun startGemmaDownload() {
         viewModelScope.launch {
-            localModelProvider?.let { provider ->
+            val provider = localModelProvider
+            provider.let { provider ->
                 val selected = _modelStates.value.values.find { it.isSelected }?.modelId
                 if (selected != null) provider.downloadModel(selected)
             }
@@ -742,13 +786,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun downloadModel(modelId: String) {
         viewModelScope.launch {
-            localModelProvider?.downloadModel(modelId)
+            localModelProvider.downloadModel(modelId)
         }
     }
 
     fun cancelGemmaDownload() {
         viewModelScope.launch {
-            localModelProvider?.let { provider ->
+            val provider = localModelProvider
+            provider.let { provider ->
                 val selected = _modelStates.value.values.find { it.isSelected }?.modelId
                 if (selected != null) provider.cancelDownload(selected)
             }
@@ -757,7 +802,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun enableGemma() {
         viewModelScope.launch {
-            localModelProvider?.let { provider ->
+            val provider = localModelProvider
+            provider.let { provider ->
                 val selected = _modelStates.value.values.find { it.isSelected }?.modelId
                 if (selected != null) provider.enableModel(selected)
             }
@@ -766,7 +812,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun disableGemma() {
         viewModelScope.launch {
-            localModelProvider?.let { provider ->
+            val provider = localModelProvider
+            provider.let { provider ->
                 val selected = _modelStates.value.values.find { it.isSelected }?.modelId
                 if (selected != null) provider.disableModel(selected)
             }
@@ -775,7 +822,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun deleteGemma() {
         viewModelScope.launch {
-            localModelProvider?.let { provider ->
+            val provider = localModelProvider
+            provider.let { provider ->
                 val selected = _modelStates.value.values.find { it.isSelected }?.modelId
                 if (selected != null) provider.deleteModel(selected)
             }
@@ -784,7 +832,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun refreshLocalModel() {
         viewModelScope.launch {
-            localModelProvider?.let { provider ->
+            val provider = localModelProvider
+            provider.let { provider ->
                 _modelStates.value = provider.getAllModelStates()
             }
         }

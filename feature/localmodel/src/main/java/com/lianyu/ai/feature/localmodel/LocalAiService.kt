@@ -102,7 +102,15 @@ class LocalAiService private constructor(private val context: Context) {
         }
     }
 
-    fun close() {
+    /**
+     * [M12 FIX] close 内的 engine 关闭操作改为走 mutex.withLock：
+     * 原实现用 synchronized(this) 保护 refCount，但 engine?.close() 在 synchronized 块外执行，
+     * 而 generate() 用 mutex.withLock 保护 engine 访问。两把不同的锁。
+     * 时序：close 将 refCount 减到 0 → 在 synchronized 外执行 engine.close()；
+     * 同时 generate 持有 mutex 正在使用 engine → 用到已关闭的 native 句柄，崩溃。
+     * 现在 engine 的关闭也走 mutex，与 generate 的读取/初始化互斥。
+     */
+    suspend fun close() {
         val shouldShutdown = synchronized(this) {
             if (refCount <= 0) {
                 false
@@ -112,16 +120,20 @@ class LocalAiService private constructor(private val context: Context) {
             }
         }
         if (shouldShutdown) {
+            mutex.withLock {
+                engine?.close()
+                engine = null
+                engineModelId = null
+            }
+        }
+    }
+
+    suspend fun shutdownEngine() {
+        mutex.withLock {
             engine?.close()
             engine = null
             engineModelId = null
         }
-    }
-
-    fun shutdownEngine() {
-        engine?.close()
-        engine = null
-        engineModelId = null
     }
 
     suspend fun generate(

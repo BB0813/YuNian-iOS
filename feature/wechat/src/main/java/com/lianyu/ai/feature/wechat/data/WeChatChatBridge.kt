@@ -105,7 +105,7 @@ class WeChatChatBridge(
                 val outputSafetyResult = com.lianyu.ai.common.ContentFilter.checkOutputSafety(aiResponseText)
                 if (!outputSafetyResult.isSafe) {
                     android.util.Log.w("WeChatBridge", "AI output blocked by safety filter: ${outputSafetyResult.level} - ${outputSafetyResult.reason}")
-                    com.lianyu.ai.common.BanManager.recordViolation(context, outputSafetyResult.level)
+                    // [R2 FIX] AI 生成内容不应累加用户封禁——模型输出不是用户的责任（与 AiService/ChatViewModel 策略对齐）
                     val blockedResponse = "抱歉，我无法回应这个话题。"
                     val blockedMsg = ChatMessage(
                         companionId = companionId,
@@ -271,7 +271,7 @@ class WeChatChatBridge(
                 val outputSafetyResult = com.lianyu.ai.common.ContentFilter.checkOutputSafety(responseText)
                 if (!outputSafetyResult.isSafe) {
                     android.util.Log.w("WeChatBridge", "Vision AI output blocked by safety filter: ${outputSafetyResult.level} - ${outputSafetyResult.reason}")
-                    com.lianyu.ai.common.BanManager.recordViolation(context, outputSafetyResult.level)
+                    // [R2 FIX] AI 生成内容不应累加用户封禁
                     val blockedResponse = "抱歉，我无法回应这个话题。"
                     weChatRepository.sendTextMessage(wechatUserId, blockedResponse)
                     val blockedMsg = ChatMessage(

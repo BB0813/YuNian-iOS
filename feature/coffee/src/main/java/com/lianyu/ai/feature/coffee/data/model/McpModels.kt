@@ -4,60 +4,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 // ════════════════════════════════════════════════════════════════
-// MCP JSON-RPC 2.0 协议层
-// ════════════════════════════════════════════════════════════════
-
-/**
- * MCP JSON-RPC 请求信封。
- * 瑞幸 MCP Server 使用 Streamable HTTP，单次 POST 携带一个 JSON-RPC 请求。
- */
-@Serializable
-internal data class McpRequest(
-    @SerialName("jsonrpc") val jsonrpc: String = "2.0",
-    val method: String,
-    val params: McpParams,
-    val id: Int = 1
-)
-
-@Serializable
-internal data class McpParams(
-    val name: String,
-    val arguments: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap()
-)
-
-/**
- * MCP JSON-RPC 响应信封。
- * result.content 是工具返回的文本块数组，text 字段里是 JSON 字符串，需二次解析。
- */
-@Serializable
-internal data class McpResponse(
-    @SerialName("jsonrpc") val jsonrpc: String = "2.0",
-    val id: Int = 1,
-    val result: McpResult? = null,
-    val error: McpError? = null
-)
-
-@Serializable
-internal data class McpResult(
-    val content: List<McpContent> = emptyList(),
-    @SerialName("structuredContent") val structuredContent: kotlinx.serialization.json.JsonElement? = null,
-    @SerialName("isError") val isError: Boolean = false
-)
-
-@Serializable
-internal data class McpContent(
-    val type: String = "text",
-    val text: String = ""
-)
-
-@Serializable
-internal data class McpError(
-    val code: Int = 0,
-    val message: String = ""
-)
-
-// ════════════════════════════════════════════════════════════════
-// 工具参数模型（按 SKILL.md 工具参考定义）
+// 工具参数模型（按瑞幸官方文档定义，字段名严格对齐）
+// 文档来源：https://open.lkcoffee.com/docs （SPA JS bundle 提取的工具目录）
 // ════════════════════════════════════════════════════════════════
 
 /** queryShopList 参数 */
@@ -75,12 +23,11 @@ internal data class SearchProductArgs(
     val query: String
 )
 
-/** queryProductDetailInfo 参数 */
+/** queryProductDetailInfo 参数（官方只定义 deptId + productId，无 delivery） */
 @Serializable
 internal data class ProductDetailArgs(
     @SerialName("deptId") val deptId: Long,
-    @SerialName("productId") val productId: Long,
-    val delivery: String = "pick"
+    @SerialName("productId") val productId: Long
 )
 
 /** switchProduct 参数 */
@@ -127,7 +74,8 @@ internal data class CreateOrderArgs(
     @SerialName("productList") val productList: List<ProductListItem>,
     val longitude: Double,
     val latitude: Double,
-    @SerialName("couponCodeList") val couponCodeList: List<String>? = null
+    @SerialName("couponCodeList") val couponCodeList: List<String>? = null,
+    val remark: String? = null
 )
 
 /** queryOrderDetailInfo / cancelOrder 参数 */
@@ -137,10 +85,10 @@ internal data class OrderIdArgs(
 )
 
 // ════════════════════════════════════════════════════════════════
-// 工具返回业务模型（从 result.content[0].text 二次解析）
+// 工具返回业务模型（字段名严格对齐官方文档）
 // ════════════════════════════════════════════════════════════════
 
-/** 门店信息 */
+/** 门店信息（queryShopList 输出项、previewOrder/queryOrderDetailInfo 的 shopInfo） */
 @Serializable
 data class ShopInfo(
     @SerialName("deptId") val deptId: Long = 0,
@@ -155,100 +103,77 @@ data class ShopInfo(
     val number: String = ""
 )
 
-/** queryShopList 返回 */
-@Serializable
-data class ShopListResult(
-    val list: List<ShopInfo> = emptyList()
-)
+/** queryShopList 返回的 data 是 List<ShopInfo> */
 
-/** 商品 SKU */
+/**
+ * 商品属性值（productSubAttrs 子项）。
+ * searchProductForMcp / queryProductDetailInfo / switchProduct 共用。
+ */
 @Serializable
-data class ProductSku(
-    @SerialName("skuCode") val skuCode: String = "",
-    val name: String = "",
+data class ProductSubAttr(
+    @SerialName("attributeId") val attributeId: Long = 0,
+    @SerialName("attributeName") val attributeName: String = "",
+    /** 是否选中（null/true/false，null 表示未指定） */
+    val selected: Boolean? = null,
+    /** 属性加价 */
     val price: Double = 0.0,
-    @SerialName("estimatePrice") val estimatePrice: Double = 0.0,
-    val spec: String = ""
+    /** 是否可选（null/0/1，null 表示未指定） */
+    @SerialName("canSelected") val canSelected: Int? = null
 )
 
-/** 商品信息 */
+/**
+ * 商品属性组（productAttrs 项）。
+ */
+@Serializable
+data class ProductAttrGroup(
+    @SerialName("attributeId") val attributeId: Long = 0,
+    @SerialName("attributeName") val attributeName: String = "",
+    @SerialName("productSubAttrs") val productSubAttrs: List<ProductSubAttr> = emptyList()
+)
+
+/**
+ * 商品信息（searchProductForMcp 输出项、queryProductDetailInfo/switchProduct 输出对象）。
+ * 三个工具返回结构完全一致，统一用一个模型。
+ */
 @Serializable
 data class ProductInfo(
     @SerialName("productId") val productId: Long = 0,
-    val name: String = "",
-    val description: String = "",
-    @SerialName("bigPicUrl") val bigPicUrl: String? = null,
-    @SerialName("breviaryPicUrl") val breviaryPicUrl: String? = null,
-    @SerialName("estimatePrice") val estimatePrice: Double = 0.0,
-    val skus: List<ProductSku> = emptyList()
+    @SerialName("productName") val productName: String = "",
+    @SerialName("skuCode") val skuCode: String = "",
+    @SerialName("pictureUrl") val pictureUrl: String = "",
+    @SerialName("productAttrs") val productAttrs: List<ProductAttrGroup> = emptyList(),
+    val tags: List<String>? = null,
+    @SerialName("initialPrice") val initialPrice: Double = 0.0,
+    @SerialName("estimatePrice") val estimatePrice: Double = 0.0
 )
 
-/** searchProductForMcp 返回 */
-@Serializable
-data class ProductSearchResult(
-    val list: List<ProductInfo> = emptyList()
-)
+/** queryProductDetailInfo / switchProduct 返回的 data 是单个 ProductInfo（对象，非数组） */
 
-/** 商品属性选项 */
-@Serializable
-data class ProductAttribute(
-    @SerialName("attributeId") val attributeId: Long = 0,
-    val name: String = "",
-    val options: List<AttributeOption> = emptyList()
-)
-
-@Serializable
-data class AttributeOption(
-    @SerialName("attributeId") val attributeId: Long = 0,
-    val name: String = "",
-    val operation: Int = 0
-)
-
-/** queryProductDetailInfo 返回 */
-@Serializable
-data class ProductDetailResult(
-    @SerialName("productId") val productId: Long = 0,
-    val name: String = "",
-    val attributes: List<ProductAttribute> = emptyList(),
-    @SerialName("currentSkuCode") val currentSkuCode: String = ""
-)
-
-/** previewOrder 返回 */
-@Serializable
-data class OrderPreview(
-    @SerialName("totalInitialPrice") val totalInitialPrice: Double = 0.0,
-    @SerialName("privilegeMoney") val privilegeMoney: Double = 0.0,
-    @SerialName("discountPrice") val discountPrice: Double = 0.0,
-    @SerialName("couponCodeList") val couponCodeList: List<String> = emptyList(),
-    val products: List<PreviewProduct> = emptyList()
-)
-
-@Serializable
-data class PreviewProduct(
-    @SerialName("productId") val productId: Long = 0,
-    val name: String = "",
-    val amount: Int = 0,
-    val price: Double = 0.0
-)
-
-/** createOrder 返回 */
-@Serializable
-data class OrderCreated(
-    @SerialName("orderId") val orderId: String = "",
-    @SerialName("payOrderQrCodeUrl") val payOrderQrCodeUrl: String = "",
-    @SerialName("payOrderUrl") val payOrderUrl: String = "",
-    @SerialName("discountPrice") val discountPrice: Double = 0.0,
-    @SerialName("deptName") val deptName: String = ""
-)
-
-/** 订单商品 */
+/**
+ * previewOrder / queryOrderDetailInfo 的 productInfoList 子项。
+ */
 @Serializable
 data class OrderProduct(
     @SerialName("productId") val productId: Long = 0,
+    @SerialName("skuCode") val skuCode: String = "",
     val name: String = "",
     val amount: Int = 0,
     @SerialName("additionDesc") val additionDesc: String = "",
-    @SerialName("breviaryPicUrl") val breviaryPicUrl: String? = null
+    @SerialName("bigPicUrl") val bigPicUrl: String? = null,
+    @SerialName("breviaryPicUrl") val breviaryPicUrl: String? = null,
+    @SerialName("initPrice") val initPrice: Double = 0.0,
+    @SerialName("estimatePrice") val estimatePrice: Double = 0.0,
+    @SerialName("estimateTotalPrice") val estimateTotalPrice: Double = 0.0
+)
+
+/** 订单商品粒度价格信息（previewOrder.orderGranularCommodityList / queryOrderDetailInfo.orderCommodityList） */
+@Serializable
+data class OrderCommodity(
+    @SerialName("commodityId") val commodityId: Long = 0,
+    @SerialName("commodityCode") val commodityCode: String = "",
+    @SerialName("commodityName") val commodityName: String = "",
+    @SerialName("payableMoney") val payableMoney: Double = 0.0,
+    @SerialName("payMoney") val payMoney: Double = 0.0
 )
 
 /** 取餐码信息 */
@@ -256,6 +181,44 @@ data class OrderProduct(
 data class TakeMealCodeInfo(
     val code: String = "",
     @SerialName("takeOrderId") val takeOrderId: String = ""
+)
+
+/** 配送信息（queryOrderDetailInfo.dispatchInfo） */
+@Serializable
+data class DispatchInfo(
+    @SerialName("dispatcherName") val dispatcherName: String = "",
+    @SerialName("dispatcherMobile") val dispatcherMobile: String = "",
+    @SerialName("dispatchAboutTime") val dispatchAboutTime: String = "",
+    @SerialName("destinationDistance") val destinationDistance: Double = 0.0
+)
+
+/** previewOrder 返回 */
+@Serializable
+data class OrderPreview(
+    @SerialName("aboutTime") val aboutTime: Long = 0,
+    @SerialName("discountPrice") val discountPrice: Double = 0.0,
+    @SerialName("shopInfo") val shopInfo: ShopInfo? = null,
+    @SerialName("productInfoList") val productInfoList: List<OrderProduct> = emptyList(),
+    @SerialName("couponCodeList") val couponCodeList: List<String> = emptyList(),
+    @SerialName("orderGranularCommodityList") val orderGranularCommodityList: List<OrderCommodity> = emptyList(),
+    @SerialName("expressExpectTime") val expressExpectTime: Long? = null,
+    @SerialName("privilegeMoney") val privilegeMoney: Double = 0.0,
+    @SerialName("totalInitialPrice") val totalInitialPrice: Double = 0.0
+)
+
+/** createOrder 返回 */
+@Serializable
+data class OrderCreated(
+    @SerialName("orderId") val orderId: Long = 0,
+    @SerialName("orderIdStr") val orderIdStr: String = "",
+    @SerialName("payOrderUrl") val payOrderUrl: String = "",
+    @SerialName("payOrderQrCodeUrl") val payOrderQrCodeUrl: String = "",
+    @SerialName("discountPrice") val discountPrice: Double = 0.0,
+    @SerialName("needPay") val needPay: Boolean = true,
+    @SerialName("tradeNo") val tradeNo: String? = null,
+    val description: String? = null,
+    @SerialName("businessNotifyUrl") val businessNotifyUrl: String? = null,
+    @SerialName("subMchid") val subMchid: String? = null
 )
 
 /** 订单状态（queryOrderDetailInfo 返回） */
@@ -267,10 +230,13 @@ data class OrderDetail(
     @SerialName("aboutTime") val aboutTime: Long = 0,
     @SerialName("takeMealTime") val takeMealTime: String = "",
     @SerialName("takeMealCodeInfo") val takeMealCodeInfo: TakeMealCodeInfo? = null,
-    @SerialName("deptName") val deptName: String = "",
-    val address: String = "",
+    @SerialName("shopInfo") val shopInfo: ShopInfo? = null,
     @SerialName("productInfoList") val productInfoList: List<OrderProduct>? = null,
-    @SerialName("orderPayAmount") val orderPayAmount: Double = 0.0
+    @SerialName("orderPayAmount") val orderPayAmount: Double = 0.0,
+    @SerialName("dispatchInfo") val dispatchInfo: DispatchInfo? = null,
+    @SerialName("orderCommodityList") val orderCommodityList: List<OrderCommodity> = emptyList(),
+    @SerialName("orderType") val orderType: String = "",
+    @SerialName("customerParams") val customerParams: String? = null
 ) {
     companion object {
         // 订单状态码（来自瑞幸文档）
@@ -283,9 +249,30 @@ data class OrderDetail(
     }
 }
 
-/** cancelOrder 返回 */
+/** cancelOrder 返回 data 是 boolean */
+
+// ════════════════════════════════════════════════════════════════
+// 订单历史（本地持久化，非 MCP 工具）
+// ════════════════════════════════════════════════════════════════
+
+/** 订单历史条目，createOrder 成功后写入本地 */
 @Serializable
-internal data class CancelResult(
-    val success: Boolean = false,
-    val message: String = ""
+data class OrderHistoryEntry(
+    @SerialName("orderIdStr") val orderIdStr: String,
+    @SerialName("deptName") val deptName: String = "",
+    @SerialName("discountPrice") val discountPrice: Double = 0.0,
+    @SerialName("createdAt") val createdAt: Long
+)
+
+/**
+ * 已选商品（UI 层领域模型，融合搜索结果 + 定制后的 skuCode）。
+ * 替代旧的 Pair<ProductInfo, Int>，携带定制后的真实 skuCode 和到手价。
+ */
+data class SelectedProduct(
+    val productId: Long,
+    val productName: String,
+    val pictureUrl: String,
+    val skuCode: String,
+    val amount: Int,
+    val estimatePrice: Double
 )

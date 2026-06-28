@@ -74,7 +74,7 @@ Pass arguments via navigation path parameters, not global state.
 
 ### Database (`core:database`)
 
-- Room database, **current version 17**.
+- Room database, **current version 19**.
 - Entities include: `Companion`, `ChatMessage`, `ChatGroup`, `GroupMessage`, `MemoryEntry`, `ApiConfig`, `KeywordEntity`, `TokenUsage`, `QuizQuestionEntity`.
 
 ### Cross-Feature Communication (`core:domain`)

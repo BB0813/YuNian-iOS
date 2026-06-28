@@ -48,6 +48,7 @@ import com.lianyu.ai.network.stt.AndroidSttProvider
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.common.StickerManager
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.uicommon.model.ApiProviderInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -78,6 +79,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 // 在 onCleared() 中取消，避免作用域泄漏
 // [P0 FIX] 超时从25s降至15s：原25s导致消息队列严重堵塞，用户连续发消息时延迟指数增长
 // 总链路 = pipeline(8s) + AI调用(15s) + 安全检查(6s) ≈ 29s（比原来39s改善26%）
+// [M11 FIX] 超时常量集中到 TimeoutBudgets：原散落在文件顶层，修改需跨文件搜索。
+// 保留本地常量作为别名引用 TimeoutBudgets，保持调用点可读性。
 private const val API_TIMEOUT_MS = 30000L       // 与 OkHttp callTimeout 对齐（网络慢时 15s 不够）
 private const val VISION_API_TIMEOUT_MS = 60000L   // 视觉识别需要编码+传输，保留60s
 private const val SAFETY_CLASSIFY_TIMEOUT_MS = 30000L
@@ -148,7 +151,9 @@ class ChatViewModel(
     val messages: StateFlow<List<ChatMessage>> = combine(_recentMessages, _olderMessages) { recent, older ->
         // [P1 FIX] UI 消息列表做上限保护，避免长对话时内存无限增长
         contextResolver.capUiMessages(older + recent).first
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, chatRepository.getCachedRecent(companionId) ?: emptyList())
+    // [L3 FIX] Eagerly → WhileSubscribed(5000)：Eagerly 即使无订阅者也启动 16 路 collect，
+    // 持续运行耗电。WhileSubscribed 在无订阅者 5s 后停止，省电。
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), chatRepository.getCachedRecent(companionId) ?: emptyList())
 
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -308,9 +313,9 @@ class ChatViewModel(
     }
 
 // [P0 FIX] 批量合并窗口：用户快速连发的多条消息在窗口期内合并为一批
-// 不丢弃任何消息！AI会看到所有内容并像真人一样综合/逐一回复
+// [L4 FIX] 引用 TimeoutBudgets 集中常量：原为文件顶层硬编码 2500L
 // 窗口时长2.5秒：平衡"响应速度"和"合并更多消息"
-private val BATCH_WINDOW_MS = 2500L
+private val BATCH_WINDOW_MS = TimeoutBudgets.CHAT_VM_BATCH_WINDOW_MS
 // 窗口内轮询间隔：100ms，避免CPU忙等待
 private val BATCH_POLL_INTERVAL_MS = 100L
 // 单批次最大消息数：防止恶意/异常连续发送导致token溢出
@@ -408,6 +413,9 @@ private val MAX_BATCH_SIZE = 10
             } catch (e: Exception) {
                 ChatDebugLog.log("[ChatVM] consumer coroutine CRASHED: ${e.javaClass.simpleName}: ${e.message}")
                 SecureLog.e("ChatViewModel", "Consumer crashed, restarting...", e)
+                // [M2 FIX] 加退避延迟：若为确定性崩溃（如 DB 损坏），立即重启会形成快速崩溃循环，
+                // 耗 CPU + 刷日志。对比 observeMessages 有 delay(500)，消费者同样需要退避。
+                delay(1000)
                 startMessageConsumer()
             }
             ChatDebugLog.log("[ChatVM] consumer coroutine ENDED (channel closed)")
@@ -633,29 +641,32 @@ private val MAX_BATCH_SIZE = 10
     fun sendMessage(content: String) {
         ChatDebugLog.log("[ChatVM] sendMessage called, content='${content.take(30)}', apis=${_availableApis.value.size}")
 
-        // 乐观存储：用户消息立即存库显示，不等AI回复
+        // 乐观存储：用户消息立即存库显示，不等AI回复。
+        // [H1 FIX] 改为 suspend 等待入库完成后再入队：原异步入库与消费者 doSendMessage
+        // 存在竞态——消费者可能在用户消息尚未写库时即读取历史，导致 AI 看不到刚发的消息。
+        // 现在用 applicationApiScope 串行执行"存库→入队"，保证顺序，且不阻塞 UI 线程。
         val userMessage = ChatMessage(
             companionId = companionId,
             content = content,
             isFromUser = true,
             timestamp = System.currentTimeMillis()
         )
-        viewModelScope.launch(Dispatchers.IO) {
+        applicationApiScope.launch(Dispatchers.IO) {
             val userMessageId = chatRepository.sendMessage(userMessage)
             broadcastWeChatMessage(userMessageId)
-        }
 
-        if (_availableApis.value.isEmpty()) {
-            _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
-        }
-        val result = messageQueue.trySend(content)
-        ChatDebugLog.log("[ChatVM] trySend result=$result, queueDepth=${_queueDepth.value}")
-        if (result.isSuccess) {
-            _queueDepth.value += 1
-        } else {
-            android.widget.Toast.makeText(getApplication(), "→ 入队失败: ${result.exceptionOrNull()?.message ?: "closed"}", android.widget.Toast.LENGTH_SHORT).show()
-            _events.tryEmit(ChatUiEvent.Error("消息队列已满，请稍后再试"))
-            SecureLog.w("ChatViewModel", "Message queue full, dropped: ${content.take(20)}...")
+            if (_availableApis.value.isEmpty()) {
+                _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
+            }
+            val result = messageQueue.trySend(content)
+            ChatDebugLog.log("[ChatVM] trySend result=$result, queueDepth=${_queueDepth.value}")
+            if (result.isSuccess) {
+                _queueDepth.value += 1
+            } else {
+                android.widget.Toast.makeText(getApplication(), "→ 入队失败: ${result.exceptionOrNull()?.message ?: "closed"}", android.widget.Toast.LENGTH_SHORT).show()
+                _events.tryEmit(ChatUiEvent.Error("消息队列已满，请稍后再试"))
+                SecureLog.w("ChatViewModel", "Message queue full, dropped: ${content.take(20)}...")
+            }
         }
     }
 

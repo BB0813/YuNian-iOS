@@ -21,6 +21,20 @@ object TimeoutBudgets {
     const val API_STREAM_MS = 20_000L        // 流式对话 (20s)
     const val TTS_SYNTH_MS = 10_000L         // TTS合成 (10s)
     const val STT_RECOGNIZE_MS = 15_000L     // 语音识别 (15s)
+    // [M11 FIX] ChatViewModel 使用的实际超时值（OkHttp callTimeout 对齐，网络慢时需更长）
+    const val CHAT_VM_API_TIMEOUT_MS = 30_000L      // ChatViewModel AI 调用超时
+    const val CHAT_VM_VISION_TIMEOUT_MS = 60_000L   // ChatViewModel 视觉调用超时
+    const val CHAT_VM_SAFETY_CLASSIFY_MS = 30_000L  // ChatViewModel 安全分类超时
+    const val CHAT_VM_MEMORY_EXTRACT_MS = 5_000L    // ChatViewModel 记忆提取超时
+    const val CHAT_VM_TTS_SYNTH_MS = 10_000L        // ChatViewModel TTS 超时
+    const val CHAT_VM_BATCH_WINDOW_MS = 2_500L      // ChatViewModel 批量合并窗口
+
+    // === 瑞幸 MCP (JSON-RPC over Streamable HTTP) ===
+    // 集中管理：原先硬编码在 LuckinMcpClient companion，现统一至此处
+    const val MCP_CONNECT_MS = 15_000L       // MCP 连接超时
+    const val MCP_READ_MS = 30_000L          // MCP 读取超时（普通 JSON 响应）
+    const val MCP_WRITE_MS = 15_000L         // MCP 写入超时
+    const val MCP_SSE_READ_MS = 30_000L      // SSE 流无数据超时（防协程永久阻塞）
 
     // === 数据库操作 ===
     const val ROOM_WRITE_MS = 5_000L         // Room写入

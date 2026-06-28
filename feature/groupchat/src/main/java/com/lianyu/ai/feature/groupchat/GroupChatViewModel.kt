@@ -28,14 +28,11 @@ import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.database.repository.UserRepository
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,7 +51,9 @@ class GroupChatViewModel(
     private val groupId: Long
 ) : AndroidViewModel(application) {
 
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // [H5 FIX] 改用应用级作用域：退出群聊页面后正在生成的多角色 AI 回复仍能继续完成并写入数据库，
+    // 重新进入群聊即可看到完整回复。与 ChatViewModel 行为保持一致。
+    private val applicationScope = com.lianyu.ai.common.ApplicationScopeProvider.scope
     private var sendMessageJob: Job? = null
 
     private val groupChatDispatcher = Executors.newFixedThreadPool(
@@ -825,6 +824,13 @@ class GroupChatViewModel(
     }
 
     fun regenerateMessage(targetMessage: GroupMessage) {
+        // [H4 FIX] 走 isLoadingLock 互斥：原 regenerate 绕过 sendMessage 的并发锁，
+        // 若 sendMessage 正在执行（isLoadingLock=true），regenerate 启动的 job 会与旧 job 并发跑，
+        // AI 回复错乱；且 regenerate 的 finally 没有释放 isLoadingLock。
+        if (!isLoadingLock.compareAndSet(false, true)) {
+            Log.w("GroupChatViewModel", "regenerateMessage ignored: already processing")
+            return
+        }
         sendMessageJob?.cancel()
         sendMessageJob = applicationScope.launch(Dispatchers.IO) {
             try {
@@ -852,6 +858,8 @@ class GroupChatViewModel(
                 Log.e("GroupChatViewModel", "regenerateMessage failed", e)
             } finally {
                 _isRegenerating.value = false
+                // [H4 FIX] 释放互斥锁，与 sendMessage 的 finally 对称
+                isLoadingLock.set(false)
             }
         }
     }
@@ -1054,26 +1062,61 @@ class GroupChatViewModel(
             val msgId = groupMessageRepository.sendMessage(msg)
             broadcastWeChatMessage(companionId, msgId)
         } else {
-            Log.d("GroupChatViewModel", "AI回复拆分为 ${textSegments.size} 段文字 + ${stickerNames.size} 个表情包")
-            var segmentIndex = 0
-            val totalItems = textSegments.size + stickerNames.size
-
-            for (seg in textSegments) {
-                delay(Random.nextLong(800L, 1600L))
-                val msg = GroupMessage(groupId = groupId, companionId = companionId, content = seg, timestamp = System.currentTimeMillis())
-                val msgId = groupMessageRepository.sendMessage(msg)
-                broadcastWeChatMessage(companionId, msgId)
-                segmentIndex++
-                Log.d("GroupChatViewModel", "发送文字段 $segmentIndex/$totalItems")
+            // [M8 FIX] 按原文出现顺序交织发送 text 与 sticker：原实现先发完所有文字再发所有表情包，
+            // 但表情包可能穿插在文字中间，顺序错乱破坏语义。
+            // 直接在第一遍遍历时按 cleaned 中的原始位置构建有序发送队列。
+            val orderedItems = mutableListOf<Either<String, String>>()  // Left=text, Right=stickerName
+            var cursor = 0
+            for (match in stickerRegex.findAll(cleaned)) {
+                val description = match.groupValues[1].trim()
+                if (description !in systemTags) {
+                    val beforeText = cleaned.substring(cursor, match.range.first).trim()
+                    if (beforeText.isNotBlank()) {
+                        orderedItems.add(Either.Left(beforeText))
+                    }
+                    orderedItems.add(Either.Right(description))
+                    cursor = match.range.last + 1
+                }
+            }
+            val remaining = cleaned.substring(cursor).trim()
+            if (remaining.isNotBlank()) {
+                orderedItems.add(Either.Left(remaining))
+            }
+            // 兜底：若正则未匹配到任何 sticker（stickerNames 非空但 orderedItems 只含 text 的情况），
+            // 将剩余 sticker 追加到末尾，保证不丢消息。
+            val textCount = orderedItems.count { it is Either.Left }
+            val stickerCount = orderedItems.count { it is Either.Right }
+            repeat(stickerNames.size - stickerCount) { i ->
+                orderedItems.add(Either.Right(stickerNames[stickerCount + i]))
+            }
+            repeat(textSegments.size - textCount) { i ->
+                orderedItems.add(Either.Left(textSegments[textCount + i]))
             }
 
-            for (stickerName in stickerNames) {
-                delay(Random.nextLong(600L, 1200L))
-                sendStickerMessage(groupId, companionId, stickerName)
+            Log.d("GroupChatViewModel", "AI回复按原文顺序发送 ${orderedItems.size} 项 (text=${textSegments.size}, sticker=${stickerNames.size})")
+            var segmentIndex = 0
+            for (item in orderedItems) {
+                delay(Random.nextLong(600L, 1600L))
+                when (item) {
+                    is Either.Left -> {
+                        val msg = GroupMessage(groupId = groupId, companionId = companionId, content = item.value, timestamp = System.currentTimeMillis())
+                        val msgId = groupMessageRepository.sendMessage(msg)
+                        broadcastWeChatMessage(companionId, msgId)
+                    }
+                    is Either.Right -> {
+                        sendStickerMessage(groupId, companionId, item.value)
+                    }
+                }
                 segmentIndex++
-                Log.d("GroupChatViewModel", "发送表情包 $segmentIndex/$totalItems: [$stickerName]")
+                Log.d("GroupChatViewModel", "发送 $segmentIndex/${orderedItems.size}")
             }
         }
+    }
+
+    /** 简易 Either：避免引入额外依赖。Left=文字段，Right=表情包名。 */
+    private sealed class Either<out L, out R> {
+        data class Left<L>(val value: L) : Either<L, Nothing>()
+        data class Right<R>(val value: R) : Either<Nothing, R>()
     }
 
     private suspend fun sendStickerMessage(
@@ -1150,7 +1193,8 @@ class GroupChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        applicationScope.cancel()
+        // [H5 FIX] 不再取消应用级作用域——它生命周期与 Application 一致，取消会影响其他正在运行的任务。
+        // AI 请求运行在 applicationScope 中，退出群聊后应继续完成，重新进入即可看到回复。
         sendMessageJob?.cancel()
         groupChatDispatcher.close()
         _isLoading.value = false

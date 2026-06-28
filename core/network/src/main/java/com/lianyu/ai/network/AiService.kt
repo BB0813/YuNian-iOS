@@ -596,6 +596,27 @@ class AiService(context: Context) : AiServiceProvider {
                 .build()
         }
 
+        // [M9 FIX] 轻量请求专用客户端单例（Judge/Generation 等高频小请求）
+        // 原每次 callOpenAiCompatibleLight 都 newBuilder().build()，有 dispatcher/拦截器链开销。
+        private val lightHttpClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+
+        // [M9 FIX] 视觉请求专用客户端单例（图片上传大 body，需更长超时）
+        private val visionHttpClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+
         /**
          * Checks if a response body is HTML (non-JSON) and throws a clear error.
          * Some providers (e.g. Xunfei Spark) return HTML error pages on auth failure
@@ -832,7 +853,7 @@ class AiService(context: Context) : AiServiceProvider {
                                         val safetyResult = ContentFilter.checkOutputSafety(cleaned)
                                         if (!safetyResult.isSafe) {
                                             SecureLog.w("AiService", "Stream output safety violation: ${safetyResult.level} - ${safetyResult.reason}")
-                                            BanManager.recordViolation(appContext, safetyResult.level)
+                                            // [C4 FIX] AI 生成内容不应累加用户封禁（与 ChatViewModel.finalizeResponse 策略一致）
                                             emit(ChunkedResponseHandler.ChunkResult.Text("抱歉，我无法继续这个话题。"))
                                         } else {
                                             emit(ChunkedResponseHandler.ChunkResult.Text(cleaned))
@@ -991,7 +1012,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val safetyResult = ContentFilter.checkOutputSafety(singleLine)
                 if (!safetyResult.isSafe) {
                     SecureLog.w("AiService", "Proactive output safety violation: ${safetyResult.level} - ${safetyResult.reason}")
-                    BanManager.recordViolation(appContext, safetyResult.level)
+                    // [C4 FIX] AI 生成内容不应累加用户封禁
                     return@withContext null
                 }
 
@@ -1048,7 +1069,7 @@ class AiService(context: Context) : AiServiceProvider {
                     val safetyResult = ContentFilter.checkOutputSafety(cleaned)
                     if (!safetyResult.isSafe) {
                         SecureLog.w("AiService", "sendMessageWithCustomSystem output blocked: ${safetyResult.reason}")
-                        BanManager.recordViolation(appContext, safetyResult.level)
+                        // [C4 FIX] AI 生成内容不应累加用户封禁
                         return@withContext "抱歉，我无法继续这个话题。"
                     }
 
@@ -1106,12 +1127,9 @@ class AiService(context: Context) : AiServiceProvider {
         val allKeys = resolveKeysWithPartnerFallback(config).second
         var lastException: Exception? = null
 
-        val lightClient = getEffectiveClient(config).newBuilder()
-            // [P0 FIX] 轻量客户端超时从45s降至20s，与主客户端对齐
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(10, TimeUnit.SECONDS)
-            .build()
+        // [M9 FIX] 复用轻量客户端单例：原每次调用 getEffectiveClient(config).newBuilder().build()
+        // 创建新 OkHttpClient，虽共享连接池但新建 dispatcher + 拦截器链。Judge/Generation 调用频繁有开销。
+        val lightClient = lightHttpClient
 
         for (keyIndex in allKeys.indices) {
             val currentKey = allKeys[keyIndex]
@@ -2578,12 +2596,8 @@ $chatText
                     val mimeType = getImageMimeType(imagePath)
                     SecureLog.i("VISION", "Image encoded successfully: size=${imageBase64.length} chars, mimeType=$mimeType")
 
-                    val visionClient = getEffectiveClient(config).newBuilder()
-                    // [P0 FIX] 视觉客户端超时从60s降至30s（与VISION_API_TIMEOUT_MS对齐）
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(30, TimeUnit.SECONDS)
-                    .writeTimeout(15, TimeUnit.SECONDS)
-                    .build()
+                    // [M9 FIX] 复用视觉客户端单例：原每次调用都 getEffectiveClient(config).newBuilder().build()
+                    val visionClient = visionHttpClient
 
                     val rawResponse = when (config.provider) {
                         ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
@@ -2607,7 +2621,7 @@ $chatText
                     val safetyResult = ContentFilter.checkOutputSafety(cleaned)
                     if (!safetyResult.isSafe) {
                         SecureLog.w("AiService", "sendMessageWithImage output blocked: ${safetyResult.reason}")
-                        BanManager.recordViolation(appContext, safetyResult.level)
+                        // [C4 FIX] AI 生成内容不应累加用户封禁
                         return@withContext AiResponse("抱歉，我无法继续这个话题。")
                     }
 

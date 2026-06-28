@@ -22,10 +22,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlin.text.RegexOption
 
 class CreateCompanionViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
-    private val userRepository = ServiceRegistry.getOrThrow(UserRepository::class.java)
+    // [C5 FIX] 改为 by lazy 延迟获取：原在构造函数立即 getOrThrow，若页面在 ServiceRegistry
+    // 标记初始化完成前被导航到（冷启动 deep link / 配置变更），会抛 IllegalStateException 闪退。
+    private val repository by lazy { ServiceRegistry.getOrThrow(CompanionRepository::class.java) }
+    private val userRepository by lazy { ServiceRegistry.getOrThrow(UserRepository::class.java) }
 
-    val selectedRole: StateFlow<CompanionRole> = userRepository.selectedRole
+    val selectedRole: StateFlow<CompanionRole> by lazy { userRepository.selectedRole }
 
     private val _existingCompanion = MutableStateFlow<CompanionEntity?>(null)
     val existingCompanion: StateFlow<CompanionEntity?> = _existingCompanion
@@ -42,7 +44,7 @@ class CreateCompanionViewModel(application: Application) : AndroidViewModel(appl
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
 
-    private val aiService = ServiceRegistry.getOrThrow(AiService::class.java)
+    private val aiService by lazy { ServiceRegistry.getOrThrow(AiService::class.java) }
 
     fun loadCompanion(id: Long) {
         viewModelScope.launch {

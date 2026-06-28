@@ -54,6 +54,6 @@ interface ChatMessageDao {
     @Query("SELECT COUNT(*) FROM chat_messages WHERE companionId = :companionId AND isFromUser = 0")
     suspend fun getAiMessageCount(companionId: Long): Int
 
-    @Query("UPDATE chat_messages SET content = :content, searchContent = :content WHERE id = :messageId")
-    suspend fun updateMessageContent(messageId: Long, content: String): Int
+    @Query("UPDATE chat_messages SET content = :content, searchContent = :searchContent WHERE id = :messageId")
+    suspend fun updateMessageContent(messageId: Long, content: String, searchContent: String): Int
 }
