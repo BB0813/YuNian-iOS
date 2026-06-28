@@ -13,7 +13,19 @@ import kotlinx.coroutines.flow.Flow
 /** AI 对话响应 */
 data class AiResponse(
     val content: String,
-    val reasoningContent: String? = null
+    val reasoningContent: String? = null,
+    /** AI 要求调用的工具列表（finishReason == "tool_calls" 时非空） */
+    val toolCalls: List<AiToolCall>? = null,
+    /** 结束原因：stop / tool_calls / length */
+    val finishReason: String? = null
+)
+
+/** AI 发起的单次工具调用 */
+data class AiToolCall(
+    val id: String,
+    val name: String,
+    /** 参数 JSON 字符串，由执行端解析 */
+    val arguments: String
 )
 
 /** 伴侣角色摘要信息，供 AI 对话使用 */
@@ -55,6 +67,22 @@ interface AiServiceProvider {
         history: List<AiChatMessage>,
         stickerProbability: Int = 0,
         ntpTimeEnabled: Boolean = false
+    ): AiResponse
+
+    /**
+     * 发送文本消息并获取 AI 响应（带工具调用能力）。
+     *
+     * 当 [tools] 非空时，请求体会包含 tools 定义，AI 可返回 tool_calls。
+     * 调用方负责执行 tool_calls 并重新调用本方法（传入追加了 tool 结果的 history）。
+     *
+     * @param tools 可被 AI 调用的工具列表，null 或空表示不支持工具调用
+     */
+    suspend fun sendMessage(
+        companion: AiCompanionInfo,
+        history: List<AiChatMessage>,
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean,
+        tools: List<AiTool>?
     ): AiResponse
 
     /**

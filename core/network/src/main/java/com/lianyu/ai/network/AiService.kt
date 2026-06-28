@@ -21,6 +21,7 @@ import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.AiTool
 import com.lianyu.ai.domain.AiStreamChunk
 import com.lianyu.ai.domain.ProactiveMessageSettings
 import com.lianyu.ai.domain.ServiceRegistry
@@ -138,8 +139,23 @@ data class ToolProperty(
 @Serializable
 data class Message(
     val role: String,
-    val content: String,
-    val reasoning_content: String? = null
+    val content: String? = null,
+    val reasoning_content: String? = null,
+    val tool_calls: List<ToolCallRaw>? = null,
+    val tool_call_id: String? = null
+)
+
+@Serializable
+data class ToolCallRaw(
+    val id: String,
+    val type: String = "function",
+    val function: ToolCallFunction
+)
+
+@Serializable
+data class ToolCallFunction(
+    val name: String,
+    val arguments: String
 )
 
 @Serializable
@@ -169,7 +185,8 @@ data class ChatCompletionResponse(
 @Serializable
 data class Choice(
     val message: Message? = null,
-    val delta: Message? = null
+    val delta: Message? = null,
+    val finish_reason: String? = null
 )
 
 @Serializable
@@ -806,7 +823,7 @@ class AiService(context: Context) : AiServiceProvider {
 
             val streamRequest = ChunkedResponseHandler.StreamRequest(
                 model = config.model,
-                messages = messages.map { ChunkedResponseHandler.StreamMessage(it.role, it.content) },
+                messages = messages.map { ChunkedResponseHandler.StreamMessage(it.role, it.content ?: "") },
                 temperature = config.temperature.coerceIn(0.1f, 1.5f),
                 max_tokens = config.maxTokens ?: 800,
                 stream = true
@@ -1759,7 +1776,16 @@ class AiService(context: Context) : AiServiceProvider {
         } else ""
         val timeSection = "\n\n${buildCurrentTimeContext(ntpTimeEnabled)}\n"
 
-        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role)
+        // 工具调用能力说明（仅当有已注册工具时注入）
+        val toolsSection = if (com.lianyu.ai.domain.ToolRegistry.isNotEmpty()) {
+            "\n\n=== 工具调用能力 ===\n" +
+                "你可以调用工具帮用户完成实际操作（如查瑞幸门店、搜商品、下单、查订单）。\n" +
+                "工具列表会随请求一并发送，按需调用即可。\n" +
+                "注意：涉及支付的 createOrder 会产生真实订单，请先确认用户意图后再调用。\n" +
+                "工具返回的是 JSON 数据，请用自然语言总结后回复用户，不要直接贴 JSON。\n"
+        } else ""
+
+        return basePrompt + memorySection + timeSection + toolsSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role)
     }
 
     private fun extractPersona(companion: CompanionModel): String {
@@ -2182,6 +2208,24 @@ $chatText
     }
 
     private suspend fun callOpenAiCompatibleWithReasoning(config: ApiConfig, messages: List<Message>): Pair<String, String?> {
+        // 委托到带工具参数的重载，不传工具（保持向后兼容）
+        val result = callOpenAiCompatibleWithTools(config, messages, toolsJson = null)
+        return Pair(result.first, result.second)
+    }
+
+    /**
+     * OpenAI 兼容接口调用（支持 tools + tool_calls 解析）。
+     *
+     * @param toolsJson OpenAI tools 数组 JSON 字符串，null 表示不传 tools
+     * @return 四元组 (content, reasoningContent, toolCalls, finishReason)
+     *         - 正常回复：content 非空，toolCalls=null
+     *         - 工具调用：content 可能为空，toolCalls 非空，finishReason="tool_calls"
+     */
+    private suspend fun callOpenAiCompatibleWithTools(
+        config: ApiConfig,
+        messages: List<Message>,
+        toolsJson: String?
+    ): Tuple4<String, String?, List<com.lianyu.ai.domain.AiToolCall>?, String?> {
         val safeTemp = config.temperature.coerceIn(0.1f, 1.5f)
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
@@ -2193,7 +2237,25 @@ $chatText
         for (msg in messages) {
             val msgObj = org.json.JSONObject()
             msgObj.put("role", msg.role)
-            msgObj.put("content", msg.content)
+            // content 可能为 null（tool_calls 响应），用 putOpt 避免 NPE
+            msgObj.putOpt("content", msg.content)
+            // tool_calls 消息需要回传
+            msg.tool_calls?.let { toolCalls ->
+                val tcArray = org.json.JSONArray()
+                for (tc in toolCalls) {
+                    val tcObj = org.json.JSONObject()
+                    tcObj.put("id", tc.id)
+                    tcObj.put("type", tc.type)
+                    val fnObj = org.json.JSONObject()
+                    fnObj.put("name", tc.function.name)
+                    fnObj.put("arguments", tc.function.arguments)
+                    tcObj.put("function", fnObj)
+                    tcArray.put(tcObj)
+                }
+                msgObj.put("tool_calls", tcArray)
+            }
+            // tool 角色的消息带 tool_call_id
+            msg.tool_call_id?.let { msgObj.put("tool_call_id", it) }
             jsonArray.put(msgObj)
         }
 
@@ -2215,23 +2277,27 @@ $chatText
                         "max_tokens"
                     }
                     jsonBody.put(maxTokensParam, maxTokens)
-                                    }
+                }
+                // 工具调用：注入 tools + tool_choice
+                if (!toolsJson.isNullOrBlank() && toolsJson != "[]") {
+                    jsonBody.put("tools", org.json.JSONArray(toolsJson))
+                    jsonBody.put("tool_choice", "auto")
+                }
 
-                                    val requestBuilder = okhttp3.Request.Builder()
-                                        .url(url)
-                                        .addHeader("Content-Type", "application/json")
-                                    if (prefersApiKeyHeader(config.provider)) {
-                                        requestBuilder.addHeader("api-key", currentKey)
-                                    } else {
-                                        requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                                    }
-                                    val request = requestBuilder
-                                        .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                                        .build()
+                val requestBuilder = okhttp3.Request.Builder()
+                    .url(url)
+                    .addHeader("Content-Type", "application/json")
+                if (prefersApiKeyHeader(config.provider)) {
+                    requestBuilder.addHeader("api-key", currentKey)
+                } else {
+                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
+                }
+                val request = requestBuilder
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
 
-                                    // Use dedicated client per config (PARTNER, CUSTOM+skipCert, or default pinned)
-                                    val client = getEffectiveClient(config)
-                                    val response = executeAdaptive(config, request, client)
+                val client = getEffectiveClient(config)
+                val response = executeAdaptive(config, request, client)
                 SecureLog.api("HTTP", "code=${response.code}, protocol=${response.protocol}")
                 val body = response.body?.string() ?: throw Exception("Empty response")
 
@@ -2248,28 +2314,38 @@ $chatText
                     throw Exception(parsed.error.message ?: "API返回错误")
                 }
 
-                val message = parsed.choices?.firstOrNull()?.message
+                val choice = parsed.choices?.firstOrNull()
+                val message = choice?.message
                 val rawContent = message?.content
                 val reasoning = message?.reasoning_content
-                SecureLog.api("RESPONSE", "len=${rawContent?.length ?: 0}, reasoningLen=${reasoning?.length ?: 0}")
+                val finishReason = choice?.finish_reason
+                SecureLog.api("RESPONSE", "len=${rawContent?.length ?: 0}, reasoningLen=${reasoning?.length ?: 0}, finish=$finishReason")
 
-                // [FIX] 推理模型可能 content=null 但 reasoning_content 有值
-                // 也可能 content 只有思考标签，stripThinkingContent 后变空
-                // 注意：reasoning_content 是模型内部思考过程，绝不能作为用户可见的回复
+                // 解析 tool_calls
+                val toolCalls = message?.tool_calls?.map { tc ->
+                    com.lianyu.ai.domain.AiToolCall(
+                        id = tc.id,
+                        name = tc.function.name,
+                        arguments = tc.function.arguments
+                    )
+                }
+
+                // 有 tool_calls 时，content 可能为空，这是正常的
+                if (!toolCalls.isNullOrEmpty()) {
+                    return Tuple4("", reasoning, toolCalls, finishReason ?: "tool_calls")
+                }
+
                 var content = if (!rawContent.isNullOrBlank()) {
                     stripThinkingContent(rawContent)
                 } else {
-                    // content 为空，即使有 reasoning_content 也不使用
                     ""
                 }
 
                 if (content.isBlank()) {
-                    // stripThinkingContent 清空了全部内容（模型只返回了思考标签）
-                    // 或者 content 本身为空——都不应使用 reasoning_content 替代
                     throw Exception("模型仅返回了思考过程，未生成实际回复，请重试")
                 }
 
-                return Pair(content, reasoning)
+                return Tuple4(content, reasoning, null, finishReason)
             } catch (e: Exception) {
                 lastException = e
                 markKeyFailed(currentKey)
@@ -2280,6 +2356,11 @@ $chatText
 
         throw lastException ?: Exception("所有 API Key 均请求失败")
     }
+
+    /** 简易四元组（Kotlin 无内置 Tuple4） */
+    private data class Tuple4<A, B, C, D>(
+        val first: A, val second: B, val third: C, val fourth: D
+    )
 
     private fun stripThinkingContent(content: String): String {
         var result = content
@@ -2301,7 +2382,7 @@ $chatText
         val anthropicMessages = messages.filter { it.role != "system" }.map {
             AnthropicMessage(
                 role = if (it.role == "user") "user" else "assistant",
-                content = it.content
+                content = it.content ?: ""
             )
         }
 
@@ -2334,7 +2415,7 @@ $chatText
         val anthropicMessages = messages.filter { it.role != "system" }.map {
             AnthropicMessage(
                 role = if (it.role == "user") "user" else "assistant",
-                content = it.content
+                content = it.content ?: ""
             )
         }
 
@@ -2917,6 +2998,114 @@ $chatText
         val entity = companion.toCompanionEntity()
         val messages = history.map { it.toChatMessage() }
         return sendMessage(entity, messages, stickerProbability, ntpTimeEnabled)
+    }
+
+    override suspend fun sendMessage(
+        companion: AiCompanionInfo,
+        history: List<AiChatMessage>,
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean,
+        tools: List<AiTool>?
+    ): AiResponse {
+        if (tools.isNullOrEmpty()) {
+            return sendMessage(companion, history, stickerProbability, ntpTimeEnabled)
+        }
+        val entity = companion.toCompanionEntity()
+        val messages = history.map { it.toChatMessage() }
+        return sendMessageWithTools(entity, messages, stickerProbability, ntpTimeEnabled, tools)
+    }
+
+    /**
+     * 带工具调用能力的消息发送。
+     * 请求注入 tools 定义，响应解析 tool_calls 并返回给调用方（ChatViewModel 负责执行循环）。
+     */
+    private suspend fun sendMessageWithTools(
+        companion: CompanionModel?,
+        history: List<ChatMessage>,
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean,
+        tools: List<AiTool>
+    ): AiResponse {
+        if (companion == null) return AiResponse("抱歉，找不到角色信息。")
+
+        return SecureLog.timed("AiService", "sendMessageWithTools") {
+            withContext(Dispatchers.IO) {
+                val config = resolveConfig()
+                    ?: return@withContext AiResponse("请先配置并启用可用的API。")
+                if (config.model.isBlank()) {
+                    return@withContext AiResponse("模型名未配置。")
+                }
+
+                val sortedHistory = history.sortedBy { it.timestamp }
+                val sanitizedHistory = if (config.provider == ApiProvider.PARTNER) {
+                    sortedHistory
+                } else {
+                    sortedHistory.map { msg ->
+                        if (msg.isFromUser) msg.copy(content = com.lianyu.ai.common.safety.DifferentialPrivacyFilter.sanitize(msg.content))
+                        else msg
+                    }
+                }
+                val lastUserMessage = sanitizedHistory.lastOrNull { it.isFromUser }?.content ?: ""
+                val contextLimit = appSettingsStore.getContextLimit()
+                val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
+                val compressionMode = appSettingsStore.getContextCompressionMode()
+                val keepRatio = appSettingsStore.getCompressionKeepRatio()
+                val minKeep = appSettingsStore.getCompressionMinKeep()
+                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
+                val role = userRepository.selectedRole.value
+                val baseSystemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, emptyList(), stickerProbability, innerThoughtEnabled, role = role)
+                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
+                val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
+
+                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, tools=${tools.size}")
+
+                try {
+                    val toolsJson = com.lianyu.ai.domain.ToolRegistry.toolDefinitionsJson()
+                    val result = when (config.provider) {
+                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
+                            callOpenAiCompatibleWithTools(config, messages, toolsJson)
+                        }
+                        ApiProvider.ANTHROPIC -> {
+                            // Anthropic 路径暂不支持 tools，降级为普通调用
+                            val resp = callAnthropic(config, messages, systemPrompt)
+                            Tuple4(resp, null, null, null)
+                        }
+                    }
+                    val rawResponse = result.first
+                    val reasoning = result.second
+                    val toolCalls = result.third
+                    val finishReason = result.fourth
+
+                    recordTokenUsage(companion.id, messages.size, rawResponse.length + (toolCalls?.joinToString("") { it.arguments }?.length ?: 0))
+
+                    // 有 tool_calls：直接返回，不做事后处理，由 ChatViewModel 执行循环
+                    if (!toolCalls.isNullOrEmpty()) {
+                        SecureLog.api("TOOL_CALL", "count=${toolCalls.size}, names=${toolCalls.map { it.name }}")
+                        return@withContext AiResponse(
+                            content = "",
+                            reasoningContent = reasoning,
+                            toolCalls = toolCalls,
+                            finishReason = finishReason
+                        )
+                    }
+
+                    if (rawResponse.isBlank()) {
+                        throw Exception("API返回空内容，请检查模型名是否正确")
+                    }
+
+                    val cleaned = applyPersonaPostProcessing(rawResponse, sortedHistory)
+                    val safetyResult = ContentFilter.checkOutputSafety(cleaned)
+                    if (!safetyResult.isSafe) {
+                        return@withContext AiResponse("抱歉，我无法继续这个话题。")
+                    }
+
+                    AiResponse(cleaned, reasoning, null, finishReason)
+                } catch (e: Exception) {
+                    SecureLog.e("AiService", "sendMessageWithTools failed", e)
+                    throw Exception(formatApiException(e))
+                }
+            }
+        }
     }
 
     override suspend fun sendMessageWithImage(

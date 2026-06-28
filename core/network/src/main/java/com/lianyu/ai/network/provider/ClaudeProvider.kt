@@ -29,7 +29,7 @@ class ClaudeProvider : AiProvider {
         return messages.filter { it.role != "system" }.map {
             AnthropicMessage(
                 role = if (it.role == "user") "user" else "assistant",
-                content = it.content
+                content = it.content ?: ""
             )
         }
     }
