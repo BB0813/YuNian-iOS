@@ -12,8 +12,9 @@ import okhttp3.CertificatePinner
  */
 object CertificatePins {
 
-    // ── SuFlowAPI (self-hosted) ──
-    // HTTP only for now; pins to be added when HTTPS is configured
+    // ── SuFlowAPI (suflow.cloud) ──
+    // SPKI pin of TrustAsia DV TLS cert (valid until 2026-09-21)
+    private const val SUFLOW_PIN = "sha256/Nh9PzSv3Z/jvrTTdRgBJWEp2CkPjcSHBtzZ2O8Nkmgs="
 
     // ── OpenAI ──
     private const val OPENAI_PIN = "sha256/9g+mtyVAhL3wQl0JVOKDKS5NZtYWty5pQuLjWkSlTCU="
@@ -49,7 +50,8 @@ object CertificatePins {
     private const val XIAOMI_PIN = "sha256/H7ox+nLEX/IGOH8nZwl1Yzus/kqXmmbwXVvQA/lklRU="
 
     val certificatePinner: CertificatePinner = CertificatePinner.Builder()
-        // SuFlowAPI: no pinning needed (HTTP-only in current deployment)
+        // SuFlowAPI (suflow.cloud) — partner relay server
+        .add("suflow.cloud", SUFLOW_PIN)
         // Third-party API endpoints
         .add("api.openai.com", OPENAI_PIN)
         .add("api.anthropic.com", ANTHROPIC_PIN)

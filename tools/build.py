@@ -286,7 +286,8 @@ def shell_dex():
     for name in shell_source_names:
         target = os.path.join(SHELL_SRC, name)
         source = os.path.join(STABLE_SHELL_SRC, name)
-        if not os.path.exists(target) and os.path.exists(source):
+        # Always copy to ensure latest source is used
+        if os.path.exists(source):
             shutil.copy(source, target)
 
     cls = os.path.join(SHELL_WORK, "classes"); dex = os.path.join(SHELL_WORK, "dex")

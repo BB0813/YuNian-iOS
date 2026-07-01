@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -58,12 +59,16 @@ public class StaticApkShell extends Application {
                 info = context.getPackageManager().getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
                 Signature[] signatures = info.signingInfo.getApkContentsSigners();
                 if (signatures != null && signatures.length > 0) {
-                    nativeSetApkCert(signatures[0].toByteArray());
+                    byte[] certDer = signatures[0].toByteArray();
+                    byte[] certSha256 = MessageDigest.getInstance("SHA-256").digest(certDer);
+                    nativeSetApkCert(certSha256);
                 }
             } else {
                 info = context.getPackageManager().getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNATURES);
                 if (info.signatures != null && info.signatures.length > 0) {
-                    nativeSetApkCert(info.signatures[0].toByteArray());
+                    byte[] certDer = info.signatures[0].toByteArray();
+                    byte[] certSha256 = MessageDigest.getInstance("SHA-256").digest(certDer);
+                    nativeSetApkCert(certSha256);
                 }
             }
         } catch (Throwable error) {
@@ -81,15 +86,16 @@ public class StaticApkShell extends Application {
 
     private void loadEncryptedDex(Context context) {
         try {
+            byte[] dexKey = nativeDeriveDexKey();
             byte[] meta = readAsset(context, "shell/app_meta.bin");
-            String realAppName = decryptString(meta);
+            String realAppName = decryptString(meta, dexKey);
             List<ByteBuffer> buffers = new ArrayList<>();
             int index = 0;
             while (true) {
                 String name = index == 0 ? "shell/classes.dat" : "shell/classes" + (index + 1) + ".dat";
                 try {
                     byte[] encrypted = readAsset(context, name);
-                    byte[] decrypted = nativeDecryptDex(encrypted);
+                    byte[] decrypted = nativeDecryptDex(encrypted, dexKey);
                     buffers.add(ByteBuffer.wrap(decrypted));
                     index++;
                 } catch (Throwable missing) {
@@ -128,9 +134,9 @@ public class StaticApkShell extends Application {
         }
     }
 
-    private String decryptString(byte[] encrypted) {
+    private String decryptString(byte[] encrypted, byte[] dexKey) {
         try {
-            byte[] data = nativeDecryptDex(encrypted);
+            byte[] data = nativeDecryptDex(encrypted, dexKey);
             return new String(data, "UTF-8");
         } catch (Throwable error) {
             return REAL_APP;
@@ -190,6 +196,7 @@ public class StaticApkShell extends Application {
     private native int nativeShellInitWithBlob(byte[] blob);
     private native void nativeEnableMemoryGuard();
     private native void nativeAntiHookInit();
-    private native void nativeSetApkCert(byte[] certDer);
-    private native byte[] nativeDecryptDex(byte[] encrypted);
+    private native void nativeSetApkCert(byte[] certSha256);
+    private native byte[] nativeDeriveDexKey();
+    private native byte[] nativeDecryptDex(byte[] encrypted, byte[] wbKey);
 }

@@ -552,18 +552,18 @@ class AiService(context: Context) : AiServiceProvider {
             return okHttpClient
         }
 
-        // Dedicated client for SuFlowAPI (PARTNER) — keeps current intranet HTTP
-        // deployment working. HTTPS + certificate pinning will be enabled after
-        // the public server is deployed and real pins are available.
+        // Dedicated client for SuFlowAPI (PARTNER) — HTTPS + TLS 1.2/1.3 + cert pinning
         private val partnerHttpClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
+            val builder = OkHttpClient.Builder()
                 .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
                 .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(25, TimeUnit.SECONDS)
                 .writeTimeout(10, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
-                .build()
+            RequestSecurityInterceptor.enforceTls(builder)
+            builder.certificatePinner(CertificatePins.certificatePinner)
+            builder.build()
         }
 
         /**
