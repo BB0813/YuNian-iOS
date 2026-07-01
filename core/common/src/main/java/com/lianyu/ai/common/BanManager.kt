@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import android.provider.Settings
 import android.os.Build
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
 import java.security.MessageDigest
 
 /**
@@ -82,11 +82,13 @@ object BanManager {
         // 🔒 SecurityConstants.Level.HIGH: 封禁数据使用 EncryptedSharedPreferences
         //    防止 root 用户直接修改 XML 文件绕过封禁
         return try {
-            val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
             EncryptedSharedPreferences.create(
+                context,
                 PREFS_NAME,
                 masterKey,
-                context,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )

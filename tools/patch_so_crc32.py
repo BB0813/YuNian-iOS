@@ -68,18 +68,28 @@ def crc32(data: bytes) -> int:
     return crc ^ 0xFFFFFFFF
 
 
+def read_text(path: str) -> str:
+    for encoding in ("utf-8", "gbk"):
+        try:
+            with open(path, encoding=encoding) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 def read_seed_from_config(cpp_dir: str) -> int:
     """Read VMP_BUILD_SEED from g_vmp_config.h."""
     config_path = os.path.join(cpp_dir, "g_vmp_config.h")
-    with open(config_path) as f:
-        for line in f:
-            if "VMP_BUILD_SEED" in line:
-                # Parse: #define VMP_BUILD_SEED  0x55A565ADu
-                parts = line.split()
-                for p in parts:
-                    p = p.rstrip('uU')
-                    if p.startswith("0x") or p.startswith("0X"):
-                        return int(p, 16)
+    for line in read_text(config_path).splitlines():
+        if "VMP_BUILD_SEED" in line:
+            # Parse: #define VMP_BUILD_SEED  0x55A565ADu
+            parts = line.split()
+            for p in parts:
+                p = p.rstrip('uU')
+                if p.startswith("0x") or p.startswith("0X"):
+                    return int(p, 16)
     raise ValueError(f"VMP_BUILD_SEED not found in {config_path}")
 
 

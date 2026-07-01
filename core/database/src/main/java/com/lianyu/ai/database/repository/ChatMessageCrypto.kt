@@ -5,7 +5,6 @@ import com.lianyu.ai.database.model.GroupMessage
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import java.security.MessageDigest
-import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -32,32 +31,25 @@ object ChatMessageCrypto {
     private const val GCM_TAG_LENGTH = 128
     private const val GCM_IV_LENGTH = 12
     private const val PREFIX = "enc:v1:"
-    private val random = SecureRandom()
 
     /** Primary key from AndroidKeyStore (TEE-backed, AES-256-GCM) */
     private val keyStoreKey: SecretKey? by lazy {
         runCatching { getOrCreateAndroidKeyStoreKey() }.getOrNull()
     }
 
-    /** Legacy static key for backward compatibility with pre-existing encrypted data */
+    /** Current encryption key. Refuse storage when AndroidKeyStore is unavailable. */
+    private val encryptionKey: SecretKey
+        get() = keyStoreKey ?: error("AndroidKeyStore chat message key unavailable")
+
     private val legacyFallbackKey: SecretKey by lazy {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest("lianyu-chat-message-storage-v1".toByteArray(Charsets.UTF_8))
         SecretKeySpec(digest, "AES")
     }
 
-    /** Current encryption key (prefer KeyStore, fall back to legacy if KeyStore unavailable) */
-    private val encryptionKey: SecretKey
-        get() = keyStoreKey ?: legacyFallbackKey
-
-    /** Both keys for decryption attempts (new first, then legacy for backward compat) */
+    /** KeyStore first, legacy static key only for pre-existing encrypted rows. */
     private val decryptionKeys: List<SecretKey>
-        get() {
-            val keys = mutableListOf<SecretKey>()
-            keyStoreKey?.let { keys.add(it) }
-            keys.add(legacyFallbackKey)
-            return keys
-        }
+        get() = listOfNotNull(keyStoreKey) + legacyFallbackKey
 
     // --- Public API (mirrors C0 interface for drop-in replacement) ---
 
@@ -106,9 +98,9 @@ object ChatMessageCrypto {
     fun encrypt(plaintext: String): String {
         if (plaintext.isEmpty()) return plaintext
         if (plaintext.startsWith(PREFIX)) return plaintext
-        val iv = ByteArray(GCM_IV_LENGTH).also { random.nextBytes(it) }
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, encryptionKey, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+        cipher.init(Cipher.ENCRYPT_MODE, encryptionKey)
+        val iv = cipher.iv
         val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
         val combined = ByteBuffer.allocate(iv.size + ciphertext.size)
             .put(iv)
@@ -155,7 +147,7 @@ object ChatMessageCrypto {
             .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            .setRandomizedEncryptionRequired(false)
+            .setRandomizedEncryptionRequired(true)
             .build()
         generator.init(spec)
         generator.generateKey()

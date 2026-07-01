@@ -24,7 +24,8 @@ D8 = BT / "d8.bat"
 APKSIGNER = BT / "apksigner.bat"
 APKTOOL = PROJECT / "tools" / "apktool.jar"
 KEYSTORE = PROJECT / "release.keystore"
-KS_PASS = "3498762309"
+STORE_PASS = os.environ.get("LIANYU_STORE_PASSWORD", "")
+KEY_PASS = os.environ.get("LIANYU_KEY_PASSWORD", "")
 KS_ALIAS = "your_alias"
 
 SHELL_SRC = PROJECT / "app/build/tmp/ultimate_shell/src"
@@ -288,8 +289,8 @@ def phase5_assemble():
     signed = str(RELEASE_APK).replace('.apk', '-signed.apk')
     run([
         'cmd', '/c', str(APKSIGNER), 'sign',
-        '--ks', str(KEYSTORE), '--ks-pass', f'pass:{KS_PASS}',
-        '--key-pass', f'pass:{KS_PASS}', '--ks-key-alias', KS_ALIAS,
+        '--ks', str(KEYSTORE), '--ks-pass', f'pass:{STORE_PASS}',
+        '--key-pass', f'pass:{KEY_PASS}', '--ks-key-alias', KS_ALIAS,
         '--out', signed, str(RELEASE_APK)
     ], "Sign")
     shutil.move(signed, str(RELEASE_APK))
@@ -320,8 +321,8 @@ def phase6_patch_crc32():
     # Re-sign
     signed = str(RELEASE_APK).replace('.apk', '-signed.apk')
     run(['cmd', '/c', str(APKSIGNER), 'sign',
-         '--ks', str(KEYSTORE), '--ks-pass', f'pass:{KS_PASS}',
-         '--key-pass', f'pass:{KS_PASS}', '--ks-key-alias', KS_ALIAS,
+            '--ks', str(KEYSTORE), '--ks-pass', f'pass:{STORE_PASS}',
+            '--key-pass', f'pass:{KEY_PASS}', '--ks-key-alias', KS_ALIAS,
          '--out', signed, str(RELEASE_APK)], "sign")
     shutil.move(signed, str(RELEASE_APK))
     print(f"  CRC32 patched + re-signed. APK: {os.path.getsize(str(RELEASE_APK))/1024/1024:.1f}MB")
@@ -331,6 +332,15 @@ def main():
     print("=" * 60)
     print("LianYu Ultimate Shell — 一键构建")
     print("=" * 60)
+
+    missing = [name for name, value in [
+        ("LIANYU_STORE_PASSWORD", STORE_PASS),
+        ("LIANYU_KEY_PASSWORD", KEY_PASS),
+    ] if not value]
+    if missing:
+        sys.exit(f"Release signing requires: {', '.join(missing)}")
+    if not KEYSTORE.exists():
+        sys.exit(f"Release keystore not found: {KEYSTORE}")
 
     if not APKTOOL.exists():
         print("❌ apktool.jar not found. Download from: https://github.com/iBotPeaches/Apktool/releases")

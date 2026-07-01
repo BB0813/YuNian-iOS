@@ -70,6 +70,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -298,8 +299,14 @@ fun ChatScreen(
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
-                is ChatUiEvent.Error -> snackbarHostState.showSnackbar(event.message)
-                is ChatUiEvent.ContentBlocked -> snackbarHostState.showSnackbar("内容已拦截: ${event.reason}")
+                is ChatUiEvent.Error -> snackbarHostState.showSnackbar(
+                    message = event.message,
+                    duration = SnackbarDuration.Long
+                )
+                is ChatUiEvent.ContentBlocked -> snackbarHostState.showSnackbar(
+                    message = "内容已拦截: ${event.reason}",
+                    duration = SnackbarDuration.Long
+                )
                 is ChatUiEvent.Info -> snackbarHostState.showSnackbar(event.message)
                 is ChatUiEvent.StreamCompleted -> { /* 流式完成，不需要用户感知 */ }
             }

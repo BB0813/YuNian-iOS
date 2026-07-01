@@ -805,21 +805,30 @@ private val MAX_BATCH_SIZE = 10
             val aiResponse = if (imagePath != null) {
                 withTimeoutOrNull(VISION_API_TIMEOUT_MS) {
                     aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, stickerProbability, ntpTimeEnabled)
-                } ?: throw Exception(getApplication<Application>().getString(R.string.api_error_generic))
+                } ?: throw Exception("图片识别超时，请重试")
             } else if (isLocalModelEnabled()) {
                 AiResponse(content = runInterruptibleSafe(timeoutMs = API_TIMEOUT_MS) {
                     generateWithLocalModel(companion, history, stickerProbability, ntpTimeEnabled)
-                } ?: throw java.util.concurrent.TimeoutException("Local model timeout"))
+                } ?: throw java.util.concurrent.TimeoutException("本地模型响应超时，请重试"))
             } else {
                 runInterruptibleSafe(timeoutMs = API_TIMEOUT_MS) {
                     aiService.sendMessage(companion.toAiCompanionInfo(), history.toAiChatMessages(), stickerProbability, ntpTimeEnabled)
-                } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
+                } ?: throw java.util.concurrent.TimeoutException("AI回复超时，请检查网络后重试")
             }
 
             val aiContent = aiResponse.content
             ChatDebugLog.log("[ChatVM] startAiResponse: AI response received, length=${aiContent.length}, startsWithToast=${aiContent.startsWith("[TOAST]")}")
             if (aiContent.startsWith("[TOAST]")) {
-                _events.tryEmit(ChatUiEvent.Error(aiContent.removePrefix("[TOAST]")))
+                val toastMsg = aiContent.removePrefix("[TOAST]")
+                _events.tryEmit(ChatUiEvent.Error(toastMsg))
+                // [FIX] 持久化 [TOAST] 消息到聊天记录，确保用户始终能看到反馈
+                val toastChatMsg = ChatMessage(
+                    companionId = companionId,
+                    content = toastMsg,
+                    isFromUser = false,
+                    timestamp = System.currentTimeMillis()
+                )
+                chatRepository.sendMessage(toastChatMsg)
                 return@launch
             }
 
@@ -843,7 +852,16 @@ private val MAX_BATCH_SIZE = 10
             if (!isExpectedSupersede) {
                 // 非预期的取消——可能是网络超时或系统级中断
                 ChatDebugLog.log("[ChatVM] UNEXPECTED cancellation: $cancelReason")
-                _events.tryEmit(ChatUiEvent.Error("回复被打断，请重试"))
+                val errorMsg = "回复被打断，请重试"
+                _events.tryEmit(ChatUiEvent.Error(errorMsg))
+                // [FIX] 持久化错误消息到聊天记录，确保用户始终能看到反馈
+                val errorChatMsg = ChatMessage(
+                    companionId = companionId,
+                    content = errorMsg,
+                    isFromUser = false,
+                    timestamp = System.currentTimeMillis()
+                )
+                chatRepository.sendMessage(errorChatMsg)
             } else {
                 // 预期的取消（新批次替换）——新回复马上到来，不存占位消息
                 ChatDebugLog.log("[ChatVM] Expected cancellation (batch superseded): $cancelReason")
@@ -851,11 +869,22 @@ private val MAX_BATCH_SIZE = 10
         } catch (e: Exception) {
             val rawMessage = e.message ?: "发送失败"
             ChatDebugLog.log("[ChatVM] startAiResponse EXCEPTION: ${e.javaClass.simpleName}: $rawMessage")
-            if (rawMessage.startsWith("[TOAST]")) {
-                _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
+            // [FIX] 提取用户可读的错误消息，同时发 Snackbar 和持久化到聊天记录
+            val userFacingMsg = if (rawMessage.startsWith("[TOAST]")) {
+                rawMessage.removePrefix("[TOAST]")
             } else {
-                _events.tryEmit(ChatUiEvent.Error(rawMessage))
+                rawMessage
             }
+            _events.tryEmit(ChatUiEvent.Error(userFacingMsg))
+            // [FIX] 持久化错误消息到聊天记录，确保用户始终能看到反馈
+            // 不使用 [TOAST] 前缀，直接存储用户可读的错误信息
+            val errorChatMsg = ChatMessage(
+                companionId = companionId,
+                content = userFacingMsg,
+                isFromUser = false,
+                timestamp = System.currentTimeMillis()
+            )
+            chatRepository.sendMessage(errorChatMsg)
             SecureLog.e("ChatViewModel", "AI response failed", e)
         } finally {
             ChatDebugLog.log("[ChatVM] startAiResponse FINALLY: exitLoading, activeRequests=${_activeRequests.get()}")
@@ -1254,6 +1283,17 @@ private val MAX_BATCH_SIZE = 10
                 )
             } catch (e: Exception) {
                 SecureLog.e("ChatViewModel", "regenerateMessage failed", e)
+                val rawMessage = e.message ?: "重新生成失败"
+                val userFacingMsg = if (rawMessage.startsWith("[TOAST]")) rawMessage.removePrefix("[TOAST]") else rawMessage
+                _events.tryEmit(ChatUiEvent.Error(userFacingMsg))
+                // [FIX] 持久化错误消息到聊天记录
+                val errorChatMsg = ChatMessage(
+                    companionId = companionId,
+                    content = userFacingMsg,
+                    isFromUser = false,
+                    timestamp = System.currentTimeMillis()
+                )
+                chatRepository.sendMessage(errorChatMsg)
             } finally {
                 _isRegenerating.value = false
             }
@@ -1367,12 +1407,20 @@ private val MAX_BATCH_SIZE = 10
                         aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, settings.stickerProbability, settings.ntpTimeEnabled)
                     } ?: throw Exception(getApplication<Application>().getString(R.string.api_error_generic))
 
-                    // Handle [TOAST] prefix — show as toast, don't store as chat message
+                    // Handle [TOAST] prefix — show as toast AND store as chat message for persistence
                     val aiContent = aiResponse.content
                     if (aiContent.startsWith("[TOAST]")) {
                         val toastMsg = aiContent.removePrefix("[TOAST]")
                         _events.tryEmit(ChatUiEvent.Error(toastMsg))
                         SecureLog.w("ChatViewModel", "AI image response is a toast: $toastMsg")
+                        // [FIX] 持久化到聊天记录
+                        val toastChatMsg = ChatMessage(
+                            companionId = companionId,
+                            content = toastMsg,
+                            isFromUser = false,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        chatRepository.sendMessage(toastChatMsg)
                     } else {
                         finalizeResponse(
                             aiContent = aiContent,
@@ -1387,12 +1435,16 @@ private val MAX_BATCH_SIZE = 10
             } catch (e: Exception) {
                 SecureLog.e("ChatViewModel", "sendImageMessage failed", e)
                 val rawMessage = e.message ?: "发送失败"
-                if (rawMessage.startsWith("[TOAST]")) {
-                    _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
-                } else {
-                    _events.tryEmit(ChatUiEvent.Error(rawMessage))
-                    // 错误消息仅通过UI事件展示，不存库——避免污染AI历史上下文
-                }
+                val userFacingMsg = if (rawMessage.startsWith("[TOAST]")) rawMessage.removePrefix("[TOAST]") else rawMessage
+                _events.tryEmit(ChatUiEvent.Error(userFacingMsg))
+                // [FIX] 持久化错误消息到聊天记录，确保用户始终能看到反馈
+                val errorChatMsg = ChatMessage(
+                    companionId = companionId,
+                    content = userFacingMsg,
+                    isFromUser = false,
+                    timestamp = System.currentTimeMillis()
+                )
+                chatRepository.sendMessage(errorChatMsg)
             } finally {
                 exitLoading()
             }

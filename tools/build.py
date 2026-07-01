@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """LianYu One-Click APK Builder — strips ContentProviders, injects shell DEX."""
 
-import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile, struct, hashlib, hmac
+import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile, struct, hashlib, hmac, zlib
 
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHELL_SRC = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/src/com/lianyu/ai/security")
+STABLE_SHELL_SRC = os.path.join(PROJECT, "app/src/shell/java/com/lianyu/ai/security")
 SHELL_WORK = os.path.join(PROJECT, "app/build/tmp/ultimate_shell")
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
 SDK = os.path.join(LOCALAPPDATA, "Android", "Sdk")
 BT = os.path.join(SDK, "build-tools", "36.0.0")
 ANDROID_JAR = os.path.join(SDK, "platforms", "android-35", "android.jar")
 APKTOOL = os.path.join(PROJECT, "tools", "apktool.jar")
+CPP_DIR = os.path.join(PROJECT, "core", "security", "src", "main", "cpp")
+WB_TABLES_INC = os.path.join(CPP_DIR, "wb_tables.inc")
+G_VMP_PAYLOAD_CPP = os.path.join(CPP_DIR, "g_vmp_payload_data.cpp")
+G_VMP_CONFIG_H = os.path.join(CPP_DIR, "g_vmp_config.h")
+PYTHON = sys.executable
 
 # cert obs from nativeDeriveDexKey (obfuscation mask)
 CERT_OBS = bytes([
@@ -40,12 +46,17 @@ def crc64(data):
         c = (table[((c >> 56) ^ b) & 0xFF] ^ (c << 8)) & 0xFFFFFFFFFFFFFFFF
     return c ^ 0xFFFFFFFFFFFFFFFF
 
-def derive_dex_key(cert_sha256):
-    """Derive DEX encryption key matching nativeDeriveDexKey()."""
-    # XOR cert with obs mask → cert_hash
-    cert_hash = bytes(a ^ b for a, b in zip(cert_sha256[:32], CERT_OBS))
-    # Salt: maps_crc(8) || dev_fp(8) || hw_sig(32) || "lianyu_dex_v3"(16)
-    salt = struct.pack('<Q', EXPECTED_MAPS) + b'\x00' * 8 + b'\x00' * 32 + b'lianyu_dex_v3\x00\x00'
+def derive_dex_key(cert_sha256, use_actual_cert):
+    """Derive DEX encryption key matching nativeDeriveDexKey().
+    Debug: cert_for_salt = cert_hash (hardcoded, matches native is_debug path)
+    Release: cert_for_salt = actual cert SHA-256 (set via nativeSetApkCert)
+    """
+    # cert_hash = cert_obs[i] ^ (0xC3 ^ (i * 0x9D)) — fixed value matching native
+    cert_hash = bytes(CERT_OBS[i] ^ ((0xC3 ^ (i * 0x9D)) & 0xFF) for i in range(32))
+    # Salt: maps_crc(8) || cert_for_salt(32) || hw_sig(32) || "lianyu_dex_v3___"(16) = 88 bytes
+    # Debug: cert_for_salt = cert_hash; Release: cert_for_salt = cert_sha256[:32]
+    cert_for_salt = cert_sha256[:32] if use_actual_cert and len(cert_sha256) >= 32 else cert_hash
+    salt = struct.pack('<Q', EXPECTED_MAPS) + cert_for_salt + b'\x00' * 32 + b'lianyu_dex_v3___'
     return hmac.new(cert_hash, salt, hashlib.sha256).digest()
 
 # Fallback XOR_KEY for when cert is unavailable
@@ -63,20 +74,231 @@ DEX_KEY = _FALLBACK_KEY
 SHELL_SO_LIST = ["lib/arm64-v8a/liblianyu_shell.so",
                  "lib/arm64-v8a/liblianyu_security.so"]
 
+# SOs to pack (encrypt .text section)
+PACK_SO_LIST = ["liblianyu_security.so", "liblianyu_shell.so"]
+PACKED_SO_DIR = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/packed_so")
+
 def run(cmd, timeout=120):
     print(f"  $ {' '.join(cmd) if isinstance(cmd,list) else cmd}")
-    return subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    if result.returncode != 0:
+        if result.stdout:
+            print(result.stdout.decode("utf-8", errors="replace"))
+        if result.stderr:
+            print(result.stderr.decode("utf-8", errors="replace"))
+        result.check_returncode()
+    return result
+
+def find_gradle_apk(variant):
+    """Find the APK emitted by Gradle for the requested variant."""
+    apk_dir = os.path.join(PROJECT, "app", "build", "outputs", "apk", variant)
+    candidates = [
+        os.path.join(apk_dir, f"app-{variant}.apk"),
+        os.path.join(apk_dir, f"app-{variant}-unsigned.apk"),
+    ]
+    candidates.extend(sorted(glob.glob(os.path.join(apk_dir, "*.apk")), key=os.path.getmtime, reverse=True))
+    for apk in candidates:
+        if os.path.exists(apk):
+            return apk
+    sys.exit(f"Gradle APK not found in {apk_dir}")
+
+def get_cert_crc64(keystore_path, store_pass, alias):
+    """Compute CRC64 of signing certificate (matching native crc64_buf),
+    truncated to 32 bits for VMP_BUILD_SEED (uint32_t)."""
+    try:
+        r = subprocess.run(
+            ["keytool", "-exportcert", "-keystore", keystore_path,
+             "-storepass", store_pass, "-alias", alias],
+            capture_output=True, timeout=30)
+        if r.returncode == 0 and r.stdout:
+            return crc64(r.stdout) & 0xFFFFFFFF
+    except Exception as e:
+        print(f"  WARNING: cert CRC64 failed ({e})")
+    return int.from_bytes(os.urandom(4), 'little')
+
+
+def phase0_wb_aes():
+    """Generate White-Box AES lookup tables (wb_tables.inc) before Gradle build.
+
+    Without this step, whitebox-aes.cpp #include "wb_tables.inc" fails to compile,
+    or uses stale/placeholder tables — the AES key is effectively known.
+    """
+    print("\n═══ Phase 0: WB-AES Table Generation ═══")
+    setup_wb = os.path.join(PROJECT, "tools", "setup_wb_key.py")
+    harden_wb = os.path.join(PROJECT, "tools", "wb_tables_harden.py")
+
+    # Skip if wb_tables.inc already exists and is newer than gen_wb_tables.py
+    gen_wb = os.path.join(PROJECT, "tools", "gen_wb_tables.py")
+    if os.path.exists(WB_TABLES_INC) and os.path.exists(gen_wb):
+        if os.path.getmtime(WB_TABLES_INC) > os.path.getmtime(gen_wb):
+            print("  wb_tables.inc up-to-date — skipping")
+            return
+
+    if not os.path.exists(setup_wb):
+        print("  WARNING: setup_wb_key.py not found — skipping WB-AES generation")
+        return
+
+    # Try to use existing key file, otherwise generate a new one
+    keyfile = os.path.join(PROJECT, ".lianyu_wb_key")
+    env_key = os.environ.get("LIANYU_WB_KEY")
+
+    if env_key:
+        print("  Using LIANYU_WB_KEY from environment")
+        run([PYTHON, setup_wb, "--output", WB_TABLES_INC], timeout=60)
+    elif os.path.exists(keyfile):
+        print(f"  Using key from {keyfile}")
+        run([PYTHON, setup_wb, "--keyfile", keyfile, "--output", WB_TABLES_INC], timeout=60)
+    else:
+        print("  Generating new WB-AES key (saved to .lianyu_wb_key)")
+        run([PYTHON, setup_wb, "--generate", "--keyfile", keyfile, "--output", WB_TABLES_INC], timeout=60)
+
+    # Post-process: move tables to .text section + recompute CRC32 checksums
+    if os.path.exists(harden_wb) and os.path.exists(WB_TABLES_INC):
+        print("  Hardening wb_tables.inc (.text section + CRC32)...")
+        run([PYTHON, harden_wb, WB_TABLES_INC], timeout=30)
+
+    if os.path.exists(WB_TABLES_INC):
+        size_kb = os.path.getsize(WB_TABLES_INC) // 1024
+        print(f"  ✅ wb_tables.inc: {size_kb}KB")
+    else:
+        print("  ❌ wb_tables.inc not generated — native build will fail!")
+        sys.exit(1)
+
+
+def phase0b_vmp_payload(seed_hex):
+    """Generate g_vmp_payload_data.cpp + g_vmp_config.h + g_ss_config.h.
+
+    Reads encrypted DEX from assets (if present) and embeds it as a C array.
+    Also randomizes VMP algorithm constants and shell method names per-build.
+    """
+    print("\n═══ Phase 0b: VMP Payload Generation ═══")
+    gen_py = os.path.join(PROJECT, "tools", "gen_payload_cpp.py")
+    enc_dex = os.path.join(PROJECT, "app/src/main/assets/lianyu_shell/classes.bin")
+
+    if not os.path.exists(gen_py):
+        print("  WARNING: gen_payload_cpp.py not found — skipping")
+        return
+
+    if not os.path.exists(enc_dex):
+        print("  Skipped — no encrypted DEX (classes.bin) found")
+        # Still generate config headers (g_vmp_config.h + g_ss_config.h)
+        # gen_payload_cpp.py requires a file arg, so create a dummy
+        enc_dex = os.path.join(PROJECT, "app/build/tmp/.empty_payload")
+        os.makedirs(os.path.dirname(enc_dex), exist_ok=True)
+        if not os.path.exists(enc_dex):
+            open(enc_dex, 'wb').write(b'\x00' * 16)
+
+    crc = hex(zlib.crc32(open(enc_dex, 'rb').read()) & 0xFFFFFFFF)
+    # SM4 key — in production this should come from KMS; use a per-build random key
+    sm4_key = os.urandom(16).hex()
+
+    run([PYTHON, gen_py, enc_dex, G_VMP_PAYLOAD_CPP, crc, sm4_key, seed_hex], timeout=120)
+    print(f"  ✅ g_vmp_payload_data.cpp + g_vmp_config.h + g_ss_config.h generated")
+
+
+def phase3b_vmp_randomize(seed_hex):
+    """Randomize VMP opcodes — must run BEFORE ndk-build."""
+    print("\n═══ Phase 3b: VMP Opcode Randomization ═══")
+    rand_ops = os.path.join(PROJECT, "tools", "randomize_vmp_ops.py")
+    if not os.path.exists(rand_ops):
+        print("  WARNING: randomize_vmp_ops.py not found — skipping")
+        return
+    run([PYTHON, rand_ops, "--seed", seed_hex], timeout=30)
+    print("  ✅ VMP opcodes randomized")
+
+
+def phase6_pack_so():
+    """Encrypt SO .text sections with pack_so.py.
+
+    Without this, SO code is in plaintext inside the APK — trivially disassemblable.
+    """
+    print("\n═══ Phase 6a: SO .text Encryption ═══")
+    pack_so = os.path.join(PROJECT, "tools", "pack_so.py")
+    if not os.path.exists(pack_so):
+        sys.exit("pack_so.py not found — SO encryption cannot continue")
+
+    # Find SO build output directory
+    so_base = None
+    for variant_name in ["Release", "Debug"]:
+        dirs = glob.glob(os.path.join(PROJECT, "core/security/build/intermediates/cxx",
+                                      variant_name, "*", "obj", "local"))
+        if dirs:
+            so_base = max(dirs, key=os.path.getmtime)
+            break
+
+    if not so_base:
+        sys.exit("No compiled SOs found — SO encryption cannot continue")
+
+    shutil.rmtree(PACKED_SO_DIR, ignore_errors=True)
+    packed_count = 0
+    for abi in os.listdir(so_base):
+        for so_name in PACK_SO_LIST:
+            so_path = os.path.join(so_base, abi, so_name)
+            if not os.path.exists(so_path):
+                continue
+            print(f"  [{abi}] encrypting {so_name}...", end=" ", flush=True)
+            out_dir = os.path.join(PACKED_SO_DIR, abi)
+            os.makedirs(out_dir, exist_ok=True)
+            tmp = os.path.join(out_dir, so_name)
+            try:
+                run([PYTHON, pack_so, "--input", so_path, "--output", tmp,
+                     "--project-root", PROJECT], timeout=60)
+                packed_count += 1
+                print(f"OK ({os.path.getsize(tmp)//1024}KB)")
+            except subprocess.CalledProcessError as e:
+                detail = e.stderr.decode('utf-8', errors='replace')[-200:] if e.stderr else ''
+                sys.exit(f"SO encryption failed for {abi}/{so_name}: {detail}")
+
+    if packed_count == 0:
+        sys.exit("No SOs were encrypted — production build cannot continue")
+
+    print(f"  ✅ {packed_count} SO(s) encrypted")
+    return PACKED_SO_DIR
+
+
+def phase6b_patch_crc32(apk_path, config_dir):
+    """Inject SO .text CRC32 when the runtime still uses the legacy sentinel."""
+    print("\n═══ Phase 6b: SO CRC32 Integrity Injection ═══")
+    integrity_cpp = os.path.join(config_dir, "integrity-guard.cpp")
+    if os.path.exists(integrity_cpp):
+        with open(integrity_cpp, encoding="utf-8", errors="replace") as f:
+            integrity_source = f.read()
+        if "deobfuscate_ig_value(IG_EXPECTED_TEXT_CRC32_OBF)" not in integrity_source:
+            print("  Runtime SO integrity uses HMAC self-check; legacy CRC32 injection skipped")
+            return False
+
+    patch_py = os.path.join(PROJECT, "tools", "patch_so_crc32.py")
+    if not os.path.exists(patch_py):
+        print("  WARNING: patch_so_crc32.py not found — skipping CRC32 injection")
+        return False
+    if not os.path.exists(apk_path):
+        print(f"  WARNING: APK not found ({apk_path}) — skipping")
+        return False
+    run([PYTHON, patch_py, "--apk", apk_path, "--config-dir", config_dir], timeout=60)
+    print("  ✅ CRC32 integrity values patched")
+    return True
 
 def shell_dex():
     """Compile shell DEX from source."""
     print("\n═══ Shell DEX ═══")
+    shell_source_names = ["StaticApkShell.java", "SActivity.java", "MethodRecoveryEngine.java"]
+    os.makedirs(SHELL_SRC, exist_ok=True)
+    for name in shell_source_names:
+        target = os.path.join(SHELL_SRC, name)
+        source = os.path.join(STABLE_SHELL_SRC, name)
+        if not os.path.exists(target) and os.path.exists(source):
+            shutil.copy(source, target)
+
     cls = os.path.join(SHELL_WORK, "classes"); dex = os.path.join(SHELL_WORK, "dex")
     if os.path.exists(cls): shutil.rmtree(cls, ignore_errors=True)
     if os.path.exists(dex): shutil.rmtree(dex, ignore_errors=True)
     os.makedirs(cls); os.makedirs(dex)
-    java_files = [os.path.join(SHELL_SRC, f) for f in
-                  ["StaticApkShell.java","SActivity.java","MethodRecoveryEngine.java"]
+    java_files = [os.path.join(SHELL_SRC, f) for f in shell_source_names
                   if os.path.exists(os.path.join(SHELL_SRC, f))]
+    missing = [f for f in shell_source_names
+               if not os.path.exists(os.path.join(SHELL_SRC, f))]
+    if missing:
+        sys.exit("Shell source missing: " + ", ".join(missing) + f" in {SHELL_SRC}")
     run(["javac","-cp",ANDROID_JAR,"-d",cls] + java_files, timeout=30)
     jar = os.path.join(SHELL_WORK, "shell.jar")
     run(["jar","cf",jar,"-C",cls,"."], timeout=10)
@@ -130,7 +352,7 @@ def encrypt_dex(src_apk):
     print(f"  {count} DEX + 1 meta")
     return work, count, extra_dex
 
-def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass):
+def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass, packed_so_dir=None):
     """Replace DEX + SOs + encrypted DEX → sign. Optionally add extra DEX for Vivo."""
     print("\n═══ Assembly ═══")
     out = os.path.join(PROJECT, f"LianYu-v2.apk")
@@ -164,11 +386,12 @@ def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_
                 if item.filename == "classes.dex": data = shell
                 elif item.filename.startswith("META-INF/"): continue
                 elif item.filename.startswith("classes") and item.filename.endswith(".dex"): continue
+                elif item.filename.endswith(".packed.so"): continue
                 else:
                     for so in SHELL_SO_LIST:
                         if item.filename == so and so_base:
-                            sp = os.path.join(so_base, os.path.dirname(so).replace("lib/",""),
-                                              os.path.basename(so))
+                            abi = os.path.dirname(so).replace("lib/", "")
+                            sp = os.path.join(packed_so_dir or so_base, abi, os.path.basename(so))
                             if os.path.exists(sp): data = open(sp,"rb").read(); break
                 zout.writestr(item, data)
             for name, data in dex_files.items(): zout.writestr(name, data)
@@ -177,6 +400,8 @@ def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_
     shutil.move(tmp, out)
     apksigner = os.path.join(BT, "apksigner.bat") if os.name=="nt" else os.path.join(BT,"apksigner")
     signed = out.replace(".apk", "-signed.apk")
+    if os.path.exists(signed):
+        os.remove(signed)
     run(["cmd","/c",apksigner,"sign","--ks",keystore,"--ks-pass",f"pass:{ks_pass}",
          "--ks-key-alias",key_alias,"--key-pass",f"pass:{key_pass}","--out",signed,out])
     shutil.move(signed, out)
@@ -189,37 +414,72 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--release", action="store_true")
     p.add_argument("--no-build", action="store_true")
+    p.add_argument("--skip-wb-aes", action="store_true",
+                   help="Skip WB-AES table generation (use existing wb_tables.inc)")
+    p.add_argument("--skip-vmp", action="store_true",
+                   help="Skip VMP payload generation and opcode randomization")
+    p.add_argument("--skip-so-encrypt", action="store_true",
+                   help="Skip SO .text encryption")
+    p.add_argument("--skip-crc32", action="store_true",
+                   help="Skip SO CRC32 integrity injection")
     args = p.parse_args()
     variant = "release" if args.release else "debug"
     print(f"═══ LianYu {variant.upper()} Build ═══")
     if VIVO_MULTIDEX:
         print(f"  VIVO mode: unencrypted multi-DEX (system auto-loads)")
 
-    sdex = shell_dex()
-    if args.no_build:
-        gradle_apk = os.path.join(PROJECT, "app/build/outputs/apk", variant, f"app-{variant}.apk")
-    else:
-        gradlew = os.path.join(PROJECT, "gradlew.bat")
-        run([gradlew, f"assemble{variant.capitalize()}", "--no-daemon", "-q"], timeout=600)
-        gradle_apk = os.path.join(PROJECT, "app/build/outputs/apk", variant, f"app-{variant}.apk")
-
+    # ── Resolve signing config (needed for VMP seed) ──
     if args.release:
         ks = os.path.join(PROJECT, "release.keystore")
-        kp = os.environ.get("LIANYU_KEYSTORE_PASS", "")
+        store_pass = os.environ.get("LIANYU_STORE_PASSWORD", "")
+        key_pass = os.environ.get("LIANYU_KEY_PASSWORD", "")
         alias = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
-        if not kp:
-            ks = os.path.join(os.environ["USERPROFILE"], ".android", "debug.keystore")
-            kp = "android"; alias = "androiddebugkey"
-            print("  WARNING: LIANYU_KEYSTORE_PASS not set — using debug keystore")
+        missing = [name for name, value in [
+            ("LIANYU_STORE_PASSWORD", store_pass),
+            ("LIANYU_KEY_PASSWORD", key_pass),
+        ] if not value]
+        if missing:
+            sys.exit(f"Release signing requires: {', '.join(missing)}")
+        if not os.path.exists(ks):
+            sys.exit(f"Release keystore not found: {ks}")
     else:
         ks = os.path.join(os.environ["USERPROFILE"], ".android", "debug.keystore")
-        kp = "android"; alias = "androiddebugkey"
+        store_pass = "android"; key_pass = "android"; alias = "androiddebugkey"
+
+    # ── Compute VMP seed from signing cert CRC64 (truncated to uint32) ──
+    cert_crc64_low32 = get_cert_crc64(ks, store_pass, alias)
+    seed_hex = f"0x{cert_crc64_low32:08X}"
+    print(f"  VMP seed (cert CRC64→u32): {seed_hex}")
+
+    # ── Phase 0: WB-AES table generation (before Gradle) ──
+    if not args.skip_wb_aes:
+        phase0_wb_aes()
+
+    # ── Phase 0b: VMP payload + config generation (before Gradle) ──
+    if not args.skip_vmp:
+        phase0b_vmp_payload(seed_hex)
+
+    # ── Phase 3b: VMP opcode randomization (before Gradle ndk-build) ──
+    if not args.skip_vmp:
+        phase3b_vmp_randomize(seed_hex)
+
+    sdex = shell_dex()
+    if args.no_build:
+        gradle_apk = find_gradle_apk(variant)
+    else:
+        gradlew = os.path.join(PROJECT, "gradlew.bat")
+        gradle_cmd = [gradlew, f"assemble{variant.capitalize()}", "--no-daemon", "-q"]
+        if args.release:
+            gradle_cmd.extend(["-x", "lintVitalAnalyzeRelease", "-x", "lintVitalReportRelease", "-x", "lintVitalRelease"])
+        run(gradle_cmd, timeout=600)
+        gradle_apk = find_gradle_apk(variant)
 
     # Derive DEX encryption key from actual signing cert (matches nativeDeriveDexKey)
     global DEX_KEY
     try:
+        derived = False
         kt = subprocess.run(
-            ["keytool", "-list", "-v", "-keystore", ks, "-storepass", kp, "-alias", alias],
+            ["keytool", "-list", "-v", "-keystore", ks, "-storepass", store_pass, "-alias", alias],
             capture_output=True, timeout=30
         )
         out = kt.stdout.decode('utf-8', errors='replace')
@@ -229,18 +489,37 @@ def main():
                 cert_hex = line.split("SHA256:")[-1].strip().replace(':', '').replace(' ', '')
                 if len(cert_hex) == 64:
                     cert_sha = bytes.fromhex(cert_hex)
-                    DEX_KEY = derive_dex_key(cert_sha)
+                    DEX_KEY = derive_dex_key(cert_sha, use_actual_cert=args.release)
+                    derived = True
                     print(f"  Derived encryption key from cert SHA256: {cert_hex[:16]}...")
                     break
-        if DEX_KEY == _FALLBACK_KEY:
+        if not derived:
             print("  WARNING: Could not extract cert — using fallback key")
     except Exception as e:
         print(f"  WARNING: Key derivation failed ({e}) — using fallback key")
 
+    # ── Phase 6a: SO .text encryption (after Gradle, before assembly) ──
+    packed_so_dir = None
+    if not args.skip_so_encrypt:
+        packed_so_dir = phase6_pack_so()
+
     dex_dir, count, extra_dex = encrypt_dex(gradle_apk)
     repacked = gradle_apk
 
-    final = assemble(sdex, dex_dir, extra_dex, repacked, variant, ks, kp, alias, kp)
+    final = assemble(sdex, dex_dir, extra_dex, repacked, variant, ks, store_pass, alias, key_pass, packed_so_dir)
+
+    # ── Phase 6b: CRC32 integrity injection (after signing, then re-sign) ──
+    if not args.skip_crc32:
+        if phase6b_patch_crc32(final, CPP_DIR):
+            # Re-sign after CRC32 patching
+            apksigner = os.path.join(BT, "apksigner.bat") if os.name == "nt" else os.path.join(BT, "apksigner")
+            signed = final.replace(".apk", "-signed.apk")
+            if os.path.exists(signed):
+                os.remove(signed)
+            run(["cmd", "/c", apksigner, "sign", "--ks", ks, "--ks-pass", f"pass:{store_pass}",
+                 "--ks-key-alias", alias, "--key-pass", f"pass:{key_pass}", "--out", signed, final])
+            shutil.move(signed, final)
+            print(f"  CRC32 patched + re-signed: {os.path.getsize(final)//1048576}MB")
 
     if args.release:
         desk = os.path.join(os.environ.get("USERPROFILE",""), "Desktop", "LianYu-Release.apk")

@@ -87,7 +87,8 @@ object ChunkedResponseHandler {
         url: String,
         apiKey: String,
         request: StreamRequest,
-        client: OkHttpClient? = null
+        client: OkHttpClient? = null,
+        authHeaders: Map<String, String> = emptyMap()
     ): Flow<ChunkResult> = flow {
         SecureLog.chunk("STREAM", "Starting stream request to ${url.take(50)}...")
 
@@ -111,7 +112,7 @@ object ChunkedResponseHandler {
             jsonArray.put(msgObj)
         }
         val jsonBody = org.json.JSONObject()
-        jsonBody.put("model", request.model)
+        if (request.model.isNotBlank()) jsonBody.put("model", request.model)
         jsonBody.put("messages", jsonArray)
         if (!AiProvider.requiresFixedTemperature(request.model)) {
             jsonBody.put("temperature", request.temperature.toDouble())
@@ -121,13 +122,16 @@ object ChunkedResponseHandler {
 
         val requestBody = jsonBody.toString().toRequestBody("application/json".toMediaType())
 
-        val httpRequest = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
-            .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
             .addHeader("Accept", "text/event-stream")
-            .post(requestBody)
-            .build()
+        if (authHeaders.isEmpty()) {
+            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+        } else {
+            authHeaders.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+        }
+        val httpRequest = requestBuilder.post(requestBody).build()
 
         val response = httpClient.newCall(httpRequest).execute()
 

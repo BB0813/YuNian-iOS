@@ -7,6 +7,8 @@ import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerManager
+import com.lianyu.ai.common.SuFlowApi
+import com.lianyu.ai.common.RemoteKeyProvider
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
@@ -47,6 +49,7 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 import retrofit2.http.Url
 import java.text.SimpleDateFormat
+import java.net.URI
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -348,7 +351,13 @@ class AiService(context: Context) : AiServiceProvider {
     }
 
     private suspend fun resolveConfig(): ApiConfig? {
-        return apiConfigRepository.getActiveEnabledConfig()
+        val config = apiConfigRepository.getActiveEnabledConfig() ?: return null
+        // PARTNER 代理模式：模型选择由后端决定，前端不发送 model 字段
+        return if (config.provider == ApiProvider.PARTNER) {
+            config.copy(model = "")
+        } else {
+            config
+        }
     }
 
     private suspend fun tryFetchBuiltinModel(keys: List<String>): String? {
@@ -543,12 +552,12 @@ class AiService(context: Context) : AiServiceProvider {
             return okHttpClient
         }
 
-        // Dedicated client for SuFlowAPI (PARTNER) — avoids creating a new
-        // OkHttpClient on every call (which leaks connection pools and dispatcher threads).
-        // Uses longer timeouts since self-hosted servers may be slower.
+        // Dedicated client for SuFlowAPI (PARTNER) — keeps current intranet HTTP
+        // deployment working. HTTPS + certificate pinning will be enabled after
+        // the public server is deployed and real pins are available.
         private val partnerHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
-                .certificatePinner(CertificatePins.certificatePinner)
+                .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
                 .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(25, TimeUnit.SECONDS)
@@ -578,7 +587,15 @@ class AiService(context: Context) : AiServiceProvider {
 
         private fun shouldSignRequest(request: okhttp3.Request): Boolean {
             val host = request.url.host.lowercase()
-            return host == "api.lianyu.ai" || host.endsWith(".lianyu.ai")
+            return host == "api.lianyu.ai" ||
+                host.endsWith(".lianyu.ai") ||
+                host == partnerHost(SuFlowApi.BASE_URL) ||
+                host == partnerHost(SuFlowApi.AUTH_BASE_URL) ||
+                host == partnerHost(SuFlowApi.CHAT_BASE_URL)
+        }
+
+        private fun partnerHost(baseUrl: String): String {
+            return runCatching { URI(baseUrl).host?.lowercase().orEmpty() }.getOrDefault("")
         }
 
         private var context: Context? = null
@@ -703,7 +720,7 @@ class AiService(context: Context) : AiServiceProvider {
                 emit(ChunkedResponseHandler.ChunkResult.Error("请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。"))
                 return@flow
             }
-            if (config.model.isBlank()) {
+            if (config.model.isBlank() && config.provider != ApiProvider.PARTNER) {
                 emit(ChunkedResponseHandler.ChunkResult.Error("模型名未配置，请在「API设置」中重新测试连接以自动选择模型。"))
                 return@flow
             }
@@ -768,7 +785,13 @@ class AiService(context: Context) : AiServiceProvider {
                 accumulatedText.clear()
                 hasError = false
                 try {
-                    ChunkedResponseHandler.streamChatCompletion(url, currentKey, streamRequest, okHttpClient).collect { result ->
+                    ChunkedResponseHandler.streamChatCompletion(
+                        url,
+                        currentKey,
+                        streamRequest,
+                        getEffectiveClient(config),
+                        buildAuthHeaders(config, currentKey)
+                    ).collect { result ->
                         when (result) {
                             is ChunkedResponseHandler.ChunkResult.Text -> {
                                 accumulatedText.append(result.content)
@@ -834,7 +857,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val config = resolveConfig()
                     ?: return@withContext AiResponse("请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。")
 
-                if (config.model.isBlank()) {
+                if (config.model.isBlank() && config.provider != ApiProvider.PARTNER) {
                     return@withContext AiResponse("模型名未配置，请在「API设置」中重新测试连接以自动选择模型。")
                 }
 
@@ -974,7 +997,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val config = resolveConfig()
                     ?: return@withContext "请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。"
 
-                if (config.model.isBlank()) {
+                if (config.model.isBlank() && config.provider != ApiProvider.PARTNER) {
                     return@withContext "模型名未配置，请在「API设置」中重新测试连接以自动选择模型。"
                 }
 
@@ -1081,7 +1104,7 @@ class AiService(context: Context) : AiServiceProvider {
                     jsonArray.put(msgObj)
                 }
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", temperature)
@@ -1097,12 +1120,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                // 根据API提供商选择最优的认证方式
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                applyAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
@@ -1169,13 +1187,27 @@ class AiService(context: Context) : AiServiceProvider {
     }
 
     private suspend fun queryBalanceInternal(config: ApiConfig): Result<BalanceInfo> {
+        if (config.provider == ApiProvider.PARTNER) {
+            val handshakeJson = RemoteKeyProvider.cloveHandshake(appContext)
+            if (!handshakeJson.optBoolean("ok", false)) {
+                return Result.failure(Exception(handshakeJson.optString("error").ifEmpty { "无法获取 LianYu 会话配额" }))
+            }
+            val totalLimit = handshakeJson.optNullableDouble("total_quota")
+            val totalUsed = handshakeJson.optNullableDouble("used_quota")
+            val remaining = handshakeJson.optNullableDouble("remaining") ?: when {
+                totalLimit != null && totalUsed != null -> (totalLimit - totalUsed).coerceAtLeast(0.0)
+                else -> null
+            }
+            return Result.success(BalanceInfo(totalLimit, totalUsed, remaining, remaining, handshakeJson.toString(), null))
+        }
+
         var keysToTry = config.getUserApiKeys().takeIf { it.isNotEmpty() }
             ?: config.getAllApiKeys()
         
         // PARTNER 模式下，从远程服务器获取密钥（强制刷新）
         if (keysToTry.isEmpty() && config.provider == ApiProvider.PARTNER) {
             SecureLog.d("AiService", "PARTNER queryBalance: fetching keys from remote server...")
-            val remoteKeys = com.lianyu.ai.common.RemoteKeyProvider.fetchKeysAsync(appContext, forceRefresh = true)
+            val remoteKeys = RemoteKeyProvider.fetchKeysAsync(appContext, forceRefresh = true)
             if (remoteKeys.isNotEmpty()) {
                 keysToTry = remoteKeys
                 SecureLog.d("AiService", "Using ${remoteKeys.size} remote keys for balance query")
@@ -1275,6 +1307,11 @@ class AiService(context: Context) : AiServiceProvider {
         return Result.success(BalanceInfo(totalLimit, totalUsed, totalAvailable, remaining, rawSub, rawUsage))
     }
 
+    private fun org.json.JSONObject.optNullableDouble(name: String): Double? {
+        if (!has(name) || isNull(name)) return null
+        return optDouble(name).takeIf { !it.isNaN() }
+    }
+
     suspend fun fetchModels(baseUrl: String, apiKey: String, provider: ApiProvider? = null, skipCertVerify: Boolean = false): Result<List<String>> {
         return withContext(Dispatchers.IO) {
             try {
@@ -1283,7 +1320,15 @@ class AiService(context: Context) : AiServiceProvider {
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Accept", "application/json")
-                if (provider != null && prefersApiKeyHeader(provider)) {
+                if (provider == ApiProvider.PARTNER) {
+                    val session = RemoteKeyProvider.getPartnerSession(appContext)
+                        ?: RemoteKeyProvider.ensureSession(appContext, forceRefresh = false)
+                    val token = session?.token ?: apiKey
+                    requestBuilder.addHeader("X-LianYu-Session", token)
+                    session?.clientId?.takeIf { it.isNotBlank() }?.let {
+                        requestBuilder.addHeader("X-LianYu-Client-Id", it)
+                    }
+                } else if (provider != null && prefersApiKeyHeader(provider)) {
                     requestBuilder.addHeader("api-key", apiKey)
                 } else {
                     requestBuilder.addHeader("Authorization", "Bearer $apiKey")
@@ -1648,6 +1693,13 @@ class AiService(context: Context) : AiServiceProvider {
 
         if (isTimeout) {
             return "[TOAST]网络连接超时，请检查网络后重试"
+        }
+
+        // 网络连接失败（服务器不可达、DNS解析失败、连接被拒绝）
+        if (error is java.net.ConnectException ||
+            error is java.net.UnknownHostException ||
+            error is java.net.SocketException) {
+            return "[TOAST]无法连接到服务器，请检查网络设置"
         }
 
         val message = when (error) {
@@ -2099,7 +2151,7 @@ $chatText
             val currentKey = allKeys[keyIndex]
             try {
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", 0.7)
@@ -2114,11 +2166,7 @@ $chatText
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                applyAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
@@ -2160,21 +2208,51 @@ $chatText
 
     /**
      * 为 PARTNER 提供商获取远程密钥的回退逻辑。
-     * PARTNER 的 apiKey 存储在远程服务器上，本地 apiKey 字段为空。
-     * 如果本地没有可用密钥，则从 RemoteKeyProvider 动态获取。
+     * PARTNER 的 apiKey 存储在远程服务器上，本地 apiKey 字段应为空。
+     * PARTNER 类型始终从 RemoteKeyProvider 获取凭证，忽略本地 apiKey 字段
+     * （防止旧版本残留的 apiKey 导致使用过期凭证 → 401 Invalid API key）。
      */
     private suspend fun resolveKeysWithPartnerFallback(config: ApiConfig): Pair<Int, List<String>> {
-        val (startIdx, keys) = selectApiKey(config)
-        if (keys.isEmpty() && config.provider == ApiProvider.PARTNER) {
-            SecureLog.d("AiService", "PARTNER keys empty, fetching from RemoteKeyProvider...")
-            val remoteKeys = com.lianyu.ai.common.RemoteKeyProvider.fetchKeysAsync(appContext, forceRefresh = false)
+        if (config.provider == ApiProvider.PARTNER) {
+            SecureLog.d("AiService", "PARTNER: fetching keys from RemoteKeyProvider...")
+            val remoteKeys = RemoteKeyProvider.fetchKeysAsync(appContext, forceRefresh = false)
             if (remoteKeys.isNotEmpty()) {
                 SecureLog.d("AiService", "Fetched ${remoteKeys.size} remote keys for PARTNER send path")
                 return 0 to remoteKeys
             }
             SecureLog.w("AiService", "RemoteKeyProvider returned no keys for PARTNER")
+            // 回退到本地缓存（partner_keys.dat），不使用 Room 中的 apiKey
+            val localKeys = RemoteKeyProvider.getPartnerKeys(appContext)
+            if (localKeys.isNotEmpty()) {
+                SecureLog.d("AiService", "Using ${localKeys.size} local cached keys for PARTNER")
+                return 0 to localKeys
+            }
+            return 0 to emptyList()
         }
-        return startIdx to keys
+        return selectApiKey(config)
+    }
+
+    private fun buildAuthHeaders(config: ApiConfig, credential: String): Map<String, String> {
+        if (config.provider == ApiProvider.PARTNER) {
+            val session = RemoteKeyProvider.getPartnerSession(appContext)
+            val token = session?.token ?: credential
+            val clientId = session?.clientId ?: ""
+            return buildMap {
+                put("X-LianYu-Session", token)
+                if (clientId.isNotBlank()) put("X-LianYu-Client-Id", clientId)
+            }
+        }
+        return if (prefersApiKeyHeader(config.provider)) {
+            mapOf("api-key" to credential)
+        } else {
+            mapOf("Authorization" to "Bearer $credential")
+        }
+    }
+
+    private fun applyAuthHeaders(requestBuilder: okhttp3.Request.Builder, config: ApiConfig, credential: String) {
+        buildAuthHeaders(config, credential).forEach { (name, value) ->
+            requestBuilder.addHeader(name, value)
+        }
     }
 
     private suspend fun callOpenAiCompatibleWithReasoning(config: ApiConfig, messages: List<Message>): Pair<String, String?> {
@@ -2198,7 +2276,7 @@ $chatText
             val currentKey = allKeys[keyIndex]
             try {
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toDouble())
@@ -2216,11 +2294,7 @@ $chatText
                                     val requestBuilder = okhttp3.Request.Builder()
                                         .url(url)
                                         .addHeader("Content-Type", "application/json")
-                                    if (prefersApiKeyHeader(config.provider)) {
-                                        requestBuilder.addHeader("api-key", currentKey)
-                                    } else {
-                                        requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                                    }
+                                    applyAuthHeaders(requestBuilder, config, currentKey)
                                     val request = requestBuilder
                                         .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                                         .build()
@@ -2371,7 +2445,7 @@ $chatText
             jsonArray.put(msgObj)
         }
         val jsonBody = org.json.JSONObject()
-        jsonBody.put("model", config.model)
+        if (config.model.isNotBlank()) jsonBody.put("model", config.model)
         jsonBody.put("messages", jsonArray)
         if (!requiresFixedTemperature(config.model)) {
             jsonBody.put("temperature", 0.7)
@@ -2387,12 +2461,7 @@ $chatText
         val requestBuilder = okhttp3.Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
-        // 根据API提供商选择最优的认证方式
-        if (prefersApiKeyHeader(config.provider)) {
-            requestBuilder.addHeader("api-key", config.apiKey)
-        } else {
-            requestBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
-        }
+        applyAuthHeaders(requestBuilder, config, config.apiKey)
         val request = requestBuilder
             .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
@@ -2463,7 +2532,7 @@ $chatText
                     return@withContext AiResponse("请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。")
                 }
 
-                if (config.model.isBlank()) {
+                if (config.model.isBlank() && config.provider != ApiProvider.PARTNER) {
                     SecureLog.e("VISION", "ERROR: model is blank!")
                     return@withContext AiResponse("模型名未配置，请在「API设置」中重新测试连接以自动选择模型。")
                 }
@@ -2739,7 +2808,7 @@ $chatText
                 }
 
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", messagesJson)
                 // Some models only support temperature=1
                 if (!requiresFixedTemperature(config.model)) {
@@ -2764,12 +2833,7 @@ $chatText
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                // 根据API提供商选择最优的认证方式
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                applyAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(requestBodyStr.toRequestBody("application/json".toMediaType()))
                     .build()
@@ -2855,7 +2919,7 @@ $chatText
         }
 
         val requestBody = org.json.JSONObject()
-        requestBody.put("model", config.model)
+        if (config.model.isNotBlank()) requestBody.put("model", config.model)
         requestBody.put("messages", anthropicMessages)
         requestBody.put("system", systemPrompt)
         requestBody.put("max_tokens", config.maxTokens ?: 800)

@@ -2,6 +2,7 @@ package com.lianyu.ai.common
 
 import android.content.Context
 import android.util.Base64
+import com.lianyu.ai.common.security.DeviceRequestSigner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -20,6 +21,12 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 object RemoteKeyProvider {
+
+    data class PartnerSession(
+        val clientId: String,
+        val token: String,
+        val sessionKey: String?
+    )
 
     private const val PREFS_NAME = "remote_key_provider"
     private const val KEY_CACHE_FILE = "partner_keys.dat"
@@ -41,30 +48,85 @@ object RemoteKeyProvider {
         val body = JSONObject().apply {
             put("device_id", deviceId)
             put("user_id", deviceId.take(20))
+            put("device_public_key", DeviceRequestSigner.publicKeyBase64())
+            put("device_key_id", DeviceRequestSigner.keyId())
+            put("sig_alg", DeviceRequestSigner.SIGNATURE_ALGORITHM)
         }
         val result = httpPost(url, body.toString())
+        result?.let { storeHandshakeResult(ctx, it) }
         return result ?: JSONObject().apply {
             put("ok", false)
             put("error", "network_error")
         }
     }
 
-    /** Save handshake result for subsequent API calls */
-    fun storeHandshakeResult(ctx: Context, clientId: String, sessionKey: String) {
-        val prefs = ctx.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    /**
+     * Save handshake result for subsequent API calls.
+     *
+     * 同步更新三处存储，确保聊天请求立即使用新凭证：
+     * 1. SharedPreferences（client_id + secret + last_fetch_ms）
+     * 2. 内存缓存 cachedKeys（fetchKeysAsync 直接读取）
+     * 3. 加密文件 partner_keys.dat（网络失败时的回退）
+     *
+     * 如果只写 SharedPreferences 而不更新 cachedKeys / partner_keys.dat，
+     * fetchKeysAsync(forceRefresh=false) 会因 isCacheValid()=true 直接返回旧内存缓存，
+     * 导致聊天请求仍用旧 client_id → 401 Invalid API key。
+     */
+    fun storeHandshakeResult(ctx: Context, clientId: String, secret: String) {
+        val appCtx = ctx.applicationContext
+        val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit()
             .putString("client_id", clientId)
-            .putString("session_key", sessionKey)
+            .putString("secret", secret)
             .putLong(KEY_LAST_FETCH, System.currentTimeMillis())
             .apply()
+
+        // 同步更新内存缓存和加密文件，使聊天请求立即用上新凭证
+        val newKeys = listOf("$clientId:$secret")
+        cachedKeys = newKeys
+        saveLocalKeys(appCtx, newKeys)
+    }
+
+    fun storeHandshakeResult(ctx: Context, handshake: JSONObject): Boolean {
+        val clientId = handshake.optString("client_id").ifEmpty { null } ?: return false
+        val sessionToken = handshake.optString("session_token").ifEmpty {
+            handshake.optString("token").ifEmpty { null }
+        }
+        val sessionKey = handshake.optString("session_key").ifEmpty {
+            handshake.optString("sessionKey").ifEmpty { null }
+        }
+        if (sessionToken != null) {
+            storeSessionResult(ctx, clientId, sessionToken, sessionKey)
+            return true
+        }
+
+        val secret = handshake.optString("secret").ifEmpty { null } ?: return false
+        storeHandshakeResult(ctx, clientId, secret)
+        return true
+    }
+
+    fun storeSessionResult(ctx: Context, clientId: String, sessionToken: String, sessionKey: String?) {
+        val appCtx = ctx.applicationContext
+        val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("client_id", clientId)
+            .putString(KEY_AUTH_TOKEN, sessionToken)
+            .putString(KEY_SESSION_KEY, sessionKey)
+            .putLong(KEY_LAST_FETCH, System.currentTimeMillis())
+            .remove("secret")
+            .apply()
+
+        val sessionKeys = listOf(sessionToken)
+        cachedKeys = sessionKeys
+        saveLocalKeys(appCtx, sessionKeys)
     }
     private const val KEYS_FETCH_PATH = "/api/keys/fetch"
     private const val CACHE_TTL_MS = 6 * 60 * 60 * 1000L
     private const val AES_GCM_ALGORITHM = "AES/GCM/NoPadding"
-    private const val AES_CBC_ALGORITHM = "AES/CBC/PKCS5Padding"
 
     // Android Keystore 硬件级密钥隔离
-    private const val KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v3"
+    private const val KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v4_gcm"
+    private const val LEGACY_KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v3"
 
     @Volatile
     private var cachedKeys: List<String> = emptyList()
@@ -82,22 +144,22 @@ object RemoteKeyProvider {
      * 密钥由 TEE/StrongBox 保护，任何其他 App（即使 Root）无法提取密钥材料。
      * 首次调用自动生成并存于安全硬件中。
      */
-    private fun getOrCreateKeystoreKey(): SecretKey {
+    private fun getOrCreateKeystoreKey(alias: String = KEYSTORE_KEY_ALIAS): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-        if (keyStore.containsAlias(KEYSTORE_KEY_ALIAS)) {
-            return (keyStore.getEntry(KEYSTORE_KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
+        if (keyStore.containsAlias(alias)) {
+            return (keyStore.getEntry(alias, null) as KeyStore.SecretKeyEntry).secretKey
         }
 
         val keyGenerator = KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
         )
         val spec = KeyGenParameterSpec.Builder(
-            KEYSTORE_KEY_ALIAS,
+            alias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
-            .setBlockModes(KeyProperties.BLOCK_MODE_CBC)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_PKCS7)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
             .build()
         keyGenerator.init(spec)
@@ -106,11 +168,11 @@ object RemoteKeyProvider {
 
     private fun encryptData(data: String): String {
         val secretKey = getOrCreateKeystoreKey()
-        val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding")
+        val cipher = Cipher.getInstance(AES_GCM_ALGORITHM)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey)
         val iv = cipher.iv
         val encrypted = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
-        val combined = iv + encrypted
+        val combined = byteArrayOf(1) + iv + encrypted
         return Base64.encodeToString(combined, Base64.NO_WRAP)
     }
 
@@ -120,12 +182,19 @@ object RemoteKeyProvider {
      */
     private fun decryptData(context: Context, encryptedBase64: String): String? {
         return try {
-            val secretKey = getOrCreateKeystoreKey()
             val combined = Base64.decode(encryptedBase64, Base64.NO_WRAP)
-            val iv = combined.copyOfRange(0, 16)
-            val encrypted = combined.copyOfRange(16, combined.size)
-            val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding")
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, IvParameterSpec(iv))
+            val isGcm = combined.isNotEmpty() && combined[0].toInt() == 1
+            val secretKey = if (isGcm) getOrCreateKeystoreKey() else getOrCreateKeystoreKey(LEGACY_KEYSTORE_KEY_ALIAS)
+            val ivLength = if (isGcm) 12 else 16
+            val offset = if (isGcm) 1 else 0
+            val iv = combined.copyOfRange(offset, offset + ivLength)
+            val encrypted = combined.copyOfRange(offset + ivLength, combined.size)
+            val cipher = Cipher.getInstance(if (isGcm) AES_GCM_ALGORITHM else "AES/CBC/PKCS7Padding")
+            if (isGcm) {
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+            } else {
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, IvParameterSpec(iv))
+            }
             String(cipher.doFinal(encrypted), Charsets.UTF_8)
         } catch (e: Exception) {
             SecureLog.w("RemoteKeyProvider", "Decrypt failed: ${e.message}")
@@ -135,6 +204,11 @@ object RemoteKeyProvider {
 
     fun getPartnerKeys(context: Context): List<String> {
         val appContext = context.applicationContext
+
+        getPartnerSession(appContext)?.takeIf { isCacheValid(appContext) }?.let { session ->
+            cachedKeys = listOf(session.token)
+            return cachedKeys
+        }
 
         if (cachedKeys.isNotEmpty() && isCacheValid(appContext)) {
             return cachedKeys
@@ -153,9 +227,12 @@ object RemoteKeyProvider {
         val appContext = context.applicationContext
 
         return withContext(Dispatchers.IO) {
-            if (!forceRefresh && cachedKeys.isNotEmpty() && isCacheValid(appContext)) {
-                SecureLog.d("RemoteKeyProvider", "Using cached keys (${cachedKeys.size})")
-                return@withContext cachedKeys
+            if (!forceRefresh) {
+                getPartnerSession(appContext)?.takeIf { isCacheValid(appContext) }?.let { session ->
+                    cachedKeys = listOf(session.token)
+                    SecureLog.d("RemoteKeyProvider", "Using cached LianYu session")
+                    return@withContext cachedKeys
+                }
             }
 
             SecureLog.d("RemoteKeyProvider", "=== FETCH KEYS START ===")
@@ -167,7 +244,7 @@ object RemoteKeyProvider {
                 if (!encryptedKeys.isNullOrEmpty()) {
                     saveLocalKeys(appContext, encryptedKeys)
                     cachedKeys = encryptedKeys
-                    SecureLog.api("RemoteKeyProvider", "Fetched ${encryptedKeys.size} keys via encrypted API")
+                    SecureLog.api("RemoteKeyProvider", "Fetched LianYu session via handshake")
                     updateFetchTime(appContext)
                     return@withContext encryptedKeys
                 }
@@ -188,97 +265,84 @@ object RemoteKeyProvider {
         }
     }
 
+    suspend fun ensureSession(context: Context, forceRefresh: Boolean = false): PartnerSession? {
+        val appContext = context.applicationContext
+        return withContext(Dispatchers.IO) {
+            if (!forceRefresh) {
+                getPartnerSession(appContext)?.takeIf { isCacheValid(appContext) }?.let { return@withContext it }
+            }
+            fetchEncryptedKeys(appContext)
+            getPartnerSession(appContext)
+        }
+    }
+
+    fun getPartnerSession(context: Context): PartnerSession? {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val clientId = prefs.getString("client_id", null)?.takeIf { it.isNotBlank() } ?: return null
+        val token = prefs.getString(KEY_AUTH_TOKEN, null)?.takeIf { it.isNotBlank() } ?: return null
+        val sessionKey = prefs.getString(KEY_SESSION_KEY, null)?.takeIf { it.isNotBlank() }
+        return PartnerSession(clientId = clientId, token = token, sessionKey = sessionKey)
+    }
+
+    /**
+    * 调用 /api/auth/handshake 获取 LianYu App 会话。
+    * 后端仍用 client key 承载 Clove 分组、配额和权限，但客户端只持有 session token。
+     */
     private fun fetchEncryptedKeys(ctx: Context): List<String>? {
-        // Step 1: Handshake to get token and sessionKey
-        val clientId = getClientId(ctx)
-        val handshakeJson = JSONObject().apply { put("clientId", clientId) }
+        val deviceId = android.os.Build.FINGERPRINT.take(40) + "_" + android.os.Build.MODEL.replace(" ", "_")
+        val handshakeJson = JSONObject().apply {
+            put("device_id", deviceId)
+            put("user_id", deviceId.take(20))
+            put("device_public_key", DeviceRequestSigner.publicKeyBase64())
+            put("device_key_id", DeviceRequestSigner.keyId())
+            put("sig_alg", DeviceRequestSigner.SIGNATURE_ALGORITHM)
+        }
         val handshakeUrl = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
 
-        SecureLog.d("RemoteKeyProvider", "Handshake POST $HANDSHAKE_PATH")
+        SecureLog.d("RemoteKeyProvider", "Handshake POST $HANDSHAKE_PATH (session mode)")
         val handshakeResp = httpPost(handshakeUrl, handshakeJson.toString())
         if (handshakeResp == null) {
             SecureLog.w("RemoteKeyProvider", "Handshake returned null")
             return null
         }
 
-        val token = handshakeResp.optString("token")
-        val sessionKey = handshakeResp.optString("sessionKey")
-        if (token.isEmpty() || sessionKey.isEmpty()) {
-            SecureLog.w("RemoteKeyProvider", "Handshake missing token or sessionKey")
+        val ok = handshakeResp.optBoolean("ok", false)
+        if (!ok) {
+            val error = handshakeResp.optString("error", "unknown")
+            SecureLog.w("RemoteKeyProvider", "Handshake failed: $error")
             return null
         }
 
-        // Step 2: Fetch encrypted keys
-        val fetchJson = JSONObject().apply { put("token", token) }
-        val fetchUrl = URL("${resolveServerUrl()}$KEYS_FETCH_PATH")
-
-        SecureLog.d("RemoteKeyProvider", "Fetch keys POST $KEYS_FETCH_PATH")
-        val fetchResp = httpPost(fetchUrl, fetchJson.toString())
-        if (fetchResp == null || !fetchResp.optBoolean("encrypted")) {
-            SecureLog.w("RemoteKeyProvider", "Keys fetch failed or not encrypted")
+        val clientId = handshakeResp.optString("client_id").ifEmpty { null }
+        val sessionToken = handshakeResp.optString("session_token").ifEmpty {
+            handshakeResp.optString("token").ifEmpty { null }
+        }
+        val sessionKey = handshakeResp.optString("session_key").ifEmpty {
+            handshakeResp.optString("sessionKey").ifEmpty { null }
+        }
+        if (clientId == null || sessionToken == null) {
+            SecureLog.w("RemoteKeyProvider", "Handshake missing client_id or session_token")
             return null
         }
 
-        // Step 3: Decrypt the response
-        val dataObj = fetchResp.optJSONObject("data")
-        if (dataObj == null) {
-            SecureLog.w("RemoteKeyProvider", "No encrypted data in response")
-            return null
+        storeSessionResult(ctx, clientId, sessionToken, sessionKey)
+
+        // 解析服务器推荐的模型（如果有）
+        if (handshakeResp.has("randomModel") && !handshakeResp.isNull("randomModel")) {
+            cachedRandomModel = handshakeResp.getString("randomModel")
+        } else if (cachedRandomModel == null) {
+            // 默认模型
+            cachedRandomModel = "claude-sonnet-4-20250514"
         }
-        val iv = dataObj.optString("iv")
-        val tag = dataObj.optString("tag")
-        val encryptedData = dataObj.optString("data")
-        if (iv.isEmpty() || tag.isEmpty() || encryptedData.isEmpty()) {
-            SecureLog.w("RemoteKeyProvider", "Missing iv/tag/data in encrypted response")
-            return null
-        }
+        // 保存模型到本地缓存
+        try {
+            ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_RANDOM_MODEL, cachedRandomModel)
+                .apply()
+        } catch (_: Exception) {}
 
-        val decrypted = decryptAesGcm(encryptedData, sessionKey, iv, tag)
-        if (decrypted == null) {
-            SecureLog.w("RemoteKeyProvider", "Decryption failed")
-            return null
-        }
-
-        SecureLog.d("RemoteKeyProvider", "Decrypted: ${decrypted.take(200)}...")
-
-        val keysJson = JSONObject(decrypted)
-        val keysArray = keysJson.optJSONArray("keys")
-        if (keysArray == null || keysArray.length() == 0) {
-            SecureLog.w("RemoteKeyProvider", "No keys in decrypted response")
-            return null
-        }
-
-        val keys = mutableListOf<String>()
-        for (i in 0 until keysArray.length()) {
-            keys.add(keysArray.getString(i))
-        }
-
-        // 🎲 解析服务器推荐的随机模型
-        if (keysJson.has("randomModel") && !keysJson.isNull("randomModel")) {
-            val randomModel = keysJson.getString("randomModel")
-            cachedRandomModel = randomModel
-            SecureLog.d("RemoteKeyProvider", "Server recommended random model: $randomModel")
-
-            // 保存到本地缓存
-            try {
-                ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_RANDOM_MODEL, randomModel)
-                    .apply()
-            } catch (_: Exception) {}
-        }
-
-        // 如果没有推荐模型但有模型列表，本地随机选一个
-        if (cachedRandomModel == null && keysJson.has("models")) {
-            val modelsArray = keysJson.getJSONArray("models")
-            if (modelsArray.length() > 0) {
-                val randomIndex = random.nextInt(modelsArray.length())
-                cachedRandomModel = modelsArray.getString(randomIndex)
-                SecureLog.d("RemoteKeyProvider", "Locally selected random model: $cachedRandomModel")
-            }
-        }
-
-        return keys
+        return listOf(sessionToken)
     }
 
     private fun decryptAesGcm(data: String, sessionKeyHex: String, ivHex: String, tagHex: String): String? {
@@ -331,7 +395,7 @@ object RemoteKeyProvider {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("x-app-key", "suflow-app-2024")
+                setRequestProperty("x-app-key", "suflow-app-provision-key-2024-secure-32byte!!")
                 doOutput = true
                 doInput = true
             }

@@ -20,6 +20,14 @@ CONFIG_H = PROJECT / "core/security/src/main/cpp/g_vmp_config.h"
 BYTECODE_CPP = PROJECT / "core/security/src/main/cpp/vm-bytecode.cpp"
 VM_ENGINE_H = PROJECT / "core/security/src/main/cpp/vm-engine.h"
 
+def read_text(path: Path) -> str:
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="replace")
+
 # Opcode names and their default values (current enum)
 OPCODES = {
     "OP_NOP":       0x00,
@@ -85,8 +93,7 @@ def generate_mapping(seed: int) -> dict:
 
 def update_config_header(mapping: dict, seed: int):
     """Add VMP_OP_* defines to g_vmp_config.h."""
-    with open(CONFIG_H, 'r') as f:
-        content = f.read()
+    content = read_text(CONFIG_H)
     
     # Remove any existing VMP_OP_* defines
     lines = content.split('\n')
@@ -112,16 +119,14 @@ def update_config_header(mapping: dict, seed: int):
     
     content = content.replace('\n#endif', f'\n{vmp_ops_block}\n#endif')
     
-    with open(CONFIG_H, 'w') as f:
-        f.write(content)
+    CONFIG_H.write_text(content, encoding='utf-8')
     
     print(f"  Updated g_vmp_config.h with {len(mapping)} opcode mappings")
 
 
 def update_vm_engine_h(mapping: dict):
     """Patch vm-engine.h to use VMP_OP_* defines instead of hardcoded enum."""
-    with open(VM_ENGINE_H, 'r') as f:
-        content = f.read()
+    content = read_text(VM_ENGINE_H)
     
     # Add include for g_vmp_config.h if not present
     if '#include "g_vmp_config.h"' not in content:
@@ -182,16 +187,14 @@ def update_vm_engine_h(mapping: dict):
     
     content = content[:old_enum] + new_enum + content[old_end:]
     
-    with open(VM_ENGINE_H, 'w') as f:
-        f.write(content)
+    VM_ENGINE_H.write_text(content, encoding='utf-8')
     
     print(f"  Updated vm-engine.h to use VMP_OP_* defines")
 
 
 def remap_bytecodes(path: Path, mapping: dict):
     """Remap opcode bytes in vm-bytecode.cpp using the new mapping."""
-    with open(path, 'rb') as f:
-        data = bytearray(f.read())
+    data = bytearray(path.read_bytes())
     
     # Build reverse map: old_value → new_value
     reverse_map = {}
@@ -227,8 +230,7 @@ def remap_bytecodes(path: Path, mapping: dict):
     
     text = pattern.sub(remap_array, text)
     
-    with open(path, 'wb') as f:
-        f.write(text.encode('utf-8'))
+    path.write_bytes(text.encode('utf-8'))
     
     # Count changes
     changes = sum(1 for a, b in zip(data, text.encode('utf-8')) if a != b if len(data) == len(text.encode('utf-8')))
@@ -247,7 +249,7 @@ def main():
         # Read from g_vmp_config.h or generate
         seed = random.getrandbits(32)
         if CONFIG_H.exists():
-            with open(CONFIG_H) as f:
+            with open(CONFIG_H, encoding='utf-8') as f:
                 for line in f:
                     if 'VMP_BUILD_SEED' in line:
                         parts = line.split()

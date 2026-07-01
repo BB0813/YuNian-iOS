@@ -523,7 +523,7 @@ def pack_so(input_path: str, output_path: str,
     print(f"  Packed size:   {new_size} bytes (+{new_size - orig_size})")
     print(f"  Stub injected at file offset 0x{stub_offset:X}")
     print(f"  Key embedded at stub+0x{key_offset_in_stub:X} (VA 0x{key_va:X})")
-    print(f"  ✅ Packed SO written to: {output_path}")
+    print(f"  OK Packed SO written to: {output_path}")
 
     return True
 
@@ -675,9 +675,9 @@ def pack_apk(input_apk: str, output_apk: str,
                     zf_out.writestr(zipfile.ZipInfo(name), so_data[name])
                 else:
                     zf_out.writestr(zipfile.ZipInfo(name), data)
-        print(f"\n✅ Packed {packed} SO(s) into {output_apk}")
+        print(f"\nOK Packed {packed} SO(s) into {output_apk}")
     else:
-        print(f"\n⚠ No SOs packed — output APK unchanged")
+        print(f"\nWARN No SOs packed - output APK unchanged")
         shutil.copy(input_apk, output_apk)
 
     return packed > 0

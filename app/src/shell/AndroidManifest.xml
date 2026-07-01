@@ -27,6 +27,14 @@
         <provider android:name="com.huawei.hms.mlsdk.common.provider.MLInitializerProvider" tools:node="remove"/>
         <provider android:name="com.huawei.hms.core.aidl.provider.HMSCoreProvider" tools:node="remove"/>
         <provider android:name="com.huawei.hms.analytics.provider.HAProvider" tools:node="remove"/>
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
+        </provider>
 
         <activity-alias android:name="com.lianyu.ai.SplashActivity" tools:node="remove"/>
 
