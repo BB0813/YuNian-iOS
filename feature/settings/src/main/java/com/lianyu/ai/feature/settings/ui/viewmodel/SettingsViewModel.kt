@@ -217,6 +217,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val dailyLimit: Double? = null,
         val rpmLimit: Int = 0,
         val discount: Double = 1.0,
+        // Server-side client_id (e.g. client_81a46fa0) from handshake
+        val clientId: String? = null,
     )
 
     fun connectionKey(config: ApiConfig): String =
@@ -400,6 +402,37 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** 设置页打开时自动刷新 PARTNER 握手（获取最新限额/余额） */
+    fun refreshPartnerQuota() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val allConfigs = repository.getAllConfigs().first()
+            val partnerConfig = allConfigs.firstOrNull { it.provider == ApiProvider.PARTNER } ?: return@launch
+            val key = connectionKey(partnerConfig)
+            try {
+                val handshakeJson = com.lianyu.ai.common.RemoteKeyProvider.cloveHandshake(getApplication())
+                val ok = handshakeJson.optBoolean("ok", false)
+                val latency = handshakeJson.optLong("latency_ms", 0)
+                if (ok) {
+                    val clientId = handshakeJson.optString("client_id").ifEmpty { null }
+                    val sessionToken = handshakeJson.optString("session_token").ifEmpty { null }
+                    if (clientId != null && sessionToken != null) {
+                        com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(getApplication(), handshakeJson)
+                    }
+                    val groupName = handshakeJson.optString("group_name").ifEmpty { null }
+                    val remaining = handshakeJson.optDouble("remaining", 0.0)
+                    val daily = if (handshakeJson.has("daily_quota_limit") && !handshakeJson.isNull("daily_quota_limit"))
+                        handshakeJson.optDouble("daily_quota_limit") else null
+                    val rpm = handshakeJson.optInt("rpm_limit", 0)
+                    val disc = handshakeJson.optDouble("discount", 1.0)
+                    _connectionStatus[key] = ConnectionResult(
+                        ConnectionStatus.CONNECTED, latency, null, null,
+                        groupName, remaining, daily, rpm, disc, clientId
+                    )
+                }
+            } catch (_: Exception) { /* silent — don't downgrade on refresh failure */ }
+        }
+    }
+
     fun testConnection(config: ApiConfig) {
         viewModelScope.launch(Dispatchers.IO) {
             val key = connectionKey(config)
@@ -419,32 +452,39 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     val handshakeJson = com.lianyu.ai.common.RemoteKeyProvider.cloveHandshake(getApplication())
                     val ok = handshakeJson.optBoolean("ok", false)
                     val latency = handshakeJson.optLong("latency_ms", 0)
-                    val errorCode = handshakeJson.optString("error", null)
-                    val clientId = handshakeJson.optString("client_id", null)
-                    val sessionKey = handshakeJson.optString("session_key", null)
+                    val errorCode = handshakeJson.optString("error").ifEmpty { null }
+                    val clientId = handshakeJson.optString("client_id").ifEmpty { null }
+                    val sessionToken = handshakeJson.optString("session_token").ifEmpty { null }
 
-                    if (ok && clientId != null && sessionKey != null) {
-                        val groupName = handshakeJson.optString("group_name", null)
+                    if (ok && clientId != null && sessionToken != null) {
+                        val groupName = handshakeJson.optString("group_name").ifEmpty { null }
                         val remaining = handshakeJson.optDouble("remaining", 0.0)
                         val daily = if (handshakeJson.has("daily_quota_limit") && !handshakeJson.isNull("daily_quota_limit"))
                             handshakeJson.optDouble("daily_quota_limit") else null
                         val rpm = handshakeJson.optInt("rpm_limit", 0)
                         val disc = handshakeJson.optDouble("discount", 1.0)
 
-                        com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(
-                            getApplication(), clientId, sessionKey)
+                        com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(getApplication(), handshakeJson)
                         _connectionStatus[key] = ConnectionResult(
                             ConnectionStatus.CONNECTED, latency, null, null,
-                            groupName, remaining, daily, rpm, disc
+                            groupName, remaining, daily, rpm, disc, clientId
                         )
                         SecureLog.d("SettingsViewModel", "PARTNER handshake OK clientId=$clientId latency=${latency}ms")
                         return@launch
                     } else {
                         val err = errorCode ?: "unknown"
-                        _connectionStatus[key] = ConnectionResult(
-                            ConnectionStatus.FAILED, latency,
-                            "连接失败", err
-                        )
+                        // key_disabled: admin disabled the key, show the disabled client_id
+                        if (err == "key_disabled" && clientId != null) {
+                            _connectionStatus[key] = ConnectionResult(
+                                ConnectionStatus.FAILED, latency,
+                                "密钥已被管理员禁用", err, clientId = clientId
+                            )
+                        } else {
+                            _connectionStatus[key] = ConnectionResult(
+                                ConnectionStatus.FAILED, latency,
+                                "连接失败", err
+                            )
+                        }
                         SecureLog.e("SettingsViewModel", "PARTNER handshake FAILED error=$err")
                         return@launch
                     }

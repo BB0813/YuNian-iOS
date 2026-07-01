@@ -168,6 +168,7 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         viewModel.refreshLocalModel()
         viewModel.refreshConnectionStatus()
+        viewModel.refreshPartnerQuota()
         delay(100)
         isVisible = true
     }

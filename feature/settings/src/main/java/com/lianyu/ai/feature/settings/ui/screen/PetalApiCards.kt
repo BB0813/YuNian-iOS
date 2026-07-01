@@ -93,6 +93,7 @@ internal val PetalOrange = Color(0xFFFFA726)
 private fun mapErrorCode(code: String): String = when (code) {
     "upstream_unreachable" -> "上游不通"
     "account_blocked" -> "已冻结"
+    "key_disabled" -> "密钥已禁用"
     "network_error" -> "网络不通"
     "timeout" -> "超时"
     else -> "失败"
@@ -752,6 +753,10 @@ fun PetalApiCard(
                         Column {
                             Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
                                 color = PetalGreen, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
                             connectionResult.groupName?.let { gn ->
                                 Text("组: $gn | 剩余: $${String.format("%.2f", connectionResult.remainingQuota)}",
                                     color = PetalGreen.copy(alpha = 0.8f), fontSize = 11.sp)
@@ -768,6 +773,10 @@ fun PetalApiCard(
                         Column {
                             Text("$errLabel | error=${errCode} | latency=${connectionResult.latencyMs}ms",
                                 color = PetalError, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
                             connectionResult.errorMessage?.let { msg ->
                                 Text(msg, color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
                             }
@@ -1013,6 +1022,10 @@ fun PetalSavedApiCard(
                         Column {
                             Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
                                 color = PetalGreen, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
                             connectionResult.groupName?.let { gn ->
                                 Text("组: $gn | 剩余: $${String.format("%.2f", connectionResult.remainingQuota)}",
                                     color = PetalGreen.copy(alpha = 0.8f), fontSize = 11.sp)
@@ -1029,6 +1042,10 @@ fun PetalSavedApiCard(
                         Column {
                             Text("$errLabel | error=${errCode} | latency=${connectionResult.latencyMs}ms",
                                 color = PetalError, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
                             connectionResult.errorMessage?.let { msg ->
                                 Text(msg, color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
                             }

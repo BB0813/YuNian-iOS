@@ -2263,6 +2263,8 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
 extern "C" {
 extern int zero_trust_init(void);
 extern int zero_trust_evaluate(void);
+extern int zero_trust_get_state(void);
+extern int zero_trust_get_score(void);
 extern int zero_trust_is_degraded(void);
 extern int zero_trust_is_locked(void);
 extern int wb_aes_256_selftest(void);
@@ -2844,12 +2846,12 @@ extern "C" {
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState(
     JNIEnv* env, jobject thiz) {
-    return 0;
+    return (jint)zero_trust_get_state();
 }
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore(
     JNIEnv* env, jobject thiz) {
-    return 0;
+    return (jint)zero_trust_get_score();
 }
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded(
