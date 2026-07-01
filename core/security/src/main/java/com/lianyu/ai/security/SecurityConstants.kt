@@ -55,7 +55,7 @@ object SecurityConstants {
 
     /** @SecurityLevel HIGH — Native string-table encrypted */
     object ApiEndpoints {
-        const val SUFLOW_BASE_URL      = "http://suflow-api.internal:9876"
+        const val SUFLOW_BASE_URL      = "https://suflow.cloud"
         const val CHAT_COMPLETIONS     = "/chat/completions"
         const val MODELS_LIST          = "/models"
         const val LIANYU_ATTEST        = "/api/lianyu/attest"

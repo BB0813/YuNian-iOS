@@ -3036,7 +3036,7 @@ extern "C" __attribute__((visibility("default"))) int check_dns_hijack(void) {
             /* Check for signs of tampering: size anomaly, missing localhost */
             if (n<20 || n>65536 || !strstr(b,"127.0.0.1")) {r=1;s=998;break;}
             /* Check for known malicious patterns */
-            if (strstr(b,"lianyu.chat") || strstr(b,"156.233.228.31") ||
+            if (strstr(b,"lianyu.chat") || strstr(b,"suflow.cloud") ||
                 strstr(b,"api.openai")  || strstr(b,"api.anthropic")) {r=1;s=998;break;}
             s=999;break;
         case 998:return 1;

@@ -120,8 +120,11 @@ extern const uint32_t gDex2cTextCrc32;
 """.trimIndent())
             return@doLast
         }
+        // Resolve python executable: prefer project venv, then system python
+        val venvPython = rootProject.file(".venv/Scripts/python.exe")
+        val pythonExe = if (venvPython.exists()) venvPython.absolutePath else "python"
         val pb = ProcessBuilder(
-            "python", dex2cTranspiler.absolutePath, dexInput.absolutePath,
+            pythonExe, dex2cTranspiler.absolutePath, dexInput.absolutePath,
             "--whitelist", dex2cWhitelist.absolutePath,
             "--out-cpp", file("$dex2cOutputDir/dex2c_methods.cpp").absolutePath,
             "--out-h", file("$dex2cOutputDir/dex2c_registry.h").absolutePath

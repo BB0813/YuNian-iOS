@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- SuFlowAPI Key Server: allow cleartext for local deployment -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">156.233.228.31</domain>
-        <domain includeSubdomains="false">192.168.5.180</domain>
-    </domain-config>
+    <!-- All traffic uses HTTPS — no cleartext exceptions -->
 
     <!-- Debug overrides: allow system certificates for development -->
     <debug-overrides>
