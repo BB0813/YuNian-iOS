@@ -126,7 +126,10 @@ public class StaticApkShell extends Application {
 
     private void attachRealApplication(Context context, Application application) {
         try {
-            Method attach = Application.class.getDeclaredMethod("attachBaseContext", Context.class);
+            // Use "attach" (hidden method on Application) instead of "attachBaseContext"
+            // because attachBaseContext is declared on ContextWrapper, not Application.
+            // Application.attach(Context) internally calls attachBaseContext(Context).
+            Method attach = Application.class.getDeclaredMethod("attach", Context.class);
             attach.setAccessible(true);
             attach.invoke(application, context);
         } catch (Throwable error) {

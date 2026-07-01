@@ -75,7 +75,10 @@ SHELL_SO_LIST = ["lib/arm64-v8a/liblianyu_shell.so",
                  "lib/arm64-v8a/liblianyu_security.so"]
 
 # SOs to pack (encrypt .text section)
-PACK_SO_LIST = ["liblianyu_security.so", "liblianyu_shell.so"]
+# NOTE: liblianyu_shell.so is loaded by System.loadLibrary() via the system
+# linker — it MUST keep a valid ELF structure. Only liblianyu_security.so
+# has decrypt-stub.cpp for self-decryption and can be safely encrypted.
+PACK_SO_LIST = ["liblianyu_security.so"]
 PACKED_SO_DIR = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/packed_so")
 
 def run(cmd, timeout=120):
