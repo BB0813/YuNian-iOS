@@ -2,6 +2,7 @@
     global:
         JNI_OnLoad;
         lianyu_d2_decrypt;
+        lianyu_xor_key;
         lianyu_text_start;
         lianyu_text_size;
         lianyu_text_decrypt_ptr;
