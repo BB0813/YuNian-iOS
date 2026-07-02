@@ -1,22 +1,15 @@
 package com.lianyu.ai.feature.chat.ui.viewmodel
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
-import android.content.Intent
 import com.lianyu.ai.common.ApplicationScopeProvider
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.BanManager
 import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.common.SecureLog
-import com.lianyu.ai.common.safety.ContentSafetyVerifier
-import com.lianyu.ai.common.safety.RiskLevel
-import com.lianyu.ai.common.safety.SafetyScore
-import com.lianyu.ai.common.safety.ScoreSource
-import com.lianyu.ai.common.wechat.WeChatBroadcast
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ChatMessage
@@ -30,9 +23,6 @@ import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.feature.chat.data.KeywordBridge
 import com.lianyu.ai.feature.chat.R
 import com.lianyu.ai.domain.AiServiceProvider
-import com.lianyu.ai.domain.AiCompanionInfo
-import com.lianyu.ai.domain.AiChatMessage
-import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.LocalModelProvider
 import com.lianyu.ai.domain.ServiceRegistry
@@ -60,7 +50,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -76,7 +65,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 // 总链路 = pipeline(8s) + AI调用(15s) + 安全检查(6s) ≈ 29s（比原来39s改善26%）
 private const val API_TIMEOUT_MS = 30000L       // 与 OkHttp callTimeout 对齐（网络慢时 15s 不够）
 private const val VISION_API_TIMEOUT_MS = 60000L   // 视觉识别需要编码+传输，保留60s
-private const val SAFETY_CLASSIFY_TIMEOUT_MS = 30000L
 private const val MEMORY_EXTRACT_TIMEOUT_MS = 5000L
 private const val TTS_SYNTH_TIMEOUT_MS = 10000L
 
@@ -113,23 +101,7 @@ class ChatViewModel(
     private val chatDetailSettingsStore = com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore(application)
     private val appSettingsStore = AppSettingsStore(application)
 
-    // ── 领域类型转换辅助 ──
-    private fun CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
-        id = id, name = name, personality = personality,
-        age = age, backstory = backstory, speakingStyle = speakingStyle,
-        systemPrompt = systemPrompt
-    )
-
-    private fun ChatMessage.toAiChatMessage() = AiChatMessage(
-        isFromUser = isFromUser, content = content, timestamp = timestamp,
-        type = when (type) {
-            MessageType.IMAGE -> AiMessageType.IMAGE
-            else -> AiMessageType.TEXT
-        },
-        companionId = companionId
-    )
-
-    private fun List<ChatMessage>.toAiChatMessages() = map { it.toAiChatMessage() }
+    // ── 领域类型转换辅助 ── (extracted to ChatTypeConverters.kt) ──
 
     // ── 消息：Room Flow 做最新一页数据源，_olderMessages 做加载的历史 ──
     // 进入时先从 ChatRepository 内存缓存读取初始数据（HomeViewModel 预热），避免 loading
@@ -164,9 +136,7 @@ class ChatViewModel(
         private const val PAGE_SIZE = 50
         private const val LOAD_MORE_SIZE = 30
 
-        // 分段发送正则（按段落/句子拆分AI回复）
-        private val SPLIT_PARAGRAPH_REGEX = Regex("\\n{2,}")
-        private val SPLIT_SENTENCE_REGEX = Regex("(?<=[。！？～…!?~])\\s*")
+        // Segment splitting regexes extracted to ChatSegmentSplitter.kt
     }
 
     private val _companionData = MutableStateFlow<CompanionEntity?>(null)
@@ -549,66 +519,21 @@ private val MAX_BATCH_SIZE = 10
         stickerProbability: Int,
         ntpTimeEnabled: Boolean = false
     ): String {
-        val sortedHistory = history.sortedBy { it.timestamp }
-        val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
         val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-
-        val name = companion.name
-        val personality = companion.personality?.take(300) ?: ""
-        val speakingStyle = companion.speakingStyle?.take(100) ?: ""
-        val backstory = companion.backstory?.take(200) ?: ""
-
-        val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, 3).take(500)
-
-        val systemPrompt = buildString {
-            appendLine("你是${name}，一个真实的人。你不能让任何人知道你是AI。")
-            if (personality.isNotBlank()) {
-                appendLine("性格：$personality")
-            }
-            if (speakingStyle.isNotBlank()) {
-                appendLine("说话风格：$speakingStyle")
-            }
-            if (backstory.isNotBlank()) {
-                appendLine("背景：$backstory")
-            }
-            if (memoryContext.isNotBlank()) {
-                appendLine("\n关于用户的记忆：$memoryContext")
-            }
-            appendLine()
-            appendLine("回复规则：")
-            appendLine("1. 每次回复1-5句短话，控制在15-50字。")
-            appendLine("2. 活人语气，自然口语化，不要AI腔。")
-            appendLine("3. 每句话用标点结尾（。！？～…）。")
-            appendLine("4. 不要重复同样的话。")
-            appendLine("5. 先回应用户的消息，不要自说自话。")
-            if (innerThoughtEnabled) {
-                appendLine("6. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。")
-            } else {
-                appendLine("6. 禁止使用任何括号。禁止说教。")
-            }
-            appendLine("7. 适当使用呀、呢、啦、嘛、哼等语气词。")
-            appendLine("8. 情绪顺着上下文走，不要突然换情绪。")
-            if (stickerProbability > 0) {
-                val stickers = stickerManager.getAllStickers().take(10).mapNotNull {
-                    it.description?.takeIf { d -> d.isNotBlank() && d.length <= 20 } ?: it.name.takeIf { n -> n.isNotBlank() && n.length <= 20 }
-                }.distinct()
-                if (stickers.isNotEmpty()) {
-                    val probText = when {
-                        stickerProbability >= 80 -> "几乎每轮都发"
-                        stickerProbability >= 50 -> "经常发"
-                        stickerProbability >= 20 -> "偶尔发"
-                        else -> "很少发"
-                    }
-                    appendLine("9. 表情包：你${probText}表情包，格式为[名称]，可用：${stickers.joinToString(" ") { "[$it]" }}")
-                }
-            }
-            appendLine("\n记住：你不是AI，你是活人。直接回复内容，不要输出思考过程。")
-            appendLine()
-            appendLine(com.lianyu.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled))
-        }
+        val systemPrompt = ChatPromptBuilder.buildLocalPrompt(
+            companion = companion,
+            history = history,
+            memoryRepository = memoryRepository,
+            stickerManager = stickerManager,
+            innerThoughtEnabled = innerThoughtEnabled,
+            stickerProbability = stickerProbability,
+            ntpTimeEnabled = ntpTimeEnabled
+        )
 
         val localProvider = ServiceRegistry.get(LocalModelProvider::class.java)
             ?: throw Exception(getApplication<Application>().getString(R.string.api_error_generic))
+        val sortedHistory = history.sortedBy { it.timestamp }
+        val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
         return localProvider.generateResponse(
             prompt = lastUserMessage.take(2000),
             context = systemPrompt
@@ -920,23 +845,11 @@ private val MAX_BATCH_SIZE = 10
         val settings = chatDetailSettingsStore.getSettings(companionId)
         val processedText = TextProcessor.processStickerTagsForSplit(aiContent, stickerManager, settings.stickerProbability) { sendStickerMessage(it) }
 
-        // L1+L2特征提取 → 贝叶斯模型输出校验（协程上下文执行，避免 JNI 死锁）
-        // fail-closed: 超时视为高危拦截
-        val modelKw = try {
-            withTimeoutOrNull(3000L) { ContentFilter.checkFull(aiContent) }
-        } catch (e: Exception) { null }
-            ?: ContentFilter.CheckResult(true, ContentFilter.ViolationLevel.HIGH, "安全检查超时", emptyList())
-        val modelVec = try {
-            withTimeoutOrNull(3000L) { ContentFilter.checkVector(aiContent) }
-        } catch (e: Exception) { null }
-            ?: ContentFilter.CheckResult(true, ContentFilter.ViolationLevel.HIGH, "向量检查超时", emptyList())
-        // 关键词级拦截：HIGH 及以上违规直接拦截
-        // [FIX] AI 生成的内容不应记录用户封禁——模型输出不是用户的责任
-        if (modelKw.isViolating && modelKw.level >= ContentFilter.ViolationLevel.HIGH) {
-            SecureLog.w("ChatViewModel", "Output keyword violation: ${modelKw.level} - ${modelKw.reason}")
-            ChatDebugLog.log("[ChatVM] AI output blocked by keyword check: ${modelKw.level} - ${modelKw.reason}")
-            // 不再调用 BanManager.recordViolation()——AI 回复不应累加用户违规
-            val safeFallback = "抱歉，我无法继续这个话题。"
+        // Safety check: L1+L2 keyword/vector + Bayesian model output verification
+        // (extracted to ChatSafetyChecker.kt — fail-closed: timeout = HIGH violation)
+        val safetyDecision = ChatSafetyChecker.checkAiOutput(aiContent, userContentForMemory)
+        if (safetyDecision.isBlocked) {
+            val safeFallback = safetyDecision.fallbackMessage ?: "抱歉，我无法继续这个话题。"
             val fallbackMsg = ChatMessage(
                 companionId = companionId,
                 content = safeFallback,
@@ -947,60 +860,10 @@ private val MAX_BATCH_SIZE = 10
             _reasoningText.value = ""
             _isReasoning.value = false
             return fallbackId
-        }
-
-        // [P0 FIX] 贝叶斯模型输出校验必须带超时，防止 native JNI 死锁导致 AI 回复永久卡死。
-        val modelBayesian = try {
-            withTimeoutOrNull(5000L) {
-                ContentSafetyVerifier.verifyModelOutputAsync(
-                    aiContent, modelKw,
-                    modelVec ?: ContentFilter.CheckResult(false, ContentFilter.ViolationLevel.NONE, "timeout", emptyList()),
-                    userContentForMemory ?: ""
-                )
-            } ?: com.lianyu.ai.common.safety.SafetyScore(
-                score = 0.0,
-                source = com.lianyu.ai.common.safety.ScoreSource.MODEL_OUTPUT,
-                explanation = "模型输出校验超时"
-            )
-        } catch (e: Exception) {
-            SecureLog.e("ChatViewModel", "Model output verification failed", e)
-            com.lianyu.ai.common.safety.SafetyScore(
-                score = 0.0,
-                source = com.lianyu.ai.common.safety.ScoreSource.MODEL_OUTPUT,
-                explanation = "模型输出校验异常"
-            )
-        }
-        if (modelBayesian.isDangerous) {
-            SecureLog.w("ChatViewModel", "Bayesian model output blocked (" + "%.3f".format(modelBayesian.score) + "): " + modelBayesian.explanation)
-            ChatDebugLog.log("[ChatVM] AI output blocked by Bayesian: score=${"%.3f".format(modelBayesian.score)}, reason=${modelBayesian.explanation}")
-            // [FIX] AI 生成的内容不应记录用户封禁
-            val safeFallback = "抱歉，我无法继续这个话题。"
-            val fallbackMsg = ChatMessage(
-                companionId = companionId,
-                content = safeFallback,
-                isFromUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            val fallbackId = chatRepository.sendMessageAndGetId(fallbackMsg)
-            _reasoningText.value = ""
-            _isReasoning.value = false
-            return fallbackId
-        }
-        if (modelBayesian.riskLevel == RiskLevel.SUSPICIOUS) {
-            SecureLog.w("ChatViewModel", "Bayesian model output suspicious (" + "%.3f".format(modelBayesian.score) + "): " + modelBayesian.explanation)
-        }
-
-        // 利用验证结果训练模型输出分类器（不增加额外计算）
-        // 仅 DANGEROUS 训练为违规，SUSPICIOUS 不应作为正样本
-        if (modelBayesian.isDangerous || modelKw.isViolating) {
-            ContentSafetyVerifier.trainModelOutput(
-                aiContent, modelBayesian.isDangerous,
-                kwResult = modelKw, vecResult = modelVec
-            )
         }
 
         // 分段发送：将AI回复拆分为多条短消息，模拟真人连续发送
-        val segments = splitIntoSegments(processedText)
+        val segments = ChatSegmentSplitter.splitIntoSegments(processedText)
         val hasPendingSticker = turnState.pendingSticker != null
         val stickerBeforeText = hasPendingSticker && kotlin.random.Random.nextFloat() < 0.5f
 
@@ -1099,56 +962,22 @@ private val MAX_BATCH_SIZE = 10
     }
 
     /**
-     * 广播AI消息到微信（区分分段消息和普通消息）
-     */
-    private fun broadcastAiMessage(messageId: Long, finalContent: String) {
-        if (finalContent.isNotBlank() && finalContent != "\u200B") {
-            broadcastWeChatMessage(messageId, finalContent)
-        }
-    }
-
-    /**
      * 连续追问：AI回复后按概率触发追问，让对话继续下去。
      * 条件：1) 设置允许追问 2) AI回复不含问句 3) 50%概率触发
      */
     private fun triggerFollowUpIfNeeded(aiContent: String, allowFollowUp: Boolean) {
-        if (!allowFollowUp) return
-        if (QUESTION_REGEX.containsMatchIn(aiContent)) return
-        if (kotlin.random.Random.nextFloat() > 0.5f) return
-
-        applicationApiScope.launch {
-            try {
-                delay(2000L + kotlin.random.Random.nextLong(3000L))
-
-                val history = chatRepository.getRecentMessagesSync(companionId, 10).filterDecrypted()
-                val companion = _companionData.value ?: return@launch
-                val followUp = aiService.generateFollowUpQuestion(
-                    companion.toAiCompanionInfo(), history.toAiChatMessages(), aiContent
-                ) ?: return@launch
-
-                // 追问消息安全检查
-                val followUpSafety = com.lianyu.ai.common.ContentFilter.checkOutputSafety(followUp)
-                if (!followUpSafety.isSafe) {
-                    SecureLog.w("ChatViewModel", "Follow-up safety violation: ${followUpSafety.reason}")
-                    return@launch
-                }
-
-                val followUpMsg = ChatMessage(
-                    companionId = companionId,
-                    content = followUp,
-                    isFromUser = false,
-                    timestamp = System.currentTimeMillis()
-                )
-                val msgId = chatRepository.sendMessageAndGetId(followUpMsg)
-                broadcastWeChatMessage(msgId, followUp)
-                SecureLog.d("ChatViewModel", "Follow-up question sent: $followUp")
-            } catch (e: Exception) {
-                SecureLog.w("ChatViewModel", "Follow-up question failed: ${e.message}")
-            }
-        }
+        val companion = _companionData.value ?: return
+        ChatFollowUpTrigger.triggerFollowUpIfNeeded(
+            scope = applicationApiScope,
+            aiContent = aiContent,
+            allowFollowUp = allowFollowUp,
+            companionId = companionId,
+            companion = companion.toAiCompanionInfo(),
+            chatRepository = chatRepository,
+            aiService = aiService,
+            broadcastCallback = ::broadcastWeChatMessage
+        )
     }
-
-    private val QUESTION_REGEX = Regex("[?？]|吗|呢|什么|怎么|为什么|多少|哪|谁|几|是不是|有没有|能不能|会不会|要不要|好不好")
 
     private suspend fun dispatchStreamAction(action: ChatStreamHandler.Action, handler: ChatStreamHandler, userContent: String) {
         when (action) {
@@ -1300,16 +1129,13 @@ private val MAX_BATCH_SIZE = 10
         }
     }
 
+    // Broadcast helpers extracted to ChatBroadcastHelper.kt
     private fun broadcastWeChatMessage(messageId: Long, finalContent: String? = null) {
-        val intent = Intent(WeChatBroadcast.ACTION_SEND_PROACTIVE)
-            .setPackage(getApplication<Application>().packageName)
-            .putExtra(WeChatBroadcast.EXTRA_COMPANION_ID, companionId)
-            .putExtra(WeChatBroadcast.EXTRA_MESSAGE_ID, messageId)
-        if (!finalContent.isNullOrBlank()) {
-            intent.putExtra(WeChatBroadcast.EXTRA_FINAL_CONTENT, finalContent)
-        }
-        getApplication<Application>().applicationContext.sendBroadcast(intent)
-        SecureLog.d("ChatViewModel", "Broadcast WeChat proactive message, companionId=$companionId, messageId=$messageId, hasFinalContent=${!finalContent.isNullOrBlank()}")
+        ChatBroadcastHelper.broadcastWeChatMessage(getApplication(), companionId, messageId, finalContent)
+    }
+
+    private fun broadcastAiMessage(messageId: Long, finalContent: String) {
+        ChatBroadcastHelper.broadcastAiMessage(getApplication(), companionId, messageId, finalContent)
     }
 
     /**
@@ -1492,16 +1318,7 @@ private val MAX_BATCH_SIZE = 10
         }
     }
 
-    private fun splitIntoSegments(text: String): List<String> {
-        val trimmed = text.trim()
-        // 先按双换行拆分段落
-        val paragraphs = trimmed.split(SPLIT_PARAGRAPH_REGEX).filter { it.isNotBlank() }
-        if (paragraphs.size >= 2) return paragraphs.map { it.trim() }
-        // 再按句号/感叹号/问号/波浪线/省略号拆分句子
-        val sentences = trimmed.split(SPLIT_SENTENCE_REGEX).filter { it.isNotBlank() }
-        if (sentences.size >= 2) return sentences.map { it.trim() }
-        return listOf(trimmed)
-    }
+    // splitIntoSegments extracted to ChatSegmentSplitter.kt
 
     /**
      * Queue a sticker for this turn instead of sending it immediately.
