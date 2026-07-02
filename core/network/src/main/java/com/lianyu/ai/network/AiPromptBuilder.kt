@@ -3,6 +3,7 @@ package com.lianyu.ai.network
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
+import com.lianyu.ai.domain.ProactiveMessageSettings
 import java.util.Calendar
 
 /**
@@ -203,21 +204,58 @@ object AiPromptBuilder {
         return true
     }
 
+    // === private fun extractDirectReply(text: String): String { ===
+    internal fun extractDirectReply(text: String): String {
+        val trimmed = text.trim()
+
+        // 1. 如果模型把最终回复用引号包起来，直接提取引号内容
+        val quoteMatches = Regex("""[\"“](.+?)[\"”]""", RegexOption.DOT_MATCHES_ALL).findAll(trimmed).toList()
+        if (quoteMatches.isNotEmpty()) {
+            val quoted = quoteMatches.joinToString("\n") { it.groupValues[1].trim() }
+            if (quoted.isNotBlank() && quoted.length >= 2) return quoted
+        }
+
+        // 2. 如果最后一段明显短于前面大段内心独白，取最后一段
+        val paragraphs = trimmed.split(Regex("""\n\s*\n""")).map { it.trim() }.filter { it.isNotBlank() }
+        if (paragraphs.size >= 2) {
+            val last = paragraphs.last()
+            val first = paragraphs.first()
+            if (last.length <= 80 && first.length > last.length * 2) {
+                return last
+            }
+        }
+
+        // 3. 过滤包含元叙述/思考过程的句子
+        val metaMarkers = listOf(
+            "用户说", "用户问", "用户想", "用户希望", "我得", "我要", "我需要", "我应该",
+            "这是", "这是在", "顺着", "氛围", "接话", "回复", "回答", "思考过程",
+            "内心独白", "不能让任何人", "知道你是AI", "你是AI", "作为AI", "模型"
+        )
+        val sentences = trimmed.split(Regex("""[。！？!?]""")).map { it.trim() }.filter { it.isNotBlank() }
+        val filtered = sentences.filter { sentence ->
+            metaMarkers.none { marker -> sentence.contains(marker) }
+        }
+        return if (filtered.isNotEmpty()) filtered.joinToString("。") else trimmed
+    }
+
     // === private fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String { ===
     internal fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
         var cleaned = response
             .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-            .replace(Regex("\\(.*?\\)"), "")
-            .replace(Regex("\\[.*?\\]"), "")
-            .replace(Regex("【.*?】"), "")
+            .replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
+            .replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
+            .replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
             .replace(Regex("\\*.*?\\*"), "")
-            .replace(Regex("<.*?>"), "")
+            .replace(Regex("<(?!\\[).*?>"), "")
             .replace(Regex("\\{.*?\\}"), "")
             .replace(Regex("\\bsticker_\\w+\\.png\\b", RegexOption.IGNORE_CASE), "")
             .trim()
 
+        // 去除模型在正文里输出的思考/分析/内心独白
+        cleaned = extractDirectReply(cleaned)
+
         if (cleaned.length < 2) {
-            cleaned = response.replace(Regex("[()\\[\\]【】*<>{}]"), "").trim()
+            cleaned = response.replace(Regex("[*<>{}]"), "").trim()
         }
         if (cleaned.isEmpty()) {
             cleaned = response.trim()
@@ -378,11 +416,21 @@ ${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是
 你是$persona，一个有真实情绪的活人。记住：你不是AI，你是活人。${if (innerThoughtEnabled) "重要：你的每条回复都必须包含括号内的心理活动描写，这是你表达真实情感的方式。" else ""}""".trimIndent()
     }
 
-    // === private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = ""): String { ===
-    internal fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = ""): String {
+    // === private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", settings: ProactiveMessageSettings? = null): String { ===
+    internal fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", settings: ProactiveMessageSettings? = null): String {
         val persona = extractPersona(companion)
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n=== 关于用户的记忆 ===\n$memoryContext\n"
+        } else ""
+
+        // 根据自定义设置注入话题策略
+        val topicRule = when {
+            settings == null -> ""
+            !settings.allowNewTopic -> "\n=== 话题策略（重要）===\n你必须承接上一条话题继续聊，禁止主动开启全新话题。如果不知道说什么，就围绕用户最近提到的内容延伸或追问。\n"
+            else -> ""
+        }
+        val followUpHint = if (settings != null && !settings.allowFollowUpMessage) {
+            "\n注意：本次不要追加追问句，说完核心内容即可。\n"
         } else ""
 
         return buildString {
@@ -390,6 +438,8 @@ ${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是
             appendLine()
             appendLine(persona)
             append(memorySection)
+            append(topicRule)
+            append(followUpHint)
             appendLine()
             appendLine(buildProactiveTimeContext())
             appendLine()
