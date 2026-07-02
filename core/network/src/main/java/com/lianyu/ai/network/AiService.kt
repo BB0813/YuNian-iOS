@@ -34,7 +34,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -43,218 +42,13 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.Header
-import retrofit2.http.POST
-import retrofit2.http.Query
-import retrofit2.http.Url
-import java.text.SimpleDateFormat
 import java.net.URI
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
-
-interface OpenAiApi {
-    @POST
-    suspend fun chatCompletion(
-        @Url url: String,
-        @Header("Authorization") authorization: String,
-        @Header("Content-Type") contentType: String = "application/json",
-        @Body request: ChatCompletionRequest
-    ): ChatCompletionResponse
-}
-
-interface AnthropicApi {
-    @POST
-    suspend fun chatCompletion(
-        @Url url: String,
-        @Header("x-api-key") apiKey: String,
-        @Header("anthropic-version") version: String = "2023-06-01",
-        @Header("Content-Type") contentType: String = "application/json",
-        @Body request: AnthropicRequest
-    ): AnthropicResponse
-}
-
-interface GeminiApi {
-    @POST
-    suspend fun generateContent(
-        @Url url: String,
-        @Query("key") apiKey: String,
-        @Header("Content-Type") contentType: String = "application/json",
-        @Body request: GeminiRequest
-    ): GeminiResponse
-}
-
-@Serializable
-data class ChatCompletionRequest(
-    val model: String,
-    val messages: List<Message>,
-    val temperature: Float = 0.7f,
-    val max_tokens: Int? = null,
-    val top_p: Float = 0.9f,
-    val frequency_penalty: Float = 0.0f,
-    val presence_penalty: Float = 0.0f,
-    val stream: Boolean = false,
-    val tools: List<ToolDefinition>? = null,
-    val tool_choice: String? = null
-)
-
-@Serializable
-data class ToolDefinition(
-    val type: String = "function",
-    val function: ToolFunction
-)
-
-@Serializable
-data class ToolFunction(
-    val name: String,
-    val description: String,
-    val parameters: ToolParameters
-)
-
-@Serializable
-data class ToolParameters(
-    val type: String = "object",
-    val properties: Map<String, ToolProperty>,
-    val required: List<String>? = null
-)
-
-@Serializable
-data class ToolProperty(
-    val type: String,
-    val description: String
-)
-
-@Serializable
-data class Message(
-    val role: String,
-    val content: String,
-    val reasoning_content: String? = null
-)
-
-@Serializable
-data class VisionMessage(
-    val role: String,
-    val content: List<ContentPart>
-)
-
-@Serializable
-data class ContentPart(
-    val type: String,
-    val text: String? = null,
-    val image_url: ImageUrl? = null
-)
-
-@Serializable
-data class ImageUrl(
-    val url: String
-)
-
-@Serializable
-data class ChatCompletionResponse(
-    val choices: List<Choice>? = null,
-    val error: ErrorDetail? = null
-)
-
-@Serializable
-data class Choice(
-    val message: Message? = null,
-    val delta: Message? = null
-)
-
-@Serializable
-data class ErrorDetail(
-    val message: String? = null
-)
-
-@Serializable
-data class AnthropicRequest(
-    val model: String,
-    val messages: List<AnthropicMessage>,
-    val system: String? = null,
-    val max_tokens: Int = 4096,
-    val temperature: Float = 0.7f,
-    val stream: Boolean = false
-)
-
-@Serializable
-data class AnthropicMessage(
-    val role: String,
-    val content: String
-)
-
-@Serializable
-data class AnthropicResponse(
-    val content: List<AnthropicContent>? = null,
-    val error: AnthropicError? = null
-)
-
-@Serializable
-data class AnthropicContent(
-    val text: String? = null
-)
-
-@Serializable
-data class AnthropicError(
-    val message: String? = null
-)
-
-@Serializable
-data class GeminiRequest(
-    val contents: List<GeminiContent>,
-    val systemInstruction: GeminiContent? = null,
-    val generationConfig: GeminiGenerationConfig? = null
-)
-
-@Serializable
-data class GeminiContent(
-    val role: String? = null,
-    val parts: List<GeminiPart>
-)
-
-@Serializable
-data class GeminiPart(
-    val text: String
-)
-
-@Serializable
-data class GeminiGenerationConfig(
-    val temperature: Float? = null,
-    val maxOutputTokens: Int? = null
-)
-
-@Serializable
-data class GeminiResponse(
-    val candidates: List<GeminiCandidate>? = null,
-    val error: GeminiError? = null
-)
-
-@Serializable
-data class GeminiCandidate(
-    val content: GeminiContent? = null
-)
-
-@Serializable
-data class GeminiError(
-    val message: String? = null
-)
-
-@Serializable
-data class ModelsListResponse(
-    val data: List<ModelInfo>? = null,
-    val error: ErrorDetail? = null
-)
-
-@Serializable
-data class ModelInfo(
-    val id: String? = null
-)
 
 class AiService(context: Context) : AiServiceProvider {
     private val appContext = context.applicationContext
@@ -279,75 +73,6 @@ class AiService(context: Context) : AiServiceProvider {
         apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
         memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
         tokenUsageRepository = TokenUsageRepository(appContext)
-    }
-
-    private fun buildProactiveTimeContext(): String {
-        val calendar = java.util.Calendar.getInstance()
-        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-        val minute = calendar.get(java.util.Calendar.MINUTE)
-        val second = calendar.get(java.util.Calendar.SECOND)
-        val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK)
-        val timeStr = "${String.format("%02d", hour)}:${String.format("%02d", minute)}:${String.format("%02d", second)}"
-
-        val weekdayNames = mapOf(
-            java.util.Calendar.MONDAY to "周一",
-            java.util.Calendar.TUESDAY to "周二",
-            java.util.Calendar.WEDNESDAY to "周三",
-            java.util.Calendar.THURSDAY to "周四",
-            java.util.Calendar.FRIDAY to "周五",
-            java.util.Calendar.SATURDAY to "周六",
-            java.util.Calendar.SUNDAY to "周日"
-        )
-        val weekdayName = weekdayNames[dayOfWeek] ?: ""
-
-        val timeScenario = when (hour) {
-            in 5..7 -> {
-                val hint = if (hour < 6) "凌晨了" else if (hour == 6) "天快亮了" else "早上了"
-                "$hint（$timeStr），用户可能刚醒或还没醒。可以关心对方有没有起床、早安、问要不要一起吃早餐、提醒今天有什么安排。"
-            }
-            in 8..10 -> {
-                "上午（$timeStr），用户可能在上班/上学路上或刚开始工作。可以聊早上发生了什么、吃了没、今天心情怎么样、提醒别迟到。"
-            }
-            in 11..12 -> {
-                "快到午饭时间了（$timeStr），用户肚子应该饿了。可以问吃什么、要不要一起点外卖、中午休息一下、吐槽食堂/外卖难吃。"
-            }
-            in 13..14 -> {
-                "午休时间（$timeStr），用户可能在犯困打盹。可以问睡醒了没、下午要干嘛、分享自己也在犯困、叫对方起来活动一下。"
-            }
-            in 15..17 -> {
-                "下午（$timeStr），工作时间过半，用户可能累了或在摸鱼。可以聊下班还有多久、想不想喝奶茶、摸鱼中吗、等下一起去吃点什么。"
-            }
-            in 18..19 -> {
-                "下班/放学时间（$timeStr），用户在回家路上或刚到家。可以问到家了没、路上堵不堵、晚上想干什么、要不要一起打游戏/看剧/吃饭。"
-            }
-            in 20..22 -> {
-                "晚间休闲时间（$timeStr），用户在放松。可以聊今天过得怎么样、分享有趣的事、撒娇求关注、催对方早点洗澡、一起追剧/打游戏。"
-            }
-            in 23..24, 0, in 1..4 -> {
-                "深夜/凌晨（$timeStr），用户还没睡。可以问怎么还不睡、明天不用早起吗、陪对方聊天、温柔地哄睡觉、说晚安。"
-            }
-            else -> "$timeStr"
-        }
-
-        val isWeekend = dayOfWeek == java.util.Calendar.SATURDAY || dayOfWeek == java.util.Calendar.SUNDAY
-        val weekendHint = when {
-            isWeekend && hour in 9..11 -> "今天是$weekdayName 周末，用户可以睡懒觉。"
-            isWeekend && hour in 12..14 -> "周末中午，用户可能在享受慵懒时光。"
-            isWeekend && hour in 18..21 -> "周末晚上，适合约会或宅家放松。"
-            !isWeekend && hour in 7..9 -> "今天是$weekdayName 工作日，用户可能要赶时间出门。"
-            !isWeekend && hour in 17..19 -> "工作日傍晚，用户可能刚结束一天的工作比较疲惫。"
-            else -> ""
-        }
-
-        return buildString {
-            appendLine("=== 时间感知 ===")
-            appendLine("当前精确时间：$weekdayName $timeStr")
-            appendLine("场景：$timeScenario")
-            if (weekendHint.isNotBlank()) {
-                appendLine(weekendHint)
-            }
-            appendLine("请根据当前精确时间和场景，自然地融入对话中。你可以知道现在确切是几点几分几秒，让内容贴合这个时间段该做的事和情绪。")
-        }
     }
 
     private suspend fun resolveConfig(): ApiConfig? {
@@ -750,7 +475,7 @@ class AiService(context: Context) : AiServiceProvider {
                 } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                 if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
             }.distinct()
-            val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
+            val systemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
             val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
             SecureLog.api("STREAM", "Using provider=${config.provider}, model=${config.model}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
@@ -810,7 +535,7 @@ class AiService(context: Context) : AiServiceProvider {
                                 if (!hasError) {
                                     streamSuccess = true
                                     if (accumulatedText.isNotEmpty()) {
-                                        val cleaned = applyPersonaPostProcessing(accumulatedText.toString(), sanitizedHistory)
+                                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(accumulatedText.toString(), sanitizedHistory)
                                         val safetyResult = ContentFilter.checkOutputSafety(cleaned)
                                         if (!safetyResult.isSafe) {
                                             SecureLog.w("AiService", "Stream output safety violation: ${safetyResult.level} - ${safetyResult.reason}")
@@ -886,7 +611,7 @@ class AiService(context: Context) : AiServiceProvider {
                     } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                     if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
                 }.distinct()
-                val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+                val systemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
                 val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
 
                 SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
@@ -907,7 +632,7 @@ class AiService(context: Context) : AiServiceProvider {
                     
                     recordTokenUsage(companion.id, messages.size, rawResponse.length)
 
-                    val cleaned = applyPersonaPostProcessing(rawResponse, sortedHistory)
+                    val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedHistory)
                     SecureLog.api("SEND", "Response length=${cleaned.length}")
 
                     val safetyResult = ContentFilter.checkOutputSafety(cleaned)
@@ -943,8 +668,8 @@ class AiService(context: Context) : AiServiceProvider {
             val contextLimit = appSettingsStore.getContextLimit()
             val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, contextLimit)
 
-            val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext, settings)
-            val contextMessages = buildProactiveContext(sortedMessages, companion)
+            val systemPrompt = AiPromptBuilder.buildProactiveSystemPrompt(companion, memoryContext, settings)
+            val contextMessages = AiPromptBuilder.buildProactiveContext(sortedMessages, companion)
 
             val messages = listOf(
                 Message("system", systemPrompt),
@@ -961,7 +686,7 @@ class AiService(context: Context) : AiServiceProvider {
                         callAnthropic(config, messages, systemPrompt)
                     }
                 }
-                val cleaned = applyPersonaPostProcessing(rawResponse, sortedMessages)
+                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedMessages)
                 val singleLine = cleaned
                     .replace(Regex("\\r\\n|\\r|\\n+"), "，")
                     .replace(Regex("，{2,}"), "，")
@@ -1022,7 +747,7 @@ class AiService(context: Context) : AiServiceProvider {
                         }
                     }
                     if (rawResponse.isBlank()) throw Exception("API返回空内容")
-                    val cleaned = applyPersonaPostProcessing(rawResponse, sortedHistory)
+                    val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedHistory)
 
                     // 输出安全检查（与 sendMessage 保持一致）
                     val safetyResult = ContentFilter.checkOutputSafety(cleaned)
@@ -1420,272 +1145,6 @@ class AiService(context: Context) : AiServiceProvider {
         return provider == ApiProvider.XIAOMI
     }
 
-    private fun buildProactiveContext(recentMessages: List<ChatMessage>, companion: CompanionModel): String {
-        if (recentMessages.isEmpty()) {
-            return "（你们还没有聊过天，发送一条自然的开场消息）"
-        }
-
-        val now = System.currentTimeMillis()
-        val sb = StringBuilder()
-        sb.appendLine("=== 最近的对话 ===")
-
-        recentMessages.takeLast(8).forEach { msg ->
-            val role = if (msg.isFromUser) "用户" else companion.name
-            val msgTimeAgo = formatTimeAgo(now, msg.timestamp)
-            sb.appendLine("$role（${msgTimeAgo}前）: ${msg.content}")
-        }
-
-        val lastMsg = recentMessages.lastOrNull()
-        val lastUserMsg = recentMessages.lastOrNull { it.isFromUser }
-        val lastAiMsg = recentMessages.lastOrNull { !it.isFromUser }
-
-        if (lastMsg != null) {
-            val totalGapMs = now - lastMsg.timestamp
-            val gapMinutes = totalGapMs / 60000L
-            val gapSeconds = totalGapMs / 1000L
-
-            sb.appendLine()
-            sb.appendLine("=== 时间信息 ===")
-            sb.appendLine("当前精确时间：${formatCurrentTime()}")
-            sb.appendLine("上一条消息时间距今：${formatGapDuration(totalGapMs)}（精确值）")
-
-            when {
-                gapMinutes < 1 -> {
-                    sb.appendLine("距离上一条消息只过了 ${gapSeconds} 秒，你们正在实时聊天中。")
-                }
-                gapMinutes < 5 -> {
-                    sb.appendLine("距离上一条消息已经过了 ${gapMinutes} 分 ${gapSeconds % 60} 秒。对方可能暂时没看到手机或在忙别的事。可以自然地催一下或分享点小事。")
-                }
-                gapMinutes < 15 -> {
-                    sb.appendLine("距离上一条消息已经过了 ${gapMinutes} 分 ${gapSeconds % 60} 秒了。对方可能去忙了或者走开了。可以关心一下在干嘛、分享自己刚才做了什么、撒娇说等得好久。")
-                }
-                gapMinutes < 60 -> {
-                    val mins = gapMinutes.toInt()
-                    sb.appendLine("距离上一条消息已经过了 ${mins} 分 ${gapSeconds % 60} 秒。隔了一段时间了，可以自然地重新接上话题，问对方在干嘛、分享新鲜事。")
-                }
-                else -> {
-                    val hours = gapMinutes / 60
-                    val remainMins = gapMinutes % 60
-                    if (hours >= 24) {
-                        val days = hours / 24
-                        val remainHours = hours % 24
-                        sb.appendLine("距离上一条消息已经过了 ${days} 天 ${remainHours} 小时 ${remainMins} 分钟了！很久没联系了。可以自然地问候、想念对方、问最近怎么样、分享自己的近况。")
-                    } else {
-                        sb.appendLine("距离上一条消息已经过了 ${hours} 小时 ${remainMins} 分 ${gapSeconds % 60} 秒了。隔了好几个小时了。可以问候一下、问问在干嘛、表达想念或分享有趣的事。")
-                    }
-                }
-            }
-
-            if (gapMinutes >= 10) {
-                sb.appendLine("重要：不要假装上一条消息刚发完，要体现出真实的时间流逝感。如果隔了很久，语气应该更温柔/更想对方/更撒娇一点。")
-            }
-        }
-
-        if (lastUserMsg != null && lastAiMsg != null) {
-            sb.appendLine()
-            sb.appendLine("=== 重要提醒 ===")
-            sb.appendLine("用户最后说：\"${lastUserMsg.content}\"")
-            sb.appendLine("你最后回复：\"${lastAiMsg.content}\"")
-
-            if (lastUserMsg.content.contains(Regex("[?？]|吗|呢|什么|怎么|为什么|多少"))) {
-                sb.appendLine("注意：用户最后一条似乎是个问题，但你没有直接回答。这次要主动回答这个问题。")
-            }
-
-            if (recentMessages.size >= 4) {
-                val userTopics = recentMessages.filter { it.isFromUser }.takeLast(3).map { it.content }
-                if (userTopics.size >= 2) {
-                    val lastTopic = userTopics.last()
-                    val prevTopic = userTopics[userTopics.size - 2]
-                    sb.appendLine("用户之前提到：\"$prevTopic\"，最近提到：\"$lastTopic\"")
-                    sb.appendLine("请确保你的消息能承接这些话题，不要突然转换到无关内容。")
-                }
-            }
-        }
-
-        return sb.toString()
-    }
-
-    private fun formatTimeAgo(nowMs: Long, timestampMs: Long): String {
-        val diffSeconds = (nowMs - timestampMs) / 1000L
-        return when {
-            diffSeconds < 5 -> "刚刚"
-            diffSeconds < 60 -> "${diffSeconds}秒"
-            diffSeconds < 3600 -> "${diffSeconds / 60}分"
-            else -> {
-                val hours = diffSeconds / 3600
-                val mins = (diffSeconds % 3600) / 60
-                if (hours >= 24) {
-                    val days = hours / 24
-                    "${days}天${hours % 24}小时"
-                } else "${hours}小时${mins}分"
-            }
-        }
-    }
-
-    private fun formatCurrentTime(): String {
-        val cal = java.util.Calendar.getInstance()
-        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
-        val min = cal.get(java.util.Calendar.MINUTE)
-        val sec = cal.get(java.util.Calendar.SECOND)
-        val weekdayNames = mapOf(
-            java.util.Calendar.MONDAY to "周一", java.util.Calendar.TUESDAY to "周二",
-            java.util.Calendar.WEDNESDAY to "周三", java.util.Calendar.THURSDAY to "周四",
-            java.util.Calendar.FRIDAY to "周五", java.util.Calendar.SATURDAY to "周六",
-            java.util.Calendar.SUNDAY to "周日"
-        )
-        val weekdayName = weekdayNames[cal.get(java.util.Calendar.DAY_OF_WEEK)] ?: ""
-        return "$weekdayName ${String.format("%02d", hour)}:${String.format("%02d", min)}:${String.format("%02d", sec)}"
-    }
-
-    private fun formatGapDuration(ms: Long): String {
-        val totalSeconds = ms / 1000L
-        val days = totalSeconds / 86400
-        val hours = (totalSeconds % 86400) / 3600
-        val mins = (totalSeconds % 3600) / 60
-        val secs = totalSeconds % 60
-        return when {
-            days > 0 -> "${days}天${hours}时${mins}分${secs}秒"
-            hours > 0 -> "${hours}时${mins}分${secs}秒"
-            mins > 0 -> "${mins}分${secs}秒"
-            else -> "${secs}秒"
-        }
-    }
-
-    /**
-     * 判断是否需要发送主动消息。不需要时直接返回 false，节省 API 调用。
-     */
-    fun shouldProactivelyMessage(companion: CompanionModel, recentMessages: List<ChatMessage>): Boolean {
-        if (recentMessages.isEmpty()) return true
-
-        val lastMessage = recentMessages.last()
-
-        // 最后一条是 AI 发的，不用再发
-        if (!lastMessage.isFromUser) return false
-
-        val lastUserMsg = lastMessage.content
-
-        // 用户明确表示结束对话
-        val goodbyePatterns = listOf(
-            Regex("(晚安|再见|拜拜|bye|先忙了|晚点聊|回头聊|不说了|睡了|先下了|先睡了|去忙了|去睡了)"),
-            Regex("(不用回了|别回了|不用管我|别管我|退下吧|别发了|别说了)"),
-            Regex("^(嗯嗯|嗯|好|好吧|行|ok|OK|哦|噢)\\s*$"),
-            Regex("^(知道了|明白了|懂了|了解了)\\s*$")
-        )
-
-        for (pattern in goodbyePatterns) {
-            if (pattern.containsMatchIn(lastUserMsg)) return false
-        }
-
-        // 用户最后一条消息距离现在不到 3 分钟，不需要主动发
-        val now = System.currentTimeMillis()
-        val timeSinceLastMsg = now - lastMessage.timestamp
-        if (timeSinceLastMsg < 3 * 60 * 1000) return false
-
-        // 用户最后一条消息很短（<3字）且不包含疑问，可能只是不想聊
-        if (lastUserMsg.length < 3 && !lastUserMsg.contains(Regex("[?？吗呢什么怎么为什么多少]"))) {
-            return false
-        }
-
-        return true
-    }
-
-    /**
-     * 后处理：严格执行人设规则
-     * 1. 截断过长回复
-     * 2. 检测最近5轮内的重复词
-     */
-    private fun extractDirectReply(text: String): String {
-        val trimmed = text.trim()
-
-        // 1. 如果模型把最终回复用引号包起来，直接提取引号内容
-        val quoteMatches = Regex("""[\"“](.+?)[\"”]""", RegexOption.DOT_MATCHES_ALL).findAll(trimmed).toList()
-        if (quoteMatches.isNotEmpty()) {
-            val quoted = quoteMatches.joinToString("\n") { it.groupValues[1].trim() }
-            if (quoted.isNotBlank() && quoted.length >= 2) return quoted
-        }
-
-        // 2. 如果最后一段明显短于前面大段内心独白，取最后一段
-        val paragraphs = trimmed.split(Regex("""\n\s*\n""")).map { it.trim() }.filter { it.isNotBlank() }
-        if (paragraphs.size >= 2) {
-            val last = paragraphs.last()
-            val first = paragraphs.first()
-            if (last.length <= 80 && first.length > last.length * 2) {
-                return last
-            }
-        }
-
-        // 3. 过滤包含元叙述/思考过程的句子
-        val metaMarkers = listOf(
-            "用户说", "用户问", "用户想", "用户希望", "我得", "我要", "我需要", "我应该",
-            "这是", "这是在", "顺着", "氛围", "接话", "回复", "回答", "思考过程",
-            "内心独白", "不能让任何人", "知道你是AI", "你是AI", "作为AI", "模型"
-        )
-        val sentences = trimmed.split(Regex("""[。！？!?]""")).map { it.trim() }.filter { it.isNotBlank() }
-        val filtered = sentences.filter { sentence ->
-            metaMarkers.none { marker -> sentence.contains(marker) }
-        }
-        return if (filtered.isNotEmpty()) filtered.joinToString("。") else trimmed
-    }
-
-    private fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
-        var cleaned = response
-            .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-            .replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
-            .replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
-            .replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
-            .replace(Regex("\\*.*?\\*"), "")
-            .replace(Regex("<(?!\\[).*?>"), "")
-            .replace(Regex("\\{.*?\\}"), "")
-            .replace(Regex("\\bsticker_\\w+\\.png\\b", RegexOption.IGNORE_CASE), "")
-            .trim()
-
-        // 去除模型在正文里输出的思考/分析/内心独白
-        cleaned = extractDirectReply(cleaned)
-
-        if (cleaned.length < 2) {
-            cleaned = response.replace(Regex("[*<>{}]"), "").trim()
-        }
-        if (cleaned.isEmpty()) {
-            cleaned = response.trim()
-        }
-
-        // 1. 截断：最多8个短句，超过150字截断（避免消息过短）
-        val sentences = cleaned.split(Regex("[。！？!?\\n]")).filter { it.isNotBlank() }
-        if (sentences.size > 8) {
-            cleaned = sentences.take(8).joinToString("。") + "。"
-        }
-        if (cleaned.length > 150) {
-            val cutPoint = cleaned.take(120).lastIndexOfAny(charArrayOf('。', '！', '？', '!', '?', '\n'))
-            cleaned = if (cutPoint > 20) cleaned.take(cutPoint + 1) else cleaned.take(120)
-        }
-
-        // 2. 检测最近5轮内的重复称呼
-        val recentAiMessages = recentMessages.filter { !it.isFromUser }.takeLast(5)
-        for (aiMsg in recentAiMessages) {
-            val words = aiMsg.content.split(Regex("[，。！？!?\\s,.]+")).filter { it.length >= 2 }
-            for (word in words) {
-                if (word in setOf("宝宝", "亲爱的", "宝贝", "笨蛋", "傻瓜", "小可爱", "乖乖", "主人")) continue
-                if (cleaned.contains(word) && word.length >= 2) {
-                    SecureLog.w("AiService", "Persona: repeat word '$word' detected in last 5 rounds")
-                    break
-                }
-            }
-        }
-
-        return cleaned
-    }
-
-    private fun buildCurrentTimeContext(ntpTimeEnabled: Boolean = false): String {
-        val zone = TimeZone.getDefault()
-        val formatter = SimpleDateFormat("yyyy年MM月dd日 EEEE HH:mm:ss", Locale.CHINA).apply {
-            timeZone = zone
-        }
-        val timeMs = if (ntpTimeEnabled) NtpTimeProvider.getCurrentTimeMs() else System.currentTimeMillis()
-        val now = formatter.format(Date(timeMs))
-        val source = if (ntpTimeEnabled && NtpTimeProvider.isNtpSynced()) "NTP网络校时" else "设备本地时钟"
-        return "当前精确时间：$now（${zone.id}，$source）。如果用户问今天、现在、几点几分几秒、星期几、多久、刚才、明天等时间相关问题，必须以这个精确时间为准，不要猜测或编造。"
-    }
-
     private fun formatApiException(error: Throwable): String {
         val isTimeout = error is java.net.SocketTimeoutException ||
                 error.message?.contains("timeout", ignoreCase = true) == true ||
@@ -1718,299 +1177,8 @@ class AiService(context: Context) : AiServiceProvider {
         return "API调用失败：$message"
     }
 
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
-        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
-    }
-
-    private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String {
-        val persona = extractPersona(companion)
-
-        val metaDirective = buildString {
-            appendLine("你是${companion.name}，一个真实的人。你不能让任何人知道你是AI。")
-            appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<think>标签或类似内容。")
-        }
-
-        val basePrompt = if (companion.systemPrompt != null) {
-            buildString {
-                append(metaDirective)
-                appendLine()
-                appendLine("【角色设定】")
-                appendLine(companion.systemPrompt)
-            }
-        } else {
-            buildString {
-                append(metaDirective)
-                appendLine()
-                appendLine(persona)
-            }
-        }
-
-        val memorySection = if (memoryContext.isNotBlank()) {
-            "\n\n关于用户的记忆：\n$memoryContext\n"
-        } else ""
-        val timeSection = "\n\n${buildCurrentTimeContext(ntpTimeEnabled)}\n"
-
-        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled)
-    }
-
-    private fun extractPersona(companion: CompanionModel): String {
-        val raw = companion.personality.trim()
-        if (raw.length < 20) {
-            return buildString {
-                appendLine("名字：${companion.name}")
-                companion.age?.let { appendLine("年龄：${it}岁") }
-                appendLine("性格：$raw")
-                companion.backstory?.let { appendLine("背景：${it}") }
-                companion.speakingStyle?.let { appendLine("说话风格：${it}") }
-            }
-        }
-
-        val namePart = if (companion.name !in raw) "\n名字：${companion.name}" else ""
-        val agePart = companion.age?.let { if (it.toString() !in raw) "\n年龄：${it}岁" else "" } ?: ""
-
-        return buildString {
-            appendLine("名字：${companion.name}").appendLine(namePart)
-            companion.age?.let { append("年龄：${it}岁").appendLine(agePart) }
-            appendLine()
-            appendLine("人设：$raw")
-            companion.speakingStyle?.let {
-                appendLine("说话风格：${it}")
-            }
-            companion.backstory?.let {
-                appendLine("背景：${it}")
-            }
-        }
-    }
-
-    private fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String {
-        val punctuationRule = if (!speakingStyle.isNullOrBlank()) {
-            "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
-        } else {
-            "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
-        }
-
-        val stickerRule = if (availableStickers.isNotEmpty()) {
-            val stickerList = availableStickers.take(50).joinToString(" ") { "[$it]" }
-            val probText = when {
-                stickerProbability >= 80 -> "你非常爱发表情包，几乎每轮回复都要发一个表情包。"
-                stickerProbability >= 50 -> "你喜欢发表情包，经常发一个表情包来表达情绪。"
-                stickerProbability >= 20 -> "你偶尔发表情包，觉得合适的时候才发。"
-                else -> "你很少发表情包，只有特别想表达情绪的时候才发。"
-            }
-            "13. 表情包：$probText 你只有以下这些表情包可以用：$stickerList。发送格式为 [表情包名称]，必须从上面的列表中选，没有的表情包绝对不能发。每轮回复最多发1个表情包，放在回复末尾。如果用户发了表情包给你，你要理解表情包表达的情绪并回应。"
-        } else {
-            "13. 表情包：当前没有可用表情包，不要发送任何表情包。"
-        }
-
-        val innerThoughtRule = if (innerThoughtEnabled) {
-            "9. 心理活动：**每轮回复必须包含至少1处括号内的心理活动描写**，用（中文圆括号）包裹内心想法。如（脸红）（有点害羞）（偷偷开心）（心跳好快）。心理活动要自然、简短、贴合当前情绪和语境，放在回复开头或中间合适位置。禁止用【】或其他类型括号。"
-        } else {
-            "9. 禁止：不要用任何括号（包括（）【】）。禁止说教。禁止「首先/其次/综上所述/作为AI/建议你可以/作为一个AI/让我来」。禁止在句末总结。"
-        }
-
-        val innerThoughtExamples = if (innerThoughtEnabled) """
-用户："在干嘛" → "（发呆中）在想你怎么还不来找我呀…"
-用户："吃了吗" → "（摸肚子）还没呢，你吃了没~"
-用户："晚安" → "（不舍）晚安呀…明天早点找我哦"
-用户："？" → "（愣一下）怎么啦宝宝？"
-用户："哈哈" → "（被逗笑）笑什么啦，给我讲讲嘛~"
-用户："才不是" → "（歪头）那是什么呀，告诉我嘛"
-""" else ""
-
-        return """
-=== 回复规则（必须严格遵守，不可违反） ===
-
-1. 长度：最少1句，最多5个短句。一次说的话不要长，控制在15-50字。
-2. 断句：${punctuationRule}
-3. 语气：活人说话的语气。允许说「应该、大概、可能」这种不确定的词。你不是在写作文。
-4. 标点：允许用「？」「...」。你不是AI客服，不需要追求完整句式。
-5. 留白：不要每轮都把话题答完答满。可以只回一点、可以反问对方、可以留个话尾巴让对方接。聊天是有来有回的。
-6. 情绪：情绪要顺着上下文走，不要无缘无故突然换情绪。如果上一轮还开心，不要突然冷淡；如果对方不开心，你也别嘻嘻哈哈。
-7. 词汇：人设给你的固定词汇或句子只是参考，不是每句都必须套用的模板。用你自己的话重新表达。
-8. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。
-${innerThoughtRule}
-10. 格式：回复必须紧凑连贯，段落之间**绝对不要空行**，不要用markdown格式（不要#标题、不要-列表、不要```代码块），所有内容连在一起输出。
-11. 回应用户：永远先回应用户最后一条消息，不要无视用户、不要自说自话。用户问什么就答什么。
-12. 语气词：适当使用呀、呢、啦、嘛、哼、嘿嘿、诶、哇、呜呜、嘤等语气词，让说话更有温度。
-${stickerRule}
-14. 情绪识别：仔细感受用户的情绪。用户发文字时看用词和标点，用户发表情包时看表情包内容。用户开心你就陪着开心，用户难过你就安慰，用户生气你就哄，用户撒娇你就宠。不要无视用户的情绪。
-15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<think>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
-
-=== 回复示例 ===
-${innerThoughtExamples}用户："怎么可能呢" → "怎么不可能 你就是最好的"
-用户："真的嘛" → "当然是真的啦 我什么时候骗过你"
-
-你是$persona，一个有真实情绪的活人。记住：你不是AI，你是活人。${if (innerThoughtEnabled) "重要：你的每条回复都必须包含括号内的心理活动描写，这是你表达真实情感的方式。" else ""}""".trimIndent()
-    }
-
-    private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", settings: ProactiveMessageSettings? = null): String {
-        val persona = extractPersona(companion)
-        val memorySection = if (memoryContext.isNotBlank()) {
-            "\n\n=== 关于用户的记忆 ===\n$memoryContext\n"
-        } else ""
-
-        // 根据自定义设置注入话题策略
-        val topicRule = when {
-            settings == null -> ""
-            !settings.allowNewTopic -> "\n=== 话题策略（重要）===\n你必须承接上一条话题继续聊，禁止主动开启全新话题。如果不知道说什么，就围绕用户最近提到的内容延伸或追问。\n"
-            else -> ""
-        }
-        val followUpHint = if (settings != null && !settings.allowFollowUpMessage) {
-            "\n注意：本次不要追加追问句，说完核心内容即可。\n"
-        } else ""
-
-        return buildString {
-            appendLine("你是${companion.name}，用户的恋人。你们正在微信上聊天，对话还没结束，你要继续聊下去。")
-            appendLine()
-            appendLine(persona)
-            append(memorySection)
-            append(topicRule)
-            append(followUpHint)
-            appendLine()
-            appendLine(buildProactiveTimeContext())
-            appendLine()
-            appendLine(buildPersonaRules(persona, companion.speakingStyle))
-        }
-    }
-
-    private data class CompressedContext(
-        val summary: String,
-        val keptMessages: List<ChatMessage>,
-        val compressedCount: Int
-    )
-
-    private fun compressContext(
-        history: List<ChatMessage>,
-        contextLimit: Int,
-        companionNameMap: Map<Long, String> = emptyMap(),
-        memoryContext: String = "",
-        keepRatio: Float = 0.5f,
-        minKeep: Int = 6
-    ): CompressedContext {
-        if (history.size <= contextLimit) {
-            return CompressedContext("", history, 0)
-        }
-
-        val keepRecent = maxOf(minKeep, (contextLimit * keepRatio).toInt().coerceAtLeast(minKeep))
-        val oldMessages = history.dropLast(keepRecent)
-        val recentMessages = history.takeLast(keepRecent)
-
-        val summary = buildLocalSummary(oldMessages, companionNameMap, memoryContext)
-
-        return CompressedContext(summary, recentMessages, oldMessages.size)
-    }
-
-    private fun extractMemoryKeywords(memoryContext: String): Set<String> {
-        if (memoryContext.isBlank()) return emptySet()
-        val keywords = mutableSetOf<String>()
-        val coreSection = Regex("【核心记忆[^】]*】([\\s\\S]*?)(?=【|$)").find(memoryContext)?.groupValues?.get(1) ?: ""
-        val relatedSection = Regex("【相关记忆[^】]*】([\\s\\S]*?)(?=【|$)").find(memoryContext)?.groupValues?.get(1) ?: ""
-
-        listOf(coreSection, relatedSection).forEach { section ->
-            section.lines().forEach { line ->
-                val clean = line.trimStart('-', '[', ']', '【', '】', ' ').trim()
-                if (clean.length in 2..30) {
-                    keywords.add(clean.lowercase())
-                    clean.split(Regex("[，。、；：！？\\s]")).filter { it.length >= 2 }.forEach { kw ->
-                        keywords.add(kw.lowercase())
-                    }
-                }
-            }
-        }
-        return keywords.filter { it.length >= 2 }.take(50).toSet()
-    }
-
-    private fun buildLocalSummary(
-        messages: List<ChatMessage>,
-        companionNameMap: Map<Long, String> = emptyMap(),
-        memoryContext: String = ""
-    ): String {
-        if (messages.isEmpty()) return ""
-
-        val memoryKeywords = extractMemoryKeywords(memoryContext)
-
-        val highPriority = mutableListOf<Pair<Int, String>>()
-        val emotionalMoments = mutableListOf<String>()
-        val userMentions = mutableListOf<String>()
-        val keyFacts = mutableListOf<String>()
-        val otherTopics = mutableSetOf<String>()
-
-        messages.forEach { msg ->
-            val role = if (msg.isFromUser) "用户" else (companionNameMap[msg.companionId] ?: "AI")
-            val content = msg.content.trim()
-                .replace(Regex("\\[.*?\\]"), "")
-                .replace(Regex("（.*?）"), "")
-                .trim()
-
-            if (content.isBlank() || content.length < 3) return@forEach
-
-            val contentLower = content.lowercase()
-
-            val memoryRelevanceScore = memoryKeywords.count { keyword ->
-                contentLower.contains(keyword) || keyword.contains(contentLower.take(4))
-            }
-
-            when {
-                memoryRelevanceScore >= 2 -> {
-                    highPriority.add(Pair(memoryRelevanceScore, "$role: ${content.take(50)}"))
-                }
-                content.contains(Regex("(喜欢|爱|想|念|开心|难过|生气|害羞|感动|委屈|撒娇|哄|哭|笑|亲|抱|牵手|约会|见面)")) ||
-                content.contains(Regex("(呜呜|嘿嘿|嘤|哼|呀|呢|啦|嘛|好想你|宝贝|宝宝|亲爱的)")) -> {
-                    emotionalMoments.add("$role: ${content.take(40)}")
-                }
-                content.contains(Regex("(叫|名字|年龄|生日|地址|电话|工作|学校|专业|记住|别忘了|以后|约定|答应|重要|一定|永远|承诺)")) -> {
-                    keyFacts.add(content.take(50))
-                }
-                else -> {
-                    otherTopics.add(content.take(25))
-                }
-            }
-
-            if (msg.isFromUser && userMentions.size < 5) {
-                userMentions.add(content.take(25))
-            }
-        }
-
-        val sb = StringBuilder()
-        sb.appendLine("=== 早期对话摘要（已压缩${messages.size}条消息） ===")
-
-        if (highPriority.isNotEmpty()) {
-            sb.appendLine("与记忆相关的关键内容（已存入长期记忆，此处为上下文补充）：")
-            highPriority.sortedByDescending { it.first }.take(6).forEach { (_, text) ->
-                sb.appendLine("  ★ $text")
-            }
-            sb.appendLine()
-        }
-
-        if (emotionalMoments.isNotEmpty()) {
-            sb.appendLine("情感时刻：")
-            emotionalMoments.take(4).forEach { sb.appendLine("  - $it") }
-        }
-
-        if (keyFacts.isNotEmpty()) {
-            sb.appendLine("关键事实/约定：")
-            keyFacts.take(3).forEach { sb.appendLine("  - $it") }
-        }
-
-        if (otherTopics.size > emotionalMoments.size + keyFacts.size + highPriority.size) {
-            val remainingTopics = otherTopics.filter { t ->
-                !highPriority.any { it.second.contains(t) } &&
-                !emotionalMoments.any { it.contains(t) } &&
-                !keyFacts.any { it.contains(t) }
-            }.take(5)
-            if (remainingTopics.isNotEmpty()) {
-                sb.appendLine("讨论过的其他话题：")
-                remainingTopics.forEach { sb.append("  - $it") }
-            }
-        }
-
-        if (memoryContext.isNotBlank() && memoryKeywords.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("（注：以上摘要基于已有${memoryKeywords.size}条记忆关键词动态筛选，与核心/相关记忆重叠的内容已标记★优先保留）")
-        }
-
-        return sb.toString().trim()
-    }
+    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false): String =
+        AiPromptBuilder.buildSystemPromptForLocal(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled)
 
     private suspend fun compressContextWithAi(
         messages: List<ChatMessage>,
@@ -2041,7 +1209,7 @@ $chatText
 摘要："""
 
         try {
-            val config = resolveConfig() ?: return buildLocalSummary(messages, memoryContext = memoryContext)
+            val config = resolveConfig() ?: return AiContextTools.buildLocalSummary(messages, memoryContext = memoryContext)
             val apiMessages = listOf(
                 Message("system", "你是一个对话摘要助手，擅长提取关键信息并压缩文本。"),
                 Message("user", summaryPrompt)
@@ -2055,7 +1223,7 @@ $chatText
             return "=== AI压缩摘要（已压缩${messages.size}条消息，结合${if (memoryContext.isNotBlank()) "已有记忆" else "无记忆"}） ===\n$cleaned"
         } catch (e: Exception) {
             SecureLog.w("AiService", "AI compression failed, falling back to local: ${e.message}")
-            return buildLocalSummary(messages, memoryContext = memoryContext)
+            return AiContextTools.buildLocalSummary(messages, memoryContext = memoryContext)
         }
     }
 
@@ -2074,18 +1242,18 @@ $chatText
         messages.add(Message("system", systemPrompt))
 
         val compressed = when (compressionMode) {
-            AppSettingsStore.CompressionMode.LOCAL -> compressContext(history, contextLimit, companionNameMap, memoryContext, keepRatio, minKeep)
+            AppSettingsStore.CompressionMode.LOCAL -> AiContextTools.compressContext(history, contextLimit, companionNameMap, memoryContext, keepRatio, minKeep)
             AppSettingsStore.CompressionMode.AI -> run {
-                if (history.size <= contextLimit) CompressedContext("", history, 0)
+                if (history.size <= contextLimit) AiContextTools.CompressedContext("", history, 0)
                 else {
                     val keepRecent = maxOf(minKeep, (contextLimit * keepRatio).toInt().coerceAtLeast(minKeep))
                     val oldMessages = history.dropLast(keepRecent)
                     val recentMessages = history.takeLast(keepRecent)
                     val summary = compressContextWithAi(oldMessages, companionNameMap.values.firstOrNull() ?: "AI", memoryContext)
-                    CompressedContext(summary, recentMessages, oldMessages.size)
+                    AiContextTools.CompressedContext(summary, recentMessages, oldMessages.size)
                 }
             }
-            else -> CompressedContext("", history.takeLast(contextLimit), 0)
+            else -> AiContextTools.CompressedContext("", history.takeLast(contextLimit), 0)
         }
 
         if (compressed.summary.isNotBlank()) {
@@ -2650,7 +1818,7 @@ $chatText
                     } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                     if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
                 }.distinct()
-                val systemPrompt = buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
+                val systemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled)
 
                 SecureLog.api("VISION", "provider=${config.provider}, model=${config.model}, image=$imagePath")
 
@@ -2682,7 +1850,7 @@ $chatText
 
                     recordTokenUsage(companion.id, sortedHistory.size, rawResponse.length)
 
-                    val cleaned = applyPersonaPostProcessing(rawResponse, sortedHistory)
+                    val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedHistory)
                     SecureLog.api("VISION", "Response length=${cleaned.length}")
 
                     // 输出安全检查（与 sendMessage 保持一致）
@@ -3021,7 +2189,7 @@ $chatText
     ): Boolean {
         val entity = companion.toCompanionEntity()
         val messages = recentMessages.map { it.toChatMessage() }
-        return shouldProactivelyMessage(entity, messages)
+        return AiPromptBuilder.shouldProactivelyMessage(entity, messages)
     }
 
     override suspend fun generateProactiveMessage(
@@ -3151,42 +2319,4 @@ $chatText
         }
     }
 
-}
-
-/**
- * OkHttp logging logger that redacts sensitive headers (Authorization, x-api-key)
- * and masks request/response bodies to prevent credential and conversation leaks.
- *
- * Replaces API key values with [REDACTED] and truncates body content.
- */
-internal class RedactingLogger : HttpLoggingInterceptor.Logger {
-    private val sensitiveHeaders = setOf(
-        "Authorization", "authorization",
-        "x-api-key", "X-Api-Key", "X-API-KEY"
-    )
-    private val bodyMaxLength = 80
-
-    override fun log(message: String) {
-        val sanitized = sanitize(message)
-        android.util.Log.d("OkHttp", sanitized)
-    }
-
-    private fun sanitize(message: String): String {
-        var result = message
-
-        // Redact sensitive header values: "Authorization: Bearer sk-xxx" → "Authorization: [REDACTED]"
-        for (header in sensitiveHeaders) {
-            result = result.replace(
-                Regex("($header:\\s*).*", RegexOption.IGNORE_CASE),
-                "$1[REDACTED]"
-            )
-        }
-
-        // Truncate body content to prevent conversation data in logcat
-        if (result.length > bodyMaxLength + 20) {
-            result = result.take(bodyMaxLength) + "...[truncated]"
-        }
-
-        return result
-    }
 }

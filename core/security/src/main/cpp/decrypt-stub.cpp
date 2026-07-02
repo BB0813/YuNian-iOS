@@ -2,35 +2,44 @@
 //
 // pack_so.py encrypts the .text section in-place (NO file insertion).
 // This function lives in .lianyu_decrypt (separate from .text) and is
-// called via __attribute__((constructor(101))) before JNI_OnLoad.
-//
-// Relocations are applied by the linker before constructors run, so
-// .text must not contain relocation targets (PIC code satisfies this).
+// called via .init_array constructor before JNI_OnLoad.
 //
 // CRITICAL DESIGN RULES:
 //   1. NO calls to .text functions (it's encrypted until we decrypt it).
-//   2. NO calls through the PLT — the PLT page may fall inside the
-//      mprotect range and become non-executable.  Use raw inline
-//      syscall(SVC #0) for mprotect instead.
-//   3. NEVER request PROT_WRITE|PROT_EXEC simultaneously — Android 10+
-//      enforces W^X and will reject it with EACCES.  Use RW first,
-//      decrypt, flush cache, then RX.
+//   2. NO calls through the PLT — PLT lazy binding may not work during
+//      .init_array constructor phase. Use raw inline syscall (SVC #0)
+//      for mprotect AND for logging.
+//   3. Try RWX (PROT_READ|PROT_WRITE|PROT_EXEC) FIRST to keep EXEC
+//      throughout. If W^X enforcement rejects RWX, fall back to RW
+//      (remove EXEC), decrypt, then restore RX. On Android 16+ the
+//      RX restore may fail (hardened W^X), so try RWX as last resort.
 //   4. The mprotect range must NOT include .lianyu_decrypt or .plt.
 //      Only cover the .text section's page-aligned range.
 
 #include <cstdint>
 #include <sys/mman.h>
+#include <unistd.h>
+#include <fcntl.h>
 
-// ARM64 syscall number for mprotect (226)
-// ARM32 syscall number for mprotect (125)
+// ── Syscall numbers ──
 #if defined(__aarch64__)
 #define __NR_mprotect 226
+#define __NR_write    64
+#define __NR_openat   56
+#define __NR_close    57
 #elif defined(__arm__)
 #define __NR_mprotect 125
+#define __NR_write    4
+#define __NR_openat   322
+#define __NR_close    6
 #else
 #define __NR_mprotect 226
+#define __NR_write    64
+#define __NR_openat   56
+#define __NR_close    57
 #endif
 
+// ── Raw syscall mprotect (no PLT dependency) ──
 static __attribute__((always_inline)) inline long
 raw_mprotect(void *addr, size_t len, int prot) {
     long ret;
@@ -43,9 +52,6 @@ raw_mprotect(void *addr, size_t len, int prot) {
                      : "memory", "cc");
     ret = _x0;
 #elif defined(__arm__)
-    // ARM32: use r7 for syscall number (standard EABI calling convention).
-    // "r" constraint lets the compiler pick a register, but we need r7
-    // specifically for the SVC instruction.  Use a clobber approach instead.
     long _nr = __NR_mprotect;
     register long _r0 __asm__("r0") = (long)addr;
     register long _r1 __asm__("r1") = (long)len;
@@ -60,11 +66,110 @@ raw_mprotect(void *addr, size_t len, int prot) {
         : "memory", "cc");
     ret = _r0;
 #else
-    // x86/x86_64 fallback: use libc mprotect (no W^X issue on x86 Android)
     ret = mprotect(addr, len, prot);
 #endif
     return ret;
 }
+
+// ── Raw syscall write to any fd (no PLT dependency) ──
+static __attribute__((always_inline)) inline long
+raw_write_fd(int fd, const char *str, int len) {
+#if defined(__aarch64__)
+    register long _x0 __asm__("x0") = (long)fd;
+    register long _x1 __asm__("x1") = (long)str;
+    register long _x2 __asm__("x2") = (long)len;
+    register long _x8 __asm__("x8") = __NR_write;
+    __asm__ volatile("svc #0" : "=r"(_x0) : "r"(_x0), "r"(_x1), "r"(_x2), "r"(_x8)
+                     : "memory", "cc");
+    return _x0;
+#elif defined(__arm__)
+    long _nr = __NR_write;
+    register long _r0 __asm__("r0") = (long)fd;
+    register long _r1 __asm__("r1") = (long)str;
+    register long _r2 __asm__("r2") = (long)len;
+    __asm__ volatile(
+        "push {r7}\n"
+        "mov r7, %[_n]\n"
+        "svc #0\n"
+        "pop {r7}\n"
+        : "=r"(_r0)
+        : [_n]"r"(_nr), "r"(_r0), "r"(_r1), "r"(_r2)
+        : "memory", "cc");
+    return _r0;
+#else
+    return write(fd, str, len);
+#endif
+}
+
+// ── Raw syscall openat (no PLT dependency) ──
+static __attribute__((always_inline)) inline long
+raw_openat(const char *path, int flags, int mode) {
+#if defined(__aarch64__)
+    register long _x0 __asm__("x0") = -100; // AT_FDCWD
+    register long _x1 __asm__("x1") = (long)path;
+    register long _x2 __asm__("x2") = (long)flags;
+    register long _x3 __asm__("x3") = (long)mode;
+    register long _x8 __asm__("x8") = __NR_openat;
+    __asm__ volatile("svc #0" : "=r"(_x0) : "r"(_x0), "r"(_x1), "r"(_x2), "r"(_x3), "r"(_x8)
+                     : "memory", "cc");
+    return _x0;
+#elif defined(__arm__)
+    long _nr = __NR_openat;
+    register long _r0 __asm__("r0") = -100;
+    register long _r1 __asm__("r1") = (long)path;
+    register long _r2 __asm__("r2") = (long)flags;
+    register long _r3 __asm__("r3") = (long)mode;
+    __asm__ volatile(
+        "push {r7}\n"
+        "mov r7, %[_n]\n"
+        "svc #0\n"
+        "pop {r7}\n"
+        : "=r"(_r0)
+        : [_n]"r"(_nr), "r"(_r0), "r"(_r1), "r"(_r2), "r"(_r3)
+        : "memory", "cc");
+    return _r0;
+#else
+    return open(path, flags, mode);
+#endif
+}
+
+// Write to stderr (fd 2) — always available, may go to /dev/null on Android
+static __attribute__((always_inline)) inline void
+raw_write_str(const char *str, int len) {
+    raw_write_fd(2, str, len);
+}
+
+// Simple strlen
+static __attribute__((always_inline)) inline int
+raw_strlen(const char *s) {
+    int n = 0;
+    while (s[n]) n++;
+    return n;
+}
+
+// ── File-based logging ──
+// stderr on Android apps goes to /dev/null, so we also write to a file.
+// Try the app's data dir first (always writable by the app process).
+static int g_log_fd = -1;
+
+static __attribute__((always_inline)) inline void
+raw_log_init() {
+    if (g_log_fd >= 0) return;
+    // O_WRONLY=1, O_CREAT=0100(64), O_TRUNC=01000(512) → flags=577
+    // mode=0666(438)
+    g_log_fd = (int)raw_openat("/data/data/com.lianyu.ai/d2.log", 577, 438);
+    if (g_log_fd < 0)
+        g_log_fd = (int)raw_openat("/data/local/tmp/d2.log", 577, 438);
+    if (g_log_fd < 0)
+        g_log_fd = (int)raw_openat("/sdcard/d2.log", 577, 438);
+}
+
+#define RAW_LOG(msg) do { \
+    int _n = raw_strlen(msg); \
+    raw_write_str(msg, _n); \
+    raw_log_init(); \
+    if (g_log_fd >= 0) raw_write_fd(g_log_fd, msg, _n); \
+} while(0)
 
 // ── Global variables (in .data, patched by pack_so.py at build time) ──
 // Non-zero sentinel values ensure .data placement (not .bss) so pack_so.py
@@ -100,6 +205,8 @@ void* lianyu_text_decrypt_ptr = nullptr;
 // into .text. It has SHF_EXECINSTR so it lands in an executable segment.
 __attribute__((section(".lianyu_decrypt"), used, noinline, optimize("O0"), visibility("default")))
 extern "C" void lianyu_d2_decrypt() {
+    RAW_LOG("D2: enter\n");
+
     uint8_t* key_ptr  = lianyu_xor_key;
 
     // Compute .text runtime address via ASLR-independent offset.
@@ -108,31 +215,45 @@ extern "C" void lianyu_d2_decrypt() {
     uint64_t text_sz  = lianyu_text_size;
 
     // Sentinel check — skip if not patched (debug builds)
-    if (lianyu_text_start == 0xDEADBEEF42424242ULL) return;
-    if (!text_ptr || !text_sz || !key_ptr) return;
+    if (lianyu_text_start == 0xDEADBEEF42424242ULL) {
+        RAW_LOG("D2: sentinel not patched, skip\n");
+        return;
+    }
+    if (!text_ptr || !text_sz || !key_ptr) {
+        RAW_LOG("D2: null check failed\n");
+        return;
+    }
 
-    // 1. Make .text writable.
-    //    On Android 10+ W^X is enforced, so we use PROT_READ|PROT_WRITE
-    //    (no PROT_EXEC).  This makes the page non-executable, but on
-    //    ARM64 the instruction cache is physically tagged and is NOT
-    //    invalidated by mprotect — the CPU continues executing our
-    //    decrypt code from the I-cache until we explicitly flush it.
-    //    Use raw syscall to avoid PLT dependency (PLT page may be in range).
+    RAW_LOG("D2: sentinel ok\n");
+
+    // 1. Make .text writable while keeping it executable.
+    //    Strategy: Try RWX first (keep EXEC throughout). If RWX fails
+    //    (W^X enforced), fall back to RW (remove EXEC), then restore
+    //    RX after decryption. The restore may fail on Android 16+ which
+    //    has hardened W^X (once EXEC is removed, it can't be re-added).
+    //    In that case, try RWX as last resort.
     uint64_t page_start = ((uint64_t)text_ptr) & ~0xFFFULL;
     uint64_t page_end   = (((uint64_t)text_ptr) + text_sz + 0xFFF) & ~0xFFFULL;
+
+    // Try RWX first — avoids the need to restore EXEC later
     long mp_ret = raw_mprotect((void*)page_start, page_end - page_start,
-                               PROT_READ | PROT_WRITE);
-    // If RW fails (some kernels reject removing X from an R-X page),
-    // try RWX as fallback — some Android versions still allow it for
-    // file-backed mappings.
-    if (mp_ret != 0) {
+                               PROT_READ | PROT_WRITE | PROT_EXEC);
+    int used_rwx = (mp_ret == 0);
+    if (used_rwx) {
+        RAW_LOG("D2: mprotect RWX ok\n");
+    } else {
+        RAW_LOG("D2: RWX failed, trying RW\n");
+        // RWX failed (W^X enforced), try RW (remove EXEC)
         mp_ret = raw_mprotect((void*)page_start, page_end - page_start,
-                              PROT_READ | PROT_WRITE | PROT_EXEC);
+                              PROT_READ | PROT_WRITE);
     }
-    // If both attempts fail, abort — .text stays encrypted but the
-    // app won't crash (constructors in .text will fail later, but
-    // at least we don't SIGSEGV here).
-    if (mp_ret != 0) return;
+    if (mp_ret != 0) {
+        RAW_LOG("D2: mprotect failed, abort\n");
+        return;
+    }
+    if (!used_rwx) {
+        RAW_LOG("D2: mprotect RW ok\n");
+    }
 
     // 2. XOR decrypt in-place
     // Use volatile to prevent compiler from replacing with memset/memcpy
@@ -140,6 +261,7 @@ extern "C" void lianyu_d2_decrypt() {
     for (uint64_t i = 0; i < text_sz; i++) {
         vp[i] ^= key_ptr[i & 0xF];
     }
+    RAW_LOG("D2: xor done\n");
 
     // 3. Flush instruction cache using inline asm.
     // CRITICAL: Cannot use __builtin___clear_cache because it calls
@@ -180,16 +302,34 @@ extern "C" void lianyu_d2_decrypt() {
         __builtin___clear_cache((char*)text_ptr, (char*)text_ptr + text_sz);
 #endif
     }
+    RAW_LOG("D2: cache flushed\n");
 
-    // 4. Restore read-execute (use raw syscall, NOT PLT)
-    raw_mprotect((void*)page_start, page_end - page_start,
-                 PROT_READ | PROT_EXEC);
+    // 4. Restore read-execute (only needed if we used RW, not RWX)
+    if (!used_rwx) {
+        long restore_ret = raw_mprotect((void*)page_start, page_end - page_start,
+                     PROT_READ | PROT_EXEC);
+        if (restore_ret != 0) {
+            RAW_LOG("D2: RX restore failed, trying RWX\n");
+            // RX restore failed (Android 16 hardened W^X), try RWX
+            restore_ret = raw_mprotect((void*)page_start, page_end - page_start,
+                          PROT_READ | PROT_WRITE | PROT_EXEC);
+        }
+        if (restore_ret != 0) {
+            RAW_LOG("D2: RX/RWX restore failed\n");
+        } else {
+            RAW_LOG("D2: restore ok\n");
+        }
+    } else {
+        RAW_LOG("D2: no restore needed (RWX)\n");
+    }
 
     // 5. Wipe key from memory
     for (int i = 0; i < 16; i++) key_ptr[i] = 0;
     lianyu_text_start = 0;
     lianyu_text_size  = 0;
     lianyu_text_decrypt_ptr = nullptr;
+
+    RAW_LOG("D2: done\n");
 }
 
 // ── Constructor — runs before JNI_OnLoad, after relocations ──

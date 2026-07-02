@@ -1,129 +1,205 @@
 package com.lianyu.ai.security;
+
+import android.app.Application;
 import android.content.Context;
-import java.io.*;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.os.Build;
+import android.util.Log;
 
-public class StaticApkShell extends android.app.Application {
-    static { System.loadLibrary("lianyu_shell"); }
-    public static native byte[] nativeDeriveDexKey();
-    public static native byte[] nativeDecryptDex(byte[] e, byte[] k);
-    public static native void nativeSetApkCert(byte[] c);
-    public static native void nativeAntiHookInit();
-    public static native int nativeShellInitWithBlob(byte[] b);
-    public static native void nativeEnableMemoryGuard();
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 
-    private static final String FALLBACK_APP_CLASS = "com.lianyu.ai.LianYuApplication";
-    private android.app.Application realApp;
+import dalvik.system.InMemoryDexClassLoader;
 
-    // ═══ Optimization: 128KB buffer for streaming asset reads ═══
-    private static final int BUF_SIZE = 128 * 1024;
+public class StaticApkShell extends Application {
+    private static final String TAG = "StaticApkShell";
+    private static final String REAL_APP = "com.lianyu.ai.LianYuApplication";
+
+    private Application realApplication;
+
+    static {
+        System.loadLibrary("lianyu_shell");
+    }
 
     @Override
-    protected void attachBaseContext(Context b) {
-        super.attachBaseContext(b);
-        boolean d = (b.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
-        try {
-            // L1: Critical security — synchronous (must pass before app runs)
-            nativeAntiHookInit();
-            if (!d) {
-                try {
-                    android.content.pm.PackageInfo pi = b.getPackageManager().getPackageInfo(
-                        b.getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
-                    if (pi.signatures != null && pi.signatures.length > 0) {
-                        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-                        nativeSetApkCert(md.digest(pi.signatures[0].toByteArray()));
-                    }
-                } catch (Throwable e) {}
-            }
-            nativeEnableMemoryGuard();
-
-            // L2: VMP code items — async (5.8MB, not critical-path)
-            byte[] ci = loadAssetStream("lianyu_shell/code_items.bin");
-            if (ci != null && ci.length >= 4) {
-                new Thread("shell-vmp-init") {
-                    @Override public void run() {
-                        try { nativeShellInitWithBlob(ci); }
-                        catch (Throwable t) { android.util.Log.w("LianYuShell", "VMP init deferred: " + t.getMessage()); }
-                        finally { java.util.Arrays.fill(ci, (byte)0); }
-                    }
-                }.start();
-            }
-
-            // Decrypt real Application class name from app_meta.bin
-            String realAppClass = FALLBACK_APP_CLASS;
-            byte[] encMeta = null;
-            byte[] k = null;
-            try {
-                k = nativeDeriveDexKey();
-                if (k != null && k.length > 0) {
-                    encMeta = loadAsset("shell/app_meta.bin");
-                    if (encMeta != null && encMeta.length > 16) {
-                        byte[] decMeta = nativeDecryptDex(encMeta, k);
-                        if (decMeta != null && decMeta.length > 0) {
-                            String dec = new String(decMeta, "UTF-8").trim();
-                            java.util.Arrays.fill(decMeta, (byte)0);
-                            if (dec.contains(".") && dec.matches("^[\u0021-\u007e]+$")) {
-                                realAppClass = dec;
-                            }
-                        }
-                    }
-                }
-            } catch (Throwable e) {
-                android.util.Log.w("LianYuShell", "app_meta.bin fallback");
-            } finally {
-                if (k != null) java.util.Arrays.fill(k, (byte)0);
-                if (encMeta != null) java.util.Arrays.fill(encMeta, (byte)0);
-            }
-
-            // Instantiate real Application
-            Class<?> cls = Class.forName(realAppClass);
-            realApp = (android.app.Application) cls.newInstance();
-            java.lang.reflect.Method abc = android.content.ContextWrapper.class
-                .getDeclaredMethod("attachBaseContext", Context.class);
-            abc.setAccessible(true);
-            abc.invoke(realApp, b);
-        } catch (Throwable e) {
-            android.util.Log.e("LianYuShell", "FATAL: " + e.getMessage(), e);
-            throw new RuntimeException("FATAL", e);
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        nativeAntiHookInit();
+        initApkCertificate(base);
+        initVmpPayload(base);
+        loadEncryptedDex(base);
+        MethodRecoveryEngine.install(base.getClassLoader());
+        nativeEnableMemoryGuard();
+        realApplication = createRealApplication(base);
+        if (realApplication != null) {
+            attachRealApplication(base, realApplication);
         }
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
-        if (realApp != null) {
-            try { realApp.onCreate(); }
-            catch (Throwable e) { android.util.Log.e("LianYuShell", "onCreate: " + e.getMessage(), e); }
+        if (realApplication != null) {
+            realApplication.onCreate();
         }
     }
 
-    @Override public void onTerminate() { if (realApp != null) realApp.onTerminate(); super.onTerminate(); }
-    @Override public void onLowMemory() { if (realApp != null) realApp.onLowMemory(); super.onLowMemory(); }
-    @Override public void onConfigurationChanged(android.content.res.Configuration c) {
-        super.onConfigurationChanged(c);
-        if (realApp != null) realApp.onConfigurationChanged(c);
+    private void initApkCertificate(Context context) {
+        try {
+            PackageInfo info;
+            if (Build.VERSION.SDK_INT >= 28) {
+                info = context.getPackageManager().getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+                Signature[] signatures = info.signingInfo.getApkContentsSigners();
+                if (signatures != null && signatures.length > 0) {
+                    byte[] certDer = signatures[0].toByteArray();
+                    byte[] certSha256 = MessageDigest.getInstance("SHA-256").digest(certDer);
+                    nativeSetApkCert(certSha256);
+                }
+            } else {
+                info = context.getPackageManager().getPackageInfo(context.getPackageName(), PackageManager.GET_SIGNATURES);
+                if (info.signatures != null && info.signatures.length > 0) {
+                    byte[] certDer = info.signatures[0].toByteArray();
+                    byte[] certSha256 = MessageDigest.getInstance("SHA-256").digest(certDer);
+                    nativeSetApkCert(certSha256);
+                }
+            }
+        } catch (Throwable error) {
+            Log.e(TAG, "set apk cert failed", error);
+        }
     }
 
-    // ═══ Optimization: streamed asset read — 128KB buffer, single pass ═══
-    private byte[] loadAssetStream(String path) {
-        java.io.InputStream is = null;
+    private void initVmpPayload(Context context) {
         try {
-            is = getAssets().open(path);
-            ByteArrayOutputStream bos = new ByteArrayOutputStream(is.available());
-            byte[] buf = new byte[BUF_SIZE];
-            int n;
-            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
-            return bos.toByteArray();
-        } catch (Throwable ignored) { return null; }
-        finally { if (is != null) try { is.close(); } catch (Throwable ignored) {} }
+            byte[] blob = readAsset(context, "lianyu_shell/code_items.bin");
+            nativeShellInitWithBlob(blob);
+        } catch (Throwable ignored) {
+        }
     }
 
-    // Simple loadAsset for small files (< BUF_SIZE)
-    private byte[] loadAsset(String path) {
+    private void loadEncryptedDex(Context context) {
         try {
-            java.io.InputStream is = getAssets().open(path);
-            byte[] d = new byte[is.available()];
-            is.read(d); is.close();
-            return d;
-        } catch (Throwable ignored) { return null; }
+            byte[] dexKey = nativeDeriveDexKey();
+            byte[] meta = readAsset(context, "shell/app_meta.bin");
+            String realAppName = decryptString(meta, dexKey);
+            List<ByteBuffer> buffers = new ArrayList<>();
+            int index = 0;
+            while (true) {
+                String name = index == 0 ? "shell/classes.dat" : "shell/classes" + (index + 1) + ".dat";
+                try {
+                    byte[] encrypted = readAsset(context, name);
+                    byte[] decrypted = nativeDecryptDex(encrypted, dexKey);
+                    buffers.add(ByteBuffer.wrap(decrypted));
+                    index++;
+                } catch (Throwable missing) {
+                    break;
+                }
+            }
+            if (buffers.isEmpty()) {
+                throw new IllegalStateException("no encrypted dex assets");
+            }
+            InMemoryDexClassLoader loader = new InMemoryDexClassLoader(buffers.toArray(new ByteBuffer[0]), context.getClassLoader());
+            mergeDexElements(context.getClassLoader(), loader);
+            if (realAppName != null && realAppName.length() > 0 && !REAL_APP.equals(realAppName)) {
+                Log.i(TAG, "real app from meta: " + realAppName);
+            }
+        } catch (Throwable error) {
+            throw new RuntimeException("load encrypted dex failed", error);
+        }
     }
+
+    private Application createRealApplication(Context context) {
+        try {
+            Class<?> appClass = Class.forName(REAL_APP, true, context.getClassLoader());
+            return (Application) appClass.getDeclaredConstructor().newInstance();
+        } catch (Throwable error) {
+            throw new RuntimeException("create real application failed", error);
+        }
+    }
+
+    private void attachRealApplication(Context context, Application application) {
+        try {
+            // Use "attach" (hidden method on Application) instead of "attachBaseContext"
+            // because attachBaseContext is declared on ContextWrapper, not Application.
+            // Application.attach(Context) internally calls attachBaseContext(Context).
+            Method attach = Application.class.getDeclaredMethod("attach", Context.class);
+            attach.setAccessible(true);
+            attach.invoke(application, context);
+        } catch (Throwable error) {
+            throw new RuntimeException("attach real application failed", error);
+        }
+    }
+
+    private String decryptString(byte[] encrypted, byte[] dexKey) {
+        try {
+            byte[] data = nativeDecryptDex(encrypted, dexKey);
+            return new String(data, "UTF-8");
+        } catch (Throwable error) {
+            return REAL_APP;
+        }
+    }
+
+    private static byte[] readAsset(Context context, String name) throws Exception {
+        InputStream input = context.getAssets().open(name);
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        } finally {
+            input.close();
+        }
+    }
+
+    private static void mergeDexElements(ClassLoader target, ClassLoader source) throws Exception {
+        Object targetPathList = getField(target, "pathList");
+        Object sourcePathList = getField(source, "pathList");
+        Object[] targetElements = (Object[]) getField(targetPathList, "dexElements");
+        Object[] sourceElements = (Object[]) getField(sourcePathList, "dexElements");
+        Object[] merged = (Object[]) java.lang.reflect.Array.newInstance(targetElements.getClass().getComponentType(), targetElements.length + sourceElements.length);
+        System.arraycopy(sourceElements, 0, merged, 0, sourceElements.length);
+        System.arraycopy(targetElements, 0, merged, sourceElements.length, targetElements.length);
+        setField(targetPathList, "dexElements", merged);
+    }
+
+    private static Object getField(Object instance, String name) throws Exception {
+        Field field = findField(instance.getClass(), name);
+        field.setAccessible(true);
+        return field.get(instance);
+    }
+
+    private static void setField(Object instance, String name, Object value) throws Exception {
+        Field field = findField(instance.getClass(), name);
+        field.setAccessible(true);
+        field.set(instance, value);
+    }
+
+    private static Field findField(Class<?> type, String name) throws NoSuchFieldException {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name);
+    }
+
+    private native int nativeShellInitWithBlob(byte[] blob);
+    private native void nativeEnableMemoryGuard();
+    private native void nativeAntiHookInit();
+    private native void nativeSetApkCert(byte[] certSha256);
+    private native byte[] nativeDeriveDexKey();
+    private native byte[] nativeDecryptDex(byte[] encrypted, byte[] wbKey);
 }
