@@ -485,6 +485,7 @@ fun VisionModelSettingsScreen(
 
                                                         if (baseUrl.isBlank() || testKey.isBlank()) {
                                                             testResult = "✗ 请填写 API 地址和密钥"
+                                                            // [P4 FIX] return@launch 在 try 内会跳过 finally 的 isTestingConnection=false
                                                             isTestingConnection = false
                                                             return@launch
                                                         }

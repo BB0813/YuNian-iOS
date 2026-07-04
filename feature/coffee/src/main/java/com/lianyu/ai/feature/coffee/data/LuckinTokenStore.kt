@@ -77,8 +77,7 @@ class LuckinTokenStore(private val context: Context) {
      * 这是客户端预判，实际过期以服务端返回 401 为准。
      */
     suspend fun isTokenLikelyExpired(): Boolean {
-        var saveTime = 0L
-        tokenSaveTime.collect { saveTime = it; return@collect }
+        val saveTime = tokenSaveTime.first()
         if (saveTime == 0L) return true
         val elapsed = System.currentTimeMillis() - saveTime
         return elapsed > 29L * 24 * 60 * 60 * 1000
@@ -86,8 +85,7 @@ class LuckinTokenStore(private val context: Context) {
 
     /** Token 保存距今天数（用于设置页展示），0 表示未配置 */
     suspend fun tokenSavedDaysAgo(): Int {
-        var saveTime = 0L
-        tokenSaveTime.collect { saveTime = it; return@collect }
+        val saveTime = tokenSaveTime.first()
         if (saveTime == 0L) return 0
         val elapsed = System.currentTimeMillis() - saveTime
         return (elapsed / (24L * 60 * 60 * 1000)).toInt().coerceAtLeast(0)

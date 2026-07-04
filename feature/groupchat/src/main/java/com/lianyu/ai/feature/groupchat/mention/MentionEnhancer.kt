@@ -1,7 +1,7 @@
 package com.lianyu.ai.feature.groupchat.mention
 
 import com.lianyu.ai.database.model.CompanionEntity
-import com.lianyu.ai.network.AiService
+import com.lianyu.ai.domain.AiServiceProvider
 import kotlin.text.MatchResult
 
 object MentionEnhancer {
@@ -17,7 +17,7 @@ object MentionEnhancer {
         content: String,
         speakerName: String,
         members: List<CompanionEntity>,
-        aiService: AiService? = null,
+        aiService: AiServiceProvider? = null,
         judgeEnabled: Boolean = false,
         judgeThreshold: Float = 0.8f,
         recentContext: List<MentionMessageSnapshot> = emptyList()
@@ -53,7 +53,7 @@ object MentionEnhancer {
         content: String,
         speakerName: String,
         members: List<CompanionEntity>,
-        aiService: AiService,
+        aiService: AiServiceProvider,
         threshold: Float,
         recentContext: List<MentionMessageSnapshot>
     ): String {
@@ -72,7 +72,7 @@ object MentionEnhancer {
 $contextSummary"""
 
         try {
-            val rawResponse = aiService.callOpenAiCompatibleForJudge(judgePrompt)
+            val rawResponse = aiService.callJudge(judgePrompt)
             val jsonStr = rawResponse.trim().removePrefix("```json").removeSuffix("```").trim()
             val shouldMention = Regex(""""shouldMention"\s*:\s*(true|false)""").find(jsonStr)?.groupValues?.get(1)?.toBoolean() ?: false
             val target = Regex(""""target"\s*:\s*"([^"]+)""").find(jsonStr)?.groupValues?.get(1) ?: "NONE"

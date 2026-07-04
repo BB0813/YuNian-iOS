@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.feature.wechat.data.WeChatMessageRepository
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
@@ -25,8 +26,8 @@ class WeChatPollingWorker(
         }
 
         return try {
-            // Poll messages with long-polling
-            val result = repo.pollMessages(timeoutMs = 15000)
+            // Poll messages with long-polling (统一用 WECHAT_POLL_TIMEOUT_MS)
+            val result = repo.pollMessages(timeoutMs = TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS)
             if (result.isSuccess) {
                 Result.success()
             } else {

@@ -28,6 +28,20 @@ object TimeoutBudgets {
     const val CHAT_VM_MEMORY_EXTRACT_MS = 5_000L    // ChatViewModel 记忆提取超时
     const val CHAT_VM_TTS_SYNTH_MS = 10_000L        // ChatViewModel TTS 超时
     const val CHAT_VM_BATCH_WINDOW_MS = 2_500L      // ChatViewModel 批量合并窗口
+    // [P1 FIX] 散落在 ChatViewModel 的硬编码超时归一至此
+    const val MODEL_OUTPUT_VERIFY_MS = 5_000L  // 贝叶斯模型输出校验（语义不同于 MEMORY_EXTRACT）
+    const val API_CONFIG_WAIT_MS = 1_500L      // 冷启动等待 API 配置加载（竞态窗口）
+    const val PIPELINE_EXECUTE_MS = 8_000L     // 内容安全管道执行总预算
+
+    // === HTTP 客户端通用超时（OkHttp connectTimeout/readTimeout/writeTimeout/pingInterval） ===
+    const val HTTP_CONNECT_MS = 10_000L        // TCP 连接建立
+    const val HTTP_READ_MS = 30_000L           // 读响应（对齐 API_CHAT_MS 的 2x）
+    const val HTTP_WRITE_MS = 10_000L          // 写请求体
+    const val HTTP_PING_MS = 30_000L           // HTTP/2 ping 间隔（保活）
+
+    // === 微信 ===
+    const val WECHAT_POLL_TIMEOUT_MS = 15_000L // 长轮询超时（统一 Service 20s 与 Worker 15s 不一致）
+    const val BROADCAST_GOASYNC_MS = 9_500L    // BroadcastReceiver goAsync() 10s 限制预留 500ms
 
     // === 瑞幸 MCP (JSON-RPC over Streamable HTTP) ===
     // 集中管理：原先硬编码在 LuckinMcpClient companion，现统一至此处

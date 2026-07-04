@@ -11,9 +11,11 @@ class SttService(private val context: Context) {
     private val providers = mutableMapOf<SttProvider, SttProviderInterface>()
     private var currentProvider: SttProvider = SttProvider.ANDROID
     private val androidStt = AndroidSttProvider()
+    private val siliconflowStt = SiliconFlowSttProvider()
 
     init {
         providers[SttProvider.ANDROID] = androidStt
+        providers[SttProvider.SILICONFLOW] = siliconflowStt
     }
 
     fun setProvider(provider: SttProvider) {
@@ -35,6 +37,9 @@ class SttService(private val context: Context) {
 
             if (currentProvider == SttProvider.ANDROID && !androidStt.isInitialized()) {
                 androidStt.initialize(context)
+            }
+            if (currentProvider == SttProvider.SILICONFLOW && !siliconflowStt.isInitialized()) {
+                siliconflowStt.initialize(context)
             }
 
             val provider = providers[currentProvider]
@@ -101,21 +106,4 @@ class SttService(private val context: Context) {
             }
         }
     }
-}
-
-enum class SttProvider(val displayName: String, val description: String) {
-    ANDROID("系统语音识别", "使用Android内置SpeechRecognizer，无需配置")
-}
-
-data class SttResult(
-    val text: String,
-    val confidence: Float = 0f,
-    val isFinal: Boolean = true,
-    val provider: String = ""
-)
-
-interface SttProviderInterface {
-    suspend fun recognize(context: Context, audioPath: String): String?
-    suspend fun recognizeFromFile(context: Context, audioPath: String, mimeType: String): String?
-    suspend fun testConnection(): Boolean
 }

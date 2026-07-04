@@ -43,8 +43,8 @@ class CoffeeOrderProviderImpl(app: Application) : CoffeeOrderProvider {
         explicitNulls = false
     }
 
-    override fun isAvailable(): Boolean = try {
-        kotlinx.coroutines.runBlocking { tokenStore.token.first().isNotBlank() }
+    override suspend fun isAvailable(): Boolean = try {
+        tokenStore.token.first().isNotBlank()
     } catch (e: Exception) {
         false
     }

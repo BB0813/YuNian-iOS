@@ -464,11 +464,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "远程密钥获取失败: ${e.message}"))
                     earlyReturn = true
                 }
-                if (earlyReturn) return@launch
+                if (earlyReturn) {
+                    // [P4 FIX] return@launch 在 try 内会跳过 finally 的 TESTING 状态兜底重置。
+                    // finally 只在状态仍为 TESTING 时改 FAILED，但上面已设 FAILED，故此处状态正确；
+                    // 但为防御 finally 被跳过的语义陷阱，显式 return 前不再需要额外操作（状态已更新）。
+                    return@launch
+                }
             }
 
             if (allKeys.isEmpty()) {
                 updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "API Key 为空，请填写主密钥或检查远程Key服务"))
+                // [P4 NOTE] return@launch 在 try 内跳过 finally，但 finally 仅在 status==TESTING 时改 FAILED；
+                // 上面已设 FAILED，finally 为 no-op，故安全。
                 return@launch
             }
 
@@ -541,6 +548,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             // 确保有有效的模型名
             if (testConfig.model.isBlank()) {
                 updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "无法获取模型列表，请手动填写模型名称"))
+                // [P4 NOTE] 同上：已设 FAILED，finally 的 TESTING 兜底为 no-op，安全。
                 return@launch
             }
             

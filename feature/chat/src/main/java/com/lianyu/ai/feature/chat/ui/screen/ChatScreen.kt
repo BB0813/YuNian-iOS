@@ -61,6 +61,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Info
@@ -127,6 +130,8 @@ import com.lianyu.ai.uicommon.component.getChatBackgroundByKey
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
+import com.lianyu.ai.network.tts.ChatTtsMode
+import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.common.ReadStatusManager
@@ -238,6 +243,19 @@ fun ChatScreen(
         }
     }
 
+    // Audio recording permission launcher with pending action
+    var pendingAudioAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted: Boolean ->
+        if (granted) {
+            pendingAudioAction?.invoke()
+        } else {
+            scope.launch { snackbarHostState.showSnackbar("需要麦克风权限才能使用语音功能") }
+        }
+        pendingAudioAction = null
+    }
+
     // Video picker for album
     val videoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -274,6 +292,11 @@ fun ChatScreen(
     val availableApis by viewModel.availableApis.collectAsState()
     val currentApi by viewModel.currentApi.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    // 聊天页 TTS 朗读状态
+    val ttsState by viewModel.ttsState.collectAsState()
+    val ttsConfig = remember { viewModel.getTtsConfig() }
+    var ttsModeMenu by remember { mutableStateOf(false) }
 
     val themeViewModel: ThemeViewModel = viewModel()
     val themeMode by themeViewModel.themeMode.collectAsState()
@@ -602,6 +625,45 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.navigationBars)
             ) {
+                // 聊天页 TTS 朗读状态条（朗读中显示，可停止）
+                if (ttsState == ChatTtsState.SPEAKING) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "AI 正在朗读...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.stopTts() },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Stop,
+                                contentDescription = "停止朗读",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
                 // Sticker panel
                 StickerPanel(
                     isVisible = showStickerPanel,
@@ -637,11 +699,26 @@ fun ChatScreen(
                     onCameraClick = {
                         cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                     },
-                    onVideoCallClick = { onNavigateToVoiceCall(companionId) },
+                    onVideoCallClick = {
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            onNavigateToVoiceCall(companionId)
+                        } else {
+                            pendingAudioAction = { onNavigateToVoiceCall(companionId) }
+                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
                     onLocationClick = { /* TODO: share location */ },
                     onVoiceInputClick = {
-                        showExtensionPanel = false
-                        showVoiceRecorder = true
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            showExtensionPanel = false
+                            showVoiceRecorder = true
+                        } else {
+                            pendingAudioAction = {
+                                showExtensionPanel = false
+                                showVoiceRecorder = true
+                            }
+                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
                     },
                     onStickerClick = {
                         showExtensionPanel = false
@@ -693,11 +770,22 @@ fun ChatScreen(
                                 showStickerPanel = false
                             },
                             onVoiceRecordStart = {
-                                showExtensionPanel = false
-                                showStickerPanel = false
-                                isCanceling = false
-                                isRecording = true
-                                showVoiceRecorder = true
+                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                    showExtensionPanel = false
+                                    showStickerPanel = false
+                                    isCanceling = false
+                                    isRecording = true
+                                    showVoiceRecorder = true
+                                } else {
+                                    pendingAudioAction = {
+                                        showExtensionPanel = false
+                                        showStickerPanel = false
+                                        isCanceling = false
+                                        isRecording = true
+                                        showVoiceRecorder = true
+                                    }
+                                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                }
                             },
                             onVoiceRecordStop = {
                                 val audioPath = voiceRecorder.stop()
@@ -912,9 +1000,71 @@ fun ChatScreen(
                     }
                 }
 
+                // 聊天页 TTS 朗读模式切换按钮（静音/语音条/语音朗读）
+                Box {
+                    IconButton(
+                        onClick = { ttsModeMenu = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (ttsConfig.mode == ChatTtsMode.SILENT)
+                                Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                            contentDescription = "朗读模式",
+                            tint = if (ttsConfig.mode == ChatTtsMode.SILENT)
+                                MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = ttsModeMenu,
+                        onDismissRequest = { ttsModeMenu = false },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        ChatTtsMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = mode.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = mode.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setTtsMode(mode)
+                                    ttsModeMenu = false
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (mode == ChatTtsMode.SILENT)
+                                            Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
+                                        contentDescription = null,
+                                        tint = if (mode == ttsConfig.mode) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+
                 // Voice call button
                 IconButton(
-                    onClick = { onNavigateToVoiceCall(companionId) },
+                    onClick = {
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            onNavigateToVoiceCall(companionId)
+                        } else {
+                            pendingAudioAction = { onNavigateToVoiceCall(companionId) }
+                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
