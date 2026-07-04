@@ -34,6 +34,12 @@ private val threadCounter = AtomicInteger(0)
  * Uses a shared cached thread pool instead of creating a new executor per call,
  * avoiding thread-pool leakage under high-frequency invocation.
  *
+ * **关于内部 `runBlocking`（设计性用法，非反模式）：**
+ * `runBlocking` 在 [sharedExecutor] 的 worker 线程上执行，**不阻塞调用线程**。
+ * 调用方（协程）挂起在 `future.get(timeoutMs)` 上 —— 这是协作式挂起，而非阻塞主线程。
+ * 此桥接是必须的：[block] 是 suspend 函数，但 `Future.submit` 的 `Callable` 不是 suspend 上下文，
+ * 必须用 `runBlocking` 在 worker 线程建立协程作用域。超时后 `future.cancel(true)` 会中断 worker 线程。
+ *
  * @param timeoutMs  Hard timeout in milliseconds.
  * @param onTimeout  Value to return when the timeout fires or the thread is interrupted (default: null).
  * @param block      The suspending block to execute on a separate thread.

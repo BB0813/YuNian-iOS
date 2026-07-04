@@ -11,6 +11,7 @@ class TtsService(private val context: Context) {
     private val providers = mutableMapOf<TtsProvider, TtsProviderInterface>()
     private var currentProvider: TtsProvider = TtsProvider.ANDROID
     private val androidTts = AndroidTtsProvider()
+    private val sherpaLocalTts = SherpaLocalTtsProvider()
     private var currentConfig: TtsConfig = TtsConfig.fromSharedPreferences(context)
 
     init {
@@ -19,7 +20,14 @@ class TtsService(private val context: Context) {
         providers[TtsProvider.XUNFEI] = XunfeiTtsProvider()
         providers[TtsProvider.MICROSOFT] = MicrosoftTtsProvider()
         providers[TtsProvider.VOLCENGINE] = VolcengineTtsProvider()
+        providers[TtsProvider.SILICONFLOW] = SiliconFlowTtsProvider()
+        providers[TtsProvider.SHERPA_LOCAL] = sherpaLocalTts
         providers[TtsProvider.ANDROID] = androidTts
+    }
+
+    /** 本地离线 TTS 模型管理器（下载/校验/启用），供设置页 UI 消费 */
+    val localTtsManager: LocalTtsModelManager by lazy {
+        LocalTtsModelManager.getInstance(context)
     }
 
     fun setProvider(provider: TtsProvider) {

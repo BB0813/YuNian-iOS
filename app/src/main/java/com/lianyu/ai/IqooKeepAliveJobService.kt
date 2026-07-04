@@ -24,8 +24,9 @@ class IqooKeepAliveJobService : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         SecureLog.i("IqooKeepAliveJobService", "Job started on ${RomUtils.getRomDisplayName()}")
 
-        // 在后台线程执行保活检查
-        Thread {
+        // JobService 标准异步模式：返回 true 表示工作异步执行，完成后必须调 jobFinished。
+        // 裸 Thread 在此场景符合契约（JobScheduler 管理进程生命周期，无 CoroutineJobService 基类）。
+        Thread({
             try {
                 performKeepAliveCheck()
             } catch (e: Exception) {
@@ -33,7 +34,7 @@ class IqooKeepAliveJobService : JobService() {
             } finally {
                 jobFinished(params, false)
             }
-        }.start()
+        }, "iqoo-keepalive").start()
 
         return true // 表示工作正在异步执行
     }

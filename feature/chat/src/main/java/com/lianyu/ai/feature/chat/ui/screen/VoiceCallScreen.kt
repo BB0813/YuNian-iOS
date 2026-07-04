@@ -1,17 +1,40 @@
 package com.lianyu.ai.feature.chat.ui.screen
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
-import androidx.compose.animation.core.*
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -19,8 +42,19 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -36,13 +70,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
-import com.lianyu.ai.network.tts.TtsProvider
+import com.lianyu.ai.feature.chat.voice.VoiceCallManager
 import com.lianyu.ai.network.tts.TtsService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -51,15 +91,25 @@ import kotlin.math.sin
  * 语音通话状态
  */
 enum class CallState {
-    DIALING,      // 拨号中
-    CONNECTING,   // 连接中
-    CONNECTED,    // 已接通
-    ENDED         // 已结束
+    DIALING, CONNECTING, CONNECTED, ENDED
 }
 
 /**
- * 语音通话页面 - 模拟语音通话，接入TTS
- * 带有流动渐变背景效果
+ * 音频输出设备
+ */
+enum class AudioOutput {
+    BLUETOOTH, EARPIECE, SPEAKER
+}
+
+/**
+ * 语音通话页面 - 双向实时语音通话
+ *
+ * 基于 sherpa-onnx 流式识别 + TTS 语音合成，实现完整的 AI 语音对话：
+ * - AI 接听后主动问候
+ * - 用户说话 → 流式识别 → 发送给AI → AI回复 → TTS播放 → 循环
+ * - 支持打断（用户说话时 AI 正在播放会被打断）
+ * - 麦克风/扬声器切换
+ * - 蓝牙/听筒/扬声器三路音频切换
  */
 @Composable
 fun VoiceCallScreen(
@@ -67,44 +117,275 @@ fun VoiceCallScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
     )
     val companionData by viewModel.companionData.collectAsState()
 
+    // ── 通话状态 ──
     var callState by remember { mutableStateOf(CallState.DIALING) }
-    var isMuted by remember { mutableStateOf(false) }
-    var isSpeakerOn by remember { mutableStateOf(true) }
-    var callDuration by remember { mutableStateOf(0) }
-    var currentSpeakingText by remember { mutableStateOf("") }
+    var isMicEnabled by remember { mutableStateOf(true) }
+    var currentAudioOutput by remember { mutableStateOf(AudioOutput.EARPIECE) }
+    var hasBluetoothDevice by remember { mutableStateOf(false) }
+    var callDuration by remember { mutableIntStateOf(0) }
+    var userSpeakingText by remember { mutableStateOf("") }
+    var aiSpeakingText by remember { mutableStateOf("") }
     var isAiSpeaking by remember { mutableStateOf(false) }
 
+    // ── 语音引擎 ──
+    val voiceManager = remember { VoiceCallManager(context) }
     val ttsService = remember { TtsService.getInstance(context) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var currentAiJob by remember { mutableStateOf<Job?>(null) }
 
-    // TTS settings - get from app settings
-    var ttsEnabled by remember { mutableStateOf(false) }
-    var ttsProvider by remember { mutableStateOf(TtsProvider.ANDROID) }
-
-    // Call control: requires user action to connect
-    fun acceptCall() {
-        if (callState == CallState.DIALING || callState == CallState.CONNECTING) {
-            callState = CallState.CONNECTED
-            ttsEnabled = true
-            ttsProvider = TtsProvider.ANDROID
-            ttsService.setProvider(ttsProvider)
+    // ── 权限 ──
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted
+        if (!granted) {
+            scope.launch { snackbarHostState.showSnackbar("需要麦克风权限才能进行语音通话") }
+            onNavigateBack()
         }
     }
 
-    fun rejectCall() {
-        mediaPlayer?.release()
+    // ── 权限检查 ──
+    LaunchedEffect(Unit) {
+        if (!hasAudioPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    // ── 音频管理 ──
+    fun getAudioManager(): AudioManager {
+        return context.getSystemService(AudioManager::class.java)
+    }
+
+    fun applyAudioDevice() {
+        val am = getAudioManager()
+        when (currentAudioOutput) {
+            AudioOutput.BLUETOOTH -> {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    val btDevice = devices?.find { it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+                    if (btDevice != null) am.setCommunicationDevice(btDevice)
+                } else {
+                    am.isSpeakerphoneOn = false
+                    am.startBluetoothSco()
+                }
+            }
+            AudioOutput.EARPIECE -> {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    val earpiece = devices?.find { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                        ?: devices?.find { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (earpiece != null) am.setCommunicationDevice(earpiece)
+                } else {
+                    am.isSpeakerphoneOn = false
+                    am.stopBluetoothSco()
+                }
+            }
+            AudioOutput.SPEAKER -> {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    val speaker = devices?.find { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (speaker != null) am.setCommunicationDevice(speaker)
+                } else {
+                    am.isSpeakerphoneOn = true
+                    am.stopBluetoothSco()
+                }
+            }
+        }
+    }
+
+    // ── AI 打断 ──
+    fun interruptAi() {
+        mediaPlayer?.apply {
+            try { stop() } catch (_: Exception) {}
+            try { release() } catch (_: Exception) {}
+        }
+        mediaPlayer = null
+        isAiSpeaking = false
+        currentAiJob?.cancel()
+        currentAiJob = null
+    }
+
+    // ── TTS 播放 ──
+    fun speakText(text: String) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val audioPath = ttsService.synthesize(text)
+                if (audioPath != null) {
+                    withContext(Dispatchers.Main) {
+                        aiSpeakingText = text
+                        isAiSpeaking = true
+
+                        val player = MediaPlayer().apply {
+                            setAudioAttributes(
+                                AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                    .build()
+                            )
+                            setDataSource(audioPath)
+                            setOnPreparedListener {
+                                applyAudioDevice()
+                                start()
+                            }
+                            setOnCompletionListener {
+                                isAiSpeaking = false
+                                aiSpeakingText = ""
+                                release()
+                                mediaPlayer = null
+                                // 播放完毕，恢复录音
+                                if (isMicEnabled && callState == CallState.CONNECTED) {
+                                    voiceManager.startListening()
+                                }
+                            }
+                            setOnErrorListener { _, _, _ ->
+                                isAiSpeaking = false
+                                release()
+                                mediaPlayer = null
+                                if (isMicEnabled && callState == CallState.CONNECTED) {
+                                    voiceManager.startListening()
+                                }
+                                true
+                            }
+                            prepareAsync()
+                        }
+                        mediaPlayer = player
+                    }
+                } else {
+                    // TTS 失败，继续录音
+                    if (isMicEnabled && callState == CallState.CONNECTED) {
+                        voiceManager.startListening()
+                    }
+                }
+            } catch (e: Exception) {
+                if (isMicEnabled && callState == CallState.CONNECTED) {
+                    voiceManager.startListening()
+                }
+            }
+        }
+    }
+
+    // ── 发送用户语音识别结果给 AI ──
+    fun sendToAi(userText: String) {
+        if (callState != CallState.CONNECTED) return
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                val aiReply = viewModel.sendVoiceCallMessage(userText)
+                if (aiReply != null && aiReply.isNotBlank()) {
+                    withContext(Dispatchers.Main) {
+                        speakText(aiReply)
+                    }
+                } else {
+                    // AI 无回复，继续录音
+                    withContext(Dispatchers.Main) {
+                        if (isMicEnabled && callState == CallState.CONNECTED) {
+                            voiceManager.startListening()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    if (isMicEnabled && callState == CallState.CONNECTED) {
+                        voiceManager.startListening()
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 通话控制 ──
+    fun acceptCall() {
+        callState = CallState.CONNECTING
+        // 互斥保护：通知 ViewModel 通话激活，禁用聊天页 TTS 朗读，避免与通话抢 TtsService/AudioManager
+        viewModel.setCallActive(true)
+        scope.launch(Dispatchers.IO) {
+            // 初始化语音识别引擎
+            voiceManager.init()
+
+            // 设置音频模式
+            val am = getAudioManager()
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            if (Build.VERSION.SDK_INT >= 31) {
+                val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                hasBluetoothDevice = devices?.any { it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO } == true
+            } else {
+                hasBluetoothDevice = am.isBluetoothScoAvailableOffCall
+            }
+            currentAudioOutput = if (hasBluetoothDevice) AudioOutput.BLUETOOTH else AudioOutput.EARPIECE
+
+            withContext(Dispatchers.Main) {
+                applyAudioDevice()
+                callState = CallState.CONNECTED
+            }
+
+            // 配置语音回调
+            voiceManager.onPartialResult = { partialText ->
+                if (partialText.isNotEmpty()) {
+                    userSpeakingText = partialText
+                    // 如果 AI 正在说话且用户说了超过2个字，打断
+                    if (isAiSpeaking && partialText.length > 2) {
+                        interruptAi()
+                    }
+                }
+            }
+            voiceManager.onFinalResult = { finalText ->
+                userSpeakingText = ""
+                if (finalText.isNotBlank() && callState == CallState.CONNECTED) {
+                    voiceManager.stopListening()
+                    sendToAi(finalText)
+                }
+            }
+
+            // AI 主动问候
+            delay(300)
+            val greeting = "喂，你好呀~"
+            withContext(Dispatchers.Main) { speakText(greeting) }
+        }
+    }
+
+    fun hangUp() {
         callState = CallState.ENDED
+        interruptAi()
+        voiceManager.stopListening()
+        voiceManager.destroy()
+
+        // 恢复音频模式
+        try {
+            val am = getAudioManager()
+            if (Build.VERSION.SDK_INT >= 31) {
+                am.clearCommunicationDevice()
+            } else {
+                am.isSpeakerphoneOn = false
+            }
+            am.mode = AudioManager.MODE_NORMAL
+        } catch (_: Exception) {}
+
+        // 互斥保护解除：通知 ViewModel 通话结束，恢复聊天页 TTS 可用
+        viewModel.setCallActive(false)
         onNavigateBack()
     }
 
-    // Timer
+    fun rejectCall() {
+        hangUp()
+    }
+
+    // ── 通话计时器 ──
     LaunchedEffect(callState) {
         if (callState == CallState.CONNECTED) {
+            callDuration = 0
             while (callState == CallState.CONNECTED) {
                 delay(1000)
                 callDuration++
@@ -112,37 +393,47 @@ fun VoiceCallScreen(
         }
     }
 
-    // Cleanup
+    // ── 清理 ──
     DisposableEffect(Unit) {
         onDispose {
-            mediaPlayer?.release()
-            mediaPlayer = null
+            interruptAi()
+            voiceManager.destroy()
+            try {
+                val am = getAudioManager()
+                am.mode = AudioManager.MODE_NORMAL
+            } catch (_: Exception) {}
+            // 互斥保护解除兜底：防止异常退出时遗漏 setCallActive(false)
+            viewModel.setCallActive(false)
         }
     }
 
+    // ── 权限不足时显示空界面 ──
+    if (!hasAudioPermission && callState == CallState.DIALING) {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            Text(
+                text = "需要麦克风权限",
+                modifier = Modifier.align(Alignment.Center),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        return
+    }
+
+    // ── UI ──
     Box(modifier = Modifier.fillMaxSize()) {
-        // Flowing gradient background
+        // 流动渐变背景
         FlowingGradientBackground()
 
-        // Content
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top bar
+            // 顶部栏
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 48.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
                 horizontalArrangement = Arrangement.Start
             ) {
-                IconButton(onClick = {
-                    mediaPlayer?.release()
-                    callState = CallState.ENDED
-                    onNavigateBack()
-                }) {
+                IconButton(onClick = { hangUp() }) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
@@ -154,7 +445,7 @@ fun VoiceCallScreen(
 
             Spacer(modifier = Modifier.weight(0.15f))
 
-            // Call status
+            // 通话状态
             Text(
                 text = when (callState) {
                     CallState.DIALING -> "正在拨号..."
@@ -170,28 +461,27 @@ fun VoiceCallScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Connection indicator
+            // 连接指示器
             when (callState) {
                 CallState.DIALING -> {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        repeat(3) { index ->
-                            PulsingDot(delayMillis = index * 200)
-                        }
+                        repeat(3) { index -> PulsingDot(delayMillis = index * 200) }
                     }
                 }
-                CallState.CONNECTING -> {
-                    PulsingDot()
-                }
+                CallState.CONNECTING -> { PulsingDot() }
                 CallState.CONNECTED -> {
                     Text(
-                        text = if (isAiSpeaking) "对方正在说话..." else "已连接",
+                        text = when {
+                            isAiSpeaking -> "对方正在说话..."
+                            voiceManager.isListening -> "正在聆听..."
+                            !isMicEnabled -> "麦克风已关闭"
+                            else -> "已连接"
+                        },
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                            )
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     )
                 }
@@ -200,29 +490,14 @@ fun VoiceCallScreen(
 
             Spacer(modifier = Modifier.weight(0.2f))
 
-            // Avatar with glow effect
-            Box(
-                modifier = Modifier.size(140.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                // Outer glow rings
+            // 头像
+            Box(modifier = Modifier.size(140.dp), contentAlignment = Alignment.Center) {
                 if (callState == CallState.CONNECTED) {
-                    PulsingGlowRing(
-                        modifier = Modifier.size(180.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                    )
-                    PulsingGlowRing(
-                        modifier = Modifier.size(220.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        delayMillis = 500
-                    )
+                    PulsingGlowRing(modifier = Modifier.size(180.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                    PulsingGlowRing(modifier = Modifier.size(220.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), delayMillis = 500)
                 }
-
-                // Avatar
                 Box(
-                    modifier = Modifier
-                        .size(140.dp)
-                        .clip(CircleShape)
+                    modifier = Modifier.size(140.dp).clip(CircleShape)
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -246,7 +521,7 @@ fun VoiceCallScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Name
+            // 名字
             Text(
                 text = companionData?.name ?: "",
                 fontSize = 24.sp,
@@ -254,11 +529,21 @@ fun VoiceCallScreen(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // AI speaking text
-            if (isAiSpeaking && currentSpeakingText.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
+            // 说话文本
+            if (userSpeakingText.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = currentSpeakingText,
+                    text = userSpeakingText,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+            }
+            if (isAiSpeaking && aiSpeakingText.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = aiSpeakingText,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
@@ -268,175 +553,113 @@ fun VoiceCallScreen(
 
             Spacer(modifier = Modifier.weight(0.3f))
 
-            // Control buttons
+            // 控制按钮
             if (callState == CallState.DIALING || callState == CallState.CONNECTING) {
-                // Accept/Reject buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Reject button
+                    // 拒绝
                     Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFFF3B30))
-                            .clickable { rejectCall() },
+                        modifier = Modifier.size(64.dp).clip(CircleShape)
+                            .background(Color(0xFFFF3B30)).clickable { rejectCall() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.CallEnd,
-                            contentDescription = "挂断",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
+                        Icon(Icons.Filled.CallEnd, "挂断", tint = Color.White, modifier = Modifier.size(28.dp))
                     }
-
-                    // Accept button
+                    // 接受
                     Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF34C759))
-                            .clickable {
-                                callState = CallState.CONNECTING
-                                ttsEnabled = true
-                                ttsProvider = TtsProvider.ANDROID
-                                ttsService.setProvider(ttsProvider)
-                            },
+                        modifier = Modifier.size(72.dp).clip(CircleShape)
+                            .background(Color(0xFF34C759)).clickable { acceptCall() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Call,
+                            imageVector = Icons.Filled.VolumeUp,
                             contentDescription = "接听",
                             tint = Color.White,
                             modifier = Modifier.size(32.dp)
                         )
                     }
                 }
-
                 Spacer(modifier = Modifier.height(16.dp))
-
                 Text(
                     text = "点击接听开始通话",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
                 )
-
-                // Auto-connect after user accepts
-                LaunchedEffect(callState) {
-                    if (callState == CallState.CONNECTING) {
-                        delay(800)
-                        callState = CallState.CONNECTED
-
-                        val greeting = "喂，你好呀~"
-                        currentSpeakingText = greeting
-                        isAiSpeaking = true
-
-                        val audioPath = ttsService.synthesize(greeting)
-                        if (audioPath != null) {
-                            try {
-                                mediaPlayer?.release()
-                                mediaPlayer = MediaPlayer().apply {
-                                    setDataSource(audioPath)
-                                    prepare()
-                                    start()
-                                    setOnCompletionListener {
-                                        isAiSpeaking = false
-                                        currentSpeakingText = ""
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                isAiSpeaking = false
-                            }
-                        } else {
-                            isAiSpeaking = false
-                        }
-                    }
-                }
-            } else {
-                // Connected state controls
+            } else if (callState == CallState.CONNECTED) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 麦克风
                     CallControlButton(
-                        icon = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
-                        label = if (isMuted) "麦克风已关" else "麦克风已开",
-                        isActive = !isMuted,
-                        onClick = { isMuted = !isMuted }
+                        icon = if (isMicEnabled) Icons.Filled.Mic else Icons.Filled.MicOff,
+                        label = if (isMicEnabled) "麦克风已开" else "麦克风已关",
+                        isActive = isMicEnabled,
+                        onClick = {
+                            isMicEnabled = !isMicEnabled
+                            if (isMicEnabled) {
+                                voiceManager.startListening()
+                            } else {
+                                voiceManager.stopListening()
+                            }
+                        }
                     )
-
+                    // 挂断
                     Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFFF3B30))
-                            .clickable {
-                                mediaPlayer?.release()
-                                callState = CallState.ENDED
-                                onNavigateBack()
-                            },
+                        modifier = Modifier.size(72.dp).clip(CircleShape)
+                            .background(Color(0xFFFF3B30)).clickable { hangUp() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.CallEnd,
-                            contentDescription = "挂断",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Icon(Icons.Filled.CallEnd, "挂断", tint = Color.White, modifier = Modifier.size(32.dp))
                     }
-
+                    // 扬声器
                     CallControlButton(
                         icon = Icons.Filled.VolumeUp,
-                        label = "默认设备",
-                        isActive = isSpeakerOn,
-                        onClick = { isSpeakerOn = !isSpeakerOn }
+                        label = when (currentAudioOutput) {
+                            AudioOutput.BLUETOOTH -> "蓝牙"
+                            AudioOutput.EARPIECE -> "听筒"
+                            AudioOutput.SPEAKER -> "扬声器"
+                        },
+                        isActive = true,
+                        onClick = {
+                            currentAudioOutput = when (currentAudioOutput) {
+                                AudioOutput.BLUETOOTH -> AudioOutput.EARPIECE
+                                AudioOutput.EARPIECE -> AudioOutput.SPEAKER
+                                AudioOutput.SPEAKER -> if (hasBluetoothDevice) AudioOutput.BLUETOOTH else AudioOutput.EARPIECE
+                            }
+                            applyAudioDevice()
+                        }
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(48.dp))
         }
+
+        // Snackbar
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp)
+        )
     }
 }
+
+// ──────────────── UI 组件 ────────────────
 
 @Composable
 private fun FlowingGradientBackground() {
     val infiniteTransition = rememberInfiniteTransition(label = "flow")
-
-    val offset1 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 2f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(20000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "flow1"
-    )
-
-    val offset2 by infiniteTransition.animateFloat(
-        initialValue = PI.toFloat(),
-        targetValue = 3f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(25000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "flow2"
-    )
-
-    val offset3 by infiniteTransition.animateFloat(
-        initialValue = PI.toFloat() / 2,
-        targetValue = 2.5f * PI.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(18000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "flow3"
-    )
+    val offset1 by infiniteTransition.animateFloat(0f, 2f * PI.toFloat(),
+        infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Restart), label = "flow1")
+    val offset2 by infiniteTransition.animateFloat(PI.toFloat(), 3f * PI.toFloat(),
+        infiniteRepeatable(tween(25000, easing = LinearEasing), RepeatMode.Restart), label = "flow2")
+    val offset3 by infiniteTransition.animateFloat(PI.toFloat() / 2, 2.5f * PI.toFloat(),
+        infiniteRepeatable(tween(18000, easing = LinearEasing), RepeatMode.Restart), label = "flow3")
 
     val background = MaterialTheme.colorScheme.background
     val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
@@ -446,129 +669,53 @@ private fun FlowingGradientBackground() {
     val onSurface = MaterialTheme.colorScheme.onSurface
 
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // Base gradient - theme aware
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    background,
-                    background,
-                    surfaceVariant
-                )
-            )
-        )
-
-        // Flowing blob 1 - primary
-        val blob1X = size.width * 0.3f + cos(offset1) * size.width * 0.2f
-        val blob1Y = size.height * 0.3f + sin(offset1 * 0.7f) * size.height * 0.15f
+        drawRect(Brush.verticalGradient(listOf(background, background, surfaceVariant)))
         drawFlowingBlob(
-            centerX = blob1X,
-            centerY = blob1Y,
-            radius = size.width * 0.45f,
-            color = primary.copy(alpha = 0.25f)
+            size.width * 0.3f + cos(offset1) * size.width * 0.2f,
+            size.height * 0.3f + sin(offset1 * 0.7f) * size.height * 0.15f,
+            size.width * 0.45f, primary.copy(alpha = 0.25f)
         )
-
-        // Flowing blob 2 - secondary
-        val blob2X = size.width * 0.7f + cos(offset2 * 0.8f) * size.width * 0.18f
-        val blob2Y = size.height * 0.5f + sin(offset2) * size.height * 0.12f
         drawFlowingBlob(
-            centerX = blob2X,
-            centerY = blob2Y,
-            radius = size.width * 0.4f,
-            color = secondary.copy(alpha = 0.2f)
+            size.width * 0.7f + cos(offset2 * 0.8f) * size.width * 0.18f,
+            size.height * 0.5f + sin(offset2) * size.height * 0.12f,
+            size.width * 0.4f, secondary.copy(alpha = 0.2f)
         )
-
-        // Flowing blob 3 - tertiary
-        val blob3X = size.width * 0.5f + cos(offset3 * 0.6f) * size.width * 0.15f
-        val blob3Y = size.height * 0.7f + sin(offset3 * 0.9f) * size.height * 0.1f
         drawFlowingBlob(
-            centerX = blob3X,
-            centerY = blob3Y,
-            radius = size.width * 0.5f,
-            color = tertiary.copy(alpha = 0.15f)
+            size.width * 0.5f + cos(offset3 * 0.6f) * size.width * 0.15f,
+            size.height * 0.7f + sin(offset3 * 0.9f) * size.height * 0.1f,
+            size.width * 0.5f, tertiary.copy(alpha = 0.15f)
         )
-
-        // Subtle noise texture overlay
-        drawRect(
-            color = onSurface.copy(alpha = 0.03f)
-        )
+        drawRect(onSurface.copy(alpha = 0.03f))
     }
 }
 
-private fun DrawScope.drawFlowingBlob(
-    centerX: Float,
-    centerY: Float,
-    radius: Float,
-    color: Color
-) {
+private fun DrawScope.drawFlowingBlob(cx: Float, cy: Float, r: Float, color: Color) {
     drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                color,
-                color.copy(alpha = color.alpha * 0.5f),
-                Color.Transparent
-            ),
-            center = Offset(centerX, centerY),
-            radius = radius
-        ),
-        radius = radius,
-        center = Offset(centerX, centerY)
+        Brush.radialGradient(listOf(color, color.copy(alpha = color.alpha * 0.5f), Color.Transparent),
+            center = Offset(cx, cy), radius = r),
+        radius = r, center = Offset(cx, cy)
     )
 }
 
 @Composable
-private fun PulsingGlowRing(
-    modifier: Modifier = Modifier,
-    color: Color,
-    delayMillis: Int = 0
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "glow")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, delayMillis = delayMillis, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glow_scale"
-    )
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 0.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, delayMillis = delayMillis, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glow_alpha"
-    )
-
-    Box(
-        modifier = modifier
-            .scale(scale)
-            .alpha(alpha)
-            .clip(CircleShape)
-            .background(color)
-    )
+private fun PulsingGlowRing(modifier: Modifier = Modifier, color: Color, delayMillis: Int = 0) {
+    val t = rememberInfiniteTransition(label = "glow")
+    val scale by t.animateFloat(0.8f, 1.2f,
+        infiniteRepeatable(tween(2000, delayMillis = delayMillis, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glow_scale")
+    val alpha by t.animateFloat(0.6f, 0.2f,
+        infiniteRepeatable(tween(2000, delayMillis = delayMillis, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glow_alpha")
+    Box(modifier = modifier.scale(scale).alpha(alpha).clip(CircleShape).background(color))
 }
 
 @Composable
 private fun PulsingDot(delayMillis: Int = 0) {
-    val infiniteTransition = rememberInfiniteTransition(label = "dot")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, delayMillis = delayMillis, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot_alpha"
-    )
-
-    Box(
-        modifier = Modifier
-            .size(8.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
-    )
+    val t = rememberInfiniteTransition(label = "dot")
+    val alpha by t.animateFloat(0.3f, 1f,
+        infiniteRepeatable(tween(800, delayMillis = delayMillis, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "dot_alpha")
+    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)))
 }
 
 @Composable
@@ -578,46 +725,25 @@ private fun CallControlButton(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick)
-    ) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
         Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(
-                    if (isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                ),
+            modifier = Modifier.size(56.dp).clip(CircleShape)
+                .background(if (isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                modifier = Modifier.size(24.dp),
-                tint = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
+            Icon(icon, label, Modifier.size(24.dp),
+                tint = if (isActive) MaterialTheme.colorScheme.onSurface
+                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
         }
-
         Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            textAlign = TextAlign.Center
-        )
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), textAlign = TextAlign.Center)
     }
 }
 
 private fun formatDuration(seconds: Int): String {
-    val hours = seconds / 3600
-    val minutes = (seconds % 3600) / 60
-    val secs = seconds % 60
-    return if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, secs)
-    } else {
-        String.format("%02d:%02d", minutes, secs)
-    }
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) String.format("%02d:%02d:%02d", h, m, s) else String.format("%02d:%02d", m, s)
 }

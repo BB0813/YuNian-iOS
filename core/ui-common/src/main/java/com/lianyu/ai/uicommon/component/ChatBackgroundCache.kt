@@ -12,12 +12,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 object ChatBackgroundCache {
+
+    // app 级后台作用域，用于预加载聊天背景图片（替代裸 Thread，获得协程取消与命名能力）
+    private val preloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val cache = ConcurrentHashMap<String, Bitmap?>()
     private val maxCacheSize = 3
 
@@ -65,9 +71,8 @@ object ChatBackgroundCache {
 
     fun preload(context: Context, key: String) {
         if (!isCustomBackground(key)) return
-        Thread {
-            loadBitmap(context, key)
-        }.start()
+        // 用协程替代裸 Thread：获得结构化并发、可取消、命名线程（通过 Dispatchers.IO 复用）
+        preloadScope.launch { loadBitmap(context, key) }
     }
 
     fun clear() {

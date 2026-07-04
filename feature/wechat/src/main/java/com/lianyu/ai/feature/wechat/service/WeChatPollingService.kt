@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.feature.wechat.R
 import com.lianyu.ai.feature.wechat.data.WeChatMessageRepository
 import kotlinx.coroutines.CoroutineScope
@@ -91,7 +92,8 @@ open class WeChatPollingService : Service() {
 
                 try {
                     Log.d(TAG, "Polling messages...")
-                    val result = repository.pollMessages(timeoutMs = 20000)
+                    // [P1 FIX] 与 Worker 统一为 WECHAT_POLL_TIMEOUT_MS（原 20000 与 Worker 15000 不一致）
+                    val result = repository.pollMessages(timeoutMs = TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS)
                     if (result.isFailure) {
                         val error = result.exceptionOrNull()
                         Log.w(TAG, "Poll failed: ${error?.message}")

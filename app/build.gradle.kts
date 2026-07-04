@@ -156,6 +156,9 @@ dependencies {
     implementation(project(":feature:backup"))
     implementation(project(":feature:coffee"))
 
+    // sherpa-onnx: 离线流式语音识别，运行时由 app 模块提供
+    implementation(files("libs/sherpa-onnx-1.13.3.aar"))
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

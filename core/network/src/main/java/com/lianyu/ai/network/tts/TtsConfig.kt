@@ -16,7 +16,23 @@ data class TtsConfig(
     val azureRegion: String = "eastasia",
     val volcengineAppId: String = "",
     val volcengineToken: String = "",
-    val volcengineCluster: String = ""
+    val volcengineCluster: String = "",
+    // SiliconFlow TTS (CosyVoice2)
+    val siliconflowApiKey: String = "",
+    val siliconflowCustomVoiceId: String = "",
+    val siliconflowUseGlobalKey: Boolean = true,
+    val siliconflowTtsModel: String = "FunAudioLLM/CosyVoice2-0.5B",
+    val siliconflowSpeed: String = "1.0",
+    val siliconflowGain: String = "0",
+    val siliconflowSampleRate: Int = 44100,
+    // Custom TTS endpoint
+    val customTtsUrl: String = "",
+    val customTtsApiKey: String = "",
+    val customTtsModel: String = "",
+    val customTtsVoiceId: String = "",
+    // Local offline TTS (sherpa-onnx)
+    val localTtsSpeed: Float = 1.0f,
+    val localTtsSid: Int = 0
 ) {
     fun isProviderConfigured(provider: TtsProvider): Boolean {
         return when (provider) {
@@ -26,6 +42,10 @@ data class TtsConfig(
             TtsProvider.XUNFEI -> xunfeiAppId.isNotBlank() && xunfeiApiKey.isNotBlank() && xunfeiApiSecret.isNotBlank()
             TtsProvider.MICROSOFT -> azureSubscriptionKey.isNotBlank()
             TtsProvider.VOLCENGINE -> volcengineAppId.isNotBlank() && volcengineToken.isNotBlank()
+            TtsProvider.SILICONFLOW -> siliconflowUseGlobalKey
+                || siliconflowApiKey.isNotBlank()
+                || customTtsUrl.isNotBlank()
+            TtsProvider.SHERPA_LOCAL -> true
         }
     }
 
@@ -45,7 +65,20 @@ data class TtsConfig(
                 azureRegion = prefs.getString("azure_region", "eastasia") ?: "eastasia",
                 volcengineAppId = prefs.getString("volcengine_app_id", "") ?: "",
                 volcengineToken = prefs.getString("volcengine_token", "") ?: "",
-                volcengineCluster = prefs.getString("volcengine_cluster", "") ?: ""
+                volcengineCluster = prefs.getString("volcengine_cluster", "") ?: "",
+                siliconflowApiKey = prefs.getString("sf_api_key", "") ?: "",
+                siliconflowCustomVoiceId = prefs.getString("sf_custom_voice_id", "") ?: "",
+                siliconflowUseGlobalKey = prefs.getBoolean("sf_use_global_key", true),
+                siliconflowTtsModel = prefs.getString("sf_tts_model", "FunAudioLLM/CosyVoice2-0.5B") ?: "FunAudioLLM/CosyVoice2-0.5B",
+                siliconflowSpeed = prefs.getString("sf_speed", "1.0") ?: "1.0",
+                siliconflowGain = prefs.getString("sf_gain", "0") ?: "0",
+                siliconflowSampleRate = prefs.getInt("sf_sample_rate", 44100),
+                customTtsUrl = prefs.getString("custom_tts_url", "") ?: "",
+                customTtsApiKey = prefs.getString("custom_tts_api_key", "") ?: "",
+                customTtsModel = prefs.getString("custom_tts_model", "") ?: "",
+                customTtsVoiceId = prefs.getString("custom_tts_voice_id", "") ?: "",
+                localTtsSpeed = prefs.getFloat("local_tts_speed", 1.0f),
+                localTtsSid = prefs.getInt("local_tts_sid", 0)
             )
         }
 
@@ -65,6 +98,19 @@ data class TtsConfig(
                 putString("volcengine_app_id", config.volcengineAppId)
                 putString("volcengine_token", config.volcengineToken)
                 putString("volcengine_cluster", config.volcengineCluster)
+                putString("sf_api_key", config.siliconflowApiKey)
+                putString("sf_custom_voice_id", config.siliconflowCustomVoiceId)
+                putBoolean("sf_use_global_key", config.siliconflowUseGlobalKey)
+                putString("sf_tts_model", config.siliconflowTtsModel)
+                putString("sf_speed", config.siliconflowSpeed)
+                putString("sf_gain", config.siliconflowGain)
+                putInt("sf_sample_rate", config.siliconflowSampleRate)
+                putString("custom_tts_url", config.customTtsUrl)
+                putString("custom_tts_api_key", config.customTtsApiKey)
+                putString("custom_tts_model", config.customTtsModel)
+                putString("custom_tts_voice_id", config.customTtsVoiceId)
+                putFloat("local_tts_speed", config.localTtsSpeed)
+                putInt("local_tts_sid", config.localTtsSid)
                 apply()
             }
             SecureLog.i("TtsConfig", "Configuration saved to SharedPreferences")

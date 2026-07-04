@@ -9,7 +9,7 @@ import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.common.ImageUtils
-import com.lianyu.ai.network.AiService
+import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import androidx.core.content.edit
 import com.lianyu.ai.common.SecureLog
@@ -44,7 +44,7 @@ class CreateCompanionViewModel(application: Application) : AndroidViewModel(appl
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
 
-    private val aiService by lazy { ServiceRegistry.getOrThrow(AiService::class.java) }
+    private val aiService by lazy { ServiceRegistry.getOrThrow(AiServiceProvider::class.java) }
 
     fun loadCompanion(id: Long) {
         viewModelScope.launch {
@@ -191,7 +191,7 @@ class CreateCompanionViewModel(application: Application) : AndroidViewModel(appl
 直接输出人设内容，不要任何前缀或解释。"""
 
                 SecureLog.d("CreateCompanionVM", "开始AI生成人设，name=$name, role=$roleLabel")
-                val result = aiService.callOpenAiCompatibleForGeneration(prompt)
+                val result = aiService.callGeneration(prompt)
                 SecureLog.d("CreateCompanionVM", "AI生成结果长度=${result.length}")
 
                 val cleaned = result

@@ -3,6 +3,7 @@ package com.lianyu.ai.feature.wechat.data
 import android.content.Context
 import android.util.Log
 import com.lianyu.ai.common.AppForegroundTracker
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.feature.wechat.data.model.M0
 import com.lianyu.ai.feature.wechat.data.model.M1Type
 import com.lianyu.ai.feature.wechat.service.WeChatAiReplyWorker
@@ -66,7 +67,7 @@ class WeChatMessageRepository(
         activeReplyJobs.clear()
     }
 
-    suspend fun pollMessages(timeoutMs: Long = 15000): Result<WeChatPollResult> = withContext(Dispatchers.IO) {
+    suspend fun pollMessages(timeoutMs: Long = TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS): Result<WeChatPollResult> = withContext(Dispatchers.IO) {
         runCatching {
             val account = tokenStore.getAccount()
                 ?: throw IllegalStateException("未登录微信")

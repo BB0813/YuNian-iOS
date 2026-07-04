@@ -112,17 +112,30 @@ fun MainScreen(mainActivity: Activity) {
     val updateInfo by updateManager.updateInfo.collectAsState()
     val downloadProgress by updateManager.downloadProgress.collectAsState()
 
-    // 深度链接: intent extra → navigate
+    fun openCompanionChat(companionId: Long) {
+        LastOpenedCompanionStore.save(context, companionId)
+        navController.navigate(MainRoute.Chat(companionId).route)
+    }
+
+    // 深度链接 / 冷启动恢复最近打开的单聊
     LaunchedEffect(Unit) {
-        valActivity.intent.let { intent ->
-            if (intent.getBooleanExtra("open_chat", false)) {
-                val companionId = intent.getLongExtra("companion_id", -1L)
-                if (companionId != -1L) {
-                    navController.navigate(MainRoute.Chat(companionId).route)
-                    intent.removeExtra("open_chat")
-                    intent.removeExtra("companion_id")
-                }
+        val intent = valActivity.intent
+        if (intent.getBooleanExtra("open_chat", false)) {
+            val companionId = intent.getLongExtra("companion_id", -1L)
+            if (companionId != -1L) {
+                openCompanionChat(companionId)
+                intent.removeExtra("open_chat")
+                intent.removeExtra("companion_id")
+                return@LaunchedEffect
             }
+        }
+
+        val restoredCompanionId = LastOpenedCompanionStore.resolveInitialCompanionId(
+            context,
+            ServiceRegistry.getOrThrow(com.lianyu.ai.database.repository.CompanionRepository::class.java)
+        )
+        if (restoredCompanionId != null) {
+            openCompanionChat(restoredCompanionId)
         }
     }
 
@@ -253,13 +266,13 @@ fun MainScreen(mainActivity: Activity) {
                         ) {
                             when (page) {
                                 0 -> HomeScreen(
-                                    onCompanionClick = { navController.navigate(MainRoute.Chat(it).route) },
+                                    onCompanionClick = { openCompanionChat(it) },
                                     onGroupClick = { navController.navigate(MainRoute.GroupChat(it).route) },
                                     onAddClick = { navController.navigate(MainRoute.CreateCompanion.route) },
                                     onCreateGroupClick = { navController.navigate(MainRoute.CreateGroup.route) }
                                 )
                                 1 -> ContactsScreen(
-                                    onCompanionClick = { navController.navigate(MainRoute.Chat(it).route) },
+                                    onCompanionClick = { openCompanionChat(it) },
                                     onAddClick = { navController.navigate(MainRoute.CreateCompanion.route) },
                                     onEditClick = { navController.navigate(MainRoute.EditCompanion(it).route) },
                                     onGroupClick = { navController.navigate(MainRoute.GroupChat(it).route) },

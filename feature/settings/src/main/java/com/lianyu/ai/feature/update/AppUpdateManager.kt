@@ -13,10 +13,15 @@ import com.lianyu.ai.common.update.DownloadProgress
 import com.lianyu.ai.common.update.DownloadStatus
 import com.lianyu.ai.common.update.UpdateCheckState
 import com.lianyu.ai.common.update.UpdateInfo
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,6 +39,13 @@ class AppUpdateManager(private val context: Context) {
     }
 
     private val okHttpClient = OkHttpClient()
+
+    // App 级作用域，下载任务跨越 UI 页面生命周期（用户可退出检查更新页，下载继续）
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // 防重入：多次点击下载按钮时取消上一个任务，避免并发写同一 APK 文件
+    @Volatile
+    private var downloadJob: Job? = null
 
     private val _updateCheckState = MutableStateFlow(UpdateCheckState.IDLE)
     val updateCheckState: StateFlow<UpdateCheckState> = _updateCheckState.asStateFlow()
@@ -127,19 +139,27 @@ class AppUpdateManager(private val context: Context) {
         }
     }
 
+    /**
+     * 启动 APK 下载（fire-and-forget）。
+     *
+     * - 在 [downloadScope]（Dispatchers.IO）上执行，用户离开页面后下载继续。
+     * - [downloadJob] 防重入：再次调用时取消上一个任务，避免并发写 `update.apk` 文件损坏。
+     * - 进度通过 [_downloadProgress] StateFlow 推送到 UI，线程安全。
+     */
     fun startDownload(url: String) {
         _downloadProgress.value = DownloadProgress(status = DownloadStatus.DOWNLOADING)
-        Thread {
+        downloadJob?.cancel()
+        downloadJob = downloadScope.launch {
             try {
                 val request = Request.Builder().url(url).build()
                 val response = okHttpClient.newCall(request).execute()
                 if (!response.isSuccessful) {
                     _downloadProgress.value = _downloadProgress.value.copy(status = DownloadStatus.FAILED)
-                    return@Thread
+                    return@launch
                 }
                 val body = response.body ?: run {
                     _downloadProgress.value = _downloadProgress.value.copy(status = DownloadStatus.FAILED)
-                    return@Thread
+                    return@launch
                 }
                 val totalBytes = body.contentLength()
                 val inputStream = body.byteStream()
@@ -170,7 +190,7 @@ class AppUpdateManager(private val context: Context) {
             } catch (e: Exception) {
                 _downloadProgress.value = _downloadProgress.value.copy(status = DownloadStatus.FAILED)
             }
-        }.start()
+        }
     }
 
     private fun installApk(apkFile: File) {
@@ -221,6 +241,15 @@ class AppUpdateManager(private val context: Context) {
             if (p1 < p2) return -1
         }
         return 0
+    }
+
+    /**
+     * 取消下载任务并释放协程作用域，避免 AppUpdateManager 被回收后作用域泄漏。
+     * 调用方持有 AppUpdateManager 实例期间无需调此方法；仅在显式销毁时使用。
+     */
+    fun release() {
+        downloadJob?.cancel()
+        downloadScope.cancel()
     }
 
     @Serializable

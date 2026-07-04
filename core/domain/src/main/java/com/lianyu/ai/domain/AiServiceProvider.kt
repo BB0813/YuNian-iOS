@@ -1,7 +1,5 @@
 package com.lianyu.ai.domain
 
-import kotlinx.coroutines.flow.Flow
-
 /**
  * AI 对话服务提供者接口。
  * 由 core:network 实现，通过 ServiceRegistry 注入到 feature 模块。
@@ -103,23 +101,6 @@ interface AiServiceProvider {
     ): AiResponse
 
     /**
-     * [M1 FIX] 已废弃：AI 输入/输出禁止流式（铁律）。保留接口仅为向后兼容，
-     * 实现内部已委托到非流式 [sendMessage]，不再做真正的 SSE 流式。
-     *
-     * 新代码不应调用此方法，应直接使用 [sendMessage] 全量接收后再处理分段。
-     */
-    @Deprecated(
-        "AI 输出禁止流式，请使用 sendMessage 全量接收后再分段处理",
-        ReplaceWith("sendMessage(companion, history, stickerProbability, ntpTimeEnabled)")
-    )
-    fun sendMessageStream(
-        companion: AiCompanionInfo,
-        history: List<AiChatMessage>,
-        stickerProbability: Int = 0,
-        ntpTimeEnabled: Boolean = false
-    ): Flow<AiStreamChunk>
-
-    /**
      * 判断是否需要发送主动消息。
      *
      * @param companion 伴侣角色信息
@@ -205,4 +186,16 @@ interface AiServiceProvider {
         recentMessages: List<AiChatMessage>,
         lastAiContent: String
     ): String?
+
+    /**
+     * 轻量 AI 调用：用于 @ 提及判断。
+     * 使用当前活跃 API 配置，不依赖特定 provider。
+     */
+    suspend fun callJudge(prompt: String): String
+
+    /**
+     * 轻量 AI 调用：用于人设/角色自动生成。
+     * 使用当前活跃 API 配置，不依赖特定 provider。
+     */
+    suspend fun callGeneration(prompt: String): String
 }

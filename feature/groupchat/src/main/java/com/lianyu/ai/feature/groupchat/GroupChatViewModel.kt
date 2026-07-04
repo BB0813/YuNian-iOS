@@ -9,6 +9,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.common.wechat.WeChatBroadcast
+import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
+import com.lianyu.ai.common.ChatConstants
+import com.lianyu.ai.common.text.MessageSegmenter
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
@@ -32,7 +35,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +45,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import kotlin.random.Random
 
 class GroupChatViewModel(
@@ -55,10 +56,6 @@ class GroupChatViewModel(
     // 重新进入群聊即可看到完整回复。与 ChatViewModel 行为保持一致。
     private val applicationScope = com.lianyu.ai.common.ApplicationScopeProvider.scope
     private var sendMessageJob: Job? = null
-
-    private val groupChatDispatcher = Executors.newFixedThreadPool(
-        Runtime.getRuntime().availableProcessors().coerceAtLeast(4)
-    ).asCoroutineDispatcher()
 
     private val database = AppDatabase.getDatabase(application)
     private val groupMessageRepository = GroupMessageRepository(database.groupMessageDao())
@@ -86,15 +83,6 @@ class GroupChatViewModel(
         isFromUser = companionId == -1L, content = content, timestamp = timestamp,
         companionId = companionId
     )
-
-    companion object {
-        const val AUTO_ROUNDS = 2
-        const val BUBBLE_GAP_MS = 500L
-        const val CONTEXT_WINDOW = 20
-        const val MENTION_JUDGE_ENABLED = true
-        const val MENTION_JUDGE_THRESHOLD = 0.8f
-    }
-
     private val _messageLimit = MutableStateFlow(50)
     val messages = _messageLimit.flatMapLatest { limit ->
         groupMessageRepository.getMessagesForGroup(groupId, limit)
@@ -237,9 +225,9 @@ class GroupChatViewModel(
         activeCompanions: List<CompanionEntity>,
         userMentionedIds: Set<Long>
     ) {
-        val maxRounds = if (activeCompanions.size == 1) 1 else AUTO_ROUNDS
+        val maxRounds = if (activeCompanions.size == 1) 1 else ChatConstants.GROUP_CHAT_AUTO_ROUNDS
         for (round in 1..maxRounds) {
-            Log.d("GroupChatM", "=== 第 $round / $AUTO_ROUNDS 轮开始 ===")
+            Log.d("GroupChatM", "=== 第 $round / $ChatConstants.GROUP_CHAT_AUTO_ROUNDS 轮开始 ===")
 
             val roundMembers = if (round == 1 && userMentionedIds.isNotEmpty()) {
                 activeCompanions.filter { userMentionedIds.contains(it.id) }.also {
@@ -270,7 +258,7 @@ class GroupChatViewModel(
 
             Log.d("GroupChatM", "第${round}轮发言顺序: ${prioritizedMembers.map { it.name }}")
 
-            withContext(groupChatDispatcher) {
+            withContext(Dispatchers.IO) {
                 prioritizedMembers.mapIndexed { index, companion ->
                     async {
                         try {
@@ -295,9 +283,9 @@ class GroupChatViewModel(
                 }.awaitAll()
             }
 
-            if (round < AUTO_ROUNDS && activeCompanions.size >= 2) {
+            if (round < ChatConstants.GROUP_CHAT_AUTO_ROUNDS && activeCompanions.size >= 2) {
                 delay(Random.nextLong(800, 2000))
-            } else if (round >= AUTO_ROUNDS && activeCompanions.size == 1) {
+            } else if (round >= ChatConstants.GROUP_CHAT_AUTO_ROUNDS && activeCompanions.size == 1) {
                 break
             }
         }
@@ -305,7 +293,7 @@ class GroupChatViewModel(
 
     private suspend fun getRecentHistorySnapshot(): List<GroupMessage> {
         return withContext(Dispatchers.IO) {
-            groupMessageRepository.getMessagesForGroup(groupId).first().takeLast(CONTEXT_WINDOW)
+            groupMessageRepository.getMessagesForGroup(groupId).first().takeLast(ChatConstants.GROUP_CHAT_CONTEXT_WINDOW)
         }
     }
 
@@ -371,8 +359,8 @@ class GroupChatViewModel(
             speakerName = companion.name,
             members = activeCompanions,
             aiService = null,
-            judgeEnabled = MENTION_JUDGE_ENABLED,
-            judgeThreshold = MENTION_JUDGE_THRESHOLD,
+            judgeEnabled = ChatConstants.GROUP_CHAT_MENTION_JUDGE_ENABLED,
+            judgeThreshold = ChatConstants.GROUP_CHAT_MENTION_JUDGE_THRESHOLD,
             recentContext = buildRecentContextSnapshots(isolatedHistory)
         )
         repliedIds[companion.id] = true
@@ -484,7 +472,7 @@ class GroupChatViewModel(
             }
         }
 
-        return enhanced.takeLast(CONTEXT_WINDOW)
+        return enhanced.takeLast(ChatConstants.GROUP_CHAT_CONTEXT_WINDOW)
     }
 
     private fun calculateSpeakingPriority(
@@ -905,11 +893,7 @@ class GroupChatViewModel(
     }
 
     private fun broadcastWeChatMessage(companionId: Long, messageId: Long) {
-        val intent = Intent(WeChatBroadcast.ACTION_SEND_PROACTIVE)
-            .setPackage(getApplication<Application>().packageName)
-            .putExtra(WeChatBroadcast.EXTRA_COMPANION_ID, companionId)
-            .putExtra(WeChatBroadcast.EXTRA_MESSAGE_ID, messageId)
-        getApplication<Application>().applicationContext.sendBroadcast(intent)
+        WeChatBroadcastHelper.broadcast(getApplication(), companionId, messageId)
         Log.d("GroupChatViewModel", "Broadcast WeChat proactive message, companionId=$companionId, messageId=$messageId")
     }
 
@@ -933,91 +917,7 @@ class GroupChatViewModel(
     }
 
     private fun splitIntoSegments(text: String): List<String> {
-        val cleaned = text.trim().replace(Regex("\\n{2,}"), "\n")
-        if (cleaned.length <= 15) return listOf(cleaned)
-
-        val rawSegments = cleaned.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-
-        if (rawSegments.size > 1) {
-            val result = mutableListOf<String>()
-            for (segment in rawSegments) {
-                if (segment.length <= 20) {
-                    result.add(segment)
-                } else {
-                    result.addAll(splitLongSegment(segment))
-                }
-            }
-            return result.ifEmpty { listOf(cleaned) }
-        }
-
-        return splitLongSegment(cleaned)
-    }
-
-    private fun splitLongSegment(text: String): List<String> {
-        val sentences = mutableListOf<String>()
-        val current = StringBuilder()
-
-        fun flush() {
-            val seg = current.toString().trim()
-            if (seg.isNotEmpty()) sentences.add(seg)
-            current.clear()
-        }
-
-        for (char in text) {
-            current.append(char)
-            when (char) {
-                '。', '！', '？' -> flush()
-                '…', '～' -> { if (current.length >= 3) flush() }
-                ',', '，' -> {
-                    if (current.length >= 10 && current.contains(Regex("[！？。]"))) {
-                        flush()
-                    }
-                }
-            }
-        }
-        flush()
-
-        if (sentences.isEmpty()) return listOf(text)
-
-        val result = mutableListOf<String>()
-        var buffer = StringBuilder()
-
-        for (sentence in sentences) {
-            val cleanSentence = sentence.trimStart('，', ',', '.', '。', ' ')
-            if (cleanSentence.isEmpty()) continue
-
-            if (buffer.length + cleanSentence.length <= 12) {
-                if (buffer.isNotEmpty()) buffer.append("，")
-                buffer.append(cleanSentence)
-            } else {
-                if (buffer.isNotEmpty()) {
-                    result.add(buffer.toString())
-                    buffer = StringBuilder()
-                }
-                if (cleanSentence.length <= 14) {
-                    buffer.append(cleanSentence)
-                } else if (cleanSentence.length <= 25) {
-                    result.add(cleanSentence)
-                } else {
-                    val midPoint = cleanSentence.length / 2
-                    val startIndex = midPoint.coerceAtLeast(0)
-                    val endIndex = (midPoint + 10).coerceAtMost(cleanSentence.length)
-                    val searchRange = if (startIndex < endIndex) cleanSentence.substring(startIndex, endIndex) else ""
-                    val splitPosInRange = searchRange.indexOfAny(charArrayOf('，', ',', '、'))
-                    val splitPos = if (splitPosInRange >= 0) midPoint + splitPosInRange else -1
-                    if (splitPos > 0) {
-                        result.add(cleanSentence.take(splitPos + 1).trim())
-                        buffer.append(cleanSentence.drop(splitPos + 1).trimStart())
-                    } else {
-                        result.add(cleanSentence.take(14).trimEnd('，', ','))
-                        buffer.append(cleanSentence.drop(14).trimStart('，', ','))
-                    }
-                }
-            }
-        }
-        if (buffer.isNotEmpty()) result.add(buffer.toString())
-
-        return result.ifEmpty { listOf(text) }
+        return MessageSegmenter.split(text, MessageSegmenter.SplitMode.GROUP)
     }
 
     private suspend fun sendSplitAiMessages(
@@ -1196,7 +1096,6 @@ class GroupChatViewModel(
         // [H5 FIX] 不再取消应用级作用域——它生命周期与 Application 一致，取消会影响其他正在运行的任务。
         // AI 请求运行在 applicationScope 中，退出群聊后应继续完成，重新进入即可看到回复。
         sendMessageJob?.cancel()
-        groupChatDispatcher.close()
         _isLoading.value = false
         isLoadingLock.set(false)
         _isRegenerating.value = false

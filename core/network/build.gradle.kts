@@ -37,8 +37,12 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.datastore.preferences)
     // Kotlin coroutines
     implementation(libs.kotlinx.coroutines.android)
+    // sherpa-onnx: 离线语音识别/合成引擎 (v1.13.3)
+    // compileOnly: library 模块不能打包 AAR，运行时由 app 模块提供
+    compileOnly(files("libs/sherpa-onnx-1.13.3.aar"))
 
     testImplementation(libs.junit)
 }

@@ -13,7 +13,7 @@ package com.lianyu.ai.domain
  */
 interface CoffeeOrderProvider {
     /** Token 是否已配置（AI 可据此判断能否调用咖啡工具） */
-    fun isAvailable(): Boolean
+    suspend fun isAvailable(): Boolean
 
     /**
      * 查询附近门店。

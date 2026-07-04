@@ -88,6 +88,9 @@ object ChatConstants {
     /** 群聊 @ 判断阈值 */
     const val GROUP_CHAT_MENTION_JUDGE_THRESHOLD = 0.8f
 
+    /** 群聊 @ 判断是否启用 */
+    const val GROUP_CHAT_MENTION_JUDGE_ENABLED = true
+
     /** 群聊历史消息默认加载条数 */
     const val GROUP_CHAT_MESSAGE_LIMIT = 50
 
