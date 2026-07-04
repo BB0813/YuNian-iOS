@@ -230,13 +230,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     enum class ConnectionStatus {
-        UNKNOWN, CONNECTED, FAILED, TESTING
+        UNKNOWN, TESTING, CONNECTED, FAILED
     }
-
     data class ConnectionResult(
         val status: ConnectionStatus,
         val latencyMs: Long = 0L,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val errorCode: String? = null,
+        // Group info from handshake
+        val groupName: String? = null,
+        val remainingQuota: Double = 0.0,
+        val dailyLimit: Double? = null,
+        val rpmLimit: Int = 0,
+        val discount: Double = 1.0,
+        // Server-side client_id (e.g. client_81a46fa0) from handshake
+        val clientId: String? = null,
     )
 
     fun connectionKey(config: ApiConfig): String =
@@ -426,6 +434,37 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** 设置页打开时自动刷新 PARTNER 握手（获取最新限额/余额） */
+    fun refreshPartnerQuota() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val allConfigs = repository.getAllConfigs().first()
+            val partnerConfig = allConfigs.firstOrNull { it.provider == ApiProvider.PARTNER } ?: return@launch
+            val key = connectionKey(partnerConfig)
+            try {
+                val handshakeJson = com.lianyu.ai.common.RemoteKeyProvider.cloveHandshake(getApplication())
+                val ok = handshakeJson.optBoolean("ok", false)
+                val latency = handshakeJson.optLong("latency_ms", 0)
+                if (ok) {
+                    val clientId = handshakeJson.optString("client_id").ifEmpty { null }
+                    val sessionToken = handshakeJson.optString("session_token").ifEmpty { null }
+                    if (clientId != null && sessionToken != null) {
+                        com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(getApplication(), handshakeJson)
+                    }
+                    val groupName = handshakeJson.optString("group_name").ifEmpty { null }
+                    val remaining = handshakeJson.optDouble("remaining", 0.0)
+                    val daily = if (handshakeJson.has("daily_quota_limit") && !handshakeJson.isNull("daily_quota_limit"))
+                        handshakeJson.optDouble("daily_quota_limit") else null
+                    val rpm = handshakeJson.optInt("rpm_limit", 0)
+                    val disc = handshakeJson.optDouble("discount", 1.0)
+                    updateConnectionStatus(key, ConnectionResult(
+                        ConnectionStatus.CONNECTED, latency, null, null,
+                        groupName, remaining, daily, rpm, disc, clientId
+                    ))
+                }
+            } catch (_: Exception) { /* silent — don't downgrade on refresh failure */ }
+        }
+    }
+
     fun testConnection(config: ApiConfig) {
         viewModelScope.launch(Dispatchers.IO) {
             val key = connectionKey(config)
@@ -440,37 +479,61 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             SecureLog.d("SettingsViewModel", "isEnabled=${config.isEnabled}, connectionTested=${config.connectionTested}")
             SecureLog.d("SettingsViewModel", "isPARTNER=${config.provider == ApiProvider.PARTNER}, providerName=${config.provider.name}")
 
-            // 对于 PARTNER 类型：总是从远程服务器获取最新密钥
-            var currentConfig = config
+            // 对于 PARTNER 类型：直接调用 handshake 端点
             if (config.provider == ApiProvider.PARTNER) {
-                SecureLog.d("SettingsViewModel", "PARTNER mode: fetching fresh keys from remote server...")
-                var earlyReturn = false
+                SecureLog.d("SettingsViewModel", "PARTNER: calling handshake endpoint...")
                 try {
-                    val remoteKeys = com.lianyu.ai.common.RemoteKeyProvider.fetchKeysAsync(getApplication(), forceRefresh = true)
-                    if (remoteKeys.isNotEmpty()) {
-                        allKeys = remoteKeys
-                        // 更新 config 对象，让后续调用能使用远程密钥
-                        currentConfig = config.copy(
-                            apiKey = remoteKeys.first(),
-                            extraApiKeys = remoteKeys.drop(1).joinToString(",")
-                        )
-                        SecureLog.d("SettingsViewModel", "Fetched ${remoteKeys.size} remote keys for testing")
+                    val handshakeJson = com.lianyu.ai.common.RemoteKeyProvider.cloveHandshake(getApplication())
+                    val ok = handshakeJson.optBoolean("ok", false)
+                    val latency = handshakeJson.optLong("latency_ms", 0)
+                    val errorCode = handshakeJson.optString("error").ifEmpty { null }
+                    val clientId = handshakeJson.optString("client_id").ifEmpty { null }
+                    val sessionToken = handshakeJson.optString("session_token").ifEmpty { null }
+
+                    if (ok && clientId != null && sessionToken != null) {
+                        val groupName = handshakeJson.optString("group_name").ifEmpty { null }
+                        val remaining = handshakeJson.optDouble("remaining", 0.0)
+                        val daily = if (handshakeJson.has("daily_quota_limit") && !handshakeJson.isNull("daily_quota_limit"))
+                            handshakeJson.optDouble("daily_quota_limit") else null
+                        val rpm = handshakeJson.optInt("rpm_limit", 0)
+                        val disc = handshakeJson.optDouble("discount", 1.0)
+
+                        com.lianyu.ai.common.RemoteKeyProvider.storeHandshakeResult(getApplication(), handshakeJson)
+                        updateConnectionStatus(key, ConnectionResult(
+                            ConnectionStatus.CONNECTED, latency, null, null,
+                            groupName, remaining, daily, rpm, disc, clientId
+                        ))
+                        SecureLog.d("SettingsViewModel", "PARTNER handshake OK clientId=$clientId latency=${latency}ms")
+                        return@launch
                     } else {
-                        updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "无法从服务器获取密钥，请检查网络连接或服务器配置"))
-                        earlyReturn = true
+                        val err = errorCode ?: "unknown"
+                        // key_disabled: admin disabled the key, show the disabled client_id
+                        if (err == "key_disabled" && clientId != null) {
+                            updateConnectionStatus(key, ConnectionResult(
+                                ConnectionStatus.FAILED, latency,
+                                "密钥已被管理员禁用", err, clientId = clientId
+                            ))
+                        } else {
+                            updateConnectionStatus(key, ConnectionResult(
+                                ConnectionStatus.FAILED, latency,
+                                "连接失败", err
+                            ))
+                        }
+                        SecureLog.e("SettingsViewModel", "PARTNER handshake FAILED error=$err")
+                        return@launch
                     }
                 } catch (e: Exception) {
-                    SecureLog.e("SettingsViewModel", "Failed to fetch remote keys: ${e.message}")
-                    updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "远程密钥获取失败: ${e.message}"))
-                    earlyReturn = true
-                }
-                if (earlyReturn) {
-                    // [P4 FIX] return@launch 在 try 内会跳过 finally 的 TESTING 状态兜底重置。
-                    // finally 只在状态仍为 TESTING 时改 FAILED，但上面已设 FAILED，故此处状态正确；
-                    // 但为防御 finally 被跳过的语义陷阱，显式 return 前不再需要额外操作（状态已更新）。
+                    updateConnectionStatus(key, ConnectionResult(
+                        ConnectionStatus.FAILED, 0L,
+                        "无法连接服务器: ${e.message}", "network_error"
+                    ))
+                    SecureLog.e("SettingsViewModel", "PARTNER handshake exception: ${e.message}")
                     return@launch
                 }
             }
+
+            // 非 PARTNER：原有逻辑
+            var currentConfig = config
 
             if (allKeys.isEmpty()) {
                 updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, 0L, "API Key 为空，请填写主密钥或检查远程Key服务"))
@@ -611,7 +674,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     else -> errorMsg
                 }
                 
-                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, latencyMs, friendlyError))
+                updateConnectionStatus(key, ConnectionResult(ConnectionStatus.FAILED, latencyMs, friendlyError,
+                    errorCode = when {
+                        errorMsg.contains("upstream_unreachable") -> "upstream_unreachable"
+                        errorMsg.contains("account_blocked") -> "account_blocked"
+                        errorMsg.contains("timeout") -> "timeout"
+                        errorMsg.contains("resolve host") || errorMsg.contains("refused") -> "network_error"
+                        else -> null
+                    }
+                ))
             } else {
                 updateConnectionStatus(key, ConnectionResult(ConnectionStatus.CONNECTED, latencyMs))
             }

@@ -158,11 +158,11 @@ object AiContextTools {
                 memoryRelevanceScore >= 2 -> {
                     highPriority.add(Pair(memoryRelevanceScore, "$role: ${content.take(50)}"))
                 }
-                content.contains(Regex("[喜欢|爱|想|念|开心|难过|生气|害羞|感动|委屈|撒娇|哄|哭|笑|亲|抱|牵手|约会|见面]")) ||
-                content.contains(Regex("[呜呜|嘿嘿|嘤|哼|呀|呢|啦|嘛|好想你|宝贝|宝宝|亲爱的]")) -> {
+                content.contains(Regex("(喜欢|爱|想|念|开心|难过|生气|害羞|感动|委屈|撒娇|哄|哭|笑|亲|抱|牵手|约会|见面)")) ||
+                content.contains(Regex("(呜呜|嘿嘿|嘤|哼|呀|呢|啦|嘛|好想你|宝贝|宝宝|亲爱的)")) -> {
                     emotionalMoments.add("$role: ${content.take(40)}")
                 }
-                content.contains(Regex("[叫|名字|年龄|生日|地址|电话|工作|学校|专业|记住|别忘了|以后|约定|答应|重要|一定|永远|承诺]")) -> {
+                content.contains(Regex("(叫|名字|年龄|生日|地址|电话|工作|学校|专业|记住|别忘了|以后|约定|答应|重要|一定|永远|承诺)")) -> {
                     keyFacts.add(content.take(50))
                 }
                 else -> {

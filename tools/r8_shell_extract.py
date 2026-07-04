@@ -195,11 +195,22 @@ def main():
         # Sign
         apksigner = BT / "apksigner.bat"
         ks = PROJECT / "release.keystore"
+        store_pass = os.environ.get("LIANYU_STORE_PASSWORD", "")
+        key_pass = os.environ.get("LIANYU_KEY_PASSWORD", "")
+        key_alias = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
+        missing = [name for name, value in [
+            ("LIANYU_STORE_PASSWORD", store_pass),
+            ("LIANYU_KEY_PASSWORD", key_pass),
+        ] if not value]
+        if missing:
+            sys.exit(f"Release signing requires: {', '.join(missing)}")
+        if not ks.exists():
+            sys.exit(f"Release keystore not found: {ks}")
         signed = str(apk).replace('.apk', '-signed.apk')
         subprocess.run([
             'cmd', '/c', str(apksigner), 'sign',
-            '--ks', str(ks), '--ks-pass', 'pass:3498762309',
-            '--key-pass', 'pass:3498762309', '--ks-key-alias', 'your_alias',
+            '--ks', str(ks), '--ks-pass', f'pass:{store_pass}',
+            '--key-pass', f'pass:{key_pass}', '--ks-key-alias', key_alias,
             '--out', signed, str(apk)
         ], check=True)
         shutil.move(signed, str(apk))

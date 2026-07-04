@@ -26,8 +26,8 @@ ANDROID_JAR = SDK / "platforms" / "android-34" / "android.jar"
 CPP_DIR = PROJECT / "core" / "security" / "src" / "main" / "cpp"
 APK_OUT = PROJECT / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
 KEYSTORE = PROJECT / "release.keystore"
-STORE_PASS = os.environ.get("LIANYU_STORE_PASSWORD", "3498762309")
-KEY_PASS = os.environ.get("LIANYU_KEY_PASSWORD", "3498762309")
+STORE_PASS = os.environ.get("LIANYU_STORE_PASSWORD", "")
+KEY_PASS = os.environ.get("LIANYU_KEY_PASSWORD", "")
 KEY_ALIAS = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
 SHELL_SRC = PROJECT / "app" / "build" / "tmp" / "shell_src"
 SHELL_CLASSES = PROJECT / "app" / "build" / "tmp" / "shell_classes"
@@ -274,6 +274,15 @@ def main():
     parser.add_argument("--clean", action="store_true", help="清空构建缓存")
     parser.add_argument("--skip-gradle", action="store_true", help="跳过 Gradle 构建")
     args = parser.parse_args()
+
+    missing = [name for name, value in [
+        ("LIANYU_STORE_PASSWORD", STORE_PASS),
+        ("LIANYU_KEY_PASSWORD", KEY_PASS),
+    ] if not value]
+    if missing:
+        sys.exit(f"Release signing requires: {', '.join(missing)}")
+    if not KEYSTORE.exists():
+        sys.exit(f"Release keystore not found: {KEYSTORE}")
 
     if args.clean:
         for d in ["core/security/build", "core/security/.cxx", "app/build"]:

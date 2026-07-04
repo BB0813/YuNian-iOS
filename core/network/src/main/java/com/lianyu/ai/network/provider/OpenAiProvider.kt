@@ -112,7 +112,7 @@ open class OpenAiCompatibleProvider : AiProvider {
             val currentKey = allKeys[keyIndex]
             try {
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toDouble())
@@ -194,7 +194,7 @@ open class OpenAiCompatibleProvider : AiProvider {
                     jsonArray.put(msgObj)
                 }
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", temperature)
@@ -252,7 +252,7 @@ open class OpenAiCompatibleProvider : AiProvider {
             val currentKey = allKeys[keyIndex]
             try {
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", 0.7)
@@ -361,7 +361,7 @@ open class OpenAiCompatibleProvider : AiProvider {
                 }
 
                 val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
+                if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", messagesJson)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toDouble())

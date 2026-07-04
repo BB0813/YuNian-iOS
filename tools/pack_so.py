@@ -388,16 +388,36 @@ def patch_stub_placeholders(stub_data: bytearray, text_vaddr: int,
 
 # ─── Main SO Packing Logic ───────────────────────────────────────────
 
+def _find_symbol_file_offset(elf: ELFFile, data: bytes, sym_name: str) -> Optional[Tuple[int, int]]:
+    """Find a symbol's file offset and size by name.
+    Returns (file_offset, size) or None.
+    """
+    sym = find_symbol(elf, sym_name)
+    if sym is None:
+        return None
+    sym_value = sym['st_value']  # virtual address
+    sym_size = sym['st_size']
+    if sym_size == 0:
+        return None
+    file_offset = vaddr_to_offset(elf, sym_value)
+    if file_offset is None:
+        return None
+    return (file_offset, sym_size)
+
+
 def pack_so(input_path: str, output_path: str,
             xor_key: Optional[bytes] = None,
             project_root: Optional[str] = None) -> bool:
     """
-    Pack a single .so file:
+    Pack a single .so file using in-place .text encryption:
     1. Parse ELF, find .text section
-    2. Encrypt .text with XOR key
-    3. Inject decrypt stub
-    4. Patch ELF headers
+    2. Find lianyu_xor_key / lianyu_text_start / lianyu_text_size symbols
+    3. Encrypt .text in-place (NO file insertion — ELF structure unchanged)
+    4. Patch the three symbols' values in the file
     5. Write output
+
+    The decrypt function (lianyu_d2_decrypt) lives in .lianyu_decrypt section
+    (NOT .text) and runs via __attribute__((constructor(101))) before JNI_OnLoad.
     """
     _ensure_elftools()
 
@@ -424,7 +444,44 @@ def pack_so(input_path: str, output_path: str,
 
     print(f"  .text: offset=0x{text_offset:X} size=0x{text_size:X} vaddr=0x{text_vaddr:X}")
 
-    # 2. Generate or derive XOR key
+    # 2. Find decrypt symbols (must be compiled into the SO)
+    key_loc = _find_symbol_file_offset(elf, bytes(data), 'lianyu_xor_key')
+    start_loc = _find_symbol_file_offset(elf, bytes(data), 'lianyu_text_start')
+    size_loc = _find_symbol_file_offset(elf, bytes(data), 'lianyu_text_size')
+
+    if key_loc is None or start_loc is None or size_loc is None:
+        print(f"  ERROR: decrypt symbols not found (decrypt-stub.cpp not compiled in?)")
+        missing = []
+        if key_loc is None: missing.append('lianyu_xor_key')
+        if start_loc is None: missing.append('lianyu_text_start')
+        if size_loc is None: missing.append('lianyu_text_size')
+        print(f"  Missing: {', '.join(missing)}")
+        return False
+
+    key_file_off, key_size = key_loc
+    start_file_off, start_size = start_loc
+    size_file_off, size_size = size_loc
+
+    print(f"  lianyu_xor_key:    offset=0x{key_file_off:X} size={key_size}")
+    print(f"  lianyu_text_start: offset=0x{start_file_off:X} size={start_size}")
+    print(f"  lianyu_text_size:  offset=0x{size_file_off:X} size={size_size}")
+
+    # Verify .lianyu_decrypt section exists (decrypt code must not be in .text)
+    decrypt_sec = find_section(elf, '.lianyu_decrypt')
+    if decrypt_sec is None:
+        print(f"  WARNING: .lianyu_decrypt section not found — decrypt code may be in .text!")
+        print(f"  This would cause the decrypt function to be encrypted. Aborting.")
+        return False
+    else:
+        dec_off = decrypt_sec['sh_offset']
+        dec_size = decrypt_sec['sh_size']
+        print(f"  .lianyu_decrypt: offset=0x{dec_off:X} size=0x{dec_size:X}")
+        # Verify no overlap with .text
+        if dec_off < text_offset + text_size and dec_off + dec_size > text_offset:
+            print(f"  ERROR: .lianyu_decrypt overlaps with .text — cannot encrypt safely")
+            return False
+
+    # 3. Generate or derive XOR key
     if xor_key is None:
         xor_key = derive_key_from_env()
     if xor_key is None:
@@ -437,7 +494,7 @@ def pack_so(input_path: str, output_path: str,
         print(f"  ERROR: XOR key must be {XOR_KEY_SIZE} bytes, got {len(xor_key)}")
         return False
 
-    # 3. Encrypt .text in-place
+    # 4. Encrypt .text in-place (NO file insertion)
     text_data = data[text_offset:text_offset + text_size]
     original_checksum = hashlib.sha256(text_data).hexdigest()[:16]
     xor_encrypt(text_data, xor_key)
@@ -446,84 +503,33 @@ def pack_so(input_path: str, output_path: str,
     print(f"  .text SHA256 (after):  {encrypted_checksum}")
     data[text_offset:text_offset + text_size] = text_data
 
-    # 4. Generate or compile decrypt stub
-    if project_root is None:
-        project_root = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(project_root)  # up from tools/
+    # 5. Patch symbol values in the file
+    # Patch lianyu_xor_key (16 bytes)
+    data[key_file_off:key_file_off + 16] = xor_key
 
-    try:
-        stub_data = compile_decrypt_stub_asm(project_root, is_64bit)
-        print(f"  Compiled stub: {len(stub_data)} bytes")
-    except Exception as e:
-        print(f"  [WARN] Stub compilation failed: {e}")
-        print(f"  Using fallback pre-computed stub")
-        stub_data = _get_fallback_stub(is_64bit)
+    # Patch lianyu_text_start with SIGNED OFFSET from &lianyu_xor_key to .text.
+    # At runtime: text_ptr = &lianyu_xor_key + (int64_t)lianyu_text_start
+    # This is ASLR-independent — works regardless of where the SO is loaded.
+    # Note: lianyu_text_start is always uint64_t (8 bytes) in the C code,
+    # so we always write 8 bytes with signed 64-bit format.
+    key_sym = find_symbol(elf, 'lianyu_xor_key')
+    key_vaddr = key_sym['st_value'] if key_sym else 0
+    text_offset_from_key = text_vaddr - key_vaddr  # signed, may be negative
 
-    stub_data = bytearray(stub_data)
+    print(f"  text_vaddr=0x{text_vaddr:X} key_vaddr=0x{key_vaddr:X} offset={text_offset_from_key}")
 
-    # 5. Embed XOR key at end of stub, patch placeholders
-    # Key is placed right after the stub code
-    key_offset_in_stub = len(stub_data)
-    stub_data.extend(xor_key)
+    struct.pack_into('<q', data, start_file_off, text_offset_from_key)
+    struct.pack_into('<Q', data, size_file_off, text_size)
 
-    # Where the key will be in memory:
-    # Key VA = new text_start + key_offset_in_stub
-    new_text_start = text_vaddr  # stub injected at .text start
-    key_va = new_text_start + key_offset_in_stub
-
-    # Pad stub to 16-byte alignment
-    align_pad = (16 - (len(stub_data) % 16)) % 16
-    if align_pad:
-        stub_data.extend(b'\x00' * align_pad)
-
-    # Patch placeholders in the stub
-    patch_stub_placeholders(stub_data, text_vaddr, text_size, key_va, is_64bit)
-
-    # 6. Inject stub: prepend to .text, shift original
-    # Stub goes BEFORE the original .text
-    stub_size = len(stub_data)
-    stub_offset = text_offset  # stub starts at original .text offset
-
-    # Insert stub + encrypted .text + tail
-    # .text region becomes: [stub] [encrypted_original_text]
-    new_text_data = bytes(stub_data) + bytes(data[text_offset:text_offset + text_size])
-    new_text_size = len(new_text_data)
-
-    # Rebuild file: [before_text] [new_text_data] [after_text]
-    before = data[:text_offset]
-    after = data[text_offset + text_size:]
-    new_data = before + new_text_data + after
-
-    # 7. Update ELF section headers
-    # .text section now includes the stub
-    shift = stub_size  # .text grew by stub_size bytes
-
-    # Update .text section header
-    _update_section_header(new_data, elf, '.text',
-                           sh_size=new_text_size,
-                           sh_offset=text_offset)
-
-    # Shift all section offsets after .text
-    _shift_sections(new_data, elf, text_offset + text_size, shift)
-
-    # Update program headers
-    _update_program_headers(new_data, elf, text_offset + text_size, shift)
-
-    # 8. Update symbol table: add/update decrypt symbols
-    # If lianyu_d2_decrypt exists, update its value to point to stub start
-    # Otherwise create it
-
-    # 9. Write output
+    # 6. Write output — file size is UNCHANGED (in-place encryption)
     with open(output_path, 'wb') as f:
-        f.write(new_data)
+        f.write(data)
 
     orig_size = os.path.getsize(input_path)
-    new_size = len(new_data)
+    new_size = len(data)
     print(f"  Original size: {orig_size} bytes")
-    print(f"  Packed size:   {new_size} bytes (+{new_size - orig_size})")
-    print(f"  Stub injected at file offset 0x{stub_offset:X}")
-    print(f"  Key embedded at stub+0x{key_offset_in_stub:X} (VA 0x{key_va:X})")
-    print(f"  ✅ Packed SO written to: {output_path}")
+    print(f"  Packed size:   {new_size} bytes (delta: {new_size - orig_size})")
+    print(f"  OK Packed SO written to: {output_path}")
 
     return True
 
@@ -675,9 +681,9 @@ def pack_apk(input_apk: str, output_apk: str,
                     zf_out.writestr(zipfile.ZipInfo(name), so_data[name])
                 else:
                     zf_out.writestr(zipfile.ZipInfo(name), data)
-        print(f"\n✅ Packed {packed} SO(s) into {output_apk}")
+        print(f"\nOK Packed {packed} SO(s) into {output_apk}")
     else:
-        print(f"\n⚠ No SOs packed — output APK unchanged")
+        print(f"\nWARN No SOs packed - output APK unchanged")
         shutil.copy(input_apk, output_apk)
 
     return packed > 0

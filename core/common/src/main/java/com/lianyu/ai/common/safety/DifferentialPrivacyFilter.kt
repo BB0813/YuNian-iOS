@@ -2,7 +2,7 @@ package com.lianyu.ai.common.safety
 
 import kotlin.math.exp
 import kotlin.math.ln
-import kotlin.random.Random
+import java.security.SecureRandom
 
 /**
  * ε-Local Differential Privacy filter for chat messages.
@@ -24,6 +24,8 @@ import kotlin.random.Random
  * Default: ε = 1.0 (moderate privacy with reasonable utility)
  */
 object DifferentialPrivacyFilter {
+
+    private val random = SecureRandom()
 
     /** Default privacy budget (ε). Higher = less noise, lower = more privacy. */
     var epsilon: Double = 1.0
@@ -74,20 +76,20 @@ object DifferentialPrivacyFilter {
         // Replace structured PII patterns with probability (1-p)
         for ((pattern, replacement) in piiPatterns) {
             result = pattern.replace(result) { match ->
-                if (Random.nextDouble() < p) match.value else replacement
+                if (random.nextDouble() < p) match.value else replacement
             }
         }
 
         // Replace geographic names
         for ((pattern, replacement) in geoPatterns) {
             result = pattern.replace(result) { match ->
-                if (Random.nextDouble() < p) match.value else replacement
+                if (random.nextDouble() < p) match.value else replacement
             }
         }
 
         // Replace personal names (only in Chinese text context)
         result = namePattern.replace(result) { match ->
-            if (Random.nextDouble() < p) match.value else "[NAME]"
+            if (random.nextDouble() < p) match.value else "[NAME]"
         }
 
         return result
