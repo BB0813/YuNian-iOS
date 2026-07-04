@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.settings.ui.screen
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -87,6 +88,16 @@ internal val PetalErrorContainer = Color(0xFFFFDAD6)
 internal val PetalGreen = Color(0xFF10A37F)
 internal val PetalGreenLight = Color(0xFFE8F5E9)
 internal val PetalOrange = Color(0xFFFFA726)
+
+// ═══ Clove API error code mapping ═══
+private fun mapErrorCode(code: String): String = when (code) {
+    "upstream_unreachable" -> "上游不通"
+    "account_blocked" -> "已冻结"
+    "key_disabled" -> "密钥已禁用"
+    "network_error" -> "网络不通"
+    "timeout" -> "超时"
+    else -> "失败"
+}
 
 // ============================================================
 // PetalStatChip - 状态标签小组件
@@ -226,7 +237,7 @@ private fun PetalApiConfigEditDialog(
                     }
                     if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
                         Text(
-                            text = "✅ SuFlow API 已连接",
+                            text = "Clove API 已连接",
                             color = PetalGreen,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
@@ -243,7 +254,7 @@ private fun PetalApiConfigEditDialog(
                         }
                     } else {
                         Text(
-                            text = "点击下方「测试」验证 SuFlow API 连接",
+                            text = "点击下方「测试」验证 Clove API 连接",
                             color = textSecondaryColor,
                             fontSize = 13.sp
                         )
@@ -668,6 +679,7 @@ fun PetalApiCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .animateContentSize()
             .clickable { onExpandToggle() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
@@ -704,8 +716,12 @@ fun PetalApiCard(
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> textSecondaryColor
                     }
                     val statusText = when (connectionResult.status) {
-                        SettingsViewModel.ConnectionStatus.CONNECTED -> "已连接"
-                        SettingsViewModel.ConnectionStatus.FAILED -> "失败"
+                        SettingsViewModel.ConnectionStatus.CONNECTED ->
+                            if (connectionResult.latencyMs > 0) "已连接 ${connectionResult.latencyMs}ms" else "已连接"
+                        SettingsViewModel.ConnectionStatus.FAILED -> {
+                            val err = connectionResult.errorCode
+                            if (err != null) mapErrorCode(err) else "失败"
+                        }
                         SettingsViewModel.ConnectionStatus.TESTING -> "测试中"
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> "未测试"
                     }
@@ -732,6 +748,40 @@ fun PetalApiCard(
                 // Model info
                 if (config.provider == ApiProvider.PARTNER) {
                     Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Column {
+                            Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
+                                color = PetalGreen, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                            connectionResult.groupName?.let { gn ->
+                                Text("组: $gn | 剩余: $${String.format("%.2f", connectionResult.remainingQuota)}",
+                                    color = PetalGreen.copy(alpha = 0.8f), fontSize = 11.sp)
+                            }
+                            if (connectionResult.rpmLimit > 0) {
+                                Text("RPM: ${connectionResult.rpmLimit} | 日限额: $${connectionResult.dailyLimit ?: "∞"}",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
+                    } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val errCode = connectionResult.errorCode ?: "unknown"
+                        val errLabel = mapErrorCode(errCode)
+                        Column {
+                            Text("$errLabel | error=${errCode} | latency=${connectionResult.latencyMs}ms",
+                                color = PetalError, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                            connectionResult.errorMessage?.let { msg ->
+                                Text(msg, color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
                     Text(
@@ -887,6 +937,7 @@ fun PetalSavedApiCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .animateContentSize()
             .clickable { onExpandToggle() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor)
@@ -934,8 +985,12 @@ fun PetalSavedApiCard(
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> textSecondaryColor
                     }
                     val statusText = when (connectionResult.status) {
-                        SettingsViewModel.ConnectionStatus.CONNECTED -> "已连接"
-                        SettingsViewModel.ConnectionStatus.FAILED -> "失败"
+                        SettingsViewModel.ConnectionStatus.CONNECTED ->
+                            if (connectionResult.latencyMs > 0) "已连接 ${connectionResult.latencyMs}ms" else "已连接"
+                        SettingsViewModel.ConnectionStatus.FAILED -> {
+                            val err = connectionResult.errorCode
+                            if (err != null) mapErrorCode(err) else "失败"
+                        }
                         SettingsViewModel.ConnectionStatus.TESTING -> "测试中"
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> "未测试"
                     }
@@ -962,6 +1017,40 @@ fun PetalSavedApiCard(
                 // Model info
                 if (config.provider == ApiProvider.PARTNER) {
                     Text("模型: 自动分配", color = PetalGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    if (connectionResult.status == SettingsViewModel.ConnectionStatus.CONNECTED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Column {
+                            Text("延迟: ${connectionResult.latencyMs}ms | 状态: 已连接",
+                                color = PetalGreen, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                            connectionResult.groupName?.let { gn ->
+                                Text("组: $gn | 剩余: $${String.format("%.2f", connectionResult.remainingQuota)}",
+                                    color = PetalGreen.copy(alpha = 0.8f), fontSize = 11.sp)
+                            }
+                            if (connectionResult.rpmLimit > 0) {
+                                Text("RPM: ${connectionResult.rpmLimit} | 日限额: $${connectionResult.dailyLimit ?: "∞"}",
+                                    color = PetalGreen.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
+                    } else if (connectionResult.status == SettingsViewModel.ConnectionStatus.FAILED) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val errCode = connectionResult.errorCode ?: "unknown"
+                        val errLabel = mapErrorCode(errCode)
+                        Column {
+                            Text("$errLabel | error=${errCode} | latency=${connectionResult.latencyMs}ms",
+                                color = PetalError, fontSize = 12.sp)
+                            connectionResult.clientId?.let { cid ->
+                                Text("Client ID: $cid",
+                                    color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                            connectionResult.errorMessage?.let { msg ->
+                                Text(msg, color = PetalError.copy(alpha = 0.7f), fontSize = 11.sp)
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                 } else if (config.model.isNotEmpty()) {
                     Text(

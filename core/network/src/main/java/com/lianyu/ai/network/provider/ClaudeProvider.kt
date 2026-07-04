@@ -226,7 +226,7 @@ class ClaudeProvider : AiProvider {
         }
 
         val requestBody = org.json.JSONObject()
-        requestBody.put("model", config.model)
+        if (config.model.isNotBlank()) requestBody.put("model", config.model)
         requestBody.put("messages", anthropicMessages)
         requestBody.put("system", systemPrompt)
         requestBody.put("max_tokens", config.maxTokens ?: 800)

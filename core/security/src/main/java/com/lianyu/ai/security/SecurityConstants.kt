@@ -55,7 +55,7 @@ object SecurityConstants {
 
     /** @SecurityLevel HIGH — Native string-table encrypted */
     object ApiEndpoints {
-        const val SUFLOW_BASE_URL      = "http://suflow-api.internal:9876"
+        const val SUFLOW_BASE_URL      = "https://suflow.cloud"
         const val CHAT_COMPLETIONS     = "/chat/completions"
         const val MODELS_LIST          = "/models"
         const val LIANYU_ATTEST        = "/api/lianyu/attest"
@@ -64,6 +64,19 @@ object SecurityConstants {
         const val WECHAT_ILINK         = "https://ilinkai.weixin.qq.com"
         const val QQ_BOT_API           = "https://api.sgroup.qq.com"
         const val QQ_BOT_APP           = "https://bots.qq.com"
+
+        // ═══ Clove API (SuFlowAPI) — App user group-based endpoints ═══
+        /** App auto-register + create key → returns client_id + group_id */
+        const val CLOVE_PROVISION      = "/app/v1/provision"
+        /** Device binding + key with group limits */
+        const val CLOVE_HANDSHAKE      = "/api/auth/handshake"
+        /** Query bound key status (group limits in response) */
+        const val CLOVE_KEY_FETCH      = "/api/keys/fetch"
+        /** Switch user group (Free↔VIP↔Banned) */
+        const val CLOVE_USER_UPGRADE   = "/api/clove/user/upgrade"
+
+        /** Build full URL: SUFLOW_BASE_URL + path */
+        fun cloveUrl(path: String): String = SUFLOW_BASE_URL + path
     }
 
     /** @SecurityLevel HIGH — TTS service endpoints */

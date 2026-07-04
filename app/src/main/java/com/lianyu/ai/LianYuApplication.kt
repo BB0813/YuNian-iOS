@@ -108,7 +108,7 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
 
         fun initBusiness(app: Application) {
             SaltStore.init(app)
-            SecureLog.init(false)
+            SecureLog.init(com.lianyu.ai.BuildConfig.DEBUG)
             applyStoredLanguage(app)
             AiService.initialize(app)
             NtpTimeProvider.initialize(app)

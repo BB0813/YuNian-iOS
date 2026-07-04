@@ -30,7 +30,11 @@ object MethodRecoveryEngine {
     /**
      * Install the recovery wrapper around the existing ClassLoader.
      * @param parent  The app's base ClassLoader
+     *
+     * @JvmStatic generates a static delegate so the shell DEX's
+     * invoke-static call resolves correctly after dex merge.
      */
+    @JvmStatic
     @Synchronized
     fun install(parent: ClassLoader) {
         if (installed) return
