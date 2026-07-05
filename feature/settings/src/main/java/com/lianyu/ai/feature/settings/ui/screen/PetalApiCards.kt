@@ -325,7 +325,14 @@ private fun PetalApiConfigEditDialog(
                         unfocusedTextColor = textPrimaryColor
                     ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    singleLine = true
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            text = "填到能拼 /chat/completions 的那一层，如 https://api.openai.com/v1",
+                            color = textTertiary,
+                            fontSize = 11.sp
+                        )
+                    }
                 )
 
                 // API 格式选择 — 仅对自定义 API 显示（置于模型区域之前，切换协议即时影响一键拉取）

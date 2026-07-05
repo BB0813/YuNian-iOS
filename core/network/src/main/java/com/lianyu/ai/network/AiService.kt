@@ -981,18 +981,11 @@ class AiService(context: Context) : AiServiceProvider {
     }
 
     private fun normalizeOpenAiBaseUrl(baseUrl: String): String {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        return if (
-            trimmed.endsWith("/v1") ||
-            trimmed.endsWith("/v1beta") ||
-            trimmed.endsWith("/v4") ||
-            trimmed.endsWith("/openai") ||
-            trimmed.endsWith("/compatible-mode/v1")
-        ) {
-            trimmed
-        } else {
-            "$trimmed/v1"
-        }
+        // Trust the user-provided base URL as-is. Many third-party relays and
+        // self-hosted gateways use non-/v1 paths (e.g. /api, /v2). Auto-appending
+        // /v1 breaks those configs. The UI hint documents the expected layer
+        // (the path segment that /models or /chat/completions will be appended to).
+        return baseUrl.trim().trimEnd('/')
     }
 
     /**
