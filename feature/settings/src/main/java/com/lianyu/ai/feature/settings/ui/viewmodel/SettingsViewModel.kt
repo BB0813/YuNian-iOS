@@ -626,21 +626,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
                 SecureLog.d("SettingsViewModel", "Calling API with: url=${testConfig.baseUrl}, model=${testConfig.model}")
 
-                when (currentConfig.provider) {
-                    ApiProvider.OPENAI,
-                    ApiProvider.GEMINI,
-                    ApiProvider.DEEPSEEK,
-                    ApiProvider.DASHSCOPE,
-                    ApiProvider.KIMI,
-                    ApiProvider.XIAOMI,
-                    ApiProvider.ZHIPU,
-                    ApiProvider.SILICONFLOW,
-                    ApiProvider.OPENROUTER,
-                    ApiProvider.GROQ,
-                    ApiProvider.CUSTOM,
-                    ApiProvider.IFLYTEK,
-                    ApiProvider.PARTNER -> aiService.callOpenAiCompatibleForTest(testConfig, testMessages)
-                    ApiProvider.ANTHROPIC -> aiService.callAnthropicForTest(testConfig, testMessages, "Be helpful.")
+                if (AiService.usesAnthropicProtocol(testConfig)) {
+                    aiService.callAnthropicForTest(testConfig, testMessages, "Be helpful.")
+                } else {
+                    aiService.callOpenAiCompatibleForTest(testConfig, testMessages)
                 }
             }.also {
                 // [R17 FIX] runCatching 吞 CancellationException，这里重新抛出
