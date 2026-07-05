@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.database.DefaultCompanionSeeder
 import com.lianyu.ai.database.RolePresetStore
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.UserRepository
@@ -103,8 +104,15 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
      * called on the main thread" 崩溃。
      */
     fun switchRole(targetRole: CompanionRole, onComplete: (() -> Unit)? = null) {
+        // 即便目标角色与当前角色相同（如首次选择"AI女友"或跳过），也必须持久化
+        // selected_role，否则 MainActivity 每次重启都会重新弹出角色选择页。
         if (targetRole == repository.selectedRole.value) {
-            onComplete?.invoke()
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    repository.updateSelectedRole(targetRole)
+                }
+                onComplete?.invoke()
+            }
             return
         }
 
@@ -137,14 +145,33 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
                         companionRepository.updateCompanion(updatedCompanion)
                     }
                 } else {
-                    // 没有默认伴侣时直接插入目标预设的新实体
-                    _switchState.value = RoleSwitchState.InProgress(SwitchStage.LOADING_PRESET)
-                    val targetPreset = withContext(Dispatchers.IO) {
-                        rolePresetStore.getPreset(targetRole)
-                    }
-                    _switchState.value = RoleSwitchState.InProgress(SwitchStage.APPLYING_PRESET)
+                    // 没有默认伴侣时，先让全局 seeder 在同一把锁下补齐；避免首次选男友
+                    // 与 Application 异步 seed 并发插入两个默认伴侣。
                     withContext(Dispatchers.IO) {
-                        companionRepository.insertCompanion(targetPreset.createCompanion())
+                        DefaultCompanionSeeder.seedIfNeeded(getApplication())
+                    }
+                    val seededCompanion = withContext(Dispatchers.IO) {
+                        companionRepository.getDefaultExperienceCompanion()
+                    }
+
+                    if (seededCompanion != null) {
+                        _switchState.value = RoleSwitchState.InProgress(SwitchStage.LOADING_PRESET)
+                        val targetPreset = withContext(Dispatchers.IO) {
+                            rolePresetStore.getPreset(targetRole)
+                        }
+                        _switchState.value = RoleSwitchState.InProgress(SwitchStage.APPLYING_PRESET)
+                        withContext(Dispatchers.IO) {
+                            companionRepository.updateCompanion(targetPreset.applyTo(seededCompanion))
+                        }
+                    } else {
+                        _switchState.value = RoleSwitchState.InProgress(SwitchStage.LOADING_PRESET)
+                        val targetPreset = withContext(Dispatchers.IO) {
+                            rolePresetStore.getPreset(targetRole)
+                        }
+                        _switchState.value = RoleSwitchState.InProgress(SwitchStage.APPLYING_PRESET)
+                        withContext(Dispatchers.IO) {
+                            companionRepository.insertCompanion(targetPreset.createCompanion())
+                        }
                     }
                 }
 

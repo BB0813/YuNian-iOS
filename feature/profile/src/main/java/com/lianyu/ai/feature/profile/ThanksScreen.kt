@@ -32,6 +32,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -1159,20 +1160,16 @@ fun ThanksScreen(
     onNavigateBack: () -> Unit,
     onViewFullList: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     var isVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { isVisible = true }
 
-    Box(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        // 全屏背景图：等比例铺满屏幕，延伸至状态栏下方，消除左右空白
-        Image(
-            painter = painterResource(id = R.drawable.thanks_bg),
-            contentDescription = null,
+    Box(modifier = Modifier.fillMaxSize()) {
+        Surface(
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+            color = colorScheme.background
+        ) {}
 
         // 名单列表：放置在画面中下方（用户圈定的空白区域），避免与顶部返回按钮重叠
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1190,7 +1187,7 @@ fun ThanksScreen(
             ) {
                 itemsIndexed(
                     sponsors.take(6),
-                    key = { _, item -> item.name }
+                    key = { index, item -> "${item.name}_${item.avatarRes ?: index}_$index" }
                 ) { index, sponsor ->
                     SponsorItem(
                         sponsor = sponsor,
@@ -1217,11 +1214,11 @@ fun ThanksScreen(
                 .shadow(
                     elevation = 6.dp,
                     shape = CircleShape,
-                    ambientColor = Color(0xFFF4A6B5),
-                    spotColor = Color(0xFFF4A6B5)
+                    ambientColor = colorScheme.primary.copy(alpha = 0.35f),
+                    spotColor = colorScheme.primary.copy(alpha = 0.35f)
                 )
                 .background(
-                    color = Color.White.copy(alpha = 0.88f),
+                    color = colorScheme.surface.copy(alpha = 0.88f),
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
@@ -1233,7 +1230,7 @@ fun ThanksScreen(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.back),
-                    tint = Color(0xFFE85D75),
+                    tint = colorScheme.primary,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -1245,6 +1242,7 @@ fun ThanksScreen(
 fun ThanksFullListScreen(
     onNavigateBack: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     var isVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { isVisible = true }
@@ -1252,13 +1250,10 @@ fun ThanksFullListScreen(
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
-        // 全屏背景图
-        Image(
-            painter = painterResource(id = R.drawable.thanks_bg),
-            contentDescription = null,
+        Surface(
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+            color = colorScheme.background
+        ) {}
 
         // 完整名单
         LazyColumn(
@@ -1275,7 +1270,7 @@ fun ThanksFullListScreen(
         ) {
             itemsIndexed(
                 sponsors,
-                key = { _, item -> item.name }
+                key = { index, item -> "${item.name}_${item.avatarRes ?: index}_$index" }
             ) { index, sponsor ->
                 SponsorItem(
                     sponsor = sponsor,
@@ -1297,11 +1292,11 @@ fun ThanksFullListScreen(
                 .shadow(
                     elevation = 6.dp,
                     shape = CircleShape,
-                    ambientColor = Color(0xFFF4A6B5),
-                    spotColor = Color(0xFFF4A6B5)
+                    ambientColor = colorScheme.primary.copy(alpha = 0.35f),
+                    spotColor = colorScheme.primary.copy(alpha = 0.35f)
                 )
                 .background(
-                    color = Color.White.copy(alpha = 0.88f),
+                    color = colorScheme.surface.copy(alpha = 0.88f),
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
@@ -1313,7 +1308,7 @@ fun ThanksFullListScreen(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.back),
-                    tint = Color(0xFFE85D75),
+                    tint = colorScheme.primary,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -1327,6 +1322,7 @@ private fun SponsorItem(
     index: Int,
     isVisible: Boolean
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val animated by animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
         animationSpec = tween(400, delayMillis = 200 + index * 80),
@@ -1345,8 +1341,8 @@ private fun SponsorItem(
                 .shadow(
                     elevation = 4.dp,
                     shape = RoundedCornerShape(20.dp),
-                    ambientColor = Color(0xFF8B5CF6).copy(alpha = 0.3f),
-                    spotColor = Color(0xFF8B5CF6).copy(alpha = 0.3f)
+                    ambientColor = colorScheme.primary.copy(alpha = 0.18f),
+                    spotColor = colorScheme.primary.copy(alpha = 0.18f)
                 ),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1396,7 +1392,7 @@ private fun SponsorItem(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 15.sp
                             ),
-                            color = Color.Black,
+                            color = colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1405,7 +1401,7 @@ private fun SponsorItem(
                             imageVector = Icons.Filled.Favorite,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
-                            tint = Color(0xFFE85D75).copy(alpha = 0.8f)
+                            tint = colorScheme.primary.copy(alpha = 0.8f)
                         )
                     }
                     if (sponsor.message.isNotBlank()) {
@@ -1416,7 +1412,7 @@ private fun SponsorItem(
                                 fontSize = 13.sp,
                                 lineHeight = 18.sp
                             ),
-                            color = Color.Black.copy(alpha = 0.6f),
+                            color = colorScheme.onSurfaceVariant,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1431,12 +1427,13 @@ private fun SponsorItem(
 private fun ViewFullListButton(
     onClick: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.2f))
+            .background(colorScheme.primary.copy(alpha = 0.12f))
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center
@@ -1447,13 +1444,14 @@ private fun ViewFullListButton(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium
             ),
-            color = Color.Black.copy(alpha = 0.9f)
+            color = colorScheme.primary
         )
     }
 }
 
 @Composable
 private fun FooterNote() {
+    val colorScheme = MaterialTheme.colorScheme
     Text(
         text = "排名不分先后    名单持续更新",
         modifier = Modifier
@@ -1463,6 +1461,6 @@ private fun FooterNote() {
             fontSize = 12.sp,
             textAlign = TextAlign.Center
         ),
-        color = Color.Black.copy(alpha = 0.5f)
+        color = colorScheme.onSurfaceVariant
     )
 }

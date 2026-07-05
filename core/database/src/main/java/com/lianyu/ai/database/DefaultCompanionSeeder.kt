@@ -3,11 +3,14 @@ package com.lianyu.ai.database
 import android.content.Context
 import com.lianyu.ai.database.dao.CompanionDao
 import com.lianyu.ai.database.model.CompanionEntity
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 object DefaultCompanionSeeder {
     private const val MASK = 73
     private const val PREFS_NAME = "default_companion"
     private const val KEY_DELETED_BY_USER = "deleted_by_user"
+    private val seedMutex = Mutex()
 
     val defaultExperienceCompanionTag: String
         get() = reveal(TAG)
@@ -33,9 +36,9 @@ object DefaultCompanionSeeder {
      *
      * 注意：必须在后台协程中调用，禁止在主线程同步执行数据库 IO。
      */
-    suspend fun seedIfNeeded(context: Context) {
+    suspend fun seedIfNeeded(context: Context) = seedMutex.withLock {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_DELETED_BY_USER, false)) return
+        if (prefs.getBoolean(KEY_DELETED_BY_USER, false)) return@withLock
         runCatching {
             val db = AppDatabase.getDatabase(context.applicationContext)
             ensureDefaultTestCompanion(db.companionDao())

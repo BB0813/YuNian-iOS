@@ -123,13 +123,13 @@ class ChatViewModel(
     // TtsService 单例和 AudioManager / 通信设备冲突。
     @Volatile
     private var callActive: Boolean = false
-    @Volatile
-    private var chatTtsConfig: ChatTtsConfig = ChatTtsConfig.fromSharedPreferences(application)
+    private val _chatTtsConfig = MutableStateFlow(ChatTtsConfig.fromSharedPreferences(application))
+    val chatTtsConfig: StateFlow<ChatTtsConfig> = _chatTtsConfig.asStateFlow()
     private val chatTtsController = ChatTtsController(
         context = application.applicationContext,
         ttsService = ttsService,
         scope = ApplicationScopeProvider.scope,
-        configProvider = { chatTtsConfig },
+        configProvider = { _chatTtsConfig.value },
         callActiveProvider = { callActive }
     )
     /** 朗读状态（供 UI 显示朗读中/空闲） */
@@ -209,9 +209,12 @@ class ChatViewModel(
     }
 
     private fun exitLoading() {
-        // [P1 REVIEW FIX] decrementAndGet 可能返回负值（finally + 手动 exitLoading 双重调用）。
-        // 用 coerceAtLeast(0) 兜底，避免计数器变负导致 enterLoading 的 ==1 永不成立、loading 永久失效。
-        if (_activeRequests.decrementAndGet().coerceAtLeast(0) == 0) {
+        // finally + 早退分支可能重复调用 exitLoading；必须把计数器本身钳制回 0，
+        // 否则只对返回值 coerceAtLeast(0) 会留下负数，导致下次 enterLoading 递增不到 1。
+        val remaining = _activeRequests.updateAndGet { current ->
+            (current - 1).coerceAtLeast(0)
+        }
+        if (remaining == 0) {
             _isLoading.value = false
             chatTypingState.stopTyping()
         }
@@ -1170,15 +1173,7 @@ class ChatViewModel(
     suspend fun sendVoiceCallMessage(text: String): String? {
         val companion = _companionData.value ?: return null
 
-        // 构建聊天历史
-        val fetchedHistory = contextResolver.getHistoryForAi(companionId)
-            .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
-
-        val historyForAi = fetchedHistory.toAiChatMessages()
-        val companionInfo = companion.toAiCompanionInfo()
-        val tools = com.lianyu.ai.domain.ToolRegistry.all()
-
-        // 保存用户消息到数据库
+        // 先保存当前语音消息，再构建 AI 历史；否则语音通话回复会看不到本轮用户输入。
         val userMessage = ChatMessage(
             companionId = companionId,
             content = text,
@@ -1186,6 +1181,13 @@ class ChatViewModel(
             timestamp = System.currentTimeMillis()
         )
         chatRepository.sendMessage(userMessage)
+
+        val fetchedHistory = contextResolver.getHistoryForAi(companionId)
+            .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
+
+        val historyForAi = fetchedHistory.toAiChatMessages()
+        val companionInfo = companion.toAiCompanionInfo()
+        val tools = com.lianyu.ai.domain.ToolRegistry.all()
 
         return try {
             val response = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
@@ -1239,8 +1241,8 @@ class ChatViewModel(
      * 切换到 SILENT 时停止当前朗读。
      */
     fun setTtsMode(mode: ChatTtsMode) {
-        val newConfig = chatTtsConfig.copy(mode = mode)
-        chatTtsConfig = newConfig
+        val newConfig = _chatTtsConfig.value.copy(mode = mode)
+        _chatTtsConfig.value = newConfig
         ChatTtsConfig.saveToSharedPreferences(getApplication(), newConfig)
         if (mode == ChatTtsMode.SILENT) {
             chatTtsController.stop()
@@ -1249,11 +1251,11 @@ class ChatViewModel(
     }
 
     /** 获取当前聊天页 TTS 配置（供 UI 读取） */
-    fun getTtsConfig(): ChatTtsConfig = chatTtsConfig
+    fun getTtsConfig(): ChatTtsConfig = _chatTtsConfig.value
 
     /** 更新聊天页 TTS 配置（朗读模式之外的子项：跳过括号/美化/去重）并持久化 */
     fun updateTtsConfig(config: ChatTtsConfig) {
-        chatTtsConfig = config
+        _chatTtsConfig.value = config
         ChatTtsConfig.saveToSharedPreferences(getApplication(), config)
     }
 
