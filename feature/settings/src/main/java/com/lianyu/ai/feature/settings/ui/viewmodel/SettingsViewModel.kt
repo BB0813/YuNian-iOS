@@ -30,8 +30,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     // [R6 FIX] 改为懒加载 ServiceRegistry 单例：原 6 处直接 new AiService(getApplication())，
     // 每次点击都新建网关实例（含 OkHttpClient/Retrofit/重试器/限流器），绕过单例。
-    private val aiService: AiService by lazy {
-        ServiceRegistry.getOrThrow(AiService::class.java)
+    // [FIX] 必须用接口 AiServiceProvider 查找，与 LianYuApplication.registerSingleton 的 key 一致，
+    // 否则 release 构建下 AiService 被 R8 混淆成 x8，注册表里查不到 → "x8 not registered"。
+    private val aiService: com.lianyu.ai.network.AiService by lazy {
+        ServiceRegistry.getOrThrow(com.lianyu.ai.domain.AiServiceProvider::class.java)
+            as com.lianyu.ai.network.AiService
     }
     // [R6 FIX] localModelProvider 也改 lazy，避免构造时 ServiceRegistry.get 返回 null
     private val localModelProvider by lazy {
