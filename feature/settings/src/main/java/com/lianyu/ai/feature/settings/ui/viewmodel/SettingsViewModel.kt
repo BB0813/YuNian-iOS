@@ -747,6 +747,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun fetchModels(baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
+            _fetchedModels.value = _fetchedModels.value.toMutableMap().apply {
+                remove(provider)
+            }
             _modelFetchStates.value = _modelFetchStates.value.toMutableMap().apply {
                 put(provider, ModelFetchState(isLoading = true))
             }
@@ -758,7 +761,22 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 } catch (e: Exception) {
                     null
                 }
-                
+
+                val modelListConfig = ApiConfig(
+                    provider = resolvedProvider ?: ApiProvider.CUSTOM,
+                    apiKey = apiKey,
+                    baseUrl = baseUrl,
+                    model = "",
+                    skipCertVerify = skipCertVerify,
+                    formatHint = if (provider == "CUSTOM_ANTHROPIC") "anthropic" else "openai"
+                )
+                if (!com.lianyu.ai.network.AiService.supportsOpenAiModelList(modelListConfig)) {
+                    _modelFetchStates.value = _modelFetchStates.value.toMutableMap().apply {
+                        put(provider, ModelFetchState(errorMessage = "Anthropic 兼容模式通常不支持 /models，请手动填写模型名"))
+                    }
+                    return@launch
+                }
+
                 // PARTNER 模式下，如果 apiKey 为空，从服务器获取
                 var keyToUse = apiKey
                 if (resolvedProvider == ApiProvider.PARTNER && keyToUse.isBlank()) {
