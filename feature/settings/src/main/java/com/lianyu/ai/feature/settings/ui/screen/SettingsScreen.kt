@@ -777,6 +777,8 @@ fun ApiConfigEditDialog(
 
     val isPartner = config.provider == ApiProvider.PARTNER
     val isCustom = config.provider == ApiProvider.CUSTOM
+    val isCustomAnthropic = isCustom && formatHint == "anthropic"
+    val canFetchOpenAiModels = onFetchModels != null && !isCustomAnthropic && baseUrl.isNotBlank() && (isPartner || apiKey.isNotBlank())
     val isValid = apiKey.isNotBlank() || baseUrl.isNotBlank() || isPartner
     val hasModels = availableModels.isNotEmpty()
 
@@ -787,13 +789,11 @@ fun ApiConfigEditDialog(
         else -> "填写密钥后自动拉取模型"
     }
 
-    LaunchedEffect(apiKey, baseUrl, config.provider) {
+    LaunchedEffect(apiKey, baseUrl, config.provider, formatHint, skipCertVerify) {
         val fetchParams = baseUrl.trim() + "|" + apiKey.trim()
         // PARTNER：baseUrl 非空即可自动拉取（密钥可空，由服务器下发）
         // CUSTOM：baseUrl 和 apiKey 都非空才自动拉取
-        val shouldFetch = baseUrl.isNotBlank() &&
-                (isPartner || (isCustom && apiKey.isNotBlank())) &&
-                fetchParams != lastFetchedParams
+        val shouldFetch = canFetchOpenAiModels && fetchParams != lastFetchedParams
         if (shouldFetch) {
             delay(600)
             lastFetchedParams = fetchParams
@@ -907,16 +907,24 @@ fun ApiConfigEditDialog(
                     singleLine = true
                 )
 
-                if (hasModels && onFetchModels != null) {
+                // API 格式选择 — 仅对自定义 API 显示
+                if (isCustom) {
+                    var showFormatDropdown by remember { mutableStateOf(false) }
+                    val formatOptions = mapOf(
+                        "openai" to "OpenAI 兼容",
+                        "anthropic" to "Anthropic 兼容"
+                    )
+                    val selectedFormatText = formatOptions[formatHint] ?: "OpenAI 兼容"
+
                     Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
-                            value = selectedModelText,
+                            value = selectedFormatText,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Model", color = textSecondaryColor) },
+                            label = { Text("API 格式", color = textSecondaryColor) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { showModelDropdown = !showModelDropdown },
+                                .clickable { showFormatDropdown = !showFormatDropdown },
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = PetalPrimary,
@@ -928,15 +936,88 @@ fun ApiConfigEditDialog(
                             ),
                             trailingIcon = {
                                 Icon(
-                                    imageVector = if (showModelDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                    imageVector = if (showFormatDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                                     contentDescription = "展开",
-                                    modifier = Modifier.clickable { showModelDropdown = !showModelDropdown },
+                                    modifier = Modifier.clickable { showFormatDropdown = !showFormatDropdown },
                                     tint = textSecondaryColor
                                 )
                             },
                             singleLine = true
                         )
-                        if (!modelFetchState.isLoading) {
+                        DropdownMenu(
+                            expanded = showFormatDropdown,
+                            onDismissRequest = { showFormatDropdown = false },
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        ) {
+                            formatOptions.forEach { (key, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label, color = textPrimaryColor, fontSize = 14.sp) },
+                                    onClick = {
+                                        formatHint = key
+                                        showFormatDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (isCustomAnthropic) {
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        label = { Text("Model", color = textSecondaryColor) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = PetalPrimary,
+                            unfocusedBorderColor = dividerColor,
+                            focusedContainerColor = cardBackground,
+                            unfocusedContainerColor = cardBackground,
+                            focusedTextColor = textPrimaryColor,
+                            unfocusedTextColor = textPrimaryColor
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        singleLine = true
+                    )
+                    Text(
+                        text = "Anthropic 兼容模式通常不支持自动拉取模型，请手动填写模型名",
+                        fontSize = 12.sp,
+                        color = textSecondaryColor
+                    )
+                } else if (onFetchModels != null) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = if (hasModels) selectedModelText else model,
+                            onValueChange = { if (!hasModels) model = it },
+                            readOnly = hasModels,
+                            label = { Text("Model", color = textSecondaryColor) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = hasModels) { showModelDropdown = !showModelDropdown },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = PetalPrimary,
+                                unfocusedBorderColor = dividerColor,
+                                focusedContainerColor = cardBackground,
+                                unfocusedContainerColor = cardBackground,
+                                focusedTextColor = textPrimaryColor,
+                                unfocusedTextColor = textPrimaryColor
+                            ),
+                            trailingIcon = if (hasModels) {
+                                {
+                                    Icon(
+                                        imageVector = if (showModelDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                        contentDescription = "展开",
+                                        modifier = Modifier.clickable { showModelDropdown = !showModelDropdown },
+                                        tint = textSecondaryColor
+                                    )
+                                }
+                            } else null,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                            singleLine = true
+                        )
+                        if (hasModels && !modelFetchState.isLoading) {
                             DropdownMenu(
                                 expanded = showModelDropdown,
                                 onDismissRequest = { showModelDropdown = false },
@@ -956,45 +1037,31 @@ fun ApiConfigEditDialog(
                     }
 
                     if (modelFetchState.isLoading) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = PetalPrimary
-                        )
-                        Text(
-                            text = "正在获取模型列表...",
-                            fontSize = 12.sp,
-                            color = textSecondaryColor
-                        )
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = PetalPrimary)
+                        Text("正在获取模型列表...", fontSize = 12.sp, color = textSecondaryColor)
                     }
 
                     modelFetchState.errorMessage?.let { error ->
-                        Text(
-                            text = error,
-                            fontSize = 12.sp,
-                            color = PetalError
-                        )
+                        Text(text = error, fontSize = 12.sp, color = PetalError)
                     }
 
-                    if (hasModels && !modelFetchState.isLoading) {
-                        Button(
-                            onClick = {
-                                // 重新获取模型列表时清空已选模型，触发自动重新随机
-                                model = ""
-                                lastFetchedParams = ""
-                                val keyToUse = apiKey.trim().ifBlank {
-                                    ApiConfig.BUILTIN_KEYS[ApiProvider.PARTNER]?.firstOrNull() ?: ""
-                                }
-                                onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = PetalPrimary.copy(alpha = 0.15f),
-                                contentColor = PetalPrimary
-                            )
-                        ) {
-                            Text(if (hasModels) "重新获取模型列表" else "获取模型列表", fontSize = 13.sp)
-                        }
+                    Button(
+                        onClick = {
+                            model = ""
+                            lastFetchedParams = ""
+                            onFetchModels.invoke(baseUrl, apiKey.trim(), skipCertVerify)
+                        },
+                        enabled = canFetchOpenAiModels && !modelFetchState.isLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PetalPrimary.copy(alpha = 0.15f),
+                            contentColor = PetalPrimary,
+                            disabledContainerColor = dividerColor.copy(alpha = 0.2f),
+                            disabledContentColor = textSecondaryColor
+                        )
+                    ) {
+                        Text(if (hasModels) "重新拉取模型" else "一键拉取模型", fontSize = 13.sp)
                     }
                 } else {
                     OutlinedTextField(
@@ -1052,61 +1119,6 @@ fun ApiConfigEditDialog(
                     ),
                     singleLine = true
                 )
-
-                // API 格式选择 — 仅对自定义 API 显示
-                if (isCustom) {
-                    var showFormatDropdown by remember { mutableStateOf(false) }
-                    val formatOptions = mapOf(
-                        "openai" to "OpenAI 兼容",
-                        "anthropic" to "Anthropic 兼容"
-                    )
-                    val selectedFormatText = formatOptions[formatHint] ?: "OpenAI 兼容"
-
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = selectedFormatText,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("API 格式", color = textSecondaryColor) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showFormatDropdown = !showFormatDropdown },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = PetalPrimary,
-                                unfocusedBorderColor = dividerColor,
-                                focusedContainerColor = cardBackground,
-                                unfocusedContainerColor = cardBackground,
-                                focusedTextColor = textPrimaryColor,
-                                unfocusedTextColor = textPrimaryColor
-                            ),
-                            trailingIcon = {
-                                Icon(
-                                    imageVector = if (showFormatDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                                    contentDescription = "展开",
-                                    modifier = Modifier.clickable { showFormatDropdown = !showFormatDropdown },
-                                    tint = textSecondaryColor
-                                )
-                            },
-                            singleLine = true
-                        )
-                        DropdownMenu(
-                            expanded = showFormatDropdown,
-                            onDismissRequest = { showFormatDropdown = false },
-                            modifier = Modifier.fillMaxWidth(0.8f)
-                        ) {
-                            formatOptions.forEach { (key, label) ->
-                                DropdownMenuItem(
-                                    text = { Text(label, color = textPrimaryColor, fontSize = 14.sp) },
-                                    onClick = {
-                                        formatHint = key
-                                        showFormatDropdown = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
 
                 // 跳过证书验证 — 仅对非 PARTNER 的 provider 显示（PARTNER 始终固定证书）
                 if (!isPartner) {
