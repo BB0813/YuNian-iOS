@@ -17,7 +17,7 @@ class RequestSecurityInterceptorTest {
         SecurityState.resetForTest()
         SecurityState.markTampered("unit test tamper")
         val interceptor = RequestSecurityInterceptor(
-            signer = RequestSecurityInterceptor.Signer { "abc123" }
+            signer = RequestSecurityInterceptor.Signer { testSignature("abc123") }
         )
         val request = Request.Builder()
             .url("https://api.example.com/chat/completions")
@@ -52,7 +52,7 @@ class RequestSecurityInterceptorTest {
     @Test
     fun intercept_addsSignatureWhenSignerSucceeds() {
         val interceptor = RequestSecurityInterceptor(
-            signer = RequestSecurityInterceptor.Signer { "abc123" }
+            signer = RequestSecurityInterceptor.Signer { testSignature("abc123") }
         )
         val request = Request.Builder()
             .url("https://api.example.com/chat/completions")
@@ -72,7 +72,7 @@ class RequestSecurityInterceptorTest {
         val interceptor = RequestSecurityInterceptor(
             signer = RequestSecurityInterceptor.Signer {
                 capturedPayload.add(String(it))
-                "abc123"
+                testSignature("abc123")
             }
         )
         val request = Request.Builder()
@@ -86,9 +86,10 @@ class RequestSecurityInterceptorTest {
         assertTrue(chain.proceeded)
         assertEquals(1, capturedPayload.size)
         val payload = capturedPayload.first().lines()
-        assertEquals("GET", payload[0])
-        assertEquals("/chat/completions?prompt=hello&limit=1", payload[1])
-        assertEquals(4, payload.size)
+        assertEquals("v1", payload[0])
+        assertEquals("GET", payload[1])
+        assertEquals("/chat/completions?prompt=hello&limit=1", payload[2])
+        assertEquals(8, payload.size)
     }
 
     @Test
@@ -108,6 +109,13 @@ class RequestSecurityInterceptorTest {
         assertTrue(chain.proceeded)
         assertEquals(null, chain.proceededRequest?.header("X-LianYu-Sig"))
     }
+
+    private fun testSignature(value: String = "abc123") =
+        RequestSecurityInterceptor.RequestSignature(
+            signature = value,
+            keyId = "test-key",
+            deviceId = "test-device"
+        )
 
     private class RecordingChain(
         private val request: Request
