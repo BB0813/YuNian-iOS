@@ -580,7 +580,7 @@ private fun ApiTestResultDialog(
                     }
 
                     Text(
-                        text = "常见问题：\n• API Key 是否正确\n• Base URL 是否完整（含 /v1）\n• 网络连接是否正常\n• 该服务商是否支持当前模型",
+                        text = "常见问题：\n• API Key 是否正确\n• Base URL 是否填到 /chat/completions 的父层级（如 https://api.openai.com/v1）\n• 网络连接是否正常\n• 该服务商是否支持当前模型",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -904,7 +904,14 @@ fun ApiConfigEditDialog(
                         unfocusedTextColor = textPrimaryColor
                     ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    singleLine = true
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            text = "填到能拼 /chat/completions 的那一层，如 https://api.openai.com/v1",
+                            color = textTertiary,
+                            fontSize = 11.sp
+                        )
+                    }
                 )
 
                 // API 格式选择 — 仅对自定义 API 显示
