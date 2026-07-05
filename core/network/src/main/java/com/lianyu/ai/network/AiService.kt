@@ -516,14 +516,11 @@ class AiService(context: Context) : AiServiceProvider {
                 SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
 
                 try {
-                    val (rawResponse, reasoning) = when (config.provider) {
-                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
-                            callOpenAiCompatibleWithReasoning(config, messages)
-                        }
-                        ApiProvider.ANTHROPIC -> {
-                            val resp = callAnthropic(config, messages, systemPrompt)
-                            Pair(resp, null)
-                        }
+                    val (rawResponse, reasoning) = if (usesAnthropicProtocol(config)) {
+                        val resp = callAnthropic(config, messages, systemPrompt)
+                        Pair(resp, null)
+                    } else {
+                        callOpenAiCompatibleWithReasoning(config, messages)
                     }
                     if (rawResponse.isBlank()) {
                         throw Exception("API返回空内容，请检查模型名是否正确")
@@ -577,13 +574,10 @@ class AiService(context: Context) : AiServiceProvider {
             )
 
             try {
-                val rawResponse = when (config.provider) {
-                    ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
-                        callOpenAiCompatible(config, messages)
-                    }
-                    ApiProvider.ANTHROPIC -> {
-                        callAnthropic(config, messages, systemPrompt)
-                    }
+                val rawResponse = if (usesAnthropicProtocol(config)) {
+                    callAnthropic(config, messages, systemPrompt)
+                } else {
+                    callOpenAiCompatible(config, messages)
                 }
                 val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedMessages)
                 val singleLine = cleaned
@@ -637,13 +631,10 @@ class AiService(context: Context) : AiServiceProvider {
                 SecureLog.api("SEND-CUSTOM", "provider=${config.provider}, model=${config.model}, messages=${messages.size}")
 
                 try {
-                    val rawResponse = when (config.provider) {
-                        ApiProvider.OPENAI, ApiProvider.DEEPSEEK, ApiProvider.DASHSCOPE, ApiProvider.KIMI, ApiProvider.GEMINI, ApiProvider.XIAOMI, ApiProvider.ZHIPU, ApiProvider.SILICONFLOW, ApiProvider.OPENROUTER, ApiProvider.GROQ, ApiProvider.CUSTOM, ApiProvider.IFLYTEK, ApiProvider.PARTNER -> {
-                            callOpenAiCompatible(config, messages)
-                        }
-                        ApiProvider.ANTHROPIC -> {
-                            callAnthropic(config, messages, customSystemPrompt)
-                        }
+                    val rawResponse = if (usesAnthropicProtocol(config)) {
+                        callAnthropic(config, messages, customSystemPrompt)
+                    } else {
+                        callOpenAiCompatible(config, messages)
                     }
                     if (rawResponse.isBlank()) throw Exception("API返回空内容")
                     val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedHistory)
