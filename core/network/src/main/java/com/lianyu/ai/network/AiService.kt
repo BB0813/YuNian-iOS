@@ -418,6 +418,15 @@ class AiService(context: Context) : AiServiceProvider {
             return providers[config.provider] ?: OpenAiCompatibleProvider()
         }
 
+        fun usesAnthropicProtocol(config: ApiConfig): Boolean {
+            return config.provider == ApiProvider.ANTHROPIC ||
+                (config.provider == ApiProvider.CUSTOM && config.formatHint == "anthropic")
+        }
+
+        fun supportsOpenAiModelList(config: ApiConfig): Boolean {
+            return !usesAnthropicProtocol(config)
+        }
+
         init {
             AiProvider.okHttpClient = okHttpClient
             AiProvider.keySelector = ::selectApiKey
