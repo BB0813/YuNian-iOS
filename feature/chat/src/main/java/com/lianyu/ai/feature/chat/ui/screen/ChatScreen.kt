@@ -143,6 +143,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
     companionId: Long,
@@ -296,7 +297,7 @@ fun ChatScreen(
 
     // 聊天页 TTS 朗读状态
     val ttsState by viewModel.ttsState.collectAsState()
-    val ttsConfig = remember { viewModel.getTtsConfig() }
+    val ttsConfig by viewModel.chatTtsConfig.collectAsState()
     var ttsModeMenu by remember { mutableStateOf(false) }
 
     val themeViewModel: ThemeViewModel = viewModel()
@@ -1008,21 +1009,31 @@ fun ChatScreen(
                 }
 
                 // 聊天页 TTS 朗读模式切换按钮（静音/语音条/语音朗读）
-                Box {
-                    IconButton(
-                        onClick = { ttsModeMenu = true },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .combinedClickable(
+                            onClick = {
+                                val nextMode = when (ttsConfig.mode) {
+                                    ChatTtsMode.SILENT -> ChatTtsMode.READ_ALOUD
+                                    ChatTtsMode.READ_ALOUD -> ChatTtsMode.VOICE_BAR
+                                    ChatTtsMode.VOICE_BAR -> ChatTtsMode.SILENT
+                                }
+                                viewModel.setTtsMode(nextMode)
+                            },
+                            onLongClick = { ttsModeMenu = true }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
                             imageVector = if (ttsConfig.mode == ChatTtsMode.SILENT)
                                 Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
                             contentDescription = "朗读模式",
                             tint = if (ttsConfig.mode == ChatTtsMode.SILENT)
                                 MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    DropdownMenu(
+                    modifier = Modifier.size(20.dp)
+                )
+                DropdownMenu(
                         expanded = ttsModeMenu,
                         onDismissRequest = { ttsModeMenu = false },
                         modifier = Modifier.background(MaterialTheme.colorScheme.surface)

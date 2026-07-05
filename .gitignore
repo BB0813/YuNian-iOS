@@ -69,3 +69,6 @@ _push_tmp/
 .hermes/
 .trae/
 MODULE_ARCHITECTURE.pdf
+
+# Kotlin compiler session state (should never be tracked)
+.kotlin/
