@@ -8,6 +8,7 @@ import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
+import com.lianyu.ai.database.model.ApiProviderPreset
 import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.domain.LocalModelProvider
 import com.lianyu.ai.domain.ModelState
@@ -43,6 +44,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val appSettingsStore = AppSettingsStore(application)
     private lateinit var repository: ApiConfigRepository
     val configs: Flow<List<ApiConfig>>
+    val providerPresets: Flow<List<ApiProviderPreset>>
     private val _localModelState = MutableStateFlow(ModelState())
     val localModelState: StateFlow<ModelState> = _localModelState.asStateFlow()
     private val _modelStates = MutableStateFlow<Map<String, ModelState>>(emptyMap())
@@ -260,8 +262,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     init {
         val database = AppDatabase.getDatabase(application)
-        repository = ApiConfigRepository(database.apiConfigDao())
+        repository = ApiConfigRepository(database.apiConfigDao(), database.apiProviderPresetDao())
         configs = repository.getAllConfigs()
+        providerPresets = repository.getVisibleProviderPresets()
         // [C1 FIX] 改为异步恢复已保存配置的连接状态：原 runBlocking(Dispatchers.IO) 在主线程阻塞，
         // 违反 ViewModel init 零容忍 runBlocking 铁律，冷启动/旋转屏幕时卡顿甚至 ANR。
         viewModelScope.launch(Dispatchers.IO) {

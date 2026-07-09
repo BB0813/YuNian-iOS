@@ -18,4 +18,22 @@
     <string name="event">イベント</string>
     <string name="habit">習慣</string>
     <string name="relationship">関係</string>
+    <string name="diary">日記</string>
+    <string name="no_diary">まだ日記がありません
+ボタンをタップして書き始めよう</string>
+    <string name="add_diary">日記を書く</string>
+    <string name="edit_diary">日記を編集</string>
+    <string name="diary_title">タイトル</string>
+    <string name="diary_title_hint">この日記にタイトルをつけよう</string>
+    <string name="diary_content">本文</string>
+    <string name="diary_content_hint">今日はTAと何がありましたか？</string>
+    <string name="diary_weather">天気（任意）</string>
+    <string name="diary_tags">タグ（カンマ区切り）</string>
+    <string name="diary_mood">気分</string>
+    <string name="mood_happy">嬉しい</string>
+    <string name="mood_calm">穏やか</string>
+    <string name="mood_sad">悲しい</string>
+    <string name="mood_angry">怒り</string>
+    <string name="mood_touched">感動</string>
+    <string name="mood_miss">恋しい</string>
 </resources>

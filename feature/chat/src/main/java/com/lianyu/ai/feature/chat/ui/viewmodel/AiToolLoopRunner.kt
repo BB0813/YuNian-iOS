@@ -9,6 +9,11 @@ import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.AiTool
 import com.lianyu.ai.domain.ToolRegistry
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /**
  * AI 工具调用执行循环（从 ChatViewModel 抽取，方案B：独立类 + 委托存根）。
@@ -24,12 +29,19 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class AiToolLoopRunner(private val aiService: AiServiceProvider) {
 
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        explicitNulls = false
+    }
+
     suspend fun executeWithToolLoop(
         companionInfo: AiCompanionInfo,
         history: List<AiChatMessage>,
         stickerProbability: Int,
         ntpTimeEnabled: Boolean,
         tools: List<AiTool>,
+        groupId: Long? = null,
         maxRounds: Int = 3
     ): AiResponse {
         // 用可变列表承载 history，工具调用中间轮次追加消息但不入库
@@ -47,7 +59,7 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
                 val result = if (tool != null) {
                     runCatching {
                         withTimeoutOrNull(TimeoutBudgets.MCP_READ_MS) {
-                            tool.execute(toolCall.arguments)
+                            tool.execute(argumentsForTool(toolCall.name, toolCall.arguments, companionInfo, groupId))
                         } ?: "工具执行超时"
                     }.getOrElse {
                         "工具执行失败: ${it.message}"
@@ -89,5 +101,27 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
         }
 
         return currentResponse
+    }
+
+    private fun argumentsForTool(
+        toolName: String,
+        argumentsJson: String,
+        companionInfo: AiCompanionInfo,
+        groupId: Long?
+    ): String {
+        if (toolName != "recall_memory") return argumentsJson
+        val obj = runCatching { json.parseToJsonElement(argumentsJson).jsonObject }.getOrNull() ?: return argumentsJson
+        return JsonObject(
+            buildJsonObject {
+                obj.forEach { (key, value) ->
+                    if (key != "companionId" && key != "groupId") put(key, value)
+                }
+                if (groupId != null) {
+                    put("groupId", groupId)
+                } else {
+                    put("companionId", companionInfo.id)
+                }
+            }
+        ).toString()
     }
 }

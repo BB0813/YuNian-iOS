@@ -1,13 +1,16 @@
 package com.lianyu.ai.database.repository
 
 import com.lianyu.ai.database.dao.ApiConfigDao
+import com.lianyu.ai.database.dao.ApiProviderPresetDao
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
+import com.lianyu.ai.database.model.ApiProviderPreset
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 class ApiConfigRepository(
     private val apiConfigDao: ApiConfigDao,
+    private val apiProviderPresetDao: ApiProviderPresetDao? = null,
     private val secretCodec: SecretCodec = S0
 ) {
     interface SecretCodec {
@@ -36,6 +39,16 @@ class ApiConfigRepository(
 
     fun getAllConfiguredConfigs(): Flow<List<ApiConfig>> = apiConfigDao.getAllConfiguredConfigs().map { list ->
         list.mapNotNull { decryptForUse(it, secretCodec) }
+    }
+
+    fun getVisibleProviderPresets(): Flow<List<ApiProviderPreset>> {
+        val dao = requireNotNull(apiProviderPresetDao) { "ApiProviderPresetDao is required" }
+        return dao.getVisiblePresets()
+    }
+
+    suspend fun getProviderPreset(provider: ApiProvider): ApiProviderPreset? {
+        val dao = requireNotNull(apiProviderPresetDao) { "ApiProviderPresetDao is required" }
+        return dao.getPreset(provider)
     }
 
     suspend fun getActiveEnabledConfig(): ApiConfig? =

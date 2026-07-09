@@ -103,6 +103,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
+import com.lianyu.ai.database.model.ApiProviderPreset
 import com.lianyu.ai.domain.ModelState
 import com.lianyu.ai.domain.ModelStatus
 import com.lianyu.ai.feature.settings.R
@@ -122,6 +123,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel()
 ) {
     val configs by viewModel.configs.collectAsState(initial = emptyList())
+    val providerPresets by viewModel.providerPresets.collectAsState(initial = emptyList())
     val modelStates by viewModel.modelStates.collectAsState()
     val localModelState by viewModel.localModelState.collectAsState()
     val fetchedModels by viewModel.fetchedModels.collectAsState()
@@ -270,6 +272,7 @@ fun SettingsScreen(
             ApiCardsSection(
                 isVisible = isVisible,
                 configs = configs,
+                providerPresets = providerPresets,
                 viewModel = viewModel,
                 expandedProvider = expandedProvider,
                 onExpandedProviderChange = { expandedProvider = it },
@@ -405,21 +408,7 @@ fun SettingsScreen(
 
     // Provider Picker Dialog
     if (showProviderPicker) {
-        val presetProviders = listOf(
-            ApiProvider.OPENAI,
-            ApiProvider.DEEPSEEK,
-            ApiProvider.DASHSCOPE,
-            ApiProvider.KIMI,
-            ApiProvider.ZHIPU,
-            ApiProvider.SILICONFLOW,
-            ApiProvider.OPENROUTER,
-            ApiProvider.GROQ,
-            ApiProvider.GEMINI,
-            ApiProvider.ANTHROPIC,
-            ApiProvider.XIAOMI,
-            ApiProvider.IFLYTEK,
-            ApiProvider.CUSTOM
-        )
+        val visiblePresets = providerPresets.filter { it.provider != ApiProvider.PARTNER }
         val cardBackground = MaterialTheme.colorScheme.surfaceVariant
         val dividerColor = MaterialTheme.colorScheme.outline
 
@@ -441,7 +430,7 @@ fun SettingsScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    presetProviders.forEach { provider ->
+                    visiblePresets.forEach { preset ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -450,10 +439,12 @@ fun SettingsScreen(
                                 .clickable {
                                     showProviderPicker = false
                                     newConfigDialog = ApiConfig(
-                                        provider = provider,
+                                        provider = preset.provider,
                                         apiKey = "",
-                                        baseUrl = provider.defaultBaseUrl,
-                                        model = provider.defaultModel
+                                        baseUrl = preset.baseUrl,
+                                        model = preset.model,
+                                        skipCertVerify = preset.skipCertVerify,
+                                        formatHint = preset.formatHint
                                     )
                                 }
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
@@ -461,19 +452,19 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             ProviderLogo(
-                                provider = provider,
+                                provider = preset.provider,
                                 size = 36.dp,
                                 cornerRadius = 10.dp
                             )
                             Column {
                                 Text(
-                                    text = provider.displayName,
+                                    text = preset.displayName,
                                     color = textPrimaryColor,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = provider.defaultBaseUrl,
+                                    text = preset.baseUrl,
                                     color = textSecondaryColor,
                                     fontSize = 11.sp,
                                     maxLines = 1,
@@ -602,6 +593,7 @@ private fun ApiTestResultDialog(
 private fun ApiCardsSection(
     isVisible: Boolean,
     configs: List<ApiConfig>,
+    providerPresets: List<ApiProviderPreset>,
     viewModel: SettingsViewModel,
     expandedProvider: ApiProvider?,
     onExpandedProviderChange: (ApiProvider?) -> Unit,
@@ -627,13 +619,16 @@ private fun ApiCardsSection(
             modifier = Modifier.padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            val partnerPreset = providerPresets.firstOrNull { it.provider == ApiProvider.PARTNER }
             val partnerConfig = configs.firstOrNull { it.provider == ApiProvider.PARTNER }
                 ?: ApiConfig(
                     provider = ApiProvider.PARTNER,
                     apiKey = "",
                     extraApiKeys = "",
-                    baseUrl = ApiProvider.PARTNER.defaultBaseUrl,
-                    model = ApiProvider.PARTNER.defaultModel
+                    baseUrl = partnerPreset?.baseUrl ?: ApiProvider.PARTNER.defaultBaseUrl,
+                    model = partnerPreset?.model ?: ApiProvider.PARTNER.defaultModel,
+                    skipCertVerify = partnerPreset?.skipCertVerify ?: false,
+                    formatHint = partnerPreset?.formatHint ?: "openai"
                 )
 
             val partnerExpanded = expandedProvider == ApiProvider.PARTNER

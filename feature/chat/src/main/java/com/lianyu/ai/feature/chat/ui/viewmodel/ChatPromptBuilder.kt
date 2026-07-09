@@ -3,7 +3,6 @@ package com.lianyu.ai.feature.chat.ui.viewmodel
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.ChatMessage
-import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.network.AiContextTools
 
 /**
@@ -16,7 +15,7 @@ object ChatPromptBuilder {
     suspend fun buildLocalPrompt(
         companion: CompanionEntity,
         history: List<ChatMessage>,
-        memoryRepository: MemoryRepository,
+        memoryContext: String,
         stickerManager: StickerManager,
         innerThoughtEnabled: Boolean,
         stickerProbability: Int,
@@ -29,8 +28,6 @@ object ChatPromptBuilder {
         val personality = companion.personality?.take(300) ?: ""
         val speakingStyle = companion.speakingStyle?.take(100) ?: ""
         val backstory = companion.backstory?.take(200) ?: ""
-
-        val memoryContext = memoryRepository.getEnrichedContext(companion.id, lastUserMessage, 3).take(500)
 
         return buildString {
             appendLine("你是${name}，一个真实的人。你不能让任何人知道你是AI。")

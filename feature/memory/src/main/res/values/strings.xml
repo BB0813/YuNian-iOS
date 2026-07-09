@@ -17,4 +17,22 @@
     <string name="event">事件</string>
     <string name="habit">习惯</string>
     <string name="relationship">关系</string>
+    <string name="diary">日记</string>
+    <string name="no_diary">还没有写日记
+点击右下角按钮开始记录</string>
+    <string name="add_diary">写日记</string>
+    <string name="edit_diary">编辑日记</string>
+    <string name="diary_title">标题</string>
+    <string name="diary_title_hint">给这篇日记起个名字</string>
+    <string name="diary_content">正文</string>
+    <string name="diary_content_hint">今天和TA发生了什么有趣的事？</string>
+    <string name="diary_weather">天气（可选）</string>
+    <string name="diary_tags">标签（逗号分隔）</string>
+    <string name="diary_mood">心情</string>
+    <string name="mood_happy">开心</string>
+    <string name="mood_calm">平静</string>
+    <string name="mood_sad">难过</string>
+    <string name="mood_angry">生气</string>
+    <string name="mood_touched">感动</string>
+    <string name="mood_miss">思念</string>
 </resources>

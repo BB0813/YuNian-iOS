@@ -34,6 +34,19 @@ interface MemoryProvider {
     ): String
 
     /**
+     * 主动召回记忆，供 AI 工具调用使用。
+     *
+     * 与 [getMemoryContext] 使用同一检索路径，但语义上表示模型按需查询，
+     * 不要求每轮对话都被动注入。
+     */
+    suspend fun recallMemory(
+        companionId: Long?,
+        groupId: Long?,
+        query: String,
+        limit: Int = 5
+    ): String = getMemoryContext(companionId, groupId, query, limit)
+
+    /**
      * 从对话中提取并保存记忆。
      *
      * @param userInput 用户输入

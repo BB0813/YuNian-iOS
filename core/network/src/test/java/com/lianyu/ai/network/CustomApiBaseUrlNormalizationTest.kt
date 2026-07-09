@@ -47,6 +47,14 @@ class CustomApiBaseUrlNormalizationTest {
     }
 
     @Test
+    fun normalizeOpenAiBaseUrl_preservesVolcengineApiV3Path() {
+        val input = "https://ark.cn-beijing.volces.com/api/v3"
+        val expected = "https://ark.cn-beijing.volces.com/api/v3"
+        val actual = input.trim().trimEnd('/')
+        assertEquals(expected, actual)
+    }
+
+    @Test
     fun normalizeOpenAiBaseUrl_trimsWhitespace() {
         val input = "  https://relay.example.com/api  "
         val expected = "https://relay.example.com/api"
@@ -59,6 +67,13 @@ class CustomApiBaseUrlNormalizationTest {
         val input = "https://relay.example.com/api"
         val modelsUrl = "${input.trim().trimEnd('/')}/models"
         assertEquals("https://relay.example.com/api/models", modelsUrl)
+    }
+
+    @Test
+    fun fetchModels_url_supportsVolcengineApiV3() {
+        val input = "https://ark.cn-beijing.volces.com/api/v3"
+        val modelsUrl = "${input.trim().trimEnd('/')}/models"
+        assertEquals("https://ark.cn-beijing.volces.com/api/v3/models", modelsUrl)
     }
 
     @Test
