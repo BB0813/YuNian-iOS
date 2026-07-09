@@ -10,24 +10,33 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.dao.ApiConfigDao
+import com.lianyu.ai.database.dao.ApiProviderPresetDao
 import com.lianyu.ai.database.dao.ChatGroupDao
 import com.lianyu.ai.database.dao.ChatMessageDao
 import com.lianyu.ai.database.dao.CompanionDao
+import com.lianyu.ai.database.dao.DiaryDao
 import com.lianyu.ai.database.dao.GroupMessageDao
 import com.lianyu.ai.database.dao.KeywordDao
 import com.lianyu.ai.database.dao.MemoryDao
 import com.lianyu.ai.database.dao.QuizQuestionDao
 import com.lianyu.ai.database.dao.TokenUsageDao
+import com.lianyu.ai.database.dao.UnifiedMemoryDao
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
+import com.lianyu.ai.database.model.ApiProviderPreset
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
+import com.lianyu.ai.database.model.DiaryEntry
 import com.lianyu.ai.database.model.FileFormat
 import com.lianyu.ai.database.model.GroupMessage
 import com.lianyu.ai.database.model.KeywordEntity
 import com.lianyu.ai.database.model.MemoryCategory
 import com.lianyu.ai.database.model.MemoryEntry
+import com.lianyu.ai.database.model.MemoryRecord
+import com.lianyu.ai.database.model.MemoryScope
+import com.lianyu.ai.database.model.MemorySource
+import com.lianyu.ai.database.model.MemoryType
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.model.QuizQuestionEntity
 import com.lianyu.ai.database.model.TempMemory
@@ -39,15 +48,18 @@ import java.io.File
         CompanionEntity::class,
         ChatMessage::class,
         ApiConfig::class,
+        ApiProviderPreset::class,
         MemoryEntry::class,
         TempMemory::class,
+        MemoryRecord::class,
+        DiaryEntry::class,
         ChatGroup::class,
         GroupMessage::class,
         KeywordEntity::class,
         QuizQuestionEntity::class,
         TokenUsage::class
     ],
-    version = 19,
+    version = 23,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -55,12 +67,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun companionDao(): CompanionDao
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun apiConfigDao(): ApiConfigDao
+    abstract fun apiProviderPresetDao(): ApiProviderPresetDao
     abstract fun memoryDao(): MemoryDao
     abstract fun chatGroupDao(): ChatGroupDao
     abstract fun groupMessageDao(): GroupMessageDao
     abstract fun keywordDao(): KeywordDao
     abstract fun quizQuestionDao(): QuizQuestionDao
     abstract fun tokenUsageDao(): TokenUsageDao
+    abstract fun unifiedMemoryDao(): UnifiedMemoryDao
+    abstract fun diaryDao(): DiaryDao
 
     companion object {
         private const val DB_NAME = "lianyu_database"
@@ -303,6 +318,11 @@ abstract class AppDatabase : RoomDatabase() {
                 DB_NAME
             )
                 .addMigrations(*MIGRATIONS)
+                .addCallback(object : RoomDatabase.Callback() {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        seedApiProviderPresets(db)
+                    }
+                })
                 // 移除 fallbackToDestructiveMigration()：它会在 Schema 不匹配时静默删除数据库
                 // 现在由 openVerifiedDatabase() 统一处理异常，优先恢复而非重建
                 .build()
@@ -699,6 +719,186 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `unified_memories` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `memoryType` TEXT NOT NULL DEFAULT 'SEMANTIC',
+                        `scope` TEXT NOT NULL DEFAULT 'COMPANION',
+                        `source` TEXT NOT NULL DEFAULT 'CHAT',
+                        `content` TEXT NOT NULL,
+                        `summary` TEXT NOT NULL DEFAULT '',
+                        `confidence` REAL NOT NULL DEFAULT 1.0,
+                        `importance` REAL NOT NULL DEFAULT 0.5,
+                        `sourceId` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `lastAccessedAt` INTEGER NOT NULL,
+                        `observedAt` INTEGER NOT NULL,
+                        `expiresAt` INTEGER,
+                        `validFrom` INTEGER,
+                        `validTo` INTEGER,
+                        `temporalAnchor` TEXT NOT NULL DEFAULT '',
+                        `accessCount` INTEGER NOT NULL DEFAULT 1,
+                        `tags` TEXT NOT NULL DEFAULT '',
+                        `fuzzyHints` TEXT NOT NULL DEFAULT '',
+                        `mergedFrom` TEXT NOT NULL DEFAULT '',
+                        `isDeleted` INTEGER NOT NULL DEFAULT 0,
+                        `version` INTEGER NOT NULL DEFAULT 1,
+                        `deviceId` TEXT NOT NULL DEFAULT ''
+                    )
+                """.trimIndent())
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_unified_memories_deviceId_scope_sourceId` ON `unified_memories` (`deviceId`, `scope`, `sourceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_unified_memories_deviceId_memoryType` ON `unified_memories` (`deviceId`, `memoryType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_unified_memories_deviceId_observedAt` ON `unified_memories` (`deviceId`, `observedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_unified_memories_deviceId_importance` ON `unified_memories` (`deviceId`, `importance`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_unified_memories_isDeleted` ON `unified_memories` (`isDeleted`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_unified_memories_expiresAt` ON `unified_memories` (`expiresAt`)")
+
+                // 迁移旧 memory_entries → unified_memories（SEMANTIC 类型，COMPANION scope）
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `unified_memories` (
+                        `memoryType`, `scope`, `source`, `content`, `summary`,
+                        `confidence`, `importance`, `sourceId`,
+                        `createdAt`, `updatedAt`, `lastAccessedAt`, `observedAt`,
+                        `accessCount`, `tags`, `deviceId`
+                    )
+                    SELECT
+                        CASE `category`
+                            WHEN 'EMOTION' THEN 'EPISODIC'
+                            WHEN 'EVENT' THEN 'EPISODIC'
+                            WHEN 'PREFERENCE' THEN 'PREFERENCE'
+                            WHEN 'HABIT' THEN 'PREFERENCE'
+                            WHEN 'RELATIONSHIP' THEN 'RELATIONSHIP'
+                            ELSE 'SEMANTIC'
+                        END,
+                        'COMPANION',
+                        'CHAT',
+                        `content`, '',
+                        0.7, `importance`, `companionId`,
+                        `timestamp`, `timestamp`, `lastAccessed`, `timestamp`,
+                        `accessCount`, '', `deviceId`
+                    FROM `memory_entries`
+                    WHERE `deviceId` != ''
+                """.trimIndent())
+
+                // 迁移旧 temp_memory → unified_memories（WORKING 类型）
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `unified_memories` (
+                        `memoryType`, `scope`, `source`, `content`, `summary`,
+                        `confidence`, `importance`, `sourceId`,
+                        `createdAt`, `updatedAt`, `lastAccessedAt`, `observedAt`,
+                        `expiresAt`, `accessCount`, `tags`, `deviceId`
+                    )
+                    SELECT
+                        'WORKING', 'COMPANION', 'CHAT',
+                        `userInput` || ' | ' || `botResponse`, '',
+                        0.5, 0.3, `companionId`,
+                        `timestamp`, `timestamp`, `timestamp`, `timestamp`,
+                        `timestamp` + 86400000, 1, '', `deviceId`
+                    FROM `temp_memory`
+                    WHERE `deviceId` != ''
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Phase 3: 添加语义向量列
+                addColumnIfMissing(db, "unified_memories", "embedding", "BLOB")
+                addColumnIfMissing(db, "unified_memories", "embeddingModel", "TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 日记功能表
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `diary_entries` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `companionId` INTEGER NOT NULL,
+                        `title` TEXT NOT NULL DEFAULT '',
+                        `content` TEXT NOT NULL,
+                        `mood` INTEGER NOT NULL DEFAULT 2,
+                        `date` INTEGER NOT NULL,
+                        `weather` TEXT NOT NULL DEFAULT '',
+                        `tags` TEXT NOT NULL DEFAULT '',
+                        `deviceId` TEXT NOT NULL DEFAULT ''
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_diary_entries_companionId_deviceId` ON `diary_entries` (`companionId`, `deviceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_diary_entries_date` ON `diary_entries` (`date`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_diary_entries_deviceId` ON `diary_entries` (`deviceId`)")
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                createApiProviderPresetTable(db)
+                seedApiProviderPresets(db)
+            }
+        }
+
+        private fun createApiProviderPresetTable(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS `api_provider_presets` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `provider` TEXT NOT NULL,
+                    `displayName` TEXT NOT NULL,
+                    `baseUrl` TEXT NOT NULL,
+                    `model` TEXT NOT NULL,
+                    `formatHint` TEXT NOT NULL,
+                    `skipCertVerify` INTEGER NOT NULL,
+                    `sortOrder` INTEGER NOT NULL,
+                    `isVisible` INTEGER NOT NULL,
+                    `updatedAt` INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_api_provider_presets_provider` ON `api_provider_presets` (`provider`)")
+        }
+
+        private fun seedApiProviderPresets(db: SupportSQLiteDatabase) {
+            createApiProviderPresetTable(db)
+            val now = System.currentTimeMillis()
+            val presets = listOf(
+                ApiProvider.OPENAI to 10,
+                ApiProvider.DEEPSEEK to 20,
+                ApiProvider.DASHSCOPE to 30,
+                ApiProvider.KIMI to 40,
+                ApiProvider.ZHIPU to 50,
+                ApiProvider.SILICONFLOW to 60,
+                ApiProvider.OPENROUTER to 70,
+                ApiProvider.GROQ to 80,
+                ApiProvider.GEMINI to 90,
+                ApiProvider.ANTHROPIC to 100,
+                ApiProvider.XIAOMI to 110,
+                ApiProvider.IFLYTEK to 120,
+                ApiProvider.CUSTOM to 130
+            )
+            presets.forEach { (provider, sortOrder) ->
+                db.execSQL(
+                    """
+                    INSERT OR IGNORE INTO `api_provider_presets` (
+                        `provider`, `displayName`, `baseUrl`, `model`, `formatHint`,
+                        `skipCertVerify`, `sortOrder`, `isVisible`, `updatedAt`
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    """.trimIndent(),
+                    arrayOf<Any>(
+                        provider.name,
+                        provider.displayName,
+                        provider.defaultBaseUrl,
+                        provider.defaultModel,
+                        if (provider == ApiProvider.ANTHROPIC) "anthropic" else "openai",
+                        0,
+                        sortOrder,
+                        now
+                    )
+                )
+            }
+        }
+
         val MIGRATIONS = arrayOf(
             MIGRATION_1_6,
             MIGRATION_2_6,
@@ -717,7 +917,11 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_15_16,
             MIGRATION_16_17,
             MIGRATION_17_18,
-            MIGRATION_18_19
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+            MIGRATION_22_23
         )
 
         private var lastBackupTime: Long = 0L
@@ -875,6 +1079,33 @@ class Converters {
     fun toMemoryCategory(value: String?): MemoryCategory {
         if (value.isNullOrBlank()) return MemoryCategory.FACT
         return runCatching { MemoryCategory.valueOf(value.trim().uppercase()) }.getOrDefault(MemoryCategory.FACT)
+    }
+
+    @TypeConverter
+    fun fromMemoryType(value: MemoryType): String = value.name
+
+    @TypeConverter
+    fun toMemoryType(value: String?): MemoryType {
+        if (value.isNullOrBlank()) return MemoryType.SEMANTIC
+        return runCatching { MemoryType.valueOf(value.trim().uppercase()) }.getOrDefault(MemoryType.SEMANTIC)
+    }
+
+    @TypeConverter
+    fun fromMemoryScope(value: MemoryScope): String = value.name
+
+    @TypeConverter
+    fun toMemoryScope(value: String?): MemoryScope {
+        if (value.isNullOrBlank()) return MemoryScope.COMPANION
+        return runCatching { MemoryScope.valueOf(value.trim().uppercase()) }.getOrDefault(MemoryScope.COMPANION)
+    }
+
+    @TypeConverter
+    fun fromMemorySource(value: MemorySource): String = value.name
+
+    @TypeConverter
+    fun toMemorySource(value: String?): MemorySource {
+        if (value.isNullOrBlank()) return MemorySource.CHAT
+        return runCatching { MemorySource.valueOf(value.trim().uppercase()) }.getOrDefault(MemorySource.CHAT)
     }
 
 }

@@ -18,4 +18,22 @@
     <string name="event">Event</string>
     <string name="habit">Habit</string>
     <string name="relationship">Relationship</string>
+    <string name="diary">Diary</string>
+    <string name="no_diary">No diary entries yet
+Tap the button to start writing</string>
+    <string name="add_diary">Write Diary</string>
+    <string name="edit_diary">Edit Diary</string>
+    <string name="diary_title">Title</string>
+    <string name="diary_title_hint">Give this diary a title</string>
+    <string name="diary_content">Content</string>
+    <string name="diary_content_hint">What happened with TA today?</string>
+    <string name="diary_weather">Weather (optional)</string>
+    <string name="diary_tags">Tags (comma separated)</string>
+    <string name="diary_mood">Mood</string>
+    <string name="mood_happy">Happy</string>
+    <string name="mood_calm">Calm</string>
+    <string name="mood_sad">Sad</string>
+    <string name="mood_angry">Angry</string>
+    <string name="mood_touched">Touched</string>
+    <string name="mood_miss">Missing</string>
 </resources>

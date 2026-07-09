@@ -718,6 +718,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
+                jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", temperature)
                 }
@@ -1282,6 +1283,7 @@ $chatText
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
+                jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", 0.7)
                 }
@@ -1417,6 +1419,7 @@ $chatText
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
+                jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toDouble())
                 }
@@ -1609,6 +1612,7 @@ $chatText
         val jsonBody = org.json.JSONObject()
         jsonBody.put("model", config.model)
         jsonBody.put("messages", jsonArray)
+        jsonBody.put("stream", false)
         if (!requiresFixedTemperature(config.model)) {
             jsonBody.put("temperature", 0.7)
         }
@@ -1974,6 +1978,7 @@ $chatText
                 val jsonBody = org.json.JSONObject()
                 jsonBody.put("model", config.model)
                 jsonBody.put("messages", messagesJson)
+                jsonBody.put("stream", false)
                 // Some models only support temperature=1
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toDouble())

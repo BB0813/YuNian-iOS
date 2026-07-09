@@ -15,9 +15,20 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 记忆管理器（单例）
+ * 记忆管理器（单例）—— **已弃用**
  *
- * 核心职责：
+ * ⚠️ 此类已被 [UnifiedMemoryProvider] + [UnifiedMemoryRepository] 替代。
+ * 新系统基于 Room `unified_memories` 表，支持时间感知、7 种记忆类型、去重融合。
+ *
+ * 旧系统使用 JSON 文件持久化，与 Room 数据库完全独立，导致：
+ * - UI 管理的记忆和 AI 实际使用的记忆不一致
+ * - 无时间感知能力
+ * - 无语义检索
+ *
+ * 保留此类仅为向后兼容（旧数据迁移），不再注册到 ServiceRegistry。
+ * 新代码应使用 [UnifiedMemoryProvider]。
+ *
+ * 核心职责（历史记录）：
  * 1. 统一管理全局/角色/群聊三种作用域的记忆
  * 2. 分层存储：短期(内存)→中期(内存+文件)→长期(文件)
  * 3. 跨会话同步：群聊↔私聊通过全局池共享用户信息
@@ -27,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * 实现 [MemoryProvider] 接口，通过 ServiceRegistry 向 core:network 和 feature:groupchat 提供服务。
  */
+@Deprecated("使用 UnifiedMemoryProvider 替代，新系统基于 Room unified_memories 表", ReplaceWith("UnifiedMemoryProvider"))
 class MemoryManager private constructor(
     private val context: Context,
     private val deviceId: String

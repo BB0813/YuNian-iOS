@@ -18,4 +18,22 @@
     <string name="event">이벤트</string>
     <string name="habit">습관</string>
     <string name="relationship">관계</string>
+    <string name="diary">일기</string>
+    <string name="no_diary">아직 일기가 없습니다
+버튼을 눌러 시작하세요</string>
+    <string name="add_diary">일기 쓰기</string>
+    <string name="edit_diary">일기 편집</string>
+    <string name="diary_title">제목</string>
+    <string name="diary_title_hint">이 일기에 제목을 지어주세요</string>
+    <string name="diary_content">내용</string>
+    <string name="diary_content_hint">오늘 TA와 무슨 일이 있었나요?</string>
+    <string name="diary_weather">날씨 (선택)</string>
+    <string name="diary_tags">태그 (쉼표로 구분)</string>
+    <string name="diary_mood">기분</string>
+    <string name="mood_happy">행복</string>
+    <string name="mood_calm">평온</string>
+    <string name="mood_sad">슬픔</string>
+    <string name="mood_angry">화남</string>
+    <string name="mood_touched">감동</string>
+    <string name="mood_miss">그리움</string>
 </resources>

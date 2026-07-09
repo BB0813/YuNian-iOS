@@ -1,6 +1,7 @@
 package com.lianyu.ai.database.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.lianyu.ai.common.SuFlowApi
 import kotlinx.serialization.Serializable
@@ -81,3 +82,21 @@ enum class ApiProvider(val displayName: String, val defaultBaseUrl: String, val 
     CUSTOM("自定义 API", "", ""),
     IFLYTEK("讯飞星火", "https://spark-api-open.xf-yun.com/v1/", "generalv3.5")
 }
+
+@Entity(
+    tableName = "api_provider_presets",
+    indices = [Index(value = ["provider"], unique = true)]
+)
+data class ApiProviderPreset(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val provider: ApiProvider,
+    val displayName: String,
+    val baseUrl: String,
+    val model: String,
+    val formatHint: String = "openai",
+    val skipCertVerify: Boolean = false,
+    val sortOrder: Int = 0,
+    val isVisible: Boolean = true,
+    val updatedAt: Long = System.currentTimeMillis()
+)

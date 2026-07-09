@@ -419,6 +419,7 @@ class GroupChatViewModel(
 
         val recentSnapshots = buildRecentContextSnapshots(historySnapshot)
         val mentionContextBlock = MentionParser.buildMentionContext(companion.name, recentSnapshots, currentUserName)
+        val memoryContext = getGroupMemoryContext(historySnapshot)
 
         val baseSystemPrompt = buildString {
             appendLine("你叫${companion.name}。这是你的微信聊天记录，你在群里跟朋友们聊天。")
@@ -445,6 +446,11 @@ class GroupChatViewModel(
             if (mentionContextBlock.isNotBlank()) {
                 appendLine()
                 appendLine(mentionContextBlock)
+            }
+            if (memoryContext.isNotBlank()) {
+                appendLine()
+                appendLine("=== 群聊相关记忆 ===")
+                appendLine(memoryContext)
             }
         }
 
@@ -684,6 +690,7 @@ class GroupChatViewModel(
         val personalityTraits = extractPersonalityTraits(companion)
         val groupAtmosphere = detectGroupAtmosphere(historySnapshot, currentUserName)
         val emotionalContext = buildEmotionalContext(historySnapshot, companion)
+        val memoryContext = getGroupMemoryContext(historySnapshot)
 
         val stickerManager = StickerManager.getInstance(getApplication())
         val availableStickers = stickerManager.getAllRules()
@@ -747,6 +754,11 @@ class GroupChatViewModel(
                 appendLine()
                 appendLine(mentionContextBlock)
             }
+            if (memoryContext.isNotBlank()) {
+                appendLine()
+                appendLine("=== 群聊相关记忆 ===")
+                appendLine(memoryContext)
+            }
             appendLine()
             appendLine("=== 互动提醒 ===")
             appendLine("你是${companion.name}，你有独特的性格。在群里要活跃一点，多跟大家互动！")
@@ -772,6 +784,19 @@ class GroupChatViewModel(
             companion.toAiCompanionInfo(), filteredSnapshot.map { it.toAiChatMessage() },
             baseSystemPrompt, companionNameMap = companionNameMap
         )
+    }
+
+    private suspend fun getGroupMemoryContext(historySnapshot: List<GroupMessage>): String {
+        val query = historySnapshot.lastOrNull { it.companionId == -1L }?.content
+            ?: historySnapshot.lastOrNull()?.content
+            ?: ""
+        if (query.isBlank()) return ""
+        return memoryProvider.getMemoryContext(
+            companionId = null,
+            groupId = groupId,
+            query = query,
+            limit = 5
+        ).take(500)
     }
 
     fun triggerAiSpeak(companionId: Long) {

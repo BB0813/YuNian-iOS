@@ -16,6 +16,9 @@ import com.lianyu.ai.database.SecurityDataSeeder
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
+import com.lianyu.ai.database.repository.EmbeddingProvider
+import com.lianyu.ai.database.repository.SummaryProvider
+import com.lianyu.ai.database.repository.UnifiedMemoryRepository
 import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.YandereModeManager
@@ -216,6 +219,25 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             ServiceRegistry.registerSingleton(MemoryRepository::class.java) {
                 MemoryRepository(AppDatabase.getDatabase(app).memoryDao(), DeviceIdProvider.getDeviceId(app))
             }
+            // 语义嵌入服务（Phase 3: 本地语义检索）
+            // 在 UnifiedMemoryRepository 之前注册，因为后者需要 EmbeddingProvider
+            ServiceRegistry.registerSingleton(EmbeddingProvider::class.java) {
+                com.lianyu.ai.network.EmbeddingService(app)
+            }
+            // 对话摘要服务（Phase 4: 对话摘要压缩）
+            // 在 UnifiedMemoryRepository 之前注册，因为后者需要 SummaryProvider
+            ServiceRegistry.registerSingleton(SummaryProvider::class.java) {
+                com.lianyu.ai.network.SummaryService(app)
+            }
+            // 统一记忆仓库（现代化记忆系统，基于 Room unified_memories 表）
+            ServiceRegistry.registerSingleton(UnifiedMemoryRepository::class.java) {
+                UnifiedMemoryRepository(
+                    AppDatabase.getDatabase(app).unifiedMemoryDao(),
+                    DeviceIdProvider.getDeviceId(app),
+                    ServiceRegistry.getOrThrow(EmbeddingProvider::class.java),
+                    ServiceRegistry.getOrThrow(SummaryProvider::class.java)
+                )
+            }
             ServiceRegistry.registerSingleton(UserRepository::class.java) {
                 UserRepository(app)
             }
@@ -232,8 +254,14 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             }
             // MemoryProvider：跨会话记忆上下文与提取（feature:memory 实现，core:network/feature:groupchat 消费）
             // 必须在 AiService 之前注册，因为 AiService.init 会通过 ServiceRegistry 获取 MemoryProvider
+            // 使用统一记忆提供者（基于 Room unified_memories 表），替代旧的 JSON 文件版 MemoryManager
             ServiceRegistry.registerSingleton(MemoryProvider::class.java) {
-                com.lianyu.ai.feature.memory.engine.MemoryManager.getInstance(app)
+                com.lianyu.ai.feature.memory.engine.UnifiedMemoryProvider(
+                    app,
+                    DeviceIdProvider.getDeviceId(app),
+                    ServiceRegistry.getOrThrow(EmbeddingProvider::class.java),
+                    ServiceRegistry.getOrThrow(SummaryProvider::class.java)
+                )
             }
             ServiceRegistry.registerSingleton(AiServiceProvider::class.java) {
                 AiService(app)
@@ -250,6 +278,10 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // 注册瑞幸工具到 ToolRegistry，供 AiService 随请求一并发给 AI
             com.lianyu.ai.feature.coffee.LuckinCoffeeTools.registerAll(
                 ServiceRegistry.getOrThrow(CoffeeOrderProvider::class.java)
+            )
+            // 注册记忆召回工具，供 AI 在上下文不足时主动查询统一记忆系统
+            com.lianyu.ai.feature.memory.MemoryRecallTools.registerAll(
+                ServiceRegistry.getOrThrow(MemoryProvider::class.java)
             )
 
             ServiceRegistry.markInitialized()

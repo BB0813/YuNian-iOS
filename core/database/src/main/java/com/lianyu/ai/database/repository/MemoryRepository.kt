@@ -7,6 +7,7 @@ import com.lianyu.ai.database.model.TempMemory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
+@Deprecated("旧 memory_entries/temp_memory 仓库仅保留遗留导出/调试路径；新记忆读写请使用 UnifiedMemoryRepository 或 MemoryProvider。")
 class MemoryRepository(private val memoryDao: MemoryDao, private val deviceId: String) {
 
     private fun decrypt(memory: MemoryEntry): MemoryEntry {

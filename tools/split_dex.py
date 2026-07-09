@@ -142,6 +142,5 @@ def main():
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-
 if __name__ == '__main__':
     main()

@@ -12,6 +12,7 @@ import android.security.keystore.KeyProperties
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -21,6 +22,11 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 object RemoteKeyProvider {
+
+    private data class HandshakeBuildResult(
+        val body: JSONObject? = null,
+        val error: JSONObject? = null
+    )
 
     data class PartnerSession(
         val clientId: String,
@@ -40,17 +46,17 @@ object RemoteKeyProvider {
 
     private fun resolveServerUrl(): String = serverUrl
     private const val HANDSHAKE_PATH = "/api/auth/handshake"
+    private const val CHALLENGE_PATH = "/api/auth/challenge"
+    private const val APP_PROVISION_KEY = "suflow-app-provision-key-2024-secure-32byte!!"
 
     /** Direct handshake call — used by SettingsViewModel test button */
     fun cloveHandshake(ctx: Context): JSONObject {
         val url = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
-        val deviceId = android.os.Build.FINGERPRINT.take(40) + "_" + android.os.Build.MODEL.replace(" ", "_")
-        val body = JSONObject().apply {
-            put("device_id", deviceId)
-            put("user_id", deviceId.take(20))
-            put("device_public_key", DeviceRequestSigner.publicKeyBase64())
-            put("device_key_id", DeviceRequestSigner.keyId())
-            put("sig_alg", DeviceRequestSigner.SIGNATURE_ALGORITHM)
+        val handshake = buildHandshakeBody()
+        handshake.error?.let { return it }
+        val body = handshake.body ?: return JSONObject().apply {
+            put("ok", false)
+            put("error", "device_sign_unavailable")
         }
         val result = httpPost(url, body.toString())
         result?.let { storeHandshakeResult(ctx, it) }
@@ -289,14 +295,12 @@ object RemoteKeyProvider {
     * 后端仍用 client key 承载 Clove 分组、配额和权限，但客户端只持有 session token。
      */
     private fun fetchEncryptedKeys(ctx: Context): List<String>? {
-        val deviceId = android.os.Build.FINGERPRINT.take(40) + "_" + android.os.Build.MODEL.replace(" ", "_")
-        val handshakeJson = JSONObject().apply {
-            put("device_id", deviceId)
-            put("user_id", deviceId.take(20))
-            put("device_public_key", DeviceRequestSigner.publicKeyBase64())
-            put("device_key_id", DeviceRequestSigner.keyId())
-            put("sig_alg", DeviceRequestSigner.SIGNATURE_ALGORITHM)
+        val handshakeBuild = buildHandshakeBody()
+        handshakeBuild.error?.let {
+            SecureLog.w("RemoteKeyProvider", "Handshake preflight failed: ${it.optString("error")}")
+            return null
         }
+        val handshakeJson = handshakeBuild.body ?: return null
         val handshakeUrl = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
 
         SecureLog.d("RemoteKeyProvider", "Handshake POST $HANDSHAKE_PATH (session mode)")
@@ -343,6 +347,28 @@ object RemoteKeyProvider {
         } catch (_: Exception) {}
 
         return listOf(sessionToken)
+    }
+
+    private fun buildHandshakeBody(): HandshakeBuildResult {
+        val deviceId = android.os.Build.FINGERPRINT.take(40) + "_" + android.os.Build.MODEL.replace(" ", "_")
+        val encodedDeviceId = URLEncoder.encode(deviceId, Charsets.UTF_8.name())
+        val challengeUrl = URL("${resolveServerUrl()}$CHALLENGE_PATH?device_id=$encodedDeviceId")
+        val challengeResp = httpGet(challengeUrl) ?: return HandshakeBuildResult()
+        if (!challengeResp.optBoolean("ok", false)) return HandshakeBuildResult(error = challengeResp)
+
+        val challenge = challengeResp.optString("challenge").takeIf { it.isNotBlank() } ?: return HandshakeBuildResult()
+        val payload = "v1\nhandshake\n$challenge\n$deviceId"
+        val challengeSig = DeviceRequestSigner.sign(payload.toByteArray(Charsets.UTF_8))?.signature ?: return HandshakeBuildResult()
+
+        return HandshakeBuildResult(body = JSONObject().apply {
+            put("device_id", deviceId)
+            put("user_id", deviceId.take(20))
+            put("device_public_key", DeviceRequestSigner.publicKeyBase64())
+            put("device_key_id", DeviceRequestSigner.keyId())
+            put("sig_alg", DeviceRequestSigner.SIGNATURE_ALGORITHM)
+            put("challenge", challenge)
+            put("challenge_sig", challengeSig)
+        })
     }
 
     private fun decryptAesGcm(data: String, sessionKeyHex: String, ivHex: String, tagHex: String): String? {
@@ -395,7 +421,7 @@ object RemoteKeyProvider {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("x-app-key", "suflow-app-provision-key-2024-secure-32byte!!")
+                setRequestProperty("x-app-key", APP_PROVISION_KEY)
                 doOutput = true
                 doInput = true
             }
@@ -405,12 +431,50 @@ object RemoteKeyProvider {
             }
 
             val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
+                return JSONObject().apply {
+                    put("ok", false)
+                    put("error", "app_key_mismatch")
+                }
+            }
             if (responseCode != HttpURLConnection.HTTP_OK) return null
 
             val responseBody = connection.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
             return JSONObject(responseBody)
         } catch (e: Exception) {
             SecureLog.w("RemoteKeyProvider", "HTTP POST failed: ${e.message}")
+            return null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun httpGet(url: URL): JSONObject? {
+        var connection: HttpURLConnection? = null
+        try {
+            connection = url.openConnection() as HttpURLConnection
+            connection.apply {
+                connectTimeout = 5_000
+                readTimeout = 5_000
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("x-app-key", APP_PROVISION_KEY)
+                doInput = true
+            }
+
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
+                return JSONObject().apply {
+                    put("ok", false)
+                    put("error", "app_key_mismatch")
+                }
+            }
+            if (responseCode != HttpURLConnection.HTTP_OK) return null
+
+            val responseBody = connection.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
+            return JSONObject(responseBody)
+        } catch (e: Exception) {
+            SecureLog.w("RemoteKeyProvider", "HTTP GET failed: ${e.message}")
             return null
         } finally {
             connection?.disconnect()

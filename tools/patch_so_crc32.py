@@ -98,63 +98,64 @@ def patch_so(so_path: str, seed: int) -> bool:
     with open(so_path, 'rb') as f:
         data = bytearray(f.read())
 
-    elf = ELFFile(open(so_path, 'rb'))
+    with open(so_path, 'rb') as elf_file:
+        elf = ELFFile(elf_file)
 
-    # 1. Find .text section
-    text_section = None
-    for sec in elf.iter_sections():
-        if sec.name == '.text':
-            text_section = sec
-            break
-    if text_section is None:
-        print(f"   ⚠ No .text section — skipping")
-        return False
-
-    # Read .text data
-    text_offset = text_section['sh_offset']
-    text_size = text_section['sh_size']
-    text_data = data[text_offset:text_offset + text_size]
-    text_crc32 = crc32(text_data)
-    obfuscated = text_crc32 ^ seed
-    print(f"   .text: offset=0x{text_offset:X} size=0x{text_size:X} CRC32=0x{text_crc32:08X}")
-    print(f"   XOR'd with seed 0x{seed:08X} = 0x{obfuscated:08X}")
-
-    # 2. Find IG_EXPECTED_TEXT_CRC32_OBF in symbol table
-    symtab = elf.get_section_by_name('.symtab')
-    if symtab is None:
-        symtab = elf.get_section_by_name('.dynsym')
-
-    target_symbol = None
-    if symtab:
-        for sym in symtab.iter_symbols():
-            if sym.name == 'IG_EXPECTED_TEXT_CRC32_OBF':
-                target_symbol = sym
+        # 1. Find .text section
+        text_section = None
+        for sec in elf.iter_sections():
+            if sec.name == '.text':
+                text_section = sec
                 break
+        if text_section is None:
+            print(f"   ⚠ No .text section — skipping")
+            return False
 
-    if target_symbol is None:
-        print(f"   ⚠ Symbol IG_EXPECTED_TEXT_CRC32_OBF not found — falling back to string search")
-        # Fallback: find sentinel bytes in the data
-        sentinel_le = struct.pack('<I', 0x4E4F5045)  # "NOPE" little-endian
-        pos = data.find(sentinel_le)
-        if pos == -1:
-            print(f"   ✗ Sentinel 0x4E4F5045 not found in binary")
-            return False
-        file_offset = pos
-    else:
-        # sym['st_value'] is the virtual address, need to map to file offset
-        vaddr = target_symbol['st_value']
-        # Find which segment contains this vaddr
-        file_offset = None
-        for seg in elf.iter_segments():
-            if seg['p_type'] == 'PT_LOAD':
-                seg_start = seg['p_vaddr']
-                seg_end = seg_start + seg['p_memsz']
-                if seg_start <= vaddr < seg_end:
-                    file_offset = seg['p_offset'] + (vaddr - seg_start)
+        # Read .text data
+        text_offset = text_section['sh_offset']
+        text_size = text_section['sh_size']
+        text_data = data[text_offset:text_offset + text_size]
+        text_crc32 = crc32(text_data)
+        obfuscated = text_crc32 ^ seed
+        print(f"   .text: offset=0x{text_offset:X} size=0x{text_size:X} CRC32=0x{text_crc32:08X}")
+        print(f"   XOR'd with seed 0x{seed:08X} = 0x{obfuscated:08X}")
+
+        # 2. Find IG_EXPECTED_TEXT_CRC32_OBF in symbol table
+        symtab = elf.get_section_by_name('.symtab')
+        if symtab is None:
+            symtab = elf.get_section_by_name('.dynsym')
+
+        target_symbol = None
+        if symtab:
+            for sym in symtab.iter_symbols():
+                if sym.name == 'IG_EXPECTED_TEXT_CRC32_OBF':
+                    target_symbol = sym
                     break
-        if file_offset is None:
-            print(f"   ✗ Cannot resolve vaddr 0x{vaddr:X} to file offset")
-            return False
+
+        if target_symbol is None:
+            print(f"   ⚠ Symbol IG_EXPECTED_TEXT_CRC32_OBF not found — falling back to string search")
+            # Fallback: find sentinel bytes in the data
+            sentinel_le = struct.pack('<I', 0x4E4F5045)  # "NOPE" little-endian
+            pos = data.find(sentinel_le)
+            if pos == -1:
+                print(f"   ✗ Sentinel 0x4E4F5045 not found in binary")
+                return False
+            file_offset = pos
+        else:
+            # sym['st_value'] is the virtual address, need to map to file offset
+            vaddr = target_symbol['st_value']
+            # Find which segment contains this vaddr
+            file_offset = None
+            for seg in elf.iter_segments():
+                if seg['p_type'] == 'PT_LOAD':
+                    seg_start = seg['p_vaddr']
+                    seg_end = seg_start + seg['p_memsz']
+                    if seg_start <= vaddr < seg_end:
+                        file_offset = seg['p_offset'] + (vaddr - seg_start)
+                        break
+            if file_offset is None:
+                print(f"   ✗ Cannot resolve vaddr 0x{vaddr:X} to file offset")
+                return False
 
     # 3. Patch the value
     patched_bytes = struct.pack('<I', obfuscated)
