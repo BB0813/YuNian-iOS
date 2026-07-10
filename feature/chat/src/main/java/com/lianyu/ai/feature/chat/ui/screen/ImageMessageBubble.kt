@@ -42,6 +42,8 @@ import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
+import com.lianyu.ai.feature.chat.ui.theme.ChatColors
+import com.lianyu.ai.feature.chat.ui.theme.ChatDimens
 import com.lianyu.ai.uicommon.component.CompanionAvatar
 import com.lianyu.ai.uicommon.component.UserAvatar
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
@@ -64,8 +66,9 @@ fun ImageMessageBubble(
     }
     var showMenu by remember { mutableStateOf(false) }
 
-    val userBubbleColor = MaterialTheme.colorScheme.primary
-    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
+    val colorScheme = MaterialTheme.colorScheme
+    val userBubbleColor = ChatColors.userBubbleBackground(colorScheme)
+    val aiBubbleColor = ChatColors.aiBubbleBackground(colorScheme)
     val imageFile = remember(message.linkString, message.content) {
         java.io.File(message.linkString.ifBlank { message.content })
     }
@@ -89,7 +92,7 @@ fun ImageMessageBubble(
                     name = companionData?.name,
                     size = adaptiveSizing.avatarSize
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(ChatDimens.AvatarGap))
             }
 
             Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
@@ -98,37 +101,37 @@ fun ImageMessageBubble(
                         model = imageFile,
                         contentDescription = "图片",
                         modifier = Modifier
-                            .widthIn(max = 220.dp)
-                            .heightIn(max = 280.dp)
-                            .clip(RoundedCornerShape(12.dp)),
+                            .widthIn(max = ChatDimens.ImageMaxWidth)
+                            .heightIn(max = ChatDimens.ImageMaxHeight)
+                            .clip(RoundedCornerShape(ChatDimens.ImageCornerRadius)),
                         contentScale = ContentScale.Fit
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .widthIn(max = 200.dp)
+                            .widthIn(max = ChatDimens.ImagePlaceholderMaxWidth)
                             .clip(RoundedCornerShape(adaptiveSizing.cornerRadius))
                             .background(if (isUser) userBubbleColor else aiBubbleColor)
-                            .padding(horizontal = 16.dp, vertical = 24.dp)
+                            .padding(horizontal = ChatDimens.ImagePlaceholderHorizontalPadding, vertical = ChatDimens.ImagePlaceholderVerticalPadding)
                     ) {
                         Text(
                             text = "📷 图片",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                            color = if (isUser) ChatColors.userBubbleContent(colorScheme) else ChatColors.aiBubbleContent(colorScheme)
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(ChatDimens.BubbleTimestampGap))
                 Text(
                     text = time,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = adaptiveSizing.fontSizeCaption.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ChatColors.metadataContent(colorScheme),
                     textAlign = if (isUser) TextAlign.End else TextAlign.Start
                 )
             }
 
             if (isUser) {
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(ChatDimens.AvatarGap))
                 UserAvatar(
                     avatarUrl = userAvatar,
                     name = userName,
@@ -140,15 +143,15 @@ fun ImageMessageBubble(
         DropdownMenu(
             expanded = showMenu,
             onDismissRequest = { showMenu = false },
-            modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+            modifier = Modifier.background(ChatColors.menuBackground(colorScheme)),
             offset = DpOffset(x = 0.dp, y = 0.dp)
         ) {
             DropdownMenuItem(
                 text = {
                     Text(
                         text = "引用",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurface
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = ChatDimens.MenuTextFontSize),
+                        color = ChatColors.menuContent(colorScheme)
                     )
                 },
                 onClick = {
@@ -159,8 +162,8 @@ fun ImageMessageBubble(
                     Icon(
                         Icons.Outlined.FormatQuote,
                         contentDescription = "引用",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        tint = ChatColors.menuIcon(colorScheme),
+                        modifier = Modifier.size(ChatDimens.MenuIconSize)
                     )
                 }
             )
@@ -169,8 +172,8 @@ fun ImageMessageBubble(
                     text = {
                         Text(
                             text = "重新生成",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = MaterialTheme.colorScheme.onSurface
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = ChatDimens.MenuTextFontSize),
+                            color = ChatColors.menuContent(colorScheme)
                         )
                     },
                     onClick = {
@@ -181,8 +184,8 @@ fun ImageMessageBubble(
                         Icon(
                             Icons.Outlined.Refresh,
                             contentDescription = "重新生成",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            tint = ChatColors.menuIcon(colorScheme),
+                            modifier = Modifier.size(ChatDimens.MenuIconSize)
                         )
                     }
                 )
@@ -191,8 +194,8 @@ fun ImageMessageBubble(
                 text = {
                     Text(
                         text = "撤回消息",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurface
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = ChatDimens.MenuTextFontSize),
+                        color = ChatColors.menuContent(colorScheme)
                     )
                 },
                 onClick = {
@@ -203,8 +206,8 @@ fun ImageMessageBubble(
                     Icon(
                         Icons.Outlined.DeleteOutline,
                         contentDescription = "撤回",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        tint = ChatColors.menuIcon(colorScheme),
+                        modifier = Modifier.size(ChatDimens.MenuIconSize)
                     )
                 }
             )

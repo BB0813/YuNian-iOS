@@ -125,10 +125,17 @@ class UnifiedMemoryRepository(
         )
         val newId = dao.insert(record)
 
-        // 4. 异步生成 embedding（不阻塞返回）
-        if (embeddingProvider != null && type != MemoryType.WORKING) {
-            // embedding 在 extractAndSaveMemories 流程中由 backfillEmbeddings 批量处理
-            // 此处不单独调用以避免每条记忆都发一次 API 请求
+        // 4. 同步生成 embedding（非 WORKING 记忆）
+        // 确保新提取的记忆立即可被语义检索到，避免"刚说过的话下一句就忘了"
+        // WORKING 记忆跳过（生命周期短，不值得生成 embedding）
+        embeddingProvider?.let { provider ->
+            if (type != MemoryType.WORKING && provider.isEmbeddingSupported()) {
+                val embedding = runCatching { provider.embed(content) }.getOrNull()
+                if (embedding != null) {
+                    val modelName = provider.getEmbeddingModelName()
+                    dao.updateEmbedding(newId, provider.floatsToBytes(embedding), modelName)
+                }
+            }
         }
 
         return newId
@@ -140,13 +147,14 @@ class UnifiedMemoryRepository(
     }
 
     /**
-     * 添加工作记忆（短期，默认 30 分钟 TTL）。
+     * 添加工作记忆（短期，默认 2 小时 TTL）。
+     * TTL 从 30 分钟延长至 2 小时，避免用户短暂离开后上下文断裂。
      */
     suspend fun addWorkingMemory(
         content: String,
         scope: MemoryScope,
         sourceId: Long,
-        ttlMs: Long = 1_800_000L  // 30 分钟
+        ttlMs: Long = 7_200_000L  // 2 小时
     ): Long {
         val record = MemoryRecord(
             memoryType = MemoryType.WORKING,
@@ -521,9 +529,9 @@ class UnifiedMemoryRepository(
         // 3. 获取已有记忆上下文（避免摘要重复提取）
         val memoryContext = buildMemoryContext(scope, sourceId, "", limit = 5)
 
-        // 4. 生成摘要
+        // 4. 生成摘要（统一摘要服务，MEMORY 用途：150 字精简摘要）
         val summary = if (summaryProvider != null && summaryProvider.isSummarySupported()) {
-            summaryProvider.summarize(conversationText, memoryContext)
+            summaryProvider.summarize(conversationText, memoryContext, SummaryPurpose.MEMORY)
         } else null
 
         // 回退到本地规则摘要（截取关键片段）

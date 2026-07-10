@@ -16,6 +16,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -617,15 +621,41 @@ fun ChatScreen(
                         if (message != null && message.id > 0 && message.id % 5 == 0L) {
                             android.util.Log.w("ChatScreen", "[ChatScreen] rendering message id=${message.id} content='${message.content.take(20)}'")
                         }
-                        ChatListItemBubble(
-                            item = item,
-                            companionData = companionData,
-                            userAvatar = userAvatar,
-                            userName = userName,
-                            onIntent = handleChatIntent,
-                            adaptiveSizing = adaptiveSizing,
-                            isDarkTheme = isDarkTheme
-                        )
+
+                        // 消息首次出现淡入动画，低端设备跳过
+                        val visibleState = remember { MutableTransitionState(false) }
+                        LaunchedEffect(Unit) { visibleState.targetState = true }
+
+                        if (HardwareInfo.tier == HardwareInfo.Tier.LOW) {
+                            ChatListItemBubble(
+                                item = item,
+                                companionData = companionData,
+                                userAvatar = userAvatar,
+                                userName = userName,
+                                onIntent = handleChatIntent,
+                                adaptiveSizing = adaptiveSizing,
+                                isDarkTheme = isDarkTheme
+                            )
+                        } else {
+                            // 使用 ColumnScope.AnimatedVisibility 需要显式接收器
+                            // 在 LazyItemScope 中，通过 Column 包裹以获得 ColumnScope
+                            Column {
+                                AnimatedVisibility(
+                                    visibleState = visibleState,
+                                    enter = fadeIn(animationSpec = tween(300)) + expandVertically(animationSpec = tween(300))
+                                ) {
+                                    ChatListItemBubble(
+                                        item = item,
+                                        companionData = companionData,
+                                        userAvatar = userAvatar,
+                                        userName = userName,
+                                        onIntent = handleChatIntent,
+                                        adaptiveSizing = adaptiveSizing,
+                                        isDarkTheme = isDarkTheme
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     if (isTyping) {

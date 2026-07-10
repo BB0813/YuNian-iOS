@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.sp
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
+import com.lianyu.ai.feature.chat.ui.theme.ChatColors
+import com.lianyu.ai.feature.chat.ui.theme.ChatDimens
 import com.lianyu.ai.uicommon.component.CompanionAvatar
 import com.lianyu.ai.uicommon.component.UserAvatar
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
@@ -66,9 +68,10 @@ internal fun AttachmentMessageBubble(
     }
     var showMenu by remember { mutableStateOf(false) }
 
-    val userBubbleColor = MaterialTheme.colorScheme.primary
-    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
-    val aiBorderColor = MaterialTheme.colorScheme.outline
+    val colorScheme = MaterialTheme.colorScheme
+    val userBubbleColor = ChatColors.userBubbleBackground(colorScheme)
+    val aiBubbleColor = ChatColors.aiBubbleBackground(colorScheme)
+    val aiBorderColor = ChatColors.aiBubbleBorder(colorScheme)
     val mediaPath = remember(message.linkString, message.content) {
         message.linkString.ifBlank { message.content }
     }
@@ -98,13 +101,13 @@ internal fun AttachmentMessageBubble(
                     name = companionData?.name,
                     size = adaptiveSizing.avatarSize
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(ChatDimens.AvatarGap))
             }
 
             Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
                 Row(
                     modifier = Modifier
-                        .widthIn(max = 200.dp)
+                        .widthIn(max = ChatDimens.AttachmentMaxWidth)
                         .clip(RoundedCornerShape(adaptiveSizing.cornerRadius))
                         .background(if (isUser) userBubbleColor else aiBubbleColor)
                         .then(
@@ -115,37 +118,37 @@ internal fun AttachmentMessageBubble(
                                         adaptiveSizing.cornerRadius.toPx(),
                                         adaptiveSizing.cornerRadius.toPx()
                                     ),
-                                    style = Stroke(width = 0.8f)
+                                    style = Stroke(width = ChatDimens.BubbleBorderWidth.toPx())
                                 )
                             }
                         )
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = ChatDimens.AttachmentHorizontalPadding, vertical = ChatDimens.AttachmentVerticalPadding),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = label,
-                        tint = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(22.dp)
+                        tint = if (isUser) ChatColors.userBubbleContent(colorScheme) else ChatColors.aiBubbleContent(colorScheme),
+                        modifier = Modifier.size(ChatDimens.AttachmentIconSize)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(ChatDimens.AttachmentIconTextGap))
                     Text(
                         text = label,
                         style = MaterialTheme.typography.bodyLarge.copy(fontSize = adaptiveSizing.fontSizeBody.sp),
-                        color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                        color = if (isUser) ChatColors.userBubbleContent(colorScheme) else ChatColors.aiBubbleContent(colorScheme)
                     )
                 }
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(ChatDimens.BubbleTimestampGap))
                 Text(
                     text = time,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = adaptiveSizing.fontSizeCaption.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ChatColors.metadataContent(colorScheme),
                     textAlign = if (isUser) TextAlign.End else TextAlign.Start
                 )
             }
 
             if (isUser) {
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(ChatDimens.AvatarGap))
                 UserAvatar(
                     avatarUrl = userAvatar,
                     name = userName,
@@ -157,15 +160,15 @@ internal fun AttachmentMessageBubble(
         DropdownMenu(
             expanded = showMenu,
             onDismissRequest = { showMenu = false },
-            modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+            modifier = Modifier.background(ChatColors.menuBackground(colorScheme)),
             offset = DpOffset(x = 0.dp, y = 0.dp)
         ) {
             DropdownMenuItem(
                 text = {
                     Text(
                         text = "引用",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurface
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = ChatDimens.MenuTextFontSize),
+                        color = ChatColors.menuContent(colorScheme)
                     )
                 },
                 onClick = {
@@ -176,8 +179,8 @@ internal fun AttachmentMessageBubble(
                     Icon(
                         Icons.Outlined.FormatQuote,
                         contentDescription = "引用",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        tint = ChatColors.menuIcon(colorScheme),
+                        modifier = Modifier.size(ChatDimens.MenuIconSize)
                     )
                 }
             )
@@ -186,8 +189,8 @@ internal fun AttachmentMessageBubble(
                     text = {
                         Text(
                             text = "重新生成",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = MaterialTheme.colorScheme.onSurface
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = ChatDimens.MenuTextFontSize),
+                            color = ChatColors.menuContent(colorScheme)
                         )
                     },
                     onClick = {
@@ -198,8 +201,8 @@ internal fun AttachmentMessageBubble(
                         Icon(
                             Icons.Outlined.Refresh,
                             contentDescription = "重新生成",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            tint = ChatColors.menuIcon(colorScheme),
+                            modifier = Modifier.size(ChatDimens.MenuIconSize)
                         )
                     }
                 )
@@ -208,8 +211,8 @@ internal fun AttachmentMessageBubble(
                 text = {
                     Text(
                         text = "撤回消息",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurface
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = ChatDimens.MenuTextFontSize),
+                        color = ChatColors.menuContent(colorScheme)
                     )
                 },
                 onClick = {
@@ -220,8 +223,8 @@ internal fun AttachmentMessageBubble(
                     Icon(
                         Icons.Outlined.DeleteOutline,
                         contentDescription = "撤回",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        tint = ChatColors.menuIcon(colorScheme),
+                        modifier = Modifier.size(ChatDimens.MenuIconSize)
                     )
                 }
             )

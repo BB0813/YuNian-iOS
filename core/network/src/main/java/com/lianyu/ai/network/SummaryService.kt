@@ -6,6 +6,7 @@ import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.SummaryProvider
+import com.lianyu.ai.database.repository.SummaryPurpose
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -15,16 +16,16 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /**
- * 对话摘要服务 —— Phase 4: 对话摘要压缩。
+ * 统一对话摘要服务 —— 同时服务于 AutoContextManager（历史压缩）和
+ * UnifiedMemoryRepository（记忆压缩）。
  *
- * 职责：
- * 1. 当 WORKING 记忆积累到阈值时，调用 AI API 将多轮对话压缩为摘要
- * 2. 摘要作为 EPISODIC 记忆存储，替代逐条 WORKING 记忆
- * 3. API 不可用时返回 null，调用方回退到本地规则摘要
+ * 通过 [SummaryPurpose] 区分参数和模板，消除两套独立摘要系统的语义不一致：
+ * - [SummaryPurpose.HISTORY]：200-400 字叙事摘要，第三人称，保留关键事实/约定/情感/关系进展
+ * - [SummaryPurpose.MEMORY]：150 字精简摘要，提取关键话题和新信息
  *
  * 设计原则（与 EmbeddingService 一致）：
  * - 隐私优先：使用用户自己的 API key，不引入第三方服务
- * - 容错降级：API 失败时返回 null，记忆系统仍可用
+ * - 容错降级：API 失败时返回 null，调用方回退到本地规则摘要
  * - 独立 HTTP client：避免与 AiService 的主请求链路竞争
  */
 class SummaryService(private val context: Context) : SummaryProvider {
@@ -42,11 +43,35 @@ class SummaryService(private val context: Context) : SummaryProvider {
                 .build()
         }
 
-        /** 摘要系统提示词 */
-        private const val SUMMARY_SYSTEM_PROMPT = "你是一个对话摘要助手，擅长提取关键信息并压缩文本。"
+        // ── 统一 Prompt 模板（按 purpose 区分） ──
 
-        /** 摘要用户提示词模板 */
-        private const val SUMMARY_PROMPT_TEMPLATE = """请将以下对话历史压缩成一段简洁的摘要（150字以内）。
+        /** HISTORY 用途：系统角色（叙事摘要，200-400 字） */
+        private const val HISTORY_SYSTEM_ROLE = "你是对话摘要助手，擅长将长对话压缩为精炼的叙事摘要。"
+
+        /** HISTORY 用途：用户提示词模板（200-400 字，第三人称叙事） */
+        private const val HISTORY_PROMPT_TEMPLATE = """你是对话摘要助手。请将以下对话历史压缩为一段连贯的叙事摘要。
+
+要求：
+1. 用第三人称叙述，200-400字
+2. 按时间顺序组织，保持叙事连贯性
+3. 重点保留：
+   - 关键事实（名字、年龄、生日、工作、学校等个人信息）
+   - 用户偏好和习惯
+   - 约定、承诺、计划（如"约好周末一起"、"答应过生日送礼物"）
+   - 情感时刻（表白、争吵、和好、撒娇、感动等）
+   - 关系进展和变化
+4. 省略寒暄、重复内容和无关紧要的细节
+5. 不要编造对话中未出现的内容
+6. 直接输出摘要文本，不要加标题、不要用列表格式
+
+%s=== 对话历史 ===
+%s"""
+
+        /** MEMORY 用途：系统角色（精简摘要，150 字以内） */
+        private const val MEMORY_SYSTEM_PROMPT = "你是一个对话摘要助手，擅长提取关键信息并压缩文本。"
+
+        /** MEMORY 用途：用户提示词模板（150 字以内，提取关键信息） */
+        private const val MEMORY_PROMPT_TEMPLATE = """请将以下对话历史压缩成一段简洁的摘要（150字以内）。
 要求：
 1. 提取关键话题、情感变化、用户提到的个人信息/偏好/约定
 2. 省略闲聊和重复内容
@@ -73,15 +98,15 @@ class SummaryService(private val context: Context) : SummaryProvider {
     }
 
     /**
-     * 将对话文本压缩为摘要。
+     * 将对话文本压缩为摘要，按 [purpose] 区分参数和模板。
      *
-     * @param conversationText 已格式化的对话文本
-     * @param memoryContext    当前已有的记忆上下文（避免重复提取）
-     * @return 压缩后的摘要文本，失败时返回 null
+     * - [SummaryPurpose.HISTORY]：200-400 字叙事摘要，temp=0.3, maxTokens=600
+     * - [SummaryPurpose.MEMORY]：150 字精简摘要，temp=0.3, maxTokens=300
      */
     override suspend fun summarize(
         conversationText: String,
-        memoryContext: String
+        memoryContext: String,
+        purpose: SummaryPurpose
     ): String? = withContext(Dispatchers.IO) {
         if (conversationText.isBlank()) return@withContext null
 
@@ -89,11 +114,34 @@ class SummaryService(private val context: Context) : SummaryProvider {
         val keys = config.getAllApiKeys()
         if (keys.isEmpty()) return@withContext null
 
-        val memoryHint = if (memoryContext.isNotBlank()) {
-            "\n\n=== 已有的长期记忆（以下内容不需要重复提取，只需关注未记录的新信息） ===\n$memoryContext"
-        } else ""
+        // 按 purpose 选择模板和参数
+        val systemRole: String
+        val promptTemplate: String
+        val memoryHint: String
+        val maxTokens: Int
 
-        val prompt = SUMMARY_PROMPT_TEMPLATE.format(memoryHint, conversationText)
+        when (purpose) {
+            SummaryPurpose.HISTORY -> {
+                systemRole = HISTORY_SYSTEM_ROLE
+                promptTemplate = HISTORY_PROMPT_TEMPLATE
+                // HISTORY: 注入 memoryContext 前 500 字，确保摘要与已有记忆一致
+                memoryHint = if (memoryContext.isNotBlank()) {
+                    "已知记忆参考（摘要应与这些记忆一致，不要矛盾）：\n${memoryContext.take(500)}\n"
+                } else ""
+                maxTokens = 600
+            }
+            SummaryPurpose.MEMORY -> {
+                systemRole = MEMORY_SYSTEM_PROMPT
+                promptTemplate = MEMORY_PROMPT_TEMPLATE
+                // MEMORY: 注入完整 memoryContext，避免重复提取
+                memoryHint = if (memoryContext.isNotBlank()) {
+                    "\n\n=== 已有的长期记忆（以下内容不需要重复提取，只需关注未记录的新信息） ===\n$memoryContext"
+                } else ""
+                maxTokens = 300
+            }
+        }
+
+        val prompt = promptTemplate.format(memoryHint, conversationText)
 
         val baseUrl = normalizeBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
@@ -103,11 +151,11 @@ class SummaryService(private val context: Context) : SummaryProvider {
             append('{')
             append("\"model\":\"${escapeJson(config.model)}\",")
             append("\"messages\":[")
-            append("{\"role\":\"system\",\"content\":\"${escapeJson(SUMMARY_SYSTEM_PROMPT)}\"},")
+            append("{\"role\":\"system\",\"content\":\"${escapeJson(systemRole)}\"},")
             append("{\"role\":\"user\",\"content\":\"${escapeJson(prompt)}\"}")
             append("],")
             append("\"temperature\":0.3,")
-            append("\"max_tokens\":300")
+            append("\"max_tokens\":$maxTokens")
             append('}')
         }
 

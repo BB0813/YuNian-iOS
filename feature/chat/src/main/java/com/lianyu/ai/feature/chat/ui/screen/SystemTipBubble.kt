@@ -11,20 +11,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lianyu.ai.feature.chat.ui.theme.ChatColors
+import com.lianyu.ai.feature.chat.ui.theme.ChatDimens
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 
 @Composable
 fun SystemTipBubble(item: ChatListItem.SystemTip) {
+    val colorScheme = MaterialTheme.colorScheme
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 6.dp),
+            .padding(horizontal = ChatDimens.SystemTipHorizontalPadding, vertical = ChatDimens.SystemTipVerticalPadding),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = item.content,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = ChatDimens.SystemTipFontSize),
+            color = ChatColors.systemTipContent(colorScheme),
             textAlign = TextAlign.Center
         )
     }

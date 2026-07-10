@@ -15,6 +15,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lianyu.ai.feature.chat.ui.theme.ChatColors
+import com.lianyu.ai.feature.chat.ui.theme.ChatDimens
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import java.time.Instant
 import java.time.LocalDate
@@ -24,21 +26,22 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TimeDividerBubble(item: ChatListItem.TimeDivider) {
     val label = remember(item.timestamp) { formatTimeDividerLabel(item.timestamp) }
+    val colorScheme = MaterialTheme.colorScheme
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = ChatDimens.TimeDividerVerticalPadding),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                .clip(RoundedCornerShape(ChatDimens.TimeDividerCornerRadius))
+                .background(ChatColors.timeDividerBackground(colorScheme))
+                .padding(horizontal = ChatDimens.TimeDividerHorizontalPadding, vertical = ChatDimens.TimeDividerInnerVerticalPadding),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = ChatDimens.TimeDividerFontSize),
+            color = ChatColors.metadataContent(colorScheme),
             textAlign = TextAlign.Center
         )
     }
