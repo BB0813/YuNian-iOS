@@ -1,14 +1,13 @@
 package com.lianyu.ai.feature.chat.ui.screen
 
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.ui.theme.withChatSize
-import com.lianyu.ai.uicommon.component.CompanionAvatar
-import com.lianyu.ai.uicommon.component.UserAvatar
+import com.lianyu.ai.uicommon.component.AppMessageAvatar
+import com.lianyu.ai.uicommon.component.AppMessageTimestamp
+import com.lianyu.ai.uicommon.component.formatAppMessageTime
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
@@ -19,19 +18,14 @@ fun ChatMessageAvatar(
     userName: String,
     adaptiveSizing: AdaptiveSizing
 ) {
-    if (isMine) {
-        UserAvatar(
-            avatarUrl = userAvatar,
-            name = userName,
-            size = adaptiveSizing.avatarSize
-        )
-    } else {
-        CompanionAvatar(
-            avatarUrl = companionData?.avatarUrl,
-            name = companionData?.name,
-            size = adaptiveSizing.avatarSize
-        )
-    }
+    AppMessageAvatar(
+        isMine = isMine,
+        companionAvatarUrl = companionData?.avatarUrl,
+        companionName = companionData?.name,
+        userAvatarUrl = userAvatar,
+        userName = userName,
+        size = adaptiveSizing.avatarSize
+    )
 }
 
 @Composable
@@ -40,13 +34,12 @@ fun ChatMessageTimestamp(
     isMine: Boolean,
     adaptiveSizing: AdaptiveSizing
 ) {
-    Text(
-        text = time,
+    AppMessageTimestamp(
+        time = time,
+        isMine = isMine,
         style = ChatTheme.typography.timestamp.withChatSize(adaptiveSizing.fontSizeCaption.sp),
-        color = ChatTheme.colors.metadata,
-        textAlign = if (isMine) TextAlign.End else TextAlign.Start
+        color = ChatTheme.colors.metadata
     )
 }
 
-fun formatChatMessageTime(timestamp: Long): String = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-    .format(java.time.Instant.ofEpochMilli(timestamp).atZone(java.time.ZoneId.systemDefault()))
+fun formatChatMessageTime(timestamp: Long): String = formatAppMessageTime(timestamp)

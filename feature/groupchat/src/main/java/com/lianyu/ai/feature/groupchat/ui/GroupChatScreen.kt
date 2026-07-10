@@ -110,11 +110,13 @@ import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.common.PermissionManager
 import com.lianyu.ai.uicommon.component.ChatInputExtensionPanel
+import com.lianyu.ai.uicommon.component.AppListItemLayout
 import com.lianyu.ai.uicommon.component.StickerPanel
 import com.lianyu.ai.uicommon.component.getChatBackground
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
+import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.feature.groupchat.GroupChatViewModel
 import com.lianyu.ai.feature.groupchat.GroupChatViewModelFactory
 import com.lianyu.ai.common.HardwareInfo
@@ -896,12 +898,9 @@ fun GroupChatBubble(
     val userBubbleColor = MaterialTheme.colorScheme.primary
     val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom
-    ) {
-        if (!isUser) {
+    AppListItemLayout(
+        isStartAligned = !isUser,
+        startSlot = {
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -909,7 +908,24 @@ fun GroupChatBubble(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                if (companion?.avatarUrl != null) {
+                if (isUser) {
+                    if (userAvatar != null) {
+                        AsyncImage(
+                            model = userAvatar,
+                            contentDescription = userName,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text(
+                            text = userName.firstOrNull()?.toString() ?: "?",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+                    }
+                } else if (companion?.avatarUrl != null) {
                     AsyncImage(
                         model = companion.avatarUrl,
                         contentDescription = companion.name,
@@ -926,10 +942,15 @@ fun GroupChatBubble(
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-
-        Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
+        },
+        endSlot = {},
+        modifier = Modifier.fillMaxWidth(),
+        slotGap = AppTheme.dimens.avatarGap
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+        ) {
             if (!isUser && companion != null) {
                 Text(
                     text = companion.name,
@@ -1006,34 +1027,6 @@ fun GroupChatBubble(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = if (isUser) TextAlign.End else TextAlign.Start
             )
-        }
-
-        if (isUser) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
-            ) {
-                if (userAvatar != null) {
-                    AsyncImage(
-                        model = userAvatar,
-                        contentDescription = userName,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Text(
-                        text = userName.firstOrNull()?.toString() ?: "?",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    )
-                }
-            }
         }
     }
 }

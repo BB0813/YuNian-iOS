@@ -56,6 +56,8 @@ import com.lianyu.ai.uicommon.theme.PinkPrimary
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
+import com.lianyu.ai.uicommon.component.AppListItemLayout
+import com.lianyu.ai.uicommon.theme.AppTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -301,18 +303,9 @@ fun GroupListItem(
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = {
             Box(
                 modifier = Modifier.size(adaptiveSizing.avatarSize),
                 contentAlignment = Alignment.TopEnd
@@ -344,47 +337,46 @@ fun GroupListItem(
                         Icon(
                             imageVector = Icons.Outlined.Group,
                             contentDescription = group.name,
-                            tint = Color.White,
+                            tint = colorScheme.onPrimary,
                             modifier = Modifier.size(adaptiveSizing.iconSize)
                         )
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = group.name,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Normal,
-                            fontSize = adaptiveSizing.fontSizeBody.sp
-                        ),
-                        color = colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Text(
-                    text = "${group.getCompanionIdList().size} 人",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = (adaptiveSizing.fontSizeBody - 1).sp,
-                        lineHeight = 20.sp
-                    ),
-                    color = colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+        },
+        endSlot = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(colorScheme.surfaceVariant)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        onClick = onClick,
+        slotGap = AppTheme.dimens.avatarGap
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = group.name,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Normal,
+                    fontSize = adaptiveSizing.fontSizeBody.sp
+                ),
+                color = colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${group.getCompanionIdList().size} 人",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = (adaptiveSizing.fontSizeBody - 1).sp,
+                    lineHeight = 20.sp
+                ),
+                color = colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -402,18 +394,9 @@ fun ChatListItem(
 
     val colorScheme = MaterialTheme.colorScheme
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colorScheme.surfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = {
             Box(
                 modifier = Modifier.size(adaptiveSizing.avatarSize),
                 contentAlignment = Alignment.TopEnd
@@ -422,7 +405,7 @@ fun ChatListItem(
                     modifier = Modifier
                         .size(adaptiveSizing.avatarSize)
                         .clip(CircleShape)
-                        .background(Color(0xFFE0E0E0)),
+                        .background(colorScheme.surface),
                     contentAlignment = Alignment.Center
                 ) {
                     if (companion.avatarUrl != null) {
@@ -439,7 +422,7 @@ fun ChatListItem(
                         Icon(
                             imageVector = Icons.Outlined.Person,
                             contentDescription = null,
-                            tint = Color(0xFF888888),
+                            tint = AppTheme.colors.captionContent,
                             modifier = Modifier.size((adaptiveSizing.avatarSize * 0.58f))
                         )
                     }
@@ -453,13 +436,20 @@ fun ChatListItem(
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
+        },
+        endSlot = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(colorScheme.surfaceVariant)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        onClick = onClick,
+        slotGap = AppTheme.dimens.avatarGap
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -497,7 +487,6 @@ fun ChatListItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
         }
     }
 }

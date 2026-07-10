@@ -1,14 +1,11 @@
 package com.lianyu.ai.feature.chat.ui.screen
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
+import com.lianyu.ai.uicommon.component.AppMessageScaffold
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
@@ -27,41 +24,43 @@ internal fun ChatMessageScaffold(
 ) {
     val isMine = message.isFromUser
     val time = remember(message.timestamp) { formatChatMessageTime(message.timestamp) }
-    var showMenu by remember { mutableStateOf(false) }
 
-    Box {
-        ChatMessageFrame(
-            isMine = isMine,
-            adaptiveSizing = adaptiveSizing,
-            avatar = {
-                ChatMessageAvatar(
-                    isMine = isMine,
-                    companionData = companionData,
-                    userAvatar = userAvatar,
-                    userName = userName,
-                    adaptiveSizing = adaptiveSizing
-                )
-            },
-            timestamp = {
-                ChatMessageTimestamp(
-                    time = time,
-                    isMine = isMine,
-                    adaptiveSizing = adaptiveSizing
-                )
-            },
-            drawBubble = drawBubble,
-            isDarkTheme = isDarkTheme,
-            onClick = onClick,
-            onLongClick = { showMenu = true },
-            content = content
-        )
-
-        ChatMessageMenu(
-            expanded = showMenu,
-            message = message,
-            onDismiss = { showMenu = false },
-            onIntent = onIntent,
-            copyText = copyText
-        )
-    }
+    AppMessageScaffold(
+        frame = { onLongClickFromScaffold ->
+            ChatMessageFrame(
+                isMine = isMine,
+                adaptiveSizing = adaptiveSizing,
+                avatar = {
+                    ChatMessageAvatar(
+                        isMine = isMine,
+                        companionData = companionData,
+                        userAvatar = userAvatar,
+                        userName = userName,
+                        adaptiveSizing = adaptiveSizing
+                    )
+                },
+                timestamp = {
+                    ChatMessageTimestamp(
+                        time = time,
+                        isMine = isMine,
+                        adaptiveSizing = adaptiveSizing
+                    )
+                },
+                drawBubble = drawBubble,
+                isDarkTheme = isDarkTheme,
+                onClick = onClick,
+                onLongClick = onLongClickFromScaffold,
+                content = content
+            )
+        },
+        menu = { expanded, onDismiss ->
+            ChatMessageMenu(
+                expanded = expanded,
+                message = message,
+                onDismiss = onDismiss,
+                onIntent = onIntent,
+                copyText = copyText
+            )
+        }
+    )
 }

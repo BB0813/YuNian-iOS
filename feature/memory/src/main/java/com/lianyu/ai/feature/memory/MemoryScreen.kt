@@ -67,6 +67,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.lianyu.ai.uicommon.component.AppListItemLayout
+import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.DiaryEntry
 import com.lianyu.ai.database.model.MemoryCategory
@@ -559,11 +561,16 @@ fun MemoryItemCard(
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val category = memory.toMemoryCategory()
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = RoundedCornerShape(12.dp)
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = {},
+        endSlot = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface),
+        onClick = { onEdit(memory) },
+        slotGap = AppTheme.dimens.avatarGap
     ) {
         Column(
             modifier = Modifier
@@ -663,11 +670,15 @@ fun TempMemoryItemCard(tempMemory: MemoryRecord) {
     val userText = parsedMemory.first
     val aiText = parsedMemory.second
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = RoundedCornerShape(12.dp)
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = {},
+        endSlot = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface),
+        slotGap = AppTheme.dimens.avatarGap
     ) {
         Column(
             modifier = Modifier
@@ -738,11 +749,16 @@ fun DiaryItemCard(
 ) {
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = RoundedCornerShape(12.dp)
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = {},
+        endSlot = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface),
+        onClick = { onEdit(diary) },
+        slotGap = AppTheme.dimens.avatarGap
     ) {
         Column(
             modifier = Modifier
