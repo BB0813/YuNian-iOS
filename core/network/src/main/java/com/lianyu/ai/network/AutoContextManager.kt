@@ -89,6 +89,7 @@ class AutoContextManager(
 
         // 3. 系统提示词（固定优先级，不压缩）
         val systemTokens = TokenEstimator.estimate(systemPrompt)
+        val systemPromptHash = systemPrompt.hashCode()
         val systemMessage = Message("system", systemPrompt)
         var remainingBudget = totalBudget - systemTokens
 
@@ -101,8 +102,12 @@ class AutoContextManager(
             return messages
         }
 
-        // 4. 记忆上下文（上限 20% 预算）
-        val memoryBudget = (totalBudget * 0.2).toInt()
+        // 4. 记忆上下文（动态预算分配）
+        // 不再固定 20% 上限，而是根据实际 token 数动态分配：
+        // - 如果记忆上下文较小（≤ 剩余预算的 30%），完整放入
+        // - 如果记忆上下文较大（> 剩余预算的 30%），截断到 30% 预算
+        //   30% 是记忆与历史之间的平衡点，确保历史消息有足够空间
+        val memoryBudget = (remainingBudget * 0.3).toInt()
         val memoryTokens = TokenEstimator.estimate(memoryContext)
         if (memoryContext.isNotBlank() && memoryTokens <= memoryBudget) {
             // 记忆上下文可以完整放入
@@ -120,7 +125,7 @@ class AutoContextManager(
 
         // 5. 历史消息（使用剩余预算）
         val historyBudget = remainingBudget
-        val historyMessages = buildHistoryMessages(history, historyBudget, companionNameMap, memoryContext)
+        val historyMessages = buildHistoryMessages(history, historyBudget, companionNameMap, memoryContext, systemPromptHash)
         messages.addAll(historyMessages)
 
         // 6. 确保最后一条是 user 消息
@@ -135,12 +140,16 @@ class AutoContextManager(
     /**
      * 在 token 预算内构建历史消息列表。
      * 如果全部消息超出预算，触发自动压缩。
+     *
+     * @param systemPromptHash 系统提示词哈希，参与摘要缓存 key，
+     *   确保角色设定变更时摘要重新生成。
      */
     private suspend fun buildHistoryMessages(
         history: List<ChatMessage>,
         budgetTokens: Int,
         companionNameMap: Map<Long, String>,
-        memoryContext: String
+        memoryContext: String,
+        systemPromptHash: Int = 0
     ): List<Message> {
         if (history.isEmpty()) return emptyList()
 
@@ -180,7 +189,7 @@ class AutoContextManager(
         val compressedCount = allMessages.size - keepMessages.size
         if (compressedCount > 0) {
             val oldChatMessages = filtered.dropLast(keepMessages.size)
-            val summary = summarizeMessages(oldChatMessages, companionNameMap, memoryContext)
+            val summary = summarizeMessages(oldChatMessages, companionNameMap, memoryContext, systemPromptHash)
             if (summary.isNotBlank()) {
                 val summaryMessage = Message("system", summary)
                 val summaryTokens = TokenEstimator.estimate(listOf(summaryMessage))
@@ -202,19 +211,25 @@ class AutoContextManager(
     /**
      * 摘要消息列表：优先使用 AI 摘要，失败时降级为本地正则摘要。
      * 带缓存：同一批消息不会重复调用 AI。
+     *
+     * 缓存 key 包含：lastMsg.id + content.hash + msgCount + memoryContext.hash + systemPromptHash
+     * - memoryContext 参与摘要 prompt 生成，其变化时摘要需重新生成
+     * - systemPromptHash 确保角色设定/系统提示变更时摘要重新生成
      */
     private suspend fun summarizeMessages(
         messages: List<ChatMessage>,
         companionNameMap: Map<Long, String>,
-        memoryContext: String
+        memoryContext: String,
+        systemPromptHash: Int = 0
     ): String {
         if (messages.isEmpty()) return ""
 
-        // 构建缓存 key：最后一条消息的 ID + 内容哈希 + 消息数量 + memoryContext 哈希
+        // 构建缓存 key：最后一条消息的 ID + 内容哈希 + 消息数量 + memoryContext 哈希 + systemPrompt 哈希
         // memoryContext 参与摘要 prompt 生成，其变化时摘要需重新生成
+        // systemPromptHash 确保角色设定变更时摘要重新生成
         val lastMsg = messages.last()
         val memHash = memoryContext.hashCode()
-        val cacheKey = "${lastMsg.id ?: "noid"}_${lastMsg.content.hashCode()}_${messages.size}_$memHash"
+        val cacheKey = "${lastMsg.id ?: "noid"}_${lastMsg.content.hashCode()}_${messages.size}_${memHash}_${systemPromptHash}"
 
         // 先查缓存
         summaryCache[cacheKey]?.let {

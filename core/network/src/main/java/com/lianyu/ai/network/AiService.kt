@@ -66,6 +66,8 @@ class AiService(context: Context) : AiServiceProvider {
     private val tokenUsageRepository: TokenUsageRepository
     private val userRepository: UserRepository
     private val appSettingsStore = AppSettingsStore(appContext)
+    private val summaryProvider: com.lianyu.ai.database.repository.SummaryProvider? =
+        com.lianyu.ai.domain.ServiceRegistry.get(com.lianyu.ai.database.repository.SummaryProvider::class.java)
     private val autoContextManager = AutoContextManager(
         aiSummarizer = { messages, companionNameMap, memoryContext ->
             summarizeWithAi(messages, companionNameMap, memoryContext)
@@ -157,28 +159,6 @@ class AiService(context: Context) : AiServiceProvider {
         private val fetchModelsExecutor = java.util.concurrent.Executors.newFixedThreadPool(2) { r ->
             Thread(r, "AiService-fetchModels").apply { isDaemon = true }
         }
-
-        // ── 摘要 Prompt 模板（抽取为常量，便于统一维护和未来动态配置） ──
-
-        private const val SUMMARY_SYSTEM_ROLE = "你是对话摘要助手，擅长将长对话压缩为精炼的叙事摘要。"
-
-        private const val SUMMARY_PROMPT_TEMPLATE = """你是对话摘要助手。请将以下对话历史压缩为一段连贯的叙事摘要。
-
-要求：
-1. 用第三人称叙述，200-400字
-2. 按时间顺序组织，保持叙事连贯性
-3. 重点保留：
-   - 关键事实（名字、年龄、生日、工作、学校等个人信息）
-   - 用户偏好和习惯
-   - 约定、承诺、计划（如"约好周末一起"、"答应过生日送礼物"）
-   - 情感时刻（表白、争吵、和好、撒娇、感动等）
-   - 关系进展和变化
-4. 省略寒暄、重复内容和无关紧要的细节
-5. 不要编造对话中未出现的内容
-6. 直接输出摘要文本，不要加标题、不要用列表格式
-
-%s=== 对话历史 ===
-%s"""
 
         /**
          * Check if a model requires temperature=1 (no other values supported)
@@ -716,7 +696,7 @@ class AiService(context: Context) : AiServiceProvider {
     }
 
     /**
-     * AI 驱动的对话摘要生成。
+     * AI 驱动的对话摘要生成（委托给统一 SummaryProvider）。
      *
      * 将旧对话消息发送给 AI，生成连贯的叙事摘要，保留：
      * - 关键事实（名字、偏好、约定、承诺）
@@ -726,7 +706,9 @@ class AiService(context: Context) : AiServiceProvider {
      * 用于 AutoContextManager 的上下文压缩，替代旧的正则关键词提取方案。
      * 失败时返回 null，由调用方降级为本地正则摘要。
      *
-     * Prompt 模板抽取为 companion object 常量，便于统一维护和未来动态配置。
+     * 统一摘要服务：通过 SummaryProvider.summarize(HISTORY) 调用，
+     * 与 UnifiedMemoryRepository 的 MEMORY 摘要共享同一服务和模板体系，
+     * 消除两套独立摘要系统的语义不一致。
      */
     private suspend fun summarizeWithAi(
         messages: List<ChatMessage>,
@@ -734,15 +716,6 @@ class AiService(context: Context) : AiServiceProvider {
         memoryContext: String
     ): String? {
         if (messages.isEmpty()) return null
-
-        val config = resolveConfig() ?: run {
-            SecureLog.w("AiService", "summarizeWithAi: no active config")
-            return null
-        }
-        if (config.model.isBlank()) {
-            SecureLog.w("AiService", "summarizeWithAi: model not configured")
-            return null
-        }
 
         // 构建对话文本
         val conversationText = buildString {
@@ -760,26 +733,24 @@ class AiService(context: Context) : AiServiceProvider {
 
         if (conversationText.isBlank()) return null
 
-        // 使用抽取的 Prompt 模板构建摘要请求
-        val summaryPrompt = SUMMARY_PROMPT_TEMPLATE.format(
-            if (memoryContext.isNotBlank()) {
-                "已知记忆参考（摘要应与这些记忆一致，不要矛盾）：\n${memoryContext.take(500)}\n"
-            } else "",
-            conversationText
-        )
-
-        val aiMessages = listOf(
-            Message("system", SUMMARY_SYSTEM_ROLE),
-            Message("user", summaryPrompt)
-        )
-
-        return try {
-            val result = callOpenAiCompatibleLight(config, aiMessages, temperature = 0.3, maxTokens = 600)
-            if (result.isBlank()) null else result.trim()
-        } catch (e: Exception) {
-            SecureLog.w("AiService", "summarizeWithAi failed: ${e.message}")
-            null
+        // 委托给统一 SummaryProvider（HISTORY 用途：200-400 字叙事摘要）
+        val provider = summaryProvider
+        if (provider != null && provider.isSummarySupported()) {
+            return try {
+                provider.summarize(
+                    conversationText,
+                    memoryContext,
+                    com.lianyu.ai.database.repository.SummaryPurpose.HISTORY
+                )
+            } catch (e: Exception) {
+                SecureLog.w("AiService", "summarizeWithAi via SummaryProvider failed: ${e.message}")
+                null
+            }
         }
+
+        // SummaryProvider 不可用时返回 null，AutoContextManager 会降级为本地正则摘要
+        SecureLog.w("AiService", "summarizeWithAi: SummaryProvider not available")
+        return null
     }
 
     private suspend fun callOpenAiCompatibleLight(
