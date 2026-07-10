@@ -158,6 +158,28 @@ class AiService(context: Context) : AiServiceProvider {
             Thread(r, "AiService-fetchModels").apply { isDaemon = true }
         }
 
+        // ── 摘要 Prompt 模板（抽取为常量，便于统一维护和未来动态配置） ──
+
+        private const val SUMMARY_SYSTEM_ROLE = "你是对话摘要助手，擅长将长对话压缩为精炼的叙事摘要。"
+
+        private const val SUMMARY_PROMPT_TEMPLATE = """你是对话摘要助手。请将以下对话历史压缩为一段连贯的叙事摘要。
+
+要求：
+1. 用第三人称叙述，200-400字
+2. 按时间顺序组织，保持叙事连贯性
+3. 重点保留：
+   - 关键事实（名字、年龄、生日、工作、学校等个人信息）
+   - 用户偏好和习惯
+   - 约定、承诺、计划（如"约好周末一起"、"答应过生日送礼物"）
+   - 情感时刻（表白、争吵、和好、撒娇、感动等）
+   - 关系进展和变化
+4. 省略寒暄、重复内容和无关紧要的细节
+5. 不要编造对话中未出现的内容
+6. 直接输出摘要文本，不要加标题、不要用列表格式
+
+%s=== 对话历史 ===
+%s"""
+
         /**
          * Check if a model requires temperature=1 (no other values supported)
          */
@@ -703,6 +725,8 @@ class AiService(context: Context) : AiServiceProvider {
      *
      * 用于 AutoContextManager 的上下文压缩，替代旧的正则关键词提取方案。
      * 失败时返回 null，由调用方降级为本地正则摘要。
+     *
+     * Prompt 模板抽取为 companion object 常量，便于统一维护和未来动态配置。
      */
     private suspend fun summarizeWithAi(
         messages: List<ChatMessage>,
@@ -736,34 +760,16 @@ class AiService(context: Context) : AiServiceProvider {
 
         if (conversationText.isBlank()) return null
 
-        // 构建摘要提示词
-        val summaryPrompt = buildString {
-            appendLine("你是对话摘要助手。请将以下对话历史压缩为一段连贯的叙事摘要。")
-            appendLine()
-            appendLine("要求：")
-            appendLine("1. 用第三人称叙述，200-400字")
-            appendLine("2. 按时间顺序组织，保持叙事连贯性")
-            appendLine("3. 重点保留：")
-            appendLine("   - 关键事实（名字、年龄、生日、工作、学校等个人信息）")
-            appendLine("   - 用户偏好和习惯")
-            appendLine("   - 约定、承诺、计划（如\"约好周末一起\"、\"答应过生日送礼物\"）")
-            appendLine("   - 情感时刻（表白、争吵、和好、撒娇、感动等）")
-            appendLine("   - 关系进展和变化")
-            appendLine("4. 省略寒暄、重复内容和无关紧要的细节")
-            appendLine("5. 不要编造对话中未出现的内容")
-            appendLine("6. 直接输出摘要文本，不要加标题、不要用列表格式")
-            appendLine()
+        // 使用抽取的 Prompt 模板构建摘要请求
+        val summaryPrompt = SUMMARY_PROMPT_TEMPLATE.format(
             if (memoryContext.isNotBlank()) {
-                appendLine("已知记忆参考（摘要应与这些记忆一致，不要矛盾）：")
-                appendLine(memoryContext.take(500))
-                appendLine()
-            }
-            appendLine("=== 对话历史 ===")
-            appendLine(conversationText)
-        }
+                "已知记忆参考（摘要应与这些记忆一致，不要矛盾）：\n${memoryContext.take(500)}\n"
+            } else "",
+            conversationText
+        )
 
         val aiMessages = listOf(
-            Message("system", "你是对话摘要助手，擅长将长对话压缩为精炼的叙事摘要。"),
+            Message("system", SUMMARY_SYSTEM_ROLE),
             Message("user", summaryPrompt)
         )
 

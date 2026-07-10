@@ -6,6 +6,7 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -98,6 +99,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
@@ -314,6 +316,12 @@ fun ChatScreen(
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("聊天消息", intent.text))
                 scope.launch { snackbarHostState.showSnackbar("已复制") }
+            }
+            is ChatIntent.OpenMedia -> {
+                scope.launch {
+                    val result = openChatMedia(context, intent.path, intent.mimeType)
+                    if (!result) snackbarHostState.showSnackbar("无法打开该文件")
+                }
             }
             else -> onIntent(intent)
         }
@@ -883,5 +891,26 @@ fun ChatScreen(
                 }
             }
         )
+    }
+}
+
+private fun openChatMedia(context: Context, path: String, mimeType: String): Boolean {
+    val file = java.io.File(path)
+    if (!file.exists()) return false
+
+    return try {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.lianyu.fileprovider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
+        true
+    } catch (e: Exception) {
+        false
     }
 }

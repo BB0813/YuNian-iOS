@@ -3,7 +3,6 @@ package com.lianyu.ai.network
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ChatMessage
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * AutoContextManager — 自适应上下文管理器。
@@ -17,17 +16,31 @@ import java.util.concurrent.ConcurrentHashMap
  *    保留最近的消息 + 将旧消息压缩为连贯的叙事摘要。
  *    AI 摘要失败时自动降级为本地正则摘要。
  *
+ * 线程安全：`build()` 是 suspend 函数，协程自然向上传递，无 runBlocking。
+ * `aiSummarizer` 也是 suspend 类型，调用方用 viewModelScope.launch 即可。
+ *
  * 用户无需手动配置任何参数——一切自动完成。
  *
- * @param aiSummarizer 可选的 AI 摘要函数。传入旧消息列表，返回连贯的叙事摘要文本。
+ * @param aiSummarizer 可选的 AI 摘要函数（suspend）。传入旧消息列表，返回连贯的叙事摘要文本。
  *                     为 null 时使用本地正则摘要作为降级方案。
  */
 class AutoContextManager(
     private val aiSummarizer: (suspend (messages: List<ChatMessage>, companionNameMap: Map<Long, String>, memoryContext: String) -> String?)? = null
 ) {
 
-    /** AI 摘要缓存：key = 压缩块最后一条消息的 ID + 内容哈希，避免重复调用 API */
-    private val summaryCache = ConcurrentHashMap<String, String>()
+    /**
+     * AI 摘要 LRU 缓存：避免对同一批消息重复调用 API。
+     *
+     * 使用 synchronized LinkedHashMap + removeEldestEntry 实现 LRU 淘汰，
+ * 而非暴力 clear()，避免高并发下缓存抖动。
+     * 上限 20 条，超过时淘汰最久未访问的条目。
+     */
+    private val summaryCache: MutableMap<String, String> =
+        java.util.Collections.synchronizedMap(object : LinkedHashMap<String, String>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: Map.Entry<String, String>?): Boolean {
+                return size > 20
+            }
+        })
 
     /**
      * 上下文配置：描述当前请求的约束条件。
@@ -197,9 +210,11 @@ class AutoContextManager(
     ): String {
         if (messages.isEmpty()) return ""
 
-        // 构建缓存 key：最后一条消息的 ID + 内容哈希 + 消息数量
+        // 构建缓存 key：最后一条消息的 ID + 内容哈希 + 消息数量 + memoryContext 哈希
+        // memoryContext 参与摘要 prompt 生成，其变化时摘要需重新生成
         val lastMsg = messages.last()
-        val cacheKey = "${lastMsg.id ?: "noid"}_${lastMsg.content.hashCode()}_${messages.size}"
+        val memHash = memoryContext.hashCode()
+        val cacheKey = "${lastMsg.id ?: "noid"}_${lastMsg.content.hashCode()}_${messages.size}_$memHash"
 
         // 先查缓存
         summaryCache[cacheKey]?.let {
@@ -215,11 +230,6 @@ class AutoContextManager(
                     // 格式化为系统消息
                     val formatted = "=== 早期对话摘要（AI生成，已压缩${messages.size}条消息） ===\n$aiSummary"
                     summaryCache[cacheKey] = formatted
-                    // 限制缓存大小
-                    if (summaryCache.size > 20) {
-                        summaryCache.clear()
-                        summaryCache[cacheKey] = formatted
-                    }
                     SecureLog.api("CONTEXT", "AI summary generated: ${aiSummary.length} chars")
                     return formatted
                 }
