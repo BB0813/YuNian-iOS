@@ -529,8 +529,10 @@ fun GroupChatScreen(
                     enter = androidx.compose.animation.expandVertically(animationSpec = tween(200)) + fadeIn(tween(200)),
                     exit = androidx.compose.animation.shrinkVertically(animationSpec = tween(200)) + fadeOut(tween(200))
                 ) {
-                    val activeCompanionIds = groupData?.getCompanionIdList() ?: emptyList()
-                    val activeCompanions = companions.filter { activeCompanionIds.contains(it.id) }
+                    val activeCompanions = remember(groupData, companions) {
+                        val activeCompanionIds = groupData?.getCompanionIdList()?.toSet() ?: emptySet()
+                        companions.filter { activeCompanionIds.contains(it.id) }
+                    }
 
                     if (activeCompanions.isNotEmpty()) {
                         Column(

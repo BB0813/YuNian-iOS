@@ -79,8 +79,10 @@ fun GroupDetailScreen(
     var showEditNameDialog by remember { mutableStateOf(false) }
     var newGroupName by remember { mutableStateOf("") }
 
-    val activeCompanionIds = groupData?.getCompanionIdList() ?: emptyList()
-    val activeCompanions = companions.filter { activeCompanionIds.contains(it.id) }
+    val activeCompanions = remember(groupData, companions) {
+        val activeCompanionIds = groupData?.getCompanionIdList()?.toSet() ?: emptySet()
+        companions.filter { activeCompanionIds.contains(it.id) }
+    }
 
     // 图片选择器
     val imagePicker = rememberLauncherForActivityResult(

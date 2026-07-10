@@ -4,12 +4,19 @@ import android.content.Context
 import android.util.Log
 import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.database.AppDatabase
+import com.lianyu.ai.database.model.DiaryEntry
 import com.lianyu.ai.database.model.MemoryScope
 import com.lianyu.ai.database.model.MemorySource
+import com.lianyu.ai.database.repository.CompanionRepository
+import com.lianyu.ai.database.repository.DiaryProvider
 import com.lianyu.ai.database.repository.EmbeddingProvider
 import com.lianyu.ai.database.repository.SummaryProvider
 import com.lianyu.ai.database.repository.UnifiedMemoryRepository
 import com.lianyu.ai.domain.MemoryProvider
+import com.lianyu.ai.domain.ServiceRegistry
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 统一记忆提供者 —— 现代化记忆系统的 [MemoryProvider] 实现。
@@ -35,12 +42,15 @@ class UnifiedMemoryProvider(
 
     companion object {
         private const val TAG = "UnifiedMemoryProvider"
+            private const val DIARY_TAG = "ai_generated,conversation_summary"
     }
 
     private val repository: UnifiedMemoryRepository
+        private val database = AppDatabase.getDatabase(context.applicationContext)
+        private val diaryDao = database.diaryDao()
+        private val companionRepository = CompanionRepository(database.companionDao())
 
     init {
-        val database = AppDatabase.getDatabase(context.applicationContext)
         repository = UnifiedMemoryRepository(database.unifiedMemoryDao(), deviceId, embeddingProvider, summaryProvider)
     }
 
@@ -123,6 +133,14 @@ class UnifiedMemoryProvider(
                 aiResponse = aiResponse
             )
 
+            if (groupId == null) {
+                generateConversationDiary(
+                    companionId = companionId,
+                    userInput = userInput,
+                    aiResponse = aiResponse
+                )
+            }
+
             // 同时提取全局记忆（用户级偏好/事实，跨角色共享）
             if (scope != MemoryScope.GLOBAL) {
                 repository.extractAndSaveMemories(
@@ -133,5 +151,55 @@ class UnifiedMemoryProvider(
                 )
             }
         }.onFailure { Log.e(TAG, "提取记忆失败", it) }
+    }
+
+    private suspend fun generateConversationDiary(
+        companionId: Long,
+        userInput: String,
+        aiResponse: String
+    ) {
+        val diaryProvider = ServiceRegistry.get(DiaryProvider::class.java) ?: return
+        val companion = companionRepository.getCompanionById(companionId) ?: return
+
+        val conversationSummary = buildConversationSummary(companion.name, userInput, aiResponse)
+        val memoryContext = repository.buildMemoryContext(
+            scope = MemoryScope.COMPANION,
+            sourceId = companionId,
+            userQuery = userInput,
+            limit = 8
+        )
+        val diaryContent = diaryProvider.generateDiary(companion, conversationSummary, memoryContext)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+
+        diaryDao.insertDiary(
+            DiaryEntry(
+                companionId = companionId,
+                title = buildDiaryTitle(),
+                content = diaryContent,
+                mood = 2,
+                date = System.currentTimeMillis(),
+                tags = DIARY_TAG,
+                deviceId = deviceId
+            )
+        )
+    }
+
+    private fun buildConversationSummary(
+        companionName: String,
+        userInput: String,
+        aiResponse: String
+    ): String {
+        return buildString {
+            append("用户表达：").append(userInput.trim()).append('\n')
+            append(companionName).append("回应：").append(aiResponse.trim()).append('\n')
+            append("请从这次互动里提炼用户的情绪变化、被触动的点、未说出口的期待和亲密感。")
+        }
+    }
+
+    private fun buildDiaryTitle(): String {
+        val formatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        return "聊天后的心情 ${formatter.format(Date())}"
     }
 }

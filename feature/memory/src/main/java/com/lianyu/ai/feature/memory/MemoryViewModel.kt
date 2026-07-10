@@ -32,6 +32,9 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     private val diaryDao = AppDatabase.getDatabase(application).diaryDao()
     private val chatMessageDao = AppDatabase.getDatabase(application).chatMessageDao()
     private val deviceId = DeviceIdProvider.getDeviceId(application)
+    private val stableMemoryFlows = mutableMapOf<Long, Flow<List<MemoryRecord>>>()
+    private val workingMemoryFlows = mutableMapOf<Long, Flow<List<MemoryRecord>>>()
+    private val diaryFlows = mutableMapOf<Long, Flow<List<DiaryEntry>>>()
 
     private val _isGeneratingDiary = MutableStateFlow(false)
     val isGeneratingDiary: StateFlow<Boolean> = _isGeneratingDiary.asStateFlow()
@@ -46,11 +49,15 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getMemoriesForCompanion(companionId: Long): Flow<List<MemoryRecord>> {
-        return memoryRepository.getStableMemories(MemoryScope.COMPANION, companionId)
+        return stableMemoryFlows.getOrPut(companionId) {
+            memoryRepository.getStableMemories(MemoryScope.COMPANION, companionId)
+        }
     }
 
     fun getTempMemoriesForCompanion(companionId: Long): Flow<List<MemoryRecord>> {
-        return memoryRepository.getWorkingMemories(MemoryScope.COMPANION, companionId, limit = 20)
+        return workingMemoryFlows.getOrPut(companionId) {
+            memoryRepository.getWorkingMemories(MemoryScope.COMPANION, companionId, limit = 20)
+        }
     }
 
     fun deleteMemory(memory: MemoryRecord) {
@@ -109,7 +116,9 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     // === 日记功能 ===
 
     fun getDiariesForCompanion(companionId: Long): Flow<List<DiaryEntry>> {
-        return diaryDao.getDiariesForCompanion(companionId, deviceId)
+        return diaryFlows.getOrPut(companionId) {
+            diaryDao.getDiariesForCompanion(companionId, deviceId)
+        }
     }
 
     fun addDiary(

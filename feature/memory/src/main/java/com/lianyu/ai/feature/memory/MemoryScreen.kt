@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -33,12 +32,10 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
@@ -318,14 +315,16 @@ fun CompanionChip(
 @Composable
 fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
     val memories by viewModel.getMemoriesForCompanion(companionId).collectAsStateWithLifecycle(initialValue = emptyList())
-    val categories = MemoryCategory.values()
+    val categories = remember { MemoryCategory.values().toList() }
     var selectedCategory by remember { mutableStateOf<MemoryCategory?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingMemory by remember { mutableStateOf<MemoryRecord?>(null) }
 
-    val filteredMemories = selectedCategory?.let { category ->
-        memories.filter { it.toMemoryCategory() == category }
-    } ?: memories
+    val filteredMemories = remember(memories, selectedCategory) {
+        selectedCategory?.let { category ->
+            memories.filter { it.toMemoryCategory() == category }
+        } ?: memories
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -398,7 +397,7 @@ fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filteredMemories) { memory ->
+                items(filteredMemories, key = { it.id }) { memory ->
                     MemoryItemCard(
                         memory = memory,
                         onDelete = { viewModel.deleteMemory(memory) },
@@ -413,7 +412,7 @@ fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
         MemoryEditDialog(
             companionId = companionId,
             existingMemory = editingMemory,
-            categories = categories.toList(),
+            categories = categories,
             onDismiss = {
                 showAddDialog = false
                 editingMemory = null
@@ -463,7 +462,7 @@ fun TempMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(tempMemories) { tempMemory ->
+            items(tempMemories, key = { it.id }) { tempMemory ->
                 TempMemoryItemCard(tempMemory = tempMemory)
             }
         }
@@ -473,10 +472,7 @@ fun TempMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
 @Composable
 fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
     val diaries by viewModel.getDiariesForCompanion(companionId).collectAsStateWithLifecycle(initialValue = emptyList())
-    val isGenerating by viewModel.isGeneratingDiary.collectAsStateWithLifecycle()
-    var showAddDialog by remember { mutableStateOf(false) }
     var editingDiary by remember { mutableStateOf<DiaryEntry?>(null) }
-    var generatedContent by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (diaries.isEmpty()) {
@@ -497,7 +493,7 @@ fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(diaries) { diary ->
+                items(diaries, key = { it.id }) { diary ->
                     DiaryItemCard(
                         diary = diary,
                         onEdit = { editingDiary = it },
@@ -507,74 +503,23 @@ fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
             }
         }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.92f))
-                .clickable { showAddDialog = true }
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = stringResource(R.string.add_diary),
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = stringResource(R.string.add_diary),
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            }
-        }
     }
 
-    if (showAddDialog || editingDiary != null) {
+    if (editingDiary != null) {
         DiaryEditDialog(
             companionId = companionId,
             existingDiary = editingDiary,
             onDismiss = {
-                showAddDialog = false
                 editingDiary = null
-                generatedContent = null
             },
             onSave = { diary ->
-                if (editingDiary != null) {
-                    viewModel.updateDiary(diary)
-                } else {
-                    viewModel.addDiary(
-                        companionId = companionId,
-                        title = diary.title,
-                        content = diary.content,
-                        mood = diary.mood,
-                        weather = diary.weather,
-                        tags = diary.tags,
-                        date = diary.date
-                    )
-                }
-                showAddDialog = false
+                viewModel.updateDiary(diary)
                 editingDiary = null
-                generatedContent = null
             },
             onDelete = if (editingDiary != null) ({
                 viewModel.deleteDiary(editingDiary!!)
                 editingDiary = null
-                generatedContent = null
             }) else null,
-            onGenerateAi = {
-                viewModel.generateDiary(companionId) { diaryText ->
-                    generatedContent = diaryText
-                }
-            },
-            isGenerating = isGenerating,
-            generatedContent = generatedContent,
-            onGeneratedContentConsumed = { generatedContent = null }
         )
     }
 }
@@ -967,11 +912,7 @@ fun DiaryEditDialog(
     existingDiary: DiaryEntry?,
     onDismiss: () -> Unit,
     onSave: (DiaryEntry) -> Unit,
-    onDelete: (() -> Unit)? = null,
-    onGenerateAi: (() -> Unit)? = null,
-    isGenerating: Boolean = false,
-    generatedContent: String? = null,
-    onGeneratedContentConsumed: () -> Unit = {}
+    onDelete: (() -> Unit)? = null
 ) {
     var title by remember { mutableStateOf(existingDiary?.title ?: "") }
     var content by remember { mutableStateOf(existingDiary?.content ?: "") }
@@ -979,14 +920,6 @@ fun DiaryEditDialog(
     var weather by remember { mutableStateOf(existingDiary?.weather ?: "") }
     var tags by remember { mutableStateOf(existingDiary?.tags ?: "") }
     val isEditing = existingDiary != null
-
-    // AI 生成完成后，自动填充 content
-    LaunchedEffect(generatedContent) {
-        if (generatedContent != null) {
-            content = generatedContent
-            onGeneratedContentConsumed()
-        }
-    }
 
     val moodOptions = listOf(
         1 to stringResource(R.string.mood_happy),
@@ -1018,34 +951,6 @@ fun DiaryEditDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
-
-                // AI 生成日记按钮
-                if (onGenerateAi != null) {
-                    OutlinedButton(
-                        onClick = onGenerateAi,
-                        enabled = !isGenerating,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (isGenerating) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.ai_generating))
-                        } else {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.ai_generate_diary))
-                        }
-                    }
-                }
 
                 OutlinedTextField(
                     value = content,
