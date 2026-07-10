@@ -90,7 +90,7 @@ import kotlin.math.abs
  *   S ∈ {Home, Contacts, Profile, Chat(id), ChatDetail(id), VoiceCall(id),
  *        GroupChat(id), GroupDetail(id), CreateGroup, Settings, Theme, Language,
  *        CheckUpdate, About, FrameRate, Team, Support, Memory,
- *        ContextMemory, TtsSettings, TokenUsage, WeChatSettings, WeChatBind,
+ *        TtsSettings, TokenUsage, WeChatSettings, WeChatBind,
  *        AgreementView, CreateCompanion, EditCompanion(id)}
  *   差分方程: S[k+1] = f(S[k], E[k])
  *   验证: 所有状态出度 ≥ 1 (popBackStack 保证)
@@ -281,7 +281,6 @@ fun MainScreen(mainActivity: Activity) {
                                 2 -> ProfileScreen(
                                     // 记忆与管理
                                     onMemoryClick = { navController.navigate(MainRoute.Memory.route) },
-                                    onContextMemoryClick = { navController.navigate(MainRoute.ContextMemory.route) },
                                     // AI与外观
                                     onSettingsClick = { navController.navigate(MainRoute.Settings.route) },
                                     onThemeClick = { navController.navigate(MainRoute.Theme.route) },
@@ -372,7 +371,6 @@ fun MainScreen(mainActivity: Activity) {
                 composable(MainRoute.ThanksFullList.route) {
                     ThanksFullListScreen(onNavigateBack = { navController.popBackStack() })
                 }
-                composable(MainRoute.ContextMemory.route) { ContextMemoryScreen(onNavigateBack = { navController.popBackStack() }) }
                 composable(MainRoute.OriginOSAdaption.route) {
                     OriginOSAdaptionScreen(onNavigateBack = { navController.popBackStack() })
                 }

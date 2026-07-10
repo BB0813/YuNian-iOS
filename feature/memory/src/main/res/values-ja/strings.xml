@@ -36,4 +36,6 @@
     <string name="mood_angry">怒り</string>
     <string name="mood_touched">感動</string>
     <string name="mood_miss">恋しい</string>
+    <string name="ai_generate_diary">AI 日記生成</string>
+    <string name="ai_generating">生成中…</string>
 </resources>

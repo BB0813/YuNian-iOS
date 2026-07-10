@@ -13,7 +13,7 @@ import com.lianyu.ai.uicommon.model.ApiProviderInfo
 @Stable
 data class ChatState(
     val companionData: CompanionEntity? = null,
-    val messages: List<ChatMessage> = emptyList(),
+    val messages: List<ChatListItem> = emptyList(),
     val visibleMessages: List<ChatMessage> = emptyList(),
     val isLoading: Boolean = false,
     val isTyping: Boolean = false,

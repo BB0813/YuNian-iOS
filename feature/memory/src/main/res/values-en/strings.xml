@@ -36,4 +36,6 @@ Tap the button to start writing</string>
     <string name="mood_angry">Angry</string>
     <string name="mood_touched">Touched</string>
     <string name="mood_miss">Missing</string>
+    <string name="ai_generate_diary">AI Generate Diary</string>
+    <string name="ai_generating">Generating…</string>
 </resources>

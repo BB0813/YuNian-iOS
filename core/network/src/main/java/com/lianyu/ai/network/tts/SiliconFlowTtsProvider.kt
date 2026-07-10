@@ -3,6 +3,7 @@ package com.lianyu.ai.network.tts
 import android.content.Context
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.network.CertificatePins
+import com.lianyu.ai.network.NetworkConstants
 import com.lianyu.ai.network.RequestSecurityInterceptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,7 +65,7 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                     voiceId ?: config.siliconflowCustomVoiceId.ifBlank { "FunAudioLLM/CosyVoice2-0.5B:anna" }
                 }
             } else {
-                url = "https://api.siliconflow.cn/v1/audio/speech"
+                url = NetworkConstants.SILICONFLOW_TTS_URL
                 // API Key: use dedicated key or global key
                 apiKey = if (config.siliconflowUseGlobalKey) {
                     getGlobalApiKey(context) ?: config.siliconflowApiKey

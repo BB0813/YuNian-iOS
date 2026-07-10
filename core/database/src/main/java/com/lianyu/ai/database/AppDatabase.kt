@@ -59,7 +59,7 @@ import java.io.File
         QuizQuestionEntity::class,
         TokenUsage::class
     ],
-    version = 23,
+    version = 24,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -841,6 +841,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    UPDATE `api_provider_presets`
+                    SET `baseUrl` = ?
+                    WHERE `provider` = ? AND `baseUrl` = ?
+                    """.trimIndent(),
+                    arrayOf<Any>(
+                        ApiProvider.DEEPSEEK.defaultBaseUrl,
+                        ApiProvider.DEEPSEEK.name,
+                        "https://api.deepseek.com/v1/"
+                    )
+                )
+            }
+        }
+
         private fun createApiProviderPresetTable(db: SupportSQLiteDatabase) {
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS `api_provider_presets` (
@@ -921,7 +938,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_19_20,
             MIGRATION_20_21,
             MIGRATION_21_22,
-            MIGRATION_22_23
+            MIGRATION_22_23,
+            MIGRATION_23_24
         )
 
         private var lastBackupTime: Long = 0L

@@ -5,7 +5,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -19,11 +18,6 @@ class AppSettingsStore(context: Context) {
     private val dataStore = context.applicationContext.appSettingsDataStore
 
     private companion object {
-        private val CONTEXT_LIMIT_KEY = intPreferencesKey("context_message_limit")
-        private const val DEFAULT_CONTEXT_LIMIT = 50
-        private const val MIN_CONTEXT_LIMIT = 1
-        private const val MAX_CONTEXT_LIMIT = 10000
-
         private val SHOW_REASONING_KEY = booleanPreferencesKey("show_reasoning")
         private const val DEFAULT_SHOW_REASONING = false
 
@@ -57,15 +51,6 @@ class AppSettingsStore(context: Context) {
         private val INNER_THOUGHT_ENABLED_KEY = booleanPreferencesKey("inner_thought_enabled")
         private const val DEFAULT_INNER_THOUGHT_ENABLED = false
 
-        private val CONTEXT_COMPRESSION_KEY = stringPreferencesKey("context_compression_mode")
-        private const val DEFAULT_CONTEXT_COMPRESSION = "off"
-
-        private val COMPRESSION_KEEP_RATIO_KEY = intPreferencesKey("compression_keep_ratio")
-        private const val DEFAULT_COMPRESSION_KEEP_RATIO = 50
-
-        private val COMPRESSION_MIN_KEEP_KEY = intPreferencesKey("compression_min_keep")
-        private const val DEFAULT_COMPRESSION_MIN_KEEP = 6
-
         private val YANDERE_MODE_ENABLED_KEY = booleanPreferencesKey("yandere_mode_enabled")
         private const val DEFAULT_YANDERE_MODE_ENABLED = false
 
@@ -74,13 +59,6 @@ class AppSettingsStore(context: Context) {
 
         private val YANDERE_MODE_INSTALLED_APPS_KEY = booleanPreferencesKey("yandere_mode_installed_apps")
         private const val DEFAULT_YANDERE_MODE_INSTALLED_APPS = true
-    }
-
-    object CompressionMode {
-        const val OFF = "off"
-        const val LOCAL = "local"
-        const val AI = "ai"
-        val ALL = listOf(OFF, LOCAL, AI)
     }
 
     object VisionModels {
@@ -117,18 +95,6 @@ class AppSettingsStore(context: Context) {
                 "custom" -> VISION_GPT4O // Default for custom, user should specify model explicitly
                 else -> VISION_GPT4O
             }
-        }
-    }
-
-    val contextLimitFlow: Flow<Int> = dataStore.data.map { prefs ->
-        prefs[CONTEXT_LIMIT_KEY]?.coerceIn(MIN_CONTEXT_LIMIT, MAX_CONTEXT_LIMIT) ?: DEFAULT_CONTEXT_LIMIT
-    }
-
-    suspend fun getContextLimit(): Int = contextLimitFlow.first()
-
-    suspend fun setContextLimit(limit: Int) {
-        dataStore.edit { prefs ->
-            prefs[CONTEXT_LIMIT_KEY] = limit.coerceIn(MIN_CONTEXT_LIMIT, MAX_CONTEXT_LIMIT)
         }
     }
 
@@ -240,36 +206,6 @@ class AppSettingsStore(context: Context) {
 
     suspend fun setInnerThoughtEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[INNER_THOUGHT_ENABLED_KEY] = enabled }
-    }
-
-    val contextCompressionModeFlow: Flow<String> = dataStore.data.map { prefs ->
-        prefs[CONTEXT_COMPRESSION_KEY] ?: DEFAULT_CONTEXT_COMPRESSION
-    }
-
-    suspend fun getContextCompressionMode(): String = contextCompressionModeFlow.first()
-
-    suspend fun setContextCompressionMode(mode: String) {
-        dataStore.edit { prefs -> prefs[CONTEXT_COMPRESSION_KEY] = mode }
-    }
-
-    val compressionKeepRatioFlow: Flow<Float> = dataStore.data.map { prefs ->
-        (prefs[COMPRESSION_KEEP_RATIO_KEY] ?: DEFAULT_COMPRESSION_KEEP_RATIO) / 100f
-    }
-
-    suspend fun getCompressionKeepRatio(): Float = compressionKeepRatioFlow.first()
-
-    suspend fun setCompressionKeepRatio(ratio: Float) {
-        dataStore.edit { prefs -> prefs[COMPRESSION_KEEP_RATIO_KEY] = (ratio.coerceIn(0.1f, 0.9f) * 100).toInt() }
-    }
-
-    val compressionMinKeepFlow: Flow<Int> = dataStore.data.map { prefs ->
-        prefs[COMPRESSION_MIN_KEEP_KEY] ?: DEFAULT_COMPRESSION_MIN_KEEP
-    }
-
-    suspend fun getCompressionMinKeep(): Int = compressionMinKeepFlow.first()
-
-    suspend fun setCompressionMinKeep(count: Int) {
-        dataStore.edit { prefs -> prefs[COMPRESSION_MIN_KEEP_KEY] = count.coerceIn(2, 20) }
     }
 
     val yandereModeEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->

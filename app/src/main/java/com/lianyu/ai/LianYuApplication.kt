@@ -18,6 +18,7 @@ import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.EmbeddingProvider
 import com.lianyu.ai.database.repository.SummaryProvider
+import com.lianyu.ai.database.repository.DiaryProvider
 import com.lianyu.ai.database.repository.UnifiedMemoryRepository
 import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.common.AppSettingsStore
@@ -228,6 +229,10 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // 在 UnifiedMemoryRepository 之前注册，因为后者需要 SummaryProvider
             ServiceRegistry.registerSingleton(SummaryProvider::class.java) {
                 com.lianyu.ai.network.SummaryService(app)
+            }
+            // 日记生成服务（AI 根据对话历史生成真人风格日记）
+            ServiceRegistry.registerSingleton(DiaryProvider::class.java) {
+                com.lianyu.ai.network.DiaryService(app)
             }
             // 统一记忆仓库（现代化记忆系统，基于 Room unified_memories 表）
             ServiceRegistry.registerSingleton(UnifiedMemoryRepository::class.java) {

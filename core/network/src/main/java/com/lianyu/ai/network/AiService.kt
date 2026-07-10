@@ -66,6 +66,11 @@ class AiService(context: Context) : AiServiceProvider {
     private val tokenUsageRepository: TokenUsageRepository
     private val userRepository: UserRepository
     private val appSettingsStore = AppSettingsStore(appContext)
+    private val autoContextManager = AutoContextManager(
+        aiSummarizer = { messages, companionNameMap, memoryContext ->
+            summarizeWithAi(messages, companionNameMap, memoryContext)
+        }
+    )
 
     @Volatile
     private var cachedBuiltinModel: String? = null
@@ -80,7 +85,7 @@ class AiService(context: Context) : AiServiceProvider {
     init {
         val database = AppDatabase.getDatabase(appContext)
         val deviceId = DeviceIdProvider.getDeviceId(appContext)
-        apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
+        apiConfigRepository = ApiConfigRepository(database.apiConfigDao(), database.apiProviderPresetDao())
         companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
         memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
         memoryProvider = com.lianyu.ai.domain.ServiceRegistry.getOrThrow(com.lianyu.ai.domain.MemoryProvider::class.java)
@@ -120,7 +125,9 @@ class AiService(context: Context) : AiServiceProvider {
 
     private suspend fun tryFetchBuiltinModel(keys: List<String>): String? {
         return try {
-            val result = fetchModels(ApiProvider.PARTNER.defaultBaseUrl, keys.first())
+            val partnerPreset = apiConfigRepository.getProviderPreset(ApiProvider.PARTNER)
+            val partnerBaseUrl = partnerPreset?.baseUrl ?: ApiProvider.PARTNER.defaultBaseUrl
+            val result = fetchModels(partnerBaseUrl, keys.first(), ApiProvider.PARTNER)
             result.getOrNull()?.let { models ->
                 if (models.isNotEmpty()) {
                     val chatModels = models.filter { m ->
@@ -315,6 +322,7 @@ class AiService(context: Context) : AiServiceProvider {
         // Uses longer connect timeout since self-hosted servers may be slower to accept.
         private val partnerHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
                 .certificatePinner(CertificatePins.certificatePinner)
                 .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
                 .connectTimeout(15, TimeUnit.SECONDS)
@@ -329,6 +337,7 @@ class AiService(context: Context) : AiServiceProvider {
         // readTimeout=20s 短于主客户端，快速失败防 Judge 队列堵塞。
         private val lightHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
                 .connectTimeout(TimeoutBudgets.HTTP_CONNECT_MS, TimeUnit.MILLISECONDS)
                 .readTimeout(20, TimeUnit.SECONDS)
                 .writeTimeout(TimeoutBudgets.HTTP_WRITE_MS, TimeUnit.MILLISECONDS)
@@ -367,7 +376,8 @@ class AiService(context: Context) : AiServiceProvider {
 
         private fun shouldSignRequest(request: okhttp3.Request): Boolean {
             val host = request.url.host.lowercase()
-            return host == "api.lianyu.ai" || host.endsWith(".lianyu.ai")
+            return request.header("X-LianYu-Session")?.isNotBlank() == true ||
+                host == "api.lianyu.ai" || host.endsWith(".lianyu.ai")
         }
 
         private var context: Context? = null
@@ -379,7 +389,7 @@ class AiService(context: Context) : AiServiceProvider {
         private val retrofit: Retrofit by lazy {
             Retrofit.Builder()
                 .client(okHttpClient)
-                .baseUrl("https://api.openai.com/")
+                .baseUrl(NetworkConstants.OPENAI_DEFAULT_BASE_URL)
                 .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
                 .build()
         }
@@ -495,12 +505,8 @@ class AiService(context: Context) : AiServiceProvider {
                     }
                 }
                 val lastUserMessage = sanitizedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-                val contextLimit = appSettingsStore.getContextLimit()
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-                val compressionMode = appSettingsStore.getContextCompressionMode()
-                val keepRatio = appSettingsStore.getCompressionKeepRatio()
-                val minKeep = appSettingsStore.getCompressionMinKeep()
-                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
+                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
                 val stickerManager = StickerManager.getInstance(appContext)
                 val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
                     val displayName = sticker.description?.takeIf {
@@ -511,9 +517,10 @@ class AiService(context: Context) : AiServiceProvider {
                 val role = userRepository.selectedRole.value
                 val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled = false, role = role)
                 val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
-                val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
+                val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
+                val messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig)
 
-                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, contextLimit=$contextLimit, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
+                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
 
                 try {
                     val (rawResponse, reasoning) = if (usesAnthropicProtocol(config)) {
@@ -561,8 +568,7 @@ class AiService(context: Context) : AiServiceProvider {
 
             val sortedMessages = recentMessages.sortedBy { it.timestamp }
             val lastUserMessage = sortedMessages.lastOrNull { it.isFromUser }?.content ?: ""
-            val contextLimit = appSettingsStore.getContextLimit()
-            val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
+            val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
 
             val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext, settings)
             val contextMessages = AiPromptBuilder.buildProactiveContext(sortedMessages, companion)
@@ -621,12 +627,9 @@ class AiService(context: Context) : AiServiceProvider {
 
                 val sortedHistory = history.sortedBy { it.timestamp }
                 val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-                val contextLimit = appSettingsStore.getContextLimit()
-                val compressionMode = appSettingsStore.getContextCompressionMode()
-                val keepRatio = appSettingsStore.getCompressionKeepRatio()
-                val minKeep = appSettingsStore.getCompressionMinKeep()
-                val memCtx = if (companion != null) memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit) else ""
-                val messages = buildMessages(sortedHistory, customSystemPrompt, lastUserMessage, contextLimit, companionNameMap, compressionMode, memoryContext = memCtx, keepRatio = keepRatio, minKeep = minKeep)
+                val memCtx = if (companion != null) memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50) else ""
+                val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
+                val messages = autoContextManager.build(sortedHistory, customSystemPrompt, memCtx, lastUserMessage, companionNameMap, contextConfig)
 
                 SecureLog.api("SEND-CUSTOM", "provider=${config.provider}, model=${config.model}, messages=${messages.size}")
 
@@ -690,6 +693,89 @@ class AiService(context: Context) : AiServiceProvider {
         }
     }
 
+    /**
+     * AI 驱动的对话摘要生成。
+     *
+     * 将旧对话消息发送给 AI，生成连贯的叙事摘要，保留：
+     * - 关键事实（名字、偏好、约定、承诺）
+     * - 情感时刻和关系动态
+     * - 按时间顺序的叙事连贯性
+     *
+     * 用于 AutoContextManager 的上下文压缩，替代旧的正则关键词提取方案。
+     * 失败时返回 null，由调用方降级为本地正则摘要。
+     */
+    private suspend fun summarizeWithAi(
+        messages: List<ChatMessage>,
+        companionNameMap: Map<Long, String>,
+        memoryContext: String
+    ): String? {
+        if (messages.isEmpty()) return null
+
+        val config = resolveConfig() ?: run {
+            SecureLog.w("AiService", "summarizeWithAi: no active config")
+            return null
+        }
+        if (config.model.isBlank()) {
+            SecureLog.w("AiService", "summarizeWithAi: model not configured")
+            return null
+        }
+
+        // 构建对话文本
+        val conversationText = buildString {
+            messages.forEach { msg ->
+                val role = if (msg.isFromUser) "用户" else (companionNameMap[msg.companionId] ?: "AI")
+                val content = msg.content
+                    .replace(Regex("\\[.*?\\]"), "")
+                    .replace(Regex("（.*?）"), "")
+                    .trim()
+                if (content.isNotBlank()) {
+                    appendLine("$role: $content")
+                }
+            }
+        }
+
+        if (conversationText.isBlank()) return null
+
+        // 构建摘要提示词
+        val summaryPrompt = buildString {
+            appendLine("你是对话摘要助手。请将以下对话历史压缩为一段连贯的叙事摘要。")
+            appendLine()
+            appendLine("要求：")
+            appendLine("1. 用第三人称叙述，200-400字")
+            appendLine("2. 按时间顺序组织，保持叙事连贯性")
+            appendLine("3. 重点保留：")
+            appendLine("   - 关键事实（名字、年龄、生日、工作、学校等个人信息）")
+            appendLine("   - 用户偏好和习惯")
+            appendLine("   - 约定、承诺、计划（如\"约好周末一起\"、\"答应过生日送礼物\"）")
+            appendLine("   - 情感时刻（表白、争吵、和好、撒娇、感动等）")
+            appendLine("   - 关系进展和变化")
+            appendLine("4. 省略寒暄、重复内容和无关紧要的细节")
+            appendLine("5. 不要编造对话中未出现的内容")
+            appendLine("6. 直接输出摘要文本，不要加标题、不要用列表格式")
+            appendLine()
+            if (memoryContext.isNotBlank()) {
+                appendLine("已知记忆参考（摘要应与这些记忆一致，不要矛盾）：")
+                appendLine(memoryContext.take(500))
+                appendLine()
+            }
+            appendLine("=== 对话历史 ===")
+            appendLine(conversationText)
+        }
+
+        val aiMessages = listOf(
+            Message("system", "你是对话摘要助手，擅长将长对话压缩为精炼的叙事摘要。"),
+            Message("user", summaryPrompt)
+        )
+
+        return try {
+            val result = callOpenAiCompatibleLight(config, aiMessages, temperature = 0.3, maxTokens = 600)
+            if (result.isBlank()) null else result.trim()
+        } catch (e: Exception) {
+            SecureLog.w("AiService", "summarizeWithAi failed: ${e.message}")
+            null
+        }
+    }
+
     private suspend fun callOpenAiCompatibleLight(
         config: ApiConfig,
         messages: List<Message>,
@@ -733,12 +819,7 @@ class AiService(context: Context) : AiServiceProvider {
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                // 根据API提供商选择最优的认证方式
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                addProviderAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
@@ -919,7 +1000,12 @@ class AiService(context: Context) : AiServiceProvider {
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Accept", "application/json")
-                if (provider != null && prefersApiKeyHeader(provider)) {
+                if (provider == ApiProvider.PARTNER) {
+                    val session = RemoteKeyProvider.ensureSession(appContext, forceRefresh = false)
+                        ?: throw Exception("Clove API 会话不可用，请重新测试连接")
+                    requestBuilder.addHeader("X-LianYu-Session", session.token)
+                    requestBuilder.addHeader("X-LianYu-Client-Id", session.clientId)
+                } else if (provider != null && prefersApiKeyHeader(provider)) {
                     requestBuilder.addHeader("api-key", apiKey)
                 } else {
                     requestBuilder.addHeader("Authorization", "Bearer $apiKey")
@@ -1002,6 +1088,23 @@ class AiService(context: Context) : AiServiceProvider {
      */
     private fun prefersApiKeyHeader(provider: ApiProvider): Boolean {
         return provider == ApiProvider.XIAOMI
+    }
+
+    private suspend fun addProviderAuthHeaders(
+        requestBuilder: okhttp3.Request.Builder,
+        config: ApiConfig,
+        credential: String
+    ) {
+        if (config.provider == ApiProvider.PARTNER) {
+            val session = RemoteKeyProvider.ensureSession(appContext, forceRefresh = false)
+                ?: throw Exception("Clove API 会话不可用，请重新测试连接")
+            requestBuilder.addHeader("X-LianYu-Session", session.token)
+            requestBuilder.addHeader("X-LianYu-Client-Id", session.clientId)
+        } else if (prefersApiKeyHeader(config.provider)) {
+            requestBuilder.addHeader("api-key", credential)
+        } else {
+            requestBuilder.addHeader("Authorization", "Bearer $credential")
+        }
     }
 
     /**
@@ -1130,137 +1233,6 @@ class AiService(context: Context) : AiServiceProvider {
         } else base
     }
 
-    // [P2-1] CompressedContext 委托 AiContextTools.CompressedContext
-    private data class CompressedContext(
-        val summary: String,
-        val keptMessages: List<ChatMessage>,
-        val compressedCount: Int
-    ) {
-        companion object {
-            fun from(other: AiContextTools.CompressedContext): CompressedContext =
-                CompressedContext(other.summary, other.keptMessages, other.compressedCount)
-        }
-    }
-
-    private suspend fun compressContextWithAi(
-        messages: List<ChatMessage>,
-        companionName: String,
-        memoryContext: String = ""
-    ): String {
-        if (messages.isEmpty()) return ""
-
-        val chatText = messages.joinToString("\n") { msg ->
-            val role = if (msg.isFromUser) "用户" else companionName
-            "$role: ${msg.content}"
-        }
-
-        val memoryHint = if (memoryContext.isNotBlank()) {
-            "\n\n=== 已有的长期记忆（以下内容不需要重复提取，只需关注未记录的新信息） ===\n$memoryContext"
-        } else ""
-
-        val summaryPrompt = """请将以下对话历史压缩成一段简洁的摘要（150字以内）。
-要求：
-1. 提取关键话题、情感变化、用户提到的个人信息/偏好/约定
-2. 省略闲聊和重复内容
-3. 用自然语言描述，不要用列表格式
-4. 如果已有记忆中包含的信息，简要带过即可，重点突出新信息$memoryHint
-
-对话历史：
-$chatText
-
-摘要："""
-
-        try {
-            val config = resolveConfig() ?: return AiContextTools.buildLocalSummary(messages, memoryContext = memoryContext)
-            val apiMessages = listOf(
-                Message("system", "你是一个对话摘要助手，擅长提取关键信息并压缩文本。"),
-                Message("user", summaryPrompt)
-            )
-
-            val rawResponse = callOpenAiCompatible(config, apiMessages)
-            var cleaned = rawResponse.trim()
-                .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-            cleaned = cleaned.lines().firstOrNull { it.isNotBlank() } ?: cleaned
-
-            return "=== AI压缩摘要（已压缩${messages.size}条消息，结合${if (memoryContext.isNotBlank()) "已有记忆" else "无记忆"}） ===\n$cleaned"
-        } catch (e: Exception) {
-            SecureLog.w("AiService", "AI compression failed, falling back to local: ${e.message}")
-            return AiContextTools.buildLocalSummary(messages, memoryContext = memoryContext)
-        }
-    }
-
-    private suspend fun buildMessages(
-        history: List<ChatMessage>,
-        systemPrompt: String,
-        lastUserMessage: String = "",
-        contextLimit: Int = 12,
-        companionNameMap: Map<Long, String> = emptyMap(),
-        compressionMode: String = AppSettingsStore.CompressionMode.OFF,
-        memoryContext: String = "",
-        keepRatio: Float = 0.5f,
-        minKeep: Int = 6
-    ): List<Message> {
-        val messages = mutableListOf<Message>()
-        messages.add(Message("system", systemPrompt))
-
-        val compressed = when (compressionMode) {
-            AppSettingsStore.CompressionMode.LOCAL -> CompressedContext.from(AiContextTools.compressContext(history, contextLimit, companionNameMap, memoryContext, keepRatio, minKeep))
-            AppSettingsStore.CompressionMode.AI -> run {
-                if (history.size <= contextLimit) CompressedContext("", history, 0)
-                else {
-                    val keepRecent = maxOf(minKeep, (contextLimit * keepRatio).toInt().coerceAtLeast(minKeep))
-                    val oldMessages = history.dropLast(keepRecent)
-                    val recentMessages = history.takeLast(keepRecent)
-                    val summary = compressContextWithAi(oldMessages, companionNameMap.values.firstOrNull() ?: "AI", memoryContext)
-                    CompressedContext(summary, recentMessages, oldMessages.size)
-                }
-            }
-            else -> CompressedContext("", history.takeLast(contextLimit), 0)
-        }
-
-        if (compressed.summary.isNotBlank()) {
-            messages.add(Message("system", compressed.summary))
-            SecureLog.api("CONTEXT", "Compressed ${compressed.compressedCount} old messages into summary (${compressed.summary.length} chars)")
-        }
-
-        val recentHistory = compressed.keptMessages
-
-        // [FIX] 先过滤掉空的 assistant 消息，避免 API 报错 "assistant message must not be empty"
-        val filteredHistory = recentHistory.filterNot { msg ->
-            !msg.isFromUser && msg.content.replace("\u200B", "").isBlank()
-        }
-
-        val lastMsg = filteredHistory.lastOrNull()
-        val isLastFromUser = lastMsg?.isFromUser == true
-
-        filteredHistory.forEach { msg ->
-            val content = if (msg.isFromUser && msg.content.startsWith("[") && msg.content.endsWith("]")) {
-                val inner = msg.content.removeSurrounding("[", "]")
-                val label = when {
-                    inner.startsWith("sticker_", ignoreCase = true) -> "表情包"
-                    inner.length > 20 -> "表情包"
-                    else -> inner
-                }
-                "用户发送了一个表情包：[$label]"
-            } else {
-                msg.content
-            }
-            messages.add(Message(
-                role = if (msg.isFromUser) "user" else "assistant",
-                content = content
-            ))
-        }
-
-        if (!isLastFromUser && lastUserMessage.isNotBlank()) {
-            messages.add(Message(
-                role = "user",
-                content = lastUserMessage
-            ))
-        }
-
-        return messages
-    }
-
     suspend fun callOpenAiCompatibleForTest(config: ApiConfig, messages: List<Message>): String {
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
@@ -1297,11 +1269,7 @@ $chatText
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                addProviderAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
@@ -1441,11 +1409,7 @@ $chatText
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                addProviderAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
@@ -1627,12 +1591,7 @@ $chatText
         val requestBuilder = okhttp3.Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
-        // 根据API提供商选择最优的认证方式
-        if (prefersApiKeyHeader(config.provider)) {
-            requestBuilder.addHeader("api-key", config.apiKey)
-        } else {
-            requestBuilder.addHeader("Authorization", "Bearer ${config.apiKey}")
-        }
+        addProviderAuthHeaders(requestBuilder, config, config.apiKey)
         val request = requestBuilder
             .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
@@ -1811,9 +1770,8 @@ $chatText
 
                 val sortedHistory = history.sortedBy { it.timestamp }
                 val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-                val contextLimit = appSettingsStore.getContextLimit()
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
+                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
                 val stickerManager = StickerManager.getInstance(appContext)
                 val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
                     val displayName = sticker.description?.takeIf {
@@ -2002,12 +1960,7 @@ $chatText
                 val requestBuilder = okhttp3.Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                // 根据API提供商选择最优的认证方式
-                if (prefersApiKeyHeader(config.provider)) {
-                    requestBuilder.addHeader("api-key", currentKey)
-                } else {
-                    requestBuilder.addHeader("Authorization", "Bearer $currentKey")
-                }
+                addProviderAuthHeaders(requestBuilder, config, currentKey)
                 val request = requestBuilder
                     .post(requestBodyStr.toRequestBody("application/json".toMediaType()))
                     .build()
@@ -2202,16 +2155,13 @@ $chatText
                     }
                 }
                 val lastUserMessage = sanitizedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-                val contextLimit = appSettingsStore.getContextLimit()
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-                val compressionMode = appSettingsStore.getContextCompressionMode()
-                val keepRatio = appSettingsStore.getCompressionKeepRatio()
-                val minKeep = appSettingsStore.getCompressionMinKeep()
-                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, contextLimit)
+                val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
                 val role = userRepository.selectedRole.value
                 val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, emptyList(), stickerProbability, innerThoughtEnabled, ntpTimeEnabled = false, role = role)
                 val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
-                val messages = buildMessages(sanitizedHistory, systemPrompt, lastUserMessage, contextLimit, compressionMode = compressionMode, memoryContext = memoryContext, keepRatio = keepRatio, minKeep = minKeep)
+                val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
+                val messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig)
 
                 SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, tools=${tools.size}")
 

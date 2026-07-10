@@ -36,4 +36,6 @@
     <string name="mood_angry">화남</string>
     <string name="mood_touched">감동</string>
     <string name="mood_miss">그리움</string>
+    <string name="ai_generate_diary">AI 일기 생성</string>
+    <string name="ai_generating">생성 중…</string>
 </resources>
