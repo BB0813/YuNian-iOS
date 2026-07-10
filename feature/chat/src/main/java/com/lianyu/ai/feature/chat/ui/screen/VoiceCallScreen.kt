@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
 import com.lianyu.ai.feature.chat.voice.VoiceCallManager
@@ -119,6 +120,7 @@ fun VoiceCallScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val colors = ChatTheme.colors
 
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
@@ -409,11 +411,11 @@ fun VoiceCallScreen(
 
     // ── 权限不足时显示空界面 ──
     if (!hasAudioPermission && callState == CallState.DIALING) {
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(modifier = Modifier.fillMaxSize().background(colors.screenBackground)) {
             Text(
                 text = "需要麦克风权限",
                 modifier = Modifier.align(Alignment.Center),
-                color = MaterialTheme.colorScheme.onSurface
+                color = colors.surfaceContent
             )
         }
         return
@@ -437,7 +439,7 @@ fun VoiceCallScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "返回",
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = colors.surfaceContent,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -454,7 +456,7 @@ fun VoiceCallScreen(
                     CallState.ENDED -> "通话结束"
                 },
                 fontSize = 18.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                color = colors.surfaceContent.copy(alpha = 0.9f),
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 2.sp
             )
@@ -478,10 +480,10 @@ fun VoiceCallScreen(
                             else -> "已连接"
                         },
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = colors.topBarAccent,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                            .background(colors.topBarAccentContainer.copy(alpha = 0.15f))
                             .padding(horizontal = 12.dp, vertical = 4.dp)
                     )
                 }
@@ -493,12 +495,12 @@ fun VoiceCallScreen(
             // 头像
             Box(modifier = Modifier.size(140.dp), contentAlignment = Alignment.Center) {
                 if (callState == CallState.CONNECTED) {
-                    PulsingGlowRing(modifier = Modifier.size(180.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-                    PulsingGlowRing(modifier = Modifier.size(220.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), delayMillis = 500)
+                    PulsingGlowRing(modifier = Modifier.size(180.dp), color = colors.topBarAccent.copy(alpha = 0.3f))
+                    PulsingGlowRing(modifier = Modifier.size(220.dp), color = colors.topBarAccent.copy(alpha = 0.15f), delayMillis = 500)
                 }
                 Box(
                     modifier = Modifier.size(140.dp).clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
+                        .background(colors.surfaceContent.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (companionData?.avatarUrl != null) {
@@ -513,7 +515,7 @@ fun VoiceCallScreen(
                             text = companionData?.name?.firstOrNull()?.toString() ?: "?",
                             fontSize = 48.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = colors.surfaceContent
                         )
                     }
                 }
@@ -526,7 +528,7 @@ fun VoiceCallScreen(
                 text = companionData?.name ?: "",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = colors.surfaceContent
             )
 
             // 说话文本
@@ -535,7 +537,7 @@ fun VoiceCallScreen(
                 Text(
                     text = userSpeakingText,
                     fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    color = colors.surfaceContent.copy(alpha = 0.5f),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
@@ -545,7 +547,7 @@ fun VoiceCallScreen(
                 Text(
                     text = aiSpeakingText,
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    color = colors.surfaceContent.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
@@ -563,21 +565,21 @@ fun VoiceCallScreen(
                     // 拒绝
                     Box(
                         modifier = Modifier.size(64.dp).clip(CircleShape)
-                            .background(Color(0xFFFF3B30)).clickable { rejectCall() },
+                            .background(colors.destructive).clickable { rejectCall() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.CallEnd, "挂断", tint = Color.White, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Filled.CallEnd, "挂断", tint = colors.destructiveContent, modifier = Modifier.size(28.dp))
                     }
                     // 接受
                     Box(
                         modifier = Modifier.size(72.dp).clip(CircleShape)
-                            .background(Color(0xFF34C759)).clickable { acceptCall() },
+                            .background(colors.success).clickable { acceptCall() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Filled.VolumeUp,
                             contentDescription = "接听",
-                            tint = Color.White,
+                            tint = colors.successContent,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -586,7 +588,7 @@ fun VoiceCallScreen(
                 Text(
                     text = "点击接听开始通话",
                     fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    color = colors.surfaceContent.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
                 )
             } else if (callState == CallState.CONNECTED) {
@@ -612,10 +614,10 @@ fun VoiceCallScreen(
                     // 挂断
                     Box(
                         modifier = Modifier.size(72.dp).clip(CircleShape)
-                            .background(Color(0xFFFF3B30)).clickable { hangUp() },
+                            .background(colors.destructive).clickable { hangUp() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.CallEnd, "挂断", tint = Color.White, modifier = Modifier.size(32.dp))
+                        Icon(Icons.Filled.CallEnd, "挂断", tint = colors.destructiveContent, modifier = Modifier.size(32.dp))
                     }
                     // 扬声器
                     CallControlButton(
@@ -661,12 +663,13 @@ private fun FlowingGradientBackground() {
     val offset3 by infiniteTransition.animateFloat(PI.toFloat() / 2, 2.5f * PI.toFloat(),
         infiniteRepeatable(tween(18000, easing = LinearEasing), RepeatMode.Restart), label = "flow3")
 
-    val background = MaterialTheme.colorScheme.background
-    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val onSurface = MaterialTheme.colorScheme.onSurface
+    val colors = ChatTheme.colors
+    val background = colors.screenBackground
+    val surfaceVariant = colors.surfaceVariant
+    val primary = colors.topBarAccent
+    val secondary = colors.inputAccent
+    val tertiary = colors.accentContent
+    val onSurface = colors.surfaceContent
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         drawRect(Brush.verticalGradient(listOf(background, background, surfaceVariant)))
@@ -711,11 +714,12 @@ private fun PulsingGlowRing(modifier: Modifier = Modifier, color: Color, delayMi
 
 @Composable
 private fun PulsingDot(delayMillis: Int = 0) {
+    val colors = ChatTheme.colors
     val t = rememberInfiniteTransition(label = "dot")
     val alpha by t.animateFloat(0.3f, 1f,
         infiniteRepeatable(tween(800, delayMillis = delayMillis, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "dot_alpha")
-    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)))
+    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(colors.topBarAccent.copy(alpha = alpha)))
 }
 
 @Composable
@@ -725,19 +729,21 @@ private fun CallControlButton(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
+    val colors = ChatTheme.colors
+
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
         Box(
             modifier = Modifier.size(56.dp).clip(CircleShape)
-                .background(if (isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)),
+                .background(if (isActive) colors.surfaceContent.copy(alpha = 0.2f)
+                            else colors.surfaceContent.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, label, Modifier.size(24.dp),
-                tint = if (isActive) MaterialTheme.colorScheme.onSurface
-                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                tint = if (isActive) colors.surfaceContent
+                       else colors.surfaceContent.copy(alpha = 0.5f))
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), textAlign = TextAlign.Center)
+        Text(label, fontSize = 11.sp, color = colors.surfaceContent.copy(alpha = 0.7f), textAlign = TextAlign.Center)
     }
 }
 

@@ -486,7 +486,8 @@ fun ChatScreen(
     }
 
     // Background: per-companion > global > default
-    val defaultBackground = MaterialTheme.colorScheme.background
+    val colors = ChatTheme.colors
+    val defaultBackground = colors.screenBackground
     var targetBgColor by remember { mutableStateOf(defaultBackground) }
     var chatBgGradient by remember { mutableStateOf<Brush?>(null) }
     var isCustomBg by remember { mutableStateOf(false) }
@@ -519,9 +520,9 @@ fun ChatScreen(
 
     val chatBgColor by animateColorAsState(targetBgColor, tween(300), label = "bgColor")
     val backgroundColor = if (isDarkTheme && !isCustomBg) {
-        MaterialTheme.colorScheme.background
+        colors.screenBackground
     } else if (isDarkTheme && isCustomBg) {
-        MaterialTheme.colorScheme.background
+        colors.screenBackground
     } else {
         chatBgColor
     }
@@ -624,12 +625,12 @@ fun ChatScreen(
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(14.dp),
                                         strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = colors.metadata
                                     )
                                     Text(
                                         "加载更早的消息...",
                                         fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = colors.metadata
                                     )
                                 }
                             }
@@ -708,7 +709,7 @@ fun ChatScreen(
                             }
                         },
                         shape = RoundedCornerShape(999.dp),
-                        color = MaterialTheme.colorScheme.primary,
+                        color = colors.topBarAccent,
                         tonalElevation = 6.dp,
                         shadowElevation = 6.dp
                     ) {
@@ -720,12 +721,12 @@ fun ChatScreen(
                             Icon(
                                 Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
+                                tint = colors.userContent,
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
                                 text = "${unreadNewMessages} 条新消息",
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = colors.userContent,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -838,7 +839,7 @@ fun ChatScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
+                    .background(colors.dialogScrim.copy(alpha = 0.5f))
                     .clickable { },
                 contentAlignment = Alignment.Center
             ) {
@@ -849,19 +850,19 @@ fun ChatScreen(
                     Text(
                         text = "录音中...",
                         fontSize = 18.sp,
-                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        color = colors.inverseOnSurface,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "${recordingDuration}s",
                         fontSize = 48.sp,
-                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        color = colors.inverseOnSurface,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "点击按钮操作",
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.6f)
+                        color = colors.inverseOnSurface.copy(alpha = 0.6f)
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -870,7 +871,7 @@ fun ChatScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primary)
+                                .background(colors.topBarAccent)
                                 .clickable {
                                     val audioPath = voiceRecorder.stop()
                                     isRecording = false
@@ -883,14 +884,14 @@ fun ChatScreen(
                         ) {
                             Text(
                                 text = "发送",
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = colors.userContent,
                                 fontSize = 14.sp
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.error)
+                                .background(colors.destructive)
                                 .clickable {
                                     voiceRecorder.cancel()
                                     isRecording = false
@@ -900,7 +901,7 @@ fun ChatScreen(
                         ) {
                             Text(
                                 text = "取消",
-                                color = MaterialTheme.colorScheme.onError,
+                                color = colors.inverseOnSurface,
                                 fontSize = 14.sp
                             )
                         }
@@ -943,7 +944,7 @@ fun ChatScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.94f))
+                    .background(colors.dialogScrim.copy(alpha = 0.94f))
                     .clickable { previewImagePath = null },
                 contentAlignment = Alignment.Center
             ) {

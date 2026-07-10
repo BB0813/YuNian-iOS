@@ -18,8 +18,8 @@
     <string name="habit">习惯</string>
     <string name="relationship">关系</string>
     <string name="diary">日记</string>
-    <string name="no_diary">还没有写日记
-点击右下角按钮开始记录</string>
+    <string name="no_diary">还没有情感日记
+完成一次聊天后，AI 会根据会话总结自动生成</string>
     <string name="add_diary">写日记</string>
     <string name="edit_diary">编辑日记</string>
     <string name="diary_title">标题</string>

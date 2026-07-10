@@ -7,6 +7,7 @@ import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.common.RomUtils
 import com.lianyu.ai.common.SaltStore
+import com.lianyu.ai.common.SafetyClassifier
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.embedding.VectorLibrary
 import com.lianyu.ai.common.safety.ContentSafetyVerifier
@@ -131,7 +132,7 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initSecurityData(app) }
             bgScope.launch { autoBackupDatabase(app) }
             bgScope.launch { initVectorLibrary(app) }
-            bgScope.launch { initSafetyClassifier(app) }
+            ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
             bgScope.launch { initSafetyVerifier(app) }
             bgScope.launch { initYandereMode(app) }
         }
@@ -186,15 +187,6 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 app.assets.open("safety/violation_vectors.bin").use { it.readBytes() }
                     .let { VectorLibrary.Loader().load(it) }
                     ?.let { ContentFilter.setVectorLibrary(it) }
-            }
-        }
-
-        private fun initSafetyClassifier(app: Application) {
-            runCatching {
-                if (!com.lianyu.ai.feature.localmodel.LocalAiService.isNativeLibrarySupported) return
-                val svc = com.lianyu.ai.feature.localmodel.LocalAiService.getInstance(app)
-                com.lianyu.ai.feature.localmodel.LocalModelCatalog.all.firstOrNull { it.modelFile(app).exists() }
-                    ?.let { svc.setActiveModel(it); ContentFilter.setSafetyClassifier(com.lianyu.ai.feature.localmodel.LocalSafetyClassifier(svc)) }
             }
         }
 
@@ -295,6 +287,34 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         private fun clearUpdateIgnore(app: Application) {
             app.getSharedPreferences("update_config", android.content.Context.MODE_PRIVATE)
                 .edit().remove("ignored_version").apply()
+        }
+
+        private class LazyLocalSafetyClassifier(
+            app: Application
+        ) : SafetyClassifier {
+            private val appContext = app.applicationContext
+            private var delegate: SafetyClassifier? = null
+
+            override suspend fun classify(text: String): ContentFilter.ViolationLevel {
+                val classifier = delegate ?: buildClassifier().also { delegate = it }
+                    ?: return ContentFilter.ViolationLevel.NONE
+                return classifier.classify(text)
+            }
+
+            private fun buildClassifier(): SafetyClassifier? {
+                return runCatching {
+                    if (!com.lianyu.ai.feature.localmodel.LocalAiService.isNativeLibrarySupported) return null
+                    val svc = com.lianyu.ai.feature.localmodel.LocalAiService.getInstance(appContext)
+                    val model = com.lianyu.ai.feature.localmodel.LocalModelCatalog.all
+                        .firstOrNull { it.modelFile(appContext).exists() }
+                        ?: return null
+                    svc.setActiveModel(model)
+                    com.lianyu.ai.feature.localmodel.LocalSafetyClassifier(svc)
+                }.getOrElse {
+                    SecureLog.e("LianYuApplication", "Lazy safety classifier init failed", it)
+                    null
+                }
+            }
         }
 
         private fun applyStoredLanguage(app: Application) {
