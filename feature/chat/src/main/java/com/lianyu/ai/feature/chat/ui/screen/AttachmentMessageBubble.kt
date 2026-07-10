@@ -69,13 +69,24 @@ internal fun AttachmentMessageBubble(
     val userBubbleColor = MaterialTheme.colorScheme.primary
     val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
     val aiBorderColor = MaterialTheme.colorScheme.outline
+    val mediaPath = remember(message.linkString, message.content) {
+        message.linkString.ifBlank { message.content }
+    }
+    val mimeType = remember(label) {
+        when (label) {
+            "视频" -> "video/*"
+            else -> "*/*"
+        }
+    }
 
     Box {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    onClick = {},
+                    onClick = {
+                        onIntent(ChatIntent.OpenMedia(mediaPath, mimeType))
+                    },
                     onLongClick = { showMenu = true }
                 ),
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,

@@ -75,7 +75,9 @@ fun ImageMessageBubble(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    onClick = {},
+                    onClick = {
+                        onIntent(ChatIntent.OpenMedia(imageFile.absolutePath, "image/*"))
+                    },
                     onLongClick = { showMenu = true }
                 ),
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
