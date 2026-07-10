@@ -31,6 +31,8 @@ fun ChatMessage.toQuoteReply(companionName: String?, userName: String): QuoteRep
 fun encodeQuotedMessage(quote: QuoteReply, body: String): String {
     return buildString {
         append(QUOTE_PREFIX)
+        append(quote.messageId)
+        append("|")
         append(quote.authorName.sanitizeQuoteLine())
         append(": ")
         append(quote.previewText.sanitizeQuoteLine())
@@ -46,13 +48,16 @@ fun parseQuotedTextContent(content: String): QuotedTextContent {
 
     val quoteLine = content.substring(QUOTE_PREFIX.length, separatorIndex).trim()
     val body = content.substring(separatorIndex + QUOTE_SEPARATOR.length).trim()
-    val parts = quoteLine.split(": ", limit = 2)
+    val idParts = quoteLine.split("|", limit = 2)
+    val messageId = if (idParts.size == 2) idParts[0].toLongOrNull() ?: 0 else 0
+    val quoteText = if (idParts.size == 2) idParts[1] else quoteLine
+    val parts = quoteText.split(": ", limit = 2)
     val authorName = parts.getOrNull(0).orEmpty().ifBlank { "引用" }
     val quoteContent = parts.getOrNull(1).orEmpty()
 
     return QuotedTextContent(
         quote = QuoteReply(
-            messageId = 0,
+            messageId = messageId,
             authorName = authorName,
             content = quoteContent
         ),

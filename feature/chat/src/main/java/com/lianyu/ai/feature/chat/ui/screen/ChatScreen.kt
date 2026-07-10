@@ -306,26 +306,6 @@ fun ChatScreen(
     // Per-companion chat settings
     val settingsStore = remember { ChatDetailSettingsStore(context) }
     val detailSettings by settingsStore.settingsFlow(companionId).collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
-    val handleChatIntent: (ChatIntent) -> Unit = { intent ->
-        when (intent) {
-            is ChatIntent.QuoteReply -> quoteReply = intent.message.toQuoteReply(
-                companionName = companionData?.name,
-                userName = userName
-            )
-            is ChatIntent.CopyText -> {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("聊天消息", intent.text))
-                scope.launch { snackbarHostState.showSnackbar("已复制") }
-            }
-            is ChatIntent.OpenMedia -> {
-                scope.launch {
-                    val result = openChatMedia(context, intent.path, intent.mimeType)
-                    if (!result) snackbarHostState.showSnackbar("无法打开该文件")
-                }
-            }
-            else -> onIntent(intent)
-        }
-    }
 
     LaunchedEffect(Unit) {
         ReadStatusManager.markAsRead(context, companionId)
@@ -361,6 +341,37 @@ fun ChatScreen(
 
     // 列表状态始终存在；空消息列表时不显示转圈，而是正常展示输入栏
     val listState = remember { LazyListState() }
+    val handleChatIntent: (ChatIntent) -> Unit = { intent ->
+        when (intent) {
+            is ChatIntent.QuoteReply -> quoteReply = intent.message.toQuoteReply(
+                companionName = companionData?.name,
+                userName = userName
+            )
+            is ChatIntent.CopyText -> {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("聊天消息", intent.text))
+                scope.launch { snackbarHostState.showSnackbar("已复制") }
+            }
+            is ChatIntent.OpenMedia -> {
+                scope.launch {
+                    val result = openChatMedia(context, intent.path, intent.mimeType)
+                    if (!result) snackbarHostState.showSnackbar("无法打开该文件")
+                }
+            }
+            is ChatIntent.NavigateToMessage -> {
+                scope.launch {
+                    val messageIndex = uiState.messages.indexOfFirst { it.messageOrNull?.id == intent.messageId }
+                    if (messageIndex >= 0) {
+                        val loadingOffset = if (isLoadingMore) 1 else 0
+                        listState.animateScrollToItem(messageIndex + loadingOffset)
+                    } else {
+                        snackbarHostState.showSnackbar("消息已不在当前会话")
+                    }
+                }
+            }
+            else -> onIntent(intent)
+        }
+    }
 
     // 首次有消息时同步滚动到底部，避免首帧闪现顶部
     LaunchedEffect(messages.isNotEmpty()) {
