@@ -15,6 +15,7 @@ sealed interface ChatIntent {
     data class SwitchApi(val provider: ApiProviderInfo) : ChatIntent
     data object LoadEarlier : ChatIntent
     data class QuoteReply(val message: ChatMessage) : ChatIntent
+    data class CopyText(val text: String) : ChatIntent
     data class Recall(val message: ChatMessage) : ChatIntent
     data class Regenerate(val message: ChatMessage) : ChatIntent
 }
