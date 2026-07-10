@@ -1,5 +1,8 @@
 package com.lianyu.ai.feature.chat.ui.screen
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -22,6 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 @Composable
 fun StickerContentBubble(
@@ -29,43 +35,12 @@ fun StickerContentBubble(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val appContext = remember(context) { context.applicationContext }
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
     LaunchedEffect(stickerName) {
-        val manager = StickerManager.getInstance(context)
-        var sticker = manager.findStickerByDescriptionExact(stickerName)
-        if (sticker == null && !stickerName.endsWith(".png")) {
-            sticker = manager.findStickerByDescriptionExact("$stickerName.png")
-        }
-        if (sticker == null) {
-            sticker = manager.findStickerByDescription(stickerName)
-        }
-        if (sticker != null) {
-            bitmap = manager.loadStickerBitmap(sticker.path)
-        } else {
-            val importedDir = java.io.File(context.filesDir, "stickers/imported")
-            val possibleFiles = listOf(
-                "$stickerName.png", "$stickerName.jpg", "$stickerName.jpeg",
-                "$stickerName.gif", "$stickerName.webp",
-                "sticker_$stickerName.png"
-            )
-            for (fileName in possibleFiles) {
-                val file = java.io.File(importedDir, fileName)
-                if (file.exists()) {
-                    bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                    break
-                }
-            }
-            if (bitmap == null) {
-                try {
-                    context.assets.list("stickers")?.filter { it.equals("$stickerName.png", ignoreCase = true) || it.equals(stickerName, ignoreCase = true) }?.firstOrNull()?.let {
-                        context.assets.open("stickers/$it").use { stream ->
-                            bitmap = android.graphics.BitmapFactory.decodeStream(stream)
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
-        }
+        bitmap = null
+        bitmap = loadStickerBitmap(appContext, stickerName)
     }
 
     if (bitmap != null) {
@@ -90,4 +65,41 @@ fun StickerContentBubble(
             )
         }
     }
+}
+
+private suspend fun loadStickerBitmap(context: Context, stickerName: String): Bitmap? = withContext(Dispatchers.IO) {
+    val manager = StickerManager.getInstance(context)
+    var sticker = manager.findStickerByDescriptionExact(stickerName)
+    if (sticker == null && !stickerName.endsWith(".png")) {
+        sticker = manager.findStickerByDescriptionExact("$stickerName.png")
+    }
+    if (sticker == null) {
+        sticker = manager.findStickerByDescription(stickerName)
+    }
+    if (sticker != null) {
+        return@withContext manager.loadStickerBitmap(sticker.path)
+    }
+
+    val importedDir = File(context.filesDir, "stickers/imported")
+    val possibleFiles = listOf(
+        "$stickerName.png", "$stickerName.jpg", "$stickerName.jpeg",
+        "$stickerName.gif", "$stickerName.webp",
+        "sticker_$stickerName.png"
+    )
+    for (fileName in possibleFiles) {
+        val file = File(importedDir, fileName)
+        if (file.exists()) {
+            return@withContext BitmapFactory.decodeFile(file.absolutePath)
+        }
+    }
+
+    runCatching {
+        context.assets.list("stickers")
+            ?.firstOrNull { it.equals("$stickerName.png", ignoreCase = true) || it.equals(stickerName, ignoreCase = true) }
+            ?.let { assetName ->
+                context.assets.open("stickers/$assetName").use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }
+            }
+    }.getOrNull()
 }

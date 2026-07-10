@@ -312,8 +312,10 @@ fun ChatScreen(
     val adaptiveSizing = rememberAdaptiveSizing()
 
     // Per-companion chat settings
-    val settingsStore = remember { ChatDetailSettingsStore(context) }
-    val detailSettings by settingsStore.settingsFlow(companionId).collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
+    val appContext = remember(context) { context.applicationContext }
+    val settingsStore = remember(appContext) { ChatDetailSettingsStore(appContext) }
+    val detailSettingsFlow = remember(settingsStore, companionId) { settingsStore.settingsFlow(companionId) }
+    val detailSettings by detailSettingsFlow.collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
 
     LaunchedEffect(Unit) {
         ReadStatusManager.markAsRead(context, companionId)
