@@ -73,13 +73,15 @@ fun ChatDetailScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val store = remember { ChatDetailSettingsStore(context) }
+    val appContext = remember(context) { context.applicationContext }
+    val store = remember(appContext) { ChatDetailSettingsStore(appContext) }
+    val settingsFlow = remember(store, companionId) { store.settingsFlow(companionId) }
     val scope = rememberCoroutineScope()
     val viewModel: ChatViewModel = viewModel(
-        factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
+        factory = ChatViewModelFactory(appContext as Application, companionId)
     )
     val companionData by viewModel.companionData.collectAsState()
-    val settings by store.settingsFlow(companionId).collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
+    val settings by settingsFlow.collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
     val appSettingsStore = remember { AppSettingsStore(context) }
     var innerThoughtEnabled by remember { mutableStateOf(false) }
 
