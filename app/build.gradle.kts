@@ -173,14 +173,9 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.accompanist.systemuicontroller)
     implementation(libs.androidx.animation)
     implementation(libs.androidx.animation.core)
-    implementation(libs.androidx.animation.graphics)
-    implementation(libs.lottie.compose)
-    implementation(libs.androidx.app.update.ktx)
     implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.androidx.tracing)
 
     // 厂商 Push SDK
     // OPPO / vivo 使用本地 aar，请从各厂商开放平台下载后放置到 app/libs

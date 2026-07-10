@@ -128,7 +128,9 @@ fun WeChatChatInputBar(
                                     if (text.isEmpty()) {
                                         Text(stringResource(R.string.input_message_hint),
                                             style = MaterialTheme.typography.bodyLarge.copy(fontSize = adaptiveSizing.fontSizeBody.sp),
-                                            color = hintColor)
+                                            color = hintColor,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     }
                                     innerTextField()
                                 }

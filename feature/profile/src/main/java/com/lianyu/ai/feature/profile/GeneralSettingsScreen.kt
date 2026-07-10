@@ -1,9 +1,5 @@
 package com.lianyu.ai.feature.profile
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,7 +47,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.FrameRateManager
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -99,9 +93,6 @@ fun GeneralSettingsScreen(
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
-    var isVisible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) { delay(80); isVisible = true }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().background(colorScheme.background).windowInsetsPadding(WindowInsets.statusBars),
@@ -134,8 +125,7 @@ fun GeneralSettingsScreen(
                     MenuItemData(Icons.Filled.Refresh, stringResource(R.string.framerate), currentFrameRate.label, onFrameRateClick),
                     MenuItemData(Icons.Filled.Science, stringResource(R.string.experimental_features), stringResource(R.string.experimental_features_desc), onExperimentalFeaturesClick),
                     ThinkingSettingsEntry()
-                ),
-                isVisible = isVisible, delayMillis = 100
+                )
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -146,8 +136,7 @@ fun GeneralSettingsScreen(
                     MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.wechat_settings), stringResource(R.string.wechat_settings_desc), onWeChatClick),
                     MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.qqbot_settings), stringResource(R.string.qqbot_settings_desc), onQQBotClick),
                     MenuItemData(Icons.Filled.Coffee, stringResource(R.string.coffee_title), stringResource(R.string.coffee_desc), onCoffeeClick)
-                ),
-                isVisible = isVisible, delayMillis = 160
+                )
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -160,19 +149,13 @@ fun GeneralSettingsScreen(
                     MenuItemData(Icons.Filled.SystemUpdate, stringResource(R.string.check_new_version), stringResource(R.string.check_new_version_desc), onCheckUpdateClick),
                     MenuItemData(Icons.Filled.SaveAlt, stringResource(R.string.data_backup), stringResource(R.string.data_backup_desc), onDataBackupClick),
                     MenuItemData(Icons.Filled.Tune, stringResource(R.string.originos_adaption), stringResource(R.string.originos_adaption_desc), onOriginOSAdaptionClick)
-                ),
-                isVisible = isVisible, delayMillis = 220
+                )
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
             // 权限管理卡片（内嵌在系统与维护组下方）
-            AnimatedVisibility(
-                visible = isVisible,
-                enter = fadeIn(tween(400, delayMillis = 280)) + slideInVertically(tween(400, delayMillis = 280)) { it / 4 }
-            ) {
-                PermissionSettingsCard()
-            }
+            PermissionSettingsCard()
 
             Spacer(modifier = Modifier.height(80.dp))
         }
