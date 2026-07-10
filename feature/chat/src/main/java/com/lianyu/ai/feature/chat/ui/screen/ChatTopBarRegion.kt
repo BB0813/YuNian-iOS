@@ -94,7 +94,7 @@ fun ChatTopBarRegion(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = ChatTheme.colors.topBarIcon,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -123,7 +123,7 @@ fun ChatTopBarRegion(
                 Icon(
                     imageVector = Icons.Filled.Call,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = ChatTheme.colors.topBarAccent,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -136,7 +136,7 @@ private fun TopBarSurface(content: @Composable RowScope.() -> Unit) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(28.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
+            .background(ChatTheme.colors.topBarBackground.copy(alpha = 0.85f))
             .padding(horizontal = 12.dp, vertical = ChatTopBarOverlayDefaults.BarVerticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -239,7 +239,7 @@ private fun CompanionTitle(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp
             ),
-            color = MaterialTheme.colorScheme.onSurface
+            color = ChatTheme.colors.topBarTitle
         )
         Spacer(modifier = Modifier.width(6.dp))
         AiGeneratedBadge(isDarkTheme = isDarkTheme)
@@ -252,7 +252,7 @@ private fun CompanionTitle(
                 imageVector = Icons.Outlined.Info,
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurface
+                tint = ChatTheme.colors.topBarIcon
             )
         }
     }
@@ -265,7 +265,7 @@ private fun AiGeneratedBadge(isDarkTheme: Boolean) {
             .widthIn(max = 72.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(
-                MaterialTheme.colorScheme.primary.copy(
+                ChatTheme.colors.topBarAccent.copy(
                     alpha = if (isDarkTheme) 0.2f else 0.12f
                 )
             )
@@ -277,7 +277,7 @@ private fun AiGeneratedBadge(isDarkTheme: Boolean) {
             overflow = TextOverflow.Ellipsis,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+            color = ChatTheme.colors.topBarAccent
         )
     }
 }
@@ -327,7 +327,7 @@ private fun TtsModeMenu(
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
-        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+        modifier = Modifier.background(ChatTheme.colors.menuBackground)
     ) {
         ChatTtsMode.entries.forEach { mode ->
             TtsModeMenuItem(
@@ -351,12 +351,12 @@ private fun TtsModeMenuItem(
                 Text(
                     text = mode.displayName,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = ChatTheme.colors.menuContent
                 )
                 Text(
                     text = mode.description,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = ChatTheme.colors.metadata
                 )
             }
         },
@@ -381,8 +381,8 @@ private fun TtsModeIcon(
         imageVector = if (mode == ChatTtsMode.SILENT)
             Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
         contentDescription = contentDescription,
-        tint = if (isSelected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+        tint = if (isSelected) ChatTheme.colors.topBarAccent
+            else ChatTheme.colors.metadata,
         modifier = Modifier.size(20.dp)
     )
 }
