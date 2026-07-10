@@ -66,6 +66,8 @@ import com.lianyu.ai.feature.settings.ui.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.LocalContext
 import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.uicommon.component.AppListItemLayout
+import com.lianyu.ai.uicommon.theme.AppTheme
 
 // ============================================================
 // Petal Color Constants
@@ -1191,25 +1193,34 @@ fun PetalSavedApiCard(
 
 @Composable
 fun PetalAddApiButton(onClick: () -> Unit, isDarkTheme: Boolean) {
-    OutlinedButton(
-        onClick = onClick,
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "添加API",
+                modifier = Modifier.size(18.dp),
+                tint = PetalPrimary
+            )
+        },
+        endSlot = {},
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = PetalPrimary
-        )
+        onClick = onClick,
+        slotGap = AppTheme.dimens.avatarGap
     ) {
-        Icon(
-            imageVector = Icons.Filled.Add,
-            contentDescription = "添加API",
-            modifier = Modifier.size(18.dp),
-            tint = PetalPrimary
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = "添加API配置",
-            color = PetalPrimary,
-            fontSize = 14.sp
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.45f))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = "添加API配置",
+                color = PetalPrimary,
+                fontSize = 14.sp
+            )
+        }
     }
 }

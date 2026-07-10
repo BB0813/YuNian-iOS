@@ -190,7 +190,7 @@ private fun materialChatThemeColors(colorScheme: ColorScheme): ChatThemeColors {
         destructive = colorScheme.error,
         destructiveContent = colorScheme.onError,
         success = Color(0xFF34C759),
-        successContent = Color.White,
+        successContent = colorScheme.onPrimary,
         warning = Color(0xFFFF9500),
         quoteUserBackground = colors.quotePrimaryBackground,
         quoteAiBackground = colors.quoteSecondaryBackground,
