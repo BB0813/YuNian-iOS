@@ -3,6 +3,7 @@ package com.lianyu.ai.feature.chat.ui.screen
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -138,6 +139,13 @@ fun TextMessageBubble(
                                     .background(
                                         if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)
                                         else MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+                                    )
+                                    .then(
+                                        if (quote.messageId > 0) {
+                                            Modifier.clickable { onIntent(ChatIntent.NavigateToMessage(quote.messageId)) }
+                                        } else {
+                                            Modifier
+                                        }
                                     )
                                     .padding(horizontal = 10.dp, vertical = 7.dp)
                             ) {

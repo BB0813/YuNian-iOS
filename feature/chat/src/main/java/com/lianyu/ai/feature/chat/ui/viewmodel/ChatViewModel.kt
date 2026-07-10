@@ -172,6 +172,7 @@ class ChatViewModel(
             is ChatIntent.QuoteReply -> Unit
             is ChatIntent.CopyText -> Unit
             is ChatIntent.OpenMedia -> Unit
+            is ChatIntent.NavigateToMessage -> Unit
             is ChatIntent.Recall -> recallMessage(intent.message)
             is ChatIntent.Regenerate -> regenerateMessage(intent.message)
         }

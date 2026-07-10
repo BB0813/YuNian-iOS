@@ -17,6 +17,7 @@ sealed interface ChatIntent {
     data class QuoteReply(val message: ChatMessage) : ChatIntent
     data class CopyText(val text: String) : ChatIntent
     data class OpenMedia(val path: String, val mimeType: String) : ChatIntent
+    data class NavigateToMessage(val messageId: Long) : ChatIntent
     data class Recall(val message: ChatMessage) : ChatIntent
     data class Regenerate(val message: ChatMessage) : ChatIntent
 }
