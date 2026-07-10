@@ -170,6 +170,7 @@ class ChatViewModel(
             is ChatIntent.SwitchApi -> switchApi(intent.provider)
             ChatIntent.LoadEarlier -> loadMoreHistory()
             is ChatIntent.QuoteReply -> Unit
+            is ChatIntent.CopyText -> Unit
             is ChatIntent.Recall -> recallMessage(intent.message)
             is ChatIntent.Regenerate -> regenerateMessage(intent.message)
         }

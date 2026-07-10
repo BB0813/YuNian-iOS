@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Refresh
@@ -237,6 +238,27 @@ fun TextMessageBubble(
                     }
                 )
             }
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "复制",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                },
+                onClick = {
+                    showMenu = false
+                    onIntent(ChatIntent.CopyText(quotedContent.body))
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        contentDescription = "复制",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            )
             DropdownMenuItem(
                 text = {
                     Text(

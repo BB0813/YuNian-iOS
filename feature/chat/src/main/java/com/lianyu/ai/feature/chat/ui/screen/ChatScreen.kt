@@ -3,6 +3,9 @@ package com.lianyu.ai.feature.chat.ui.screen
 import android.util.Log
 
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -307,6 +310,11 @@ fun ChatScreen(
                 companionName = companionData?.name,
                 userName = userName
             )
+            is ChatIntent.CopyText -> {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("聊天消息", intent.text))
+                scope.launch { snackbarHostState.showSnackbar("已复制") }
+            }
             else -> onIntent(intent)
         }
     }
