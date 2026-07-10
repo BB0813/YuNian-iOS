@@ -1,0 +1,6 @@
+package com.lianyu.ai.feature.chat.ui.screen
+
+internal fun extractVoiceDuration(content: String): Int {
+    val regex = Regex("\\[语音]\\s*(\\d+)[\"秒]")
+    return regex.find(content)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+}

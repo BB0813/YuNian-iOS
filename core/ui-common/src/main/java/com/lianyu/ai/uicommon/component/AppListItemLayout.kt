@@ -3,7 +3,6 @@ package com.lianyu.ai.uicommon.component
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
@@ -70,7 +69,7 @@ fun AppListItemLayout(
     }
 
     Layout(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
         content = {
             Box(modifier = Modifier.layoutId("startSlot")) { startSlot() }
             Box(modifier = Modifier.layoutId("endSlot")) { endSlot() }
@@ -86,9 +85,12 @@ fun AppListItemLayout(
         val gapPx = slotGap.roundToPx()
 
         // Content gets the remaining width after both slots and gaps
-        val contentMaxWidth = (constraints.maxWidth
-            - startPlaceable.width - endPlaceable.width - gapPx * 2)
-            .coerceAtLeast(0)
+        val contentMaxWidth = if (constraints.hasBoundedWidth) {
+            (constraints.maxWidth - startPlaceable.width - endPlaceable.width - gapPx * 2)
+                .coerceAtLeast(0)
+        } else {
+            Constraints.Infinity
+        }
 
         val contentPlaceable = contentMeasurable.measure(
             Constraints(
@@ -100,7 +102,13 @@ fun AppListItemLayout(
         )
 
         val height = maxOf(startPlaceable.height, contentPlaceable.height, endPlaceable.height)
-        layout(constraints.maxWidth, height) {
+        val layoutWidth = if (constraints.hasBoundedWidth) {
+            constraints.maxWidth
+        } else {
+            startPlaceable.width + gapPx + contentPlaceable.width + gapPx + endPlaceable.width
+        }.coerceIn(constraints.minWidth, constraints.maxWidth)
+
+        layout(layoutWidth, height) {
             if (isStartAligned) {
                 // [startSlot] [gap] [content............] [endSlot]
                 startPlaceable.placeRelative(0, 0)
@@ -109,12 +117,12 @@ fun AppListItemLayout(
                     0
                 )
                 endPlaceable.placeRelative(
-                    constraints.maxWidth - endPlaceable.width,
+                    layoutWidth - endPlaceable.width,
                     0
                 )
             } else {
                 // [endSlot] [gap] [content............] [startSlot]
-                val startX = constraints.maxWidth - startPlaceable.width
+                val startX = layoutWidth - startPlaceable.width
                 val contentX = startX - gapPx - contentPlaceable.width
                 endPlaceable.placeRelative(0, 0)
                 contentPlaceable.placeRelative(

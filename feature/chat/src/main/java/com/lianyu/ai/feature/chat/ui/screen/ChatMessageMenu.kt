@@ -38,9 +38,10 @@ fun ChatMessageMenu(
     onIntent: (ChatIntent) -> Unit,
     copyText: String? = null
 ) {
+    val colors = ChatTheme.colors
     val metrics = ChatTheme.metrics
-    val menuBg = Color(0xFF2C2C2C)
-    val contentColor = Color.White
+    val menuBg = colors.menuBackground
+    val contentColor = colors.menuContent
 
     MaterialTheme(
         shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(16.dp))

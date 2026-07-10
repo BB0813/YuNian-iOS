@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.common.StickerInfo
+import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
 import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.uicommon.component.ChatInputExtensionPanel
@@ -66,6 +66,8 @@ fun ChatInputRegion(
     onVoiceRecordCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = ChatTheme.colors
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -77,7 +79,7 @@ fun ChatInputRegion(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .background(colors.inputAccentContainer)
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -86,13 +88,13 @@ fun ChatInputRegion(
                     CircularProgressIndicator(
                         modifier = Modifier.size(12.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary
+                        color = colors.inputAccent
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "AI 正在朗读...",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary
+                        color = colors.inputAccent
                     )
                 }
                 IconButton(
@@ -102,7 +104,7 @@ fun ChatInputRegion(
                     Icon(
                         imageVector = Icons.Filled.Stop,
                         contentDescription = "停止朗读",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = colors.inputAccent,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -135,14 +137,14 @@ fun ChatInputRegion(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                    .background(colors.inputBackground.copy(alpha = 0.95f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "你已拉黑该联系人",
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.error,
+                    color = colors.inputBlockedContent,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -152,7 +154,7 @@ fun ChatInputRegion(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                    .background(colors.inputBackground.copy(alpha = 0.95f))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -185,12 +187,14 @@ private fun QuoteReplyPreview(
     quoteReply: QuoteReply,
     onClearClick: () -> Unit
 ) {
+    val colors = ChatTheme.colors
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+            .background(colors.inputQuoteBackground.copy(alpha = 0.72f))
             .padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -200,12 +204,12 @@ private fun QuoteReplyPreview(
                 text = "引用 ${quoteReply.authorName}",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.primary
+                color = colors.inputAccent
             )
             Text(
                 text = quoteReply.previewText,
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = colors.metadata,
                 maxLines = 1
             )
         }
@@ -216,7 +220,7 @@ private fun QuoteReplyPreview(
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "取消引用",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = colors.metadata,
                 modifier = Modifier.size(16.dp)
             )
         }

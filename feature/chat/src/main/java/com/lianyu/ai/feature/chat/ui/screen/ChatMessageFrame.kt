@@ -4,14 +4,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalViewConfiguration
 import com.lianyu.ai.feature.chat.ui.theme.ChatBubbleSide
 import com.lianyu.ai.feature.chat.ui.theme.ChatBubbleSpec
 import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
@@ -37,7 +34,6 @@ fun ChatMessageFrame(
     val metrics = ChatTheme.metrics
     val shapes = ChatTheme.shapes
     val haptic = LocalHapticFeedback.current
-    val viewConfiguration = LocalViewConfiguration.current
     val bubbleColor = if (isMine) colors.userBubble else colors.aiBubble
     val bubbleContentPadding = Modifier.padding(
         horizontal = adaptiveSizing.chatBubblePaddingHorizontal,
