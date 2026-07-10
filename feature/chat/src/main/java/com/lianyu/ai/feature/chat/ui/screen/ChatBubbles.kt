@@ -72,7 +72,6 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import com.lianyu.ai.uicommon.component.CompanionAvatar
 import com.lianyu.ai.uicommon.component.UserAvatar
-import com.lianyu.ai.uicommon.component.VoiceMessageBubble
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 import android.net.Uri
@@ -90,62 +89,65 @@ fun ChatListItemBubble(
     userName: String,
     onIntent: (ChatIntent) -> Unit,
     adaptiveSizing: AdaptiveSizing,
-    isDarkTheme: Boolean
+    isDarkTheme: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    when (item) {
-        is ChatListItem.TimeDivider -> TimeDividerBubble(item = item)
-        is ChatListItem.SystemTip -> SystemTipBubble(item = item)
-        is ChatListItem.TextMessage -> TextMessageBubble(
-            item = item,
-            companionData = companionData,
-            userAvatar = userAvatar,
-            userName = userName,
-            onIntent = onIntent,
-            adaptiveSizing = adaptiveSizing,
-            isDarkTheme = isDarkTheme
-        )
-        is ChatListItem.ImageMessage -> ImageMessageBubble(
-            item = item,
-            companionData = companionData,
-            userAvatar = userAvatar,
-            userName = userName,
-            onIntent = onIntent,
-            adaptiveSizing = adaptiveSizing
-        )
-        is ChatListItem.VoiceMessage -> VoiceMessageBubble(
-            item = item,
-            companionData = companionData,
-            userAvatar = userAvatar,
-            userName = userName,
-            onIntent = onIntent,
-            adaptiveSizing = adaptiveSizing
-        )
-        is ChatListItem.StickerMessage -> StickerMessageBubble(
-            item = item,
-            companionData = companionData,
-            userAvatar = userAvatar,
-            userName = userName,
-            onIntent = onIntent,
-            adaptiveSizing = adaptiveSizing
-        )
-        is ChatListItem.VideoMessage -> VideoMessageBubble(
-            item = item,
-            companionData = companionData,
-            userAvatar = userAvatar,
-            userName = userName,
-            onIntent = onIntent,
-            adaptiveSizing = adaptiveSizing,
-            isDarkTheme = isDarkTheme
-        )
-        is ChatListItem.FileMessage -> FileMessageBubble(
-            item = item,
-            companionData = companionData,
-            userAvatar = userAvatar,
-            userName = userName,
-            onIntent = onIntent,
-            adaptiveSizing = adaptiveSizing,
-            isDarkTheme = isDarkTheme
-        )
+    Box(modifier = modifier) {
+        when (item) {
+            is ChatListItem.TimeDivider -> TimeDividerBubble(item = item)
+            is ChatListItem.SystemTip -> SystemTipBubble(item = item)
+            is ChatListItem.TextMessage -> TextMessageBubble(
+                item = item,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                onIntent = onIntent,
+                adaptiveSizing = adaptiveSizing,
+                isDarkTheme = isDarkTheme
+            )
+            is ChatListItem.ImageMessage -> ImageMessageBubble(
+                item = item,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                onIntent = onIntent,
+                adaptiveSizing = adaptiveSizing
+            )
+            is ChatListItem.VoiceMessage -> VoiceMessageBubble(
+                item = item,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                onIntent = onIntent,
+                adaptiveSizing = adaptiveSizing
+            )
+            is ChatListItem.StickerMessage -> StickerMessageBubble(
+                item = item,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                onIntent = onIntent,
+                adaptiveSizing = adaptiveSizing
+            )
+            is ChatListItem.VideoMessage -> VideoMessageBubble(
+                item = item,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                onIntent = onIntent,
+                adaptiveSizing = adaptiveSizing,
+                isDarkTheme = isDarkTheme
+            )
+            is ChatListItem.FileMessage -> FileMessageBubble(
+                item = item,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                onIntent = onIntent,
+                adaptiveSizing = adaptiveSizing,
+                isDarkTheme = isDarkTheme
+            )
+        }
     }
 }
 

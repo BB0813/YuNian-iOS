@@ -493,7 +493,6 @@ class ChatViewModel(
         if (_isLoadingMore.value || !_hasMoreMessages.value) return
         _isLoadingMore.value = true
         viewModelScope.launch(Dispatchers.IO) {
-            delay(200) // 短暂延迟让加载指示器可见
             try {
                 val beforeTimestamp = _olderMessages.value.firstOrNull()?.timestamp
                     ?: _recentMessages.value.firstOrNull()?.timestamp

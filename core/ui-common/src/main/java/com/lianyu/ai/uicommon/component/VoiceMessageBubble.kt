@@ -7,25 +7,26 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -50,11 +51,13 @@ fun VoiceMessageBubble(
     duration: Int,
     isUser: Boolean,
     onPlayComplete: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    containerColor: Color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+    contentColor: Color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
 ) {
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val iconColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    val waveColor = if (isUser) Color(0xFF34C759).copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+    val controlColor = contentColor.copy(alpha = 0.12f)
+    val playedWaveColor = contentColor
+    val idleWaveColor = contentColor.copy(alpha = 0.28f)
 
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
@@ -118,45 +121,51 @@ fun VoiceMessageBubble(
         }
     }
 
-    Box(
+    val waveformWidth = (72 + duration.coerceIn(0, 54)).dp
+
+    Surface(
         modifier = modifier
-            .widthIn(max = 280.dp)
-            .clickable { togglePlayback() }
-            .background(bubbleColor, RoundedCornerShape(16.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .widthIn(min = 120.dp, max = 240.dp)
+            .clickable { togglePlayback() },
+        shape = RoundedCornerShape(18.dp),
+        color = containerColor,
+        border = null,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
     ) {
         Row(
+            modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            IconButton(
-                onClick = { togglePlayback() },
-                modifier = Modifier.size(36.dp)
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(controlColor, CircleShape),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (isPlaying) "暂停" else "播放",
-                    tint = iconColor,
-                    modifier = Modifier.size(24.dp)
+                    tint = contentColor,
+                    modifier = Modifier.size(16.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.width(4.dp))
 
             VoiceWaveform(
                 isPlaying = isPlaying,
                 phase = wavePhase,
-                color = waveColor,
+                playedColor = playedWaveColor,
+                idleColor = idleWaveColor,
                 duration = duration.coerceAtLeast(1),
-                currentPosition = currentPosition.toInt()
+                currentPosition = currentPosition.toInt(),
+                modifier = Modifier.width(waveformWidth)
             )
-
-            Spacer(modifier = Modifier.width(8.dp))
 
             Text(
                 text = formatDuration(if (isPlaying && mediaPlayer != null) ((mediaPlayer?.duration ?: duration * 1000) / 1000) else duration),
                 fontSize = 12.sp,
-                color = iconColor.copy(alpha = 0.7f),
+                color = contentColor.copy(alpha = 0.68f),
                 maxLines = 1
             )
         }
@@ -167,36 +176,38 @@ fun VoiceMessageBubble(
 private fun VoiceWaveform(
     isPlaying: Boolean,
     phase: Float,
-    color: Color,
+    playedColor: Color,
+    idleColor: Color,
     duration: Int,
-    currentPosition: Int
+    currentPosition: Int,
+    modifier: Modifier = Modifier
 ) {
-    val barCount = 5
+    val barCount = 12
     
-    Canvas(modifier = Modifier.width(80.dp).height(28.dp)) {
-        val barWidth = size.width / (barCount * 2 + 1)
+    Canvas(modifier = modifier.height(24.dp)) {
+        val barWidth = size.width / (barCount * 2.35f)
         val maxHeight = size.height * 0.85f
+        val progress = if (duration > 0) currentPosition.toFloat() / (duration * 1000f) else 0f
         
         for (i in 0 until barCount) {
-            val x = barWidth * (i * 2 + 1.5f)
-            
-            val progress = if (duration > 0) currentPosition.toFloat() / (duration * 1000f) else 0f
+            val x = barWidth * (i * 2.25f + 0.6f)
             val barProgress = i.toFloat() / barCount
             
-            var heightRatio = when {
-                !isPlaying -> 0.35f + 0.15f * ((i % 2))
-                barProgress <= progress -> 0.45f + 0.55f * kotlin.math.sin((phase * 2 * kotlin.math.PI.toFloat()) + (i * 0.7f)).toFloat()
-                else -> 0.25f + 0.15f * ((i % 2))
+            val heightRatio = when {
+                !isPlaying -> 0.32f + 0.18f * (i % 3) / 2f
+                barProgress <= progress -> 0.42f + 0.58f * kotlin.math.sin((phase * 2 * kotlin.math.PI.toFloat()) + (i * 0.58f)).toFloat()
+                else -> 0.22f + 0.2f * (i % 3) / 2f
             }.coerceIn(0.2f, 1.0f)
 
             val barHeight = maxHeight * heightRatio
             val y = (size.height - barHeight) / 2
+            val barColor = if (barProgress <= progress) playedColor else idleColor
             
             drawRoundRect(
-                color = color,
+                color = barColor,
                 topLeft = Offset(x, y),
-                size = androidx.compose.ui.geometry.Size(barWidth * 0.75f, barHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth * 0.3f, barWidth * 0.3f)
+                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth * 0.5f, barWidth * 0.5f)
             )
         }
     }

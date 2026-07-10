@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -16,10 +17,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -81,6 +79,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -91,6 +90,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -115,6 +115,8 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatUiEvent
 import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
 import com.lianyu.ai.feature.chat.ui.viewmodel.encodeQuotedMessage
 import com.lianyu.ai.feature.chat.ui.viewmodel.toQuoteReply
+import com.lianyu.ai.feature.chat.ui.viewmodel.toChatListItems
+import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.StickerInfo
@@ -153,8 +155,10 @@ fun ChatScreen(
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
     )
-    val onIntent: (ChatIntent) -> Unit = viewModel::handleIntent
+    val currentOnIntent by rememberUpdatedState(viewModel::handleIntent)
+    val onIntent: (ChatIntent) -> Unit = remember { { intent -> currentOnIntent(intent) } }
     var quoteReply by remember { mutableStateOf<QuoteReply?>(null) }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
     var showExtensionPanel by remember { mutableStateOf(false) }
 
     // File picker for sticker import
@@ -277,8 +281,8 @@ fun ChatScreen(
 
     val userAvatar by viewModel.userAvatar.collectAsState()
     val userName by viewModel.userName.collectAsState()
-    val uiState by viewModel.state.collectAsState()
     val messages by viewModel.messages.collectAsState(initial = emptyList())
+    val chatItems = remember(messages) { messages.toChatListItems() }
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val hasMoreMessages by viewModel.hasMoreMessages.collectAsState()
     val companionData by viewModel.companionData.collectAsState()
@@ -337,7 +341,7 @@ fun ChatScreen(
     var hasScrolledToBottom by remember { mutableStateOf(false) }
 
     // LazyColumn 实际 item 总数（与 LazyColumn 内部 item 声明保持一致）
-    val itemCount = messages.size +
+    val itemCount = chatItems.size +
         (if (isLoadingMore) 1 else 0) +
         (if (isTyping) 1 else 0) +
         (if (isRegenerating) 1 else 0) +
@@ -357,14 +361,18 @@ fun ChatScreen(
                 scope.launch { snackbarHostState.showSnackbar("已复制") }
             }
             is ChatIntent.OpenMedia -> {
-                scope.launch {
-                    val result = openChatMedia(context, intent.path, intent.mimeType)
-                    if (!result) snackbarHostState.showSnackbar("无法打开该文件")
+                if (intent.mimeType.startsWith("image/")) {
+                    previewImagePath = intent.path
+                } else {
+                    scope.launch {
+                        val result = openChatMedia(context, intent.path, intent.mimeType)
+                        if (!result) snackbarHostState.showSnackbar("无法打开该文件")
+                    }
                 }
             }
             is ChatIntent.NavigateToMessage -> {
                 scope.launch {
-                    val messageIndex = uiState.messages.indexOfFirst { it.messageOrNull?.id == intent.messageId }
+                    val messageIndex = chatItems.indexOfFirst { it.messageOrNull?.id == intent.messageId }
                     if (messageIndex >= 0) {
                         val loadingOffset = if (isLoadingMore) 1 else 0
                         listState.animateScrollToItem(messageIndex + loadingOffset)
@@ -381,7 +389,8 @@ fun ChatScreen(
     LaunchedEffect(messages.isNotEmpty()) {
         if (messages.isNotEmpty() && !hasScrolledToBottom) {
             hasScrolledToBottom = true
-            listState.scrollToItem((messages.size - 1).coerceAtLeast(0))
+            delay(50)
+            listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
         }
     }
 
@@ -413,7 +422,7 @@ fun ChatScreen(
         val lastMessage = messages.lastOrNull()
         val isMyMessage = lastMessage?.isFromUser == true
         if (wasAtBottom || isMyMessage) {
-            val currentItemCount = messages.size +
+            val currentItemCount = chatItems.size +
                 (if (isLoadingMore) 1 else 0) +
                 (if (isTyping) 1 else 0) +
                 (if (isRegenerating) 1 else 0) +
@@ -445,25 +454,33 @@ fun ChatScreen(
     }
 
     // ── 上划加载历史消息 ──
-    var prevMessageCount by remember { mutableStateOf(0) }
+    var historyRestoreKey by remember { mutableStateOf<String?>(null) }
+    var historyRestoreScrollOffset by remember { mutableStateOf(0) }
     var isLoadingMoreTriggered by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState.firstVisibleItemIndex, hasMoreMessages) {
         // 首次进入时列表可能尚未滚动到底，避免此时误触发加载历史
         if (!hasScrolledToBottom) return@LaunchedEffect
         if (listState.firstVisibleItemIndex <= 2 && hasMoreMessages && !isLoadingMore && !isLoadingMoreTriggered) {
+            val anchorItem = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key != "load_more_indicator" }
+            historyRestoreKey = (anchorItem?.key as? String) ?: chatItems.getOrNull(listState.firstVisibleItemIndex)?.stableId
+            historyRestoreScrollOffset = anchorItem?.offset?.let { -it } ?: listState.firstVisibleItemScrollOffset
             isLoadingMoreTriggered = true
-            prevMessageCount = messages.size
             onIntent(ChatIntent.LoadEarlier)
         }
     }
 
     // 加载完成后恢复滚动位置
-    LaunchedEffect(isLoadingMore, prevMessageCount) {
-        if (!isLoadingMore && prevMessageCount > 0 && messages.size > prevMessageCount) {
-            val addedCount = messages.size - prevMessageCount
-            listState.scrollToItem(addedCount.coerceAtLeast(0), scrollOffset = 0)
-            prevMessageCount = 0
+    LaunchedEffect(isLoadingMore, historyRestoreKey, chatItems) {
+        val restoreKey = historyRestoreKey
+        if (!isLoadingMore && restoreKey != null) {
+            val anchorIndex = chatItems.indexOfFirst { it.stableId == restoreKey }
+            if (anchorIndex >= 0) {
+                listState.scrollToItem(anchorIndex, historyRestoreScrollOffset)
+            }
+            historyRestoreKey = null
+            historyRestoreScrollOffset = 0
             isLoadingMoreTriggered = false
         }
     }
@@ -524,6 +541,10 @@ fun ChatScreen(
     var isCanceling by remember { mutableStateOf(false) }
     val voiceRecorder = remember { VoiceRecorder.getInstance(context) }
 
+    BackHandler(enabled = previewImagePath != null) {
+        previewImagePath = null
+    }
+
     // Voice recording timer & actual recording
     LaunchedEffect(isRecording) {
         if (isRecording) {
@@ -539,7 +560,8 @@ fun ChatScreen(
     // Sticker data loaded from StickerManager
     val stickers = remember { mutableStateListOf<StickerInfo>() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    ChatTheme {
+        Box(modifier = Modifier.fillMaxSize()) {
         // Snackbar host
         SnackbarHost(
             hostState = snackbarHostState,
@@ -583,7 +605,7 @@ fun ChatScreen(
                         .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
                     contentPadding = PaddingValues(
                         start = adaptiveSizing.listHorizontalPadding, end = adaptiveSizing.listHorizontalPadding,
-                        top = 120.dp,
+                        top = ChatTopBarOverlayDefaults.ContentTopPadding,
                         bottom = 8.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -614,48 +636,32 @@ fun ChatScreen(
                         }
                     }
                     items(
-                        items = uiState.messages,
+                        items = chatItems,
                         key = { it.stableId }
                     ) { item ->
                         val message = item.messageOrNull
-                        if (message != null && message.id > 0 && message.id % 5 == 0L) {
-                            android.util.Log.w("ChatScreen", "[ChatScreen] rendering message id=${message.id} content='${message.content.take(20)}'")
-                        }
 
-                        // 消息首次出现淡入动画，低端设备跳过
-                        val visibleState = remember { MutableTransitionState(false) }
-                        LaunchedEffect(Unit) { visibleState.targetState = true }
-
-                        if (HardwareInfo.tier == HardwareInfo.Tier.LOW) {
-                            ChatListItemBubble(
-                                item = item,
-                                companionData = companionData,
-                                userAvatar = userAvatar,
-                                userName = userName,
-                                onIntent = handleChatIntent,
-                                adaptiveSizing = adaptiveSizing,
-                                isDarkTheme = isDarkTheme
-                            )
-                        } else {
-                            // 使用 ColumnScope.AnimatedVisibility 需要显式接收器
-                            // 在 LazyItemScope 中，通过 Column 包裹以获得 ColumnScope
-                            Column {
-                                AnimatedVisibility(
-                                    visibleState = visibleState,
-                                    enter = fadeIn(animationSpec = tween(300)) + expandVertically(animationSpec = tween(300))
-                                ) {
-                                    ChatListItemBubble(
-                                        item = item,
-                                        companionData = companionData,
-                                        userAvatar = userAvatar,
-                                        userName = userName,
-                                        onIntent = handleChatIntent,
-                                        adaptiveSizing = adaptiveSizing,
-                                        isDarkTheme = isDarkTheme
-                                    )
-                                }
+                        val alpha = remember(item.stableId) { Animatable(1f) }
+                        val shouldFadeIn = perfTier != HardwareInfo.Tier.LOW && message?.id == lastMessageId
+                        LaunchedEffect(item.stableId, shouldFadeIn) {
+                            if (shouldFadeIn) {
+                                alpha.snapTo(0f)
+                                alpha.animateTo(1f, animationSpec = tween(180))
+                            } else {
+                                alpha.snapTo(1f)
                             }
                         }
+
+                        ChatListItemBubble(
+                            item = item,
+                            companionData = companionData,
+                            userAvatar = userAvatar,
+                            userName = userName,
+                            onIntent = handleChatIntent,
+                            adaptiveSizing = adaptiveSizing,
+                            isDarkTheme = isDarkTheme,
+                            modifier = Modifier.graphicsLayer { this.alpha = alpha.value }
+                        )
                     }
 
                     if (isTyping) {
@@ -784,7 +790,6 @@ fun ChatScreen(
                     showStickerPanel = !showStickerPanel
                 },
                 onSendMessage = { msg ->
-                    android.util.Log.w("ChatScreen", "[ChatScreen] onSendMessage: '${msg.take(30)}'")
                     val currentQuote = quoteReply
                     val content = if (currentQuote != null) encodeQuotedMessage(currentQuote, msg) else msg
                     quoteReply = null
@@ -930,8 +935,37 @@ fun ChatScreen(
                     pendingAudioAction = { onNavigateToVoiceCall(companionId) }
                     audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
-            }
+            },
+            adaptiveSizing = adaptiveSizing
         )
+
+        previewImagePath?.let { imagePath ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.94f))
+                    .clickable { previewImagePath = null },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = java.io.File(imagePath),
+                    contentDescription = "图片预览",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 720.dp)
+                        .clickable { },
+                    contentScale = ContentScale.Fit,
+                    onError = {
+                        previewImagePath = null
+                        scope.launch {
+                            val result = openChatMedia(context, imagePath, "image/*")
+                            if (!result) snackbarHostState.showSnackbar("无法打开该文件")
+                        }
+                    }
+                )
+            }
+        }
+        }
     }
 }
 

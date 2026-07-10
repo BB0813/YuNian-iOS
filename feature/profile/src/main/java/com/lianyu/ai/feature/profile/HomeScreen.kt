@@ -1,9 +1,5 @@
 package com.lianyu.ai.feature.profile
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,7 +56,6 @@ import com.lianyu.ai.uicommon.theme.PinkPrimary
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
-import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -81,15 +75,9 @@ fun HomeScreen(
 ) {
     val chatList by viewModel.chatList.collectAsState(initial = emptyList())
     val groups by groupViewModel.groups.collectAsState(initial = emptyList())
-    var isVisible by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
     val colorScheme = MaterialTheme.colorScheme
-
-    LaunchedEffect(Unit) {
-        delay(100)
-        isVisible = true
-    }
 
     Box(
         modifier = Modifier
@@ -202,22 +190,12 @@ fun HomeScreen(
                                 title = "群聊"
                             )
                         }
-                        itemsIndexed(displayGroups) { index, group ->
-                            AnimatedVisibility(
-                                visible = isVisible,
-                                enter = fadeIn(
-                                    animationSpec = tween(300, delayMillis = index * 60)
-                                ) + slideInVertically(
-                                    animationSpec = tween(300, delayMillis = index * 60),
-                                    initialOffsetY = { it / 3 }
-                                )
-                            ) {
-                                GroupListItem(
+                        itemsIndexed(displayGroups) { _, group ->
+                            GroupListItem(
                                 group = group,
                                 onClick = { onGroupClick(group.id) },
                                 adaptiveSizing = adaptiveSizing
                             )
-                            }
                         }
                     }
 
@@ -227,24 +205,14 @@ fun HomeScreen(
                                 title = "好友"
                             )
                         }
-                        itemsIndexed(displayChats) { index, item ->
-                            AnimatedVisibility(
-                                visible = isVisible,
-                                enter = fadeIn(
-                                    animationSpec = tween(300, delayMillis = (index + displayGroups.size) * 60)
-                                ) + slideInVertically(
-                                    animationSpec = tween(300, delayMillis = (index + displayGroups.size) * 60),
-                                    initialOffsetY = { it / 3 }
-                                )
-                            ) {
-                                ChatListItem(
-                                    companion = item.companion,
-                                    lastMessage = item.lastMessage,
-                                    hasUnread = item.hasUnread,
-                                    onClick = { onCompanionClick(item.companion.id) },
-                                    adaptiveSizing = adaptiveSizing
-                                )
-                            }
+                        itemsIndexed(displayChats) { _, item ->
+                            ChatListItem(
+                                companion = item.companion,
+                                lastMessage = item.lastMessage,
+                                hasUnread = item.hasUnread,
+                                onClick = { onCompanionClick(item.companion.id) },
+                                adaptiveSizing = adaptiveSizing
+                            )
                         }
                     }
                 }

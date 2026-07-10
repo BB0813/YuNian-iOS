@@ -117,7 +117,7 @@ fun MainScreen(mainActivity: Activity) {
         navController.navigate(MainRoute.Chat(companionId).route)
     }
 
-    // 深度链接 / 冷启动恢复最近打开的单聊
+    // 只响应明确的通知/深链跳转；普通冷启动应停留在首页。
     LaunchedEffect(Unit) {
         val intent = valActivity.intent
         if (intent.getBooleanExtra("open_chat", false)) {
@@ -128,14 +128,6 @@ fun MainScreen(mainActivity: Activity) {
                 intent.removeExtra("companion_id")
                 return@LaunchedEffect
             }
-        }
-
-        val restoredCompanionId = LastOpenedCompanionStore.resolveInitialCompanionId(
-            context,
-            ServiceRegistry.getOrThrow(com.lianyu.ai.database.repository.CompanionRepository::class.java)
-        )
-        if (restoredCompanionId != null) {
-            openCompanionChat(restoredCompanionId)
         }
     }
 
