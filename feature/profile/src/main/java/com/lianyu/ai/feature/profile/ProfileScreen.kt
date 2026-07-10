@@ -81,7 +81,6 @@ import kotlinx.coroutines.delay
 fun ProfileScreen(
     // 记忆与管理
     onMemoryClick: () -> Unit,
-    onContextMemoryClick: () -> Unit,
     // AI配置
     onSettingsClick: () -> Unit,
     // 外观
@@ -238,8 +237,7 @@ fun ProfileScreen(
         // === 第二组：记忆与管理 ===
         SolidMenuGroup(
             items = listOf(
-                MenuItemData(Icons.Filled.Memory, stringResource(R.string.memory_management), stringResource(R.string.memory_management_desc), onMemoryClick),
-                MenuItemData(Icons.Filled.Memory, stringResource(R.string.context_memory), stringResource(R.string.context_memory_desc), onContextMemoryClick)
+                MenuItemData(Icons.Filled.Memory, stringResource(R.string.memory_management), stringResource(R.string.memory_management_desc), onMemoryClick)
             ),
             isVisible = isVisible, delayMillis = 80
         )

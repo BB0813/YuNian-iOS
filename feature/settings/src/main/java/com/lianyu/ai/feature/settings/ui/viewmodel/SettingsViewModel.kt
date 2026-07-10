@@ -88,9 +88,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _testCompletionEvent = MutableSharedFlow<TestCompletionEvent>(extraBufferCapacity = 1)
     val testCompletionEvent: SharedFlow<TestCompletionEvent> = _testCompletionEvent
 
-    private val _contextLimit = MutableStateFlow(50)
-    val contextLimit: StateFlow<Int> = _contextLimit.asStateFlow()
-
     private val _visionEnabled = MutableStateFlow(true)
     val visionEnabled: StateFlow<Boolean> = _visionEnabled.asStateFlow()
     private val _visionModel = MutableStateFlow(AppSettingsStore.VisionModels.VISION_AUTO)
@@ -106,12 +103,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val innerThoughtEnabled: StateFlow<Boolean> = _innerThoughtEnabled.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            appSettingsStore.contextLimitFlow.collect { limit ->
-                _contextLimit.value = limit
-            }
-        }
-
         viewModelScope.launch {
             appSettingsStore.visionEnabledFlow.collect { enabled ->
                 _visionEnabled.value = enabled
@@ -146,12 +137,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             appSettingsStore.innerThoughtEnabledFlow.collect { enabled ->
                 _innerThoughtEnabled.value = enabled
             }
-        }
-    }
-
-    fun setContextLimit(limit: Int) {
-        viewModelScope.launch {
-            appSettingsStore.setContextLimit(limit)
         }
     }
 
@@ -832,11 +817,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 if (activeConfig != null) {
                     aiService.queryBalance(activeConfig.id.takeIf { it > 0 })
                 } else {
+                    val partnerPreset = repository.getProviderPreset(ApiProvider.PARTNER)
                     val builtinConfig = ApiConfig(
                         provider = ApiProvider.PARTNER,
                         apiKey = "",
-                        baseUrl = ApiProvider.PARTNER.defaultBaseUrl,
-                        model = ApiProvider.PARTNER.defaultModel
+                        baseUrl = partnerPreset?.baseUrl ?: ApiProvider.PARTNER.defaultBaseUrl,
+                        model = partnerPreset?.model ?: ApiProvider.PARTNER.defaultModel
                     )
                     aiService.queryBalanceWithConfig(builtinConfig)
                 }

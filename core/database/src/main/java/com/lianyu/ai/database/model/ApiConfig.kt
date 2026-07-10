@@ -70,7 +70,7 @@ enum class ApiProvider(val displayName: String, val defaultBaseUrl: String, val 
     OPENAI("OpenAI", "https://api.openai.com/v1/", "gpt-4o-mini"),
     ANTHROPIC("Claude", "https://api.anthropic.com/v1/", "claude-3-5-sonnet-20241022"),
     GEMINI("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash"),
-    DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/", "deepseek-v4-pro"),
+    DEEPSEEK("DeepSeek", "https://api.deepseek.com", "deepseek-v4-pro"),
     DASHSCOPE("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1/", "qwen-plus"),
     KIMI("Kimi", "https://api.moonshot.cn/v1/", "kimi-k2.6"),
     XIAOMI("小米 MiMo", "https://api.xiaomimimo.com/v1/", "mimo-v2.5-pro"),

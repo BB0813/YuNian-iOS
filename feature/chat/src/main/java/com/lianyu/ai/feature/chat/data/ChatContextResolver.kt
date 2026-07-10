@@ -1,6 +1,5 @@
 package com.lianyu.ai.feature.chat.data
 
-import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
@@ -11,12 +10,13 @@ import com.lianyu.ai.database.repository.filterDecrypted
  * 统一解析聊天上下文配置，解决 ViewModel/AiService 中上下文数值硬编码、
  * 与用户设置不一致的问题。
  *
- * - 读取 [AppSettingsStore] 中的 contextLimit / compressionMode
  * - 对 AI 侧历史消息获取数量做安全上限，防止长对话时 OOM
  * - 提供 decrypted history 的轻量 LRU 缓存，避免同一 companion 在连续多轮中重复解密
+ *
+ * 注意：上下文条数限制已移除，改为 AutoContextManager 基于 token 预算自动管理。
+ * 此处始终拉取 MAX_AI_CONTEXT_FETCH 条消息，由 AutoContextManager 在发送前裁剪。
  */
 class ChatContextResolver(
-    private val appSettingsStore: AppSettingsStore,
     private val chatRepository: ChatRepository
 ) {
 
@@ -48,32 +48,13 @@ class ChatContextResolver(
 
     private val cacheLock = Any()
 
-    /** 用户设置的原始上下文条数上限（1..10000） */
-    suspend fun getContextLimit(): Int = appSettingsStore.getContextLimit()
-
-    /** 实际用于数据库拉取的有效条数，受 [MAX_AI_CONTEXT_FETCH] 限制 */
-    suspend fun getEffectiveFetchLimit(): Int {
-        val configured = getContextLimit()
-        return if (configured > MAX_AI_CONTEXT_FETCH) {
-            SecureLog.w(
-                "ChatContextResolver",
-                "User contextLimit=$configured exceeds safe cap $MAX_AI_CONTEXT_FETCH, capping"
-            )
-            MAX_AI_CONTEXT_FETCH
-        } else {
-            configured.coerceAtLeast(1)
-        }
-    }
-
-    /** 当前压缩模式（off / local / ai） */
-    suspend fun getCompressionMode(): String = appSettingsStore.getContextCompressionMode()
-
     /**
      * 获取用于 AI 请求的历史消息。
+     * 始终拉取 MAX_AI_CONTEXT_FETCH 条消息，由 AutoContextManager 在发送前按 token 预算裁剪。
      * 结果会按 lastMessageId 做短期缓存，连续多轮对话可减少重复解密。
      */
     suspend fun getHistoryForAi(companionId: Long): List<ChatMessage> {
-        val limit = getEffectiveFetchLimit()
+        val limit = MAX_AI_CONTEXT_FETCH
         val lastMessage = chatRepository.getRecentMessagesSync(companionId, 1).firstOrNull()
         val lastMessageId = lastMessage?.id ?: 0L
 

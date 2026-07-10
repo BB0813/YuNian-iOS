@@ -6,16 +6,12 @@ import android.app.Application
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,7 +21,6 @@ import com.lianyu.ai.uicommon.theme.ThemeMode
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +39,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -52,32 +46,24 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -115,14 +101,14 @@ import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
+import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatUiEvent
+import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
+import com.lianyu.ai.feature.chat.ui.viewmodel.encodeQuotedMessage
+import com.lianyu.ai.feature.chat.ui.viewmodel.toQuoteReply
 import com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore
-import com.lianyu.ai.uicommon.component.WeChatChatInputBar
-import com.lianyu.ai.uicommon.component.ChatInputExtensionPanel
-import com.lianyu.ai.uicommon.component.StickerPanel
-import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.common.StickerManager
-import com.lianyu.ai.uicommon.component.CompanionAvatar
+import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.uicommon.component.UserAvatar
 import com.lianyu.ai.uicommon.component.VoiceRecorder
 import com.lianyu.ai.uicommon.component.VoiceMessageBubble
@@ -132,7 +118,6 @@ import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
 import com.lianyu.ai.network.tts.ChatTtsMode
-import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.common.ReadStatusManager
@@ -159,6 +144,8 @@ fun ChatScreen(
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
     )
+    val onIntent: (ChatIntent) -> Unit = viewModel::handleIntent
+    var quoteReply by remember { mutableStateOf<QuoteReply?>(null) }
     var showExtensionPanel by remember { mutableStateOf(false) }
 
     // File picker for sticker import
@@ -192,7 +179,7 @@ fun ChatScreen(
                 try {
                     val imagePath = copyUriToCache(context, it)
                     if (imagePath != null) {
-                        viewModel.sendImageMessage(imagePath)
+                        onIntent(ChatIntent.SendImage(imagePath))
                     } else {
                         snackbarHostState.showSnackbar("图片读取失败")
                     }
@@ -220,7 +207,7 @@ fun ChatScreen(
                                 input.copyTo(output)
                             }
                         }
-                        viewModel.sendImageMessage(cacheFile.absolutePath)
+                        onIntent(ChatIntent.SendImage(cacheFile.absolutePath))
                     } catch (e: Exception) {
                         snackbarHostState.showSnackbar("拍照失败: ${e.message}")
                     }
@@ -268,7 +255,7 @@ fun ChatScreen(
                 try {
                     val videoPath = copyUriToCache(context, it)
                     if (videoPath != null) {
-                        viewModel.sendVideoMessage(videoPath)
+                        onIntent(ChatIntent.SendVideo(videoPath))
                     } else {
                         snackbarHostState.showSnackbar("视频读取失败")
                     }
@@ -281,6 +268,7 @@ fun ChatScreen(
 
     val userAvatar by viewModel.userAvatar.collectAsState()
     val userName by viewModel.userName.collectAsState()
+    val uiState by viewModel.state.collectAsState()
     val messages by viewModel.messages.collectAsState(initial = emptyList())
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val hasMoreMessages by viewModel.hasMoreMessages.collectAsState()
@@ -313,6 +301,15 @@ fun ChatScreen(
     // Per-companion chat settings
     val settingsStore = remember { ChatDetailSettingsStore(context) }
     val detailSettings by settingsStore.settingsFlow(companionId).collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
+    val handleChatIntent: (ChatIntent) -> Unit = { intent ->
+        when (intent) {
+            is ChatIntent.QuoteReply -> quoteReply = intent.message.toQuoteReply(
+                companionName = companionData?.name,
+                userName = userName
+            )
+            else -> onIntent(intent)
+        }
+    }
 
     LaunchedEffect(Unit) {
         ReadStatusManager.markAsRead(context, companionId)
@@ -370,9 +367,11 @@ fun ChatScreen(
 
     // 通过 snapshotFlow 追踪用户是否在底部附近，避免布局更新时序导致的误判
     var wasAtBottom by remember { mutableStateOf(true) }
+    var unreadNewMessages by remember { mutableStateOf(0) }
     LaunchedEffect(listState) {
         snapshotFlow { isAtBottom.value }.collect { nearBottom ->
             wasAtBottom = nearBottom
+            if (nearBottom) unreadNewMessages = 0
         }
     }
 
@@ -389,6 +388,9 @@ fun ChatScreen(
                 (if (isRegenerating) 1 else 0) +
                 (if (isReasoning && reasoningText.isNotBlank()) 1 else 0)
             listState.scrollToItem((currentItemCount - 1).coerceAtLeast(0))
+            unreadNewMessages = 0
+        } else {
+            unreadNewMessages += 1
         }
     }
 
@@ -421,7 +423,7 @@ fun ChatScreen(
         if (listState.firstVisibleItemIndex <= 2 && hasMoreMessages && !isLoadingMore && !isLoadingMoreTriggered) {
             isLoadingMoreTriggered = true
             prevMessageCount = messages.size
-            viewModel.loadMoreHistory()
+            onIntent(ChatIntent.LoadEarlier)
         }
     }
 
@@ -536,283 +538,237 @@ fun ChatScreen(
                     else Modifier.background(backgroundColor)
                 )
         ) {
-            // Messages list - takes full space, top bar is overlay
-            LazyColumn(
-                state = listState,
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .nestedScroll(rememberHorizontalSwipeGuard())
-                    .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
-                contentPadding = PaddingValues(
-                    start = adaptiveSizing.listHorizontalPadding, end = adaptiveSizing.listHorizontalPadding,
-                    top = 120.dp,
-                    bottom = 8.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // 顶部加载指示器
-                if (isLoadingMore) {
-                    item(key = "load_more_indicator") {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Messages list - takes full space, top bar is overlay
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(rememberHorizontalSwipeGuard())
+                        .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
+                    contentPadding = PaddingValues(
+                        start = adaptiveSizing.listHorizontalPadding, end = adaptiveSizing.listHorizontalPadding,
+                        top = 120.dp,
+                        bottom = 8.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // 顶部加载指示器
+                    if (isLoadingMore) {
+                        item(key = "load_more_indicator") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    "加载更早的消息...",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        "加载更早的消息...",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
-                }
-                items(
-                    items = messages,
-                    key = { it.id }
-                ) { message ->
-                    if (message.id > 0 && message.id % 5 == 0L) {
-                        android.util.Log.w("ChatScreen", "[ChatScreen] rendering message id=${message.id} content='${message.content.take(20)}'")
-                    }
-                    ChatBubble(
-                        message = message,
-                        companionData = companionData,
-                        isUser = message.isFromUser,
-                        userAvatar = userAvatar,
-                        userName = userName,
-                        onVoiceClick = { /* TODO: play voice message */ },
-                        onRecall = { msg -> viewModel.recallMessage(msg) },
-                        onRegenerate = { msg -> viewModel.regenerateMessage(msg) },
-                        adaptiveSizing = adaptiveSizing,
-                        isDarkTheme = isDarkTheme
-                    )
-                }
-
-                if (isTyping) {
-                    item(key = "typing_indicator") {
-                        TypingIndicatorBubble(
+                    items(
+                        items = uiState.messages,
+                        key = { it.stableId }
+                    ) { item ->
+                        val message = item.messageOrNull
+                        if (message != null && message.id > 0 && message.id % 5 == 0L) {
+                            android.util.Log.w("ChatScreen", "[ChatScreen] rendering message id=${message.id} content='${message.content.take(20)}'")
+                        }
+                        ChatListItemBubble(
+                            item = item,
                             companionData = companionData,
-                            typingText = typingText,
+                            userAvatar = userAvatar,
+                            userName = userName,
+                            onIntent = handleChatIntent,
                             adaptiveSizing = adaptiveSizing,
                             isDarkTheme = isDarkTheme
                         )
                     }
-                }
 
-                if (isRegenerating) {
-                    item(key = "regenerating_indicator") {
-                        RegeneratingBubble(
-                            companionData = companionData,
-                            adaptiveSizing = adaptiveSizing
-                        )
-                    }
-                }
-
-                if (isReasoning && reasoningText.isNotBlank()) {
-                    item(key = "reasoning_indicator") {
-                        ReasoningBubble(
-                            reasoningText = reasoningText,
-                            adaptiveSizing = adaptiveSizing
-                        )
-                    }
-                }
-            }
-
-            // Bottom panels and input
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-            ) {
-                // 聊天页 TTS 朗读状态条（朗读中显示，可停止）
-                if (ttsState == ChatTtsState.SPEAKING) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(12.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "AI 正在朗读...",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.primary
+                    if (isTyping) {
+                        item(key = "typing_indicator") {
+                            TypingIndicatorBubble(
+                                companionData = companionData,
+                                typingText = typingText,
+                                adaptiveSizing = adaptiveSizing,
+                                isDarkTheme = isDarkTheme
                             )
                         }
-                        IconButton(
-                            onClick = { viewModel.stopTts() },
-                            modifier = Modifier.size(24.dp)
+                    }
+
+                    if (isRegenerating) {
+                        item(key = "regenerating_indicator") {
+                            RegeneratingBubble(
+                                companionData = companionData,
+                                adaptiveSizing = adaptiveSizing
+                            )
+                        }
+                    }
+
+                    if (isReasoning && reasoningText.isNotBlank()) {
+                        item(key = "reasoning_indicator") {
+                            ReasoningBubble(
+                                reasoningText = reasoningText,
+                                adaptiveSizing = adaptiveSizing
+                            )
+                        }
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = unreadNewMessages > 0,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.clickable {
+                            scope.launch {
+                                listState.animateScrollToItem((itemCount - 1).coerceAtLeast(0))
+                                unreadNewMessages = 0
+                            }
+                        },
+                        shape = RoundedCornerShape(999.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        tonalElevation = 6.dp,
+                        shadowElevation = 6.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Stop,
-                                contentDescription = "停止朗读",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
+                                Icons.Outlined.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "${unreadNewMessages} 条新消息",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
+            }
 
-                // Sticker panel
-                StickerPanel(
-                    isVisible = showStickerPanel,
-                    onStickerClick = { sticker ->
-                        viewModel.sendSticker(sticker)
-                        showStickerPanel = false
-                    },
-                    onImportClick = {
-                        stickerPickerLauncher.launch("application/zip")
-                    },
-                    onDeleteAllClick = {
-                        scope.launch {
-                            val manager = StickerManager.getInstance(context)
-                            val success = manager.deleteAllImportedStickers()
-                            if (success) {
-                                snackbarHostState.showSnackbar("已删除全部表情包")
-                            } else {
-                                snackbarHostState.showSnackbar("删除失败")
-                            }
+            ChatInputRegion(
+                isBlocked = detailSettings.blocked,
+                isLoading = isLoading,
+                quoteReply = quoteReply,
+                ttsState = ttsState,
+                showStickerPanel = showStickerPanel,
+                showExtensionPanel = showExtensionPanel,
+                availableApis = availableApis,
+                currentApi = currentApi,
+                onStopTtsClick = { viewModel.stopTts() },
+                onStickerClick = { sticker ->
+                    onIntent(ChatIntent.SendSticker(sticker))
+                    showStickerPanel = false
+                },
+                onImportStickersClick = { stickerPickerLauncher.launch("application/zip") },
+                onDeleteAllStickersClick = {
+                    scope.launch {
+                        val manager = StickerManager.getInstance(context)
+                        val success = manager.deleteAllImportedStickers()
+                        if (success) {
+                            snackbarHostState.showSnackbar("已删除全部表情包")
+                        } else {
+                            snackbarHostState.showSnackbar("删除失败")
                         }
                     }
-                )
-
-                // Extension panel
-                ChatInputExtensionPanel(
-                    isVisible = showExtensionPanel,
-                    availableApis = availableApis,
-                    currentApi = currentApi,
-                    onSwitchApi = { provider -> viewModel.switchApi(provider) },
-                    onAlbumClick = {
-                        imagePickerLauncher.launch("image/*")
-                    },
-                    onCameraClick = {
-                        cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
-                    },
-                    onVideoCallClick = {
-                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                            onNavigateToVoiceCall(companionId)
-                        } else {
-                            pendingAudioAction = { onNavigateToVoiceCall(companionId) }
-                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                        }
-                    },
-                    onLocationClick = { /* TODO: share location */ },
-                    onVoiceInputClick = {
-                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                },
+                onSwitchApi = { provider -> onIntent(ChatIntent.SwitchApi(provider)) },
+                onClearQuoteReply = { quoteReply = null },
+                onAlbumClick = { imagePickerLauncher.launch("image/*") },
+                onCameraClick = { cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA) },
+                onVideoCallClick = {
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        onNavigateToVoiceCall(companionId)
+                    } else {
+                        pendingAudioAction = { onNavigateToVoiceCall(companionId) }
+                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onLocationClick = { /* TODO: share location */ },
+                onVoiceInputClick = {
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        showExtensionPanel = false
+                        showVoiceRecorder = true
+                    } else {
+                        pendingAudioAction = {
                             showExtensionPanel = false
                             showVoiceRecorder = true
-                        } else {
-                            pendingAudioAction = {
-                                showExtensionPanel = false
-                                showVoiceRecorder = true
-                            }
-                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                         }
-                    },
-                    onStickerClick = {
+                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onStickerPanelClick = {
+                    showExtensionPanel = false
+                    showStickerPanel = !showStickerPanel
+                },
+                onSendMessage = { msg ->
+                    android.util.Log.w("ChatScreen", "[ChatScreen] onSendMessage: '${msg.take(30)}'")
+                    val currentQuote = quoteReply
+                    val content = if (currentQuote != null) encodeQuotedMessage(currentQuote, msg) else msg
+                    quoteReply = null
+                    onIntent(ChatIntent.SendText(content))
+                },
+                onPlusClick = {
+                    showExtensionPanel = !showExtensionPanel
+                    showStickerPanel = false
+                },
+                onVoiceRecordStart = {
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         showExtensionPanel = false
-                        showStickerPanel = !showStickerPanel
+                        showStickerPanel = false
+                        isCanceling = false
+                        isRecording = true
+                        showVoiceRecorder = true
+                    } else {
+                        pendingAudioAction = {
+                            showExtensionPanel = false
+                            showStickerPanel = false
+                            isCanceling = false
+                            isRecording = true
+                            showVoiceRecorder = true
+                        }
+                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                     }
-                )
-
-                // Input bar
-                val isBlocked = detailSettings.blocked
-                if (isBlocked) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "你已拉黑该联系人",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.Medium
-                        )
+                },
+                onVoiceRecordStop = {
+                    val audioPath = voiceRecorder.stop()
+                    isRecording = false
+                    showVoiceRecorder = false
+                    if (audioPath != null && recordingDuration >= 1) {
+                        onIntent(ChatIntent.SendVoice(audioPath, recordingDuration))
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        WeChatChatInputBar(
-                            onSendMessage = { msg ->
-                                android.util.Log.w("ChatScreen", "[ChatScreen] onSendMessage: '${msg.take(30)}'")
-                                viewModel.sendMessage(msg)
-                            },
-                            isLoading = isLoading,
-                            availableApis = availableApis,
-                            currentApi = currentApi,
-                            onSwitchApi = { provider ->
-                                viewModel.switchApi(provider)
-                            },
-                            onPlusClick = {
-                                showExtensionPanel = !showExtensionPanel
-                                showStickerPanel = false
-                            },
-                            onVoiceRecordStart = {
-                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                    showExtensionPanel = false
-                                    showStickerPanel = false
-                                    isCanceling = false
-                                    isRecording = true
-                                    showVoiceRecorder = true
-                                } else {
-                                    pendingAudioAction = {
-                                        showExtensionPanel = false
-                                        showStickerPanel = false
-                                        isCanceling = false
-                                        isRecording = true
-                                        showVoiceRecorder = true
-                                    }
-                                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            onVoiceRecordStop = {
-                                val audioPath = voiceRecorder.stop()
-                                isRecording = false
-                                showVoiceRecorder = false
-                                if (audioPath != null && recordingDuration >= 1) {
-                                    viewModel.sendVoiceMessage(audioPath, recordingDuration)
-                                }
-                            },
-                            onVoiceRecordCancel = {
-                                voiceRecorder.cancel()
-                                isRecording = false
-                                showVoiceRecorder = false
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                },
+                onVoiceRecordCancel = {
+                    voiceRecorder.cancel()
+                    isRecording = false
+                    showVoiceRecorder = false
                 }
-            }
+            )
         }
 
         // Voice recording overlay
@@ -858,7 +814,7 @@ fun ChatScreen(
                                     isRecording = false
                                     showVoiceRecorder = false
                                     if (audioPath != null && recordingDuration >= 1) {
-                                        viewModel.sendVoiceMessage(audioPath, recordingDuration)
+                                        onIntent(ChatIntent.SendVoice(audioPath, recordingDuration))
                                     }
                                 }
                                 .padding(horizontal = 20.dp, vertical = 10.dp)
@@ -891,208 +847,33 @@ fun ChatScreen(
             }
         }
 
-        // Floating top bar - overlay on top of messages
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    top = 48.dp,
-                    start = 16.dp, end = 16.dp
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.send),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp)
-                    )
+        ChatTopBarRegion(
+            companionId = companionId,
+            companionData = companionData,
+            isLoading = isLoading,
+            isDarkTheme = isDarkTheme,
+            currentTtsMode = ttsConfig.mode,
+            isTtsModeMenuExpanded = ttsModeMenu,
+            onBackClick = onNavigateBack,
+            onDetailClick = onNavigateToDetail,
+            onTtsModeMenuExpandedChange = { expanded -> ttsModeMenu = expanded },
+            onCycleTtsModeClick = {
+                val nextMode = when (ttsConfig.mode) {
+                    ChatTtsMode.SILENT -> ChatTtsMode.READ_ALOUD
+                    ChatTtsMode.READ_ALOUD -> ChatTtsMode.VOICE_BAR
+                    ChatTtsMode.VOICE_BAR -> ChatTtsMode.SILENT
                 }
-
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AnimatedContent(
-                        targetState = isLoading,
-                        transitionSpec = {
-                            fadeIn(tween(200)) togetherWith fadeOut(tween(200))
-                        },
-                        label = "title_switch"
-                    ) { loading ->
-                        if (loading) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(10.dp),
-                                    strokeWidth = 1.5.dp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = stringResource(R.string.typing),
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Normal,
-                                        fontSize = 14.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CompanionAvatar(
-                                    avatarUrl = companionData?.avatarUrl,
-                                    name = companionData?.name,
-                                    size = 24.dp
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = companionData?.name ?: "",
-                                    modifier = Modifier.weight(1f, fill = false),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 15.sp
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                // AI生成标识
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(
-                                            MaterialTheme.colorScheme.primary.copy(
-                                                alpha = if (isDarkTheme) 0.2f else 0.12f
-                                            )
-                                        )
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = "AI生成仅供参考",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(6.dp))
-                                IconButton(
-                                    onClick = { onNavigateToDetail(companionId) },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Info,
-                                        contentDescription = "详情",
-                                        modifier = Modifier.size(20.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 聊天页 TTS 朗读模式切换按钮（静音/语音条/语音朗读）
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .combinedClickable(
-                            onClick = {
-                                val nextMode = when (ttsConfig.mode) {
-                                    ChatTtsMode.SILENT -> ChatTtsMode.READ_ALOUD
-                                    ChatTtsMode.READ_ALOUD -> ChatTtsMode.VOICE_BAR
-                                    ChatTtsMode.VOICE_BAR -> ChatTtsMode.SILENT
-                                }
-                                viewModel.setTtsMode(nextMode)
-                            },
-                            onLongClick = { ttsModeMenu = true }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                            imageVector = if (ttsConfig.mode == ChatTtsMode.SILENT)
-                                Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                            contentDescription = "朗读模式",
-                            tint = if (ttsConfig.mode == ChatTtsMode.SILENT)
-                                MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                DropdownMenu(
-                        expanded = ttsModeMenu,
-                        onDismissRequest = { ttsModeMenu = false },
-                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
-                    ) {
-                        ChatTtsMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            text = mode.displayName,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = mode.description,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    viewModel.setTtsMode(mode)
-                                    ttsModeMenu = false
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = if (mode == ChatTtsMode.SILENT)
-                                            Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                                        contentDescription = null,
-                                        tint = if (mode == ttsConfig.mode) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Voice call button
-                IconButton(
-                    onClick = {
-                        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                            onNavigateToVoiceCall(companionId)
-                        } else {
-                            pendingAudioAction = { onNavigateToVoiceCall(companionId) }
-                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                        }
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Call,
-                        contentDescription = "语音通话",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
+                viewModel.setTtsMode(nextMode)
+            },
+            onTtsModeSelected = { mode -> viewModel.setTtsMode(mode) },
+            onVoiceCallClick = {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    onNavigateToVoiceCall(companionId)
+                } else {
+                    pendingAudioAction = { onNavigateToVoiceCall(companionId) }
+                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
             }
-        }
+        )
     }
 }

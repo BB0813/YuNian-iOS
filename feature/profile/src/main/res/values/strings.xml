@@ -23,8 +23,6 @@
     <string name="general_settings_desc">语言、帧率、思考、TTS、Token、更新、权限、平台集成</string>
 
     <!-- 记忆与管理 -->
-    <string name="context_memory">上下文记忆</string>
-    <string name="context_memory_desc">设置 AI 对话记忆条数</string>
 
     <!-- AI与对话 -->
     <string name="thinking_settings">思考设置</string>

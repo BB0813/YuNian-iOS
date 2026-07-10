@@ -35,4 +35,6 @@
     <string name="mood_angry">生气</string>
     <string name="mood_touched">感动</string>
     <string name="mood_miss">思念</string>
+    <string name="ai_generate_diary">AI 生成日记</string>
+    <string name="ai_generating">正在生成…</string>
 </resources>

@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.database.model.ApiProvider
+import com.lianyu.ai.database.model.ApiProviderPreset
 import com.lianyu.ai.feature.settings.R
 import com.lianyu.ai.feature.settings.ui.viewmodel.SettingsViewModel
 import com.lianyu.ai.uicommon.theme.ThemeMode
@@ -91,6 +92,7 @@ fun VisionModelSettingsScreen(
     val visionProvider by viewModel.visionProvider.collectAsState()
     val visionApiUrl by viewModel.visionApiUrl.collectAsState()
     val visionApiKey by viewModel.visionApiKey.collectAsState()
+    val providerPresets by viewModel.providerPresets.collectAsState(initial = emptyList())
 
     var isVisible by remember { mutableStateOf(false) }
     var showModelDropdown by remember { mutableStateOf(false) }
@@ -391,17 +393,25 @@ fun VisionModelSettingsScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        val providerPresets = listOf(
-                                            Triple("OpenAI", "https://api.openai.com/v1/", "gpt-4o"),
-                                            Triple("Kimi/Moonshot", "https://api.moonshot.cn/v1/", "kimi-k2.6"),
-                                            Triple("DeepSeek", "https://api.deepseek.com/v1/", "deepseek-chat"),
-                                            Triple("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1/", "qwen-vl-max"),
-                                            Triple("智谱GLM", "https://open.bigmodel.cn/api/paas/v4/", "glm-4v"),
-                                            Triple("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-1.5-pro")
+                                        // 视觉模型映射 — baseUrl 从 DB 预设拉取，model 为各厂商视觉模型
+                                        val visionModelMap = mapOf(
+                                            ApiProvider.OPENAI to "gpt-4o",
+                                            ApiProvider.KIMI to "kimi-k2.6",
+                                            ApiProvider.DEEPSEEK to "deepseek-chat",
+                                            ApiProvider.DASHSCOPE to "qwen-vl-max",
+                                            ApiProvider.ZHIPU to "glm-4v",
+                                            ApiProvider.GEMINI to "gemini-1.5-pro"
                                         )
+                                        val visionPresets = providerPresets
+                                            .filter { it.provider in visionModelMap.keys }
+                                            .mapNotNull { preset ->
+                                                visionModelMap[preset.provider]?.let { model ->
+                                                    Triple(preset.displayName, preset.baseUrl, model)
+                                                }
+                                            }
 
-                                        items(providerPresets.size) { index ->
-                                            val (name, url, model) = providerPresets[index]
+                                        items(visionPresets.size) { index ->
+                                            val (name, url, model) = visionPresets[index]
                                             androidx.compose.material3.FilterChip(
                                                 selected = false,
                                                 onClick = {

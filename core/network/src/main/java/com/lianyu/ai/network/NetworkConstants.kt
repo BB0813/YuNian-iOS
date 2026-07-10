@@ -1,5 +1,7 @@
 package com.lianyu.ai.network
 
+import com.lianyu.ai.database.model.ApiProvider
+
 /**
  * 集中管理网络层常量，避免超时、连接池、URL 路径等数值散落在各个文件中。
  *
@@ -30,6 +32,7 @@ object NetworkConstants {
     const val PARTNER_CONNECTION_POOL_MAX_IDLE = 3
 
     // ── OpenAI 兼容 API ──
+    /** Retrofit 初始化占位符 — 实际请求 URL 由 provider 预设/用户配置动态覆盖，不使用此常量 */
     const val OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/"
     const val OPENAI_CHAT_COMPLETIONS_PATH = "/chat/completions"
     const val OPENAI_DEFAULT_API_VERSION = "/v1"
@@ -48,6 +51,10 @@ object NetworkConstants {
 
     // ── TTS 服务固定 endpoint ──
     const val BAIDU_TTS_URL = "https://tsn.baidu.com/text2audio"
+
+    // ── 硅基流动 STT/TTS endpoint（基于 ApiProvider.SILICONFLOW.defaultBaseUrl 构建） ──
+    val SILICONFLOW_STT_URL = ApiProvider.SILICONFLOW.defaultBaseUrl.trimEnd('/') + "/audio/transcriptions"
+    val SILICONFLOW_TTS_URL = ApiProvider.SILICONFLOW.defaultBaseUrl.trimEnd('/') + "/audio/speech"
 
     // ── QQ Bot 官方 API ──
     const val QQ_BOT_AUTH_BASE_URL = "https://bots.qq.com/"

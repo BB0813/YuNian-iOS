@@ -3,6 +3,7 @@ package com.lianyu.ai.network.stt
 import android.content.Context
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.network.CertificatePins
+import com.lianyu.ai.network.NetworkConstants
 import com.lianyu.ai.network.RequestSecurityInterceptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -71,7 +72,7 @@ class SiliconFlowSttProvider : SttProviderInterface {
                 .build()
 
             val request = Request.Builder()
-                .url("https://api.siliconflow.cn/v1/audio/transcriptions")
+                .url(NetworkConstants.SILICONFLOW_STT_URL)
                 .post(requestBody)
                 .addHeader("Authorization", "Bearer $apiKey")
                 .build()

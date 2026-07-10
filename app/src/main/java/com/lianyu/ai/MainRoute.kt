@@ -45,7 +45,6 @@ sealed class MainRoute(val route: String) {
 
     // === 个人中心 ===
     object Memory : MainRoute("memory")
-    object ContextMemory : MainRoute("context_memory")
     object About : MainRoute("about")
     object AgreementView : MainRoute("agreement_view")
     object Team : MainRoute("team")
@@ -90,7 +89,6 @@ sealed class MainRoute(val route: String) {
             route == "tts_settings" -> TtsSettings
             route == "token_usage" -> TokenUsage
             route == "memory" -> Memory
-            route == "context_memory" -> ContextMemory
             route == "role_manager" -> RoleManager
             route == "theme" -> Theme
             route == "language" -> Language

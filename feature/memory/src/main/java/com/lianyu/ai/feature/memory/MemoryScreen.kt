@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -32,10 +33,12 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
@@ -46,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -469,8 +473,10 @@ fun TempMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
 @Composable
 fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
     val diaries by viewModel.getDiariesForCompanion(companionId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val isGenerating by viewModel.isGeneratingDiary.collectAsStateWithLifecycle()
     var showAddDialog by remember { mutableStateOf(false) }
     var editingDiary by remember { mutableStateOf<DiaryEntry?>(null) }
+    var generatedContent by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (diaries.isEmpty()) {
@@ -536,6 +542,7 @@ fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
             onDismiss = {
                 showAddDialog = false
                 editingDiary = null
+                generatedContent = null
             },
             onSave = { diary ->
                 if (editingDiary != null) {
@@ -553,11 +560,21 @@ fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
                 }
                 showAddDialog = false
                 editingDiary = null
+                generatedContent = null
             },
             onDelete = if (editingDiary != null) ({
                 viewModel.deleteDiary(editingDiary!!)
                 editingDiary = null
-            }) else null
+                generatedContent = null
+            }) else null,
+            onGenerateAi = {
+                viewModel.generateDiary(companionId) { diaryText ->
+                    generatedContent = diaryText
+                }
+            },
+            isGenerating = isGenerating,
+            generatedContent = generatedContent,
+            onGeneratedContentConsumed = { generatedContent = null }
         )
     }
 }
@@ -950,7 +967,11 @@ fun DiaryEditDialog(
     existingDiary: DiaryEntry?,
     onDismiss: () -> Unit,
     onSave: (DiaryEntry) -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    onGenerateAi: (() -> Unit)? = null,
+    isGenerating: Boolean = false,
+    generatedContent: String? = null,
+    onGeneratedContentConsumed: () -> Unit = {}
 ) {
     var title by remember { mutableStateOf(existingDiary?.title ?: "") }
     var content by remember { mutableStateOf(existingDiary?.content ?: "") }
@@ -958,6 +979,15 @@ fun DiaryEditDialog(
     var weather by remember { mutableStateOf(existingDiary?.weather ?: "") }
     var tags by remember { mutableStateOf(existingDiary?.tags ?: "") }
     val isEditing = existingDiary != null
+
+    // AI 生成完成后，自动填充 content
+    LaunchedEffect(generatedContent) {
+        if (generatedContent != null) {
+            content = generatedContent
+            onGeneratedContentConsumed()
+        }
+    }
+
     val moodOptions = listOf(
         1 to stringResource(R.string.mood_happy),
         2 to stringResource(R.string.mood_calm),
@@ -988,6 +1018,34 @@ fun DiaryEditDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+
+                // AI 生成日记按钮
+                if (onGenerateAi != null) {
+                    OutlinedButton(
+                        onClick = onGenerateAi,
+                        enabled = !isGenerating,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isGenerating) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.ai_generating))
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.ai_generate_diary))
+                        }
+                    }
+                }
 
                 OutlinedTextField(
                     value = content,

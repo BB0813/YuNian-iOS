@@ -78,6 +78,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.Job
 
 // ViewModel 实例级作用域，用于 API 调用等需要跨越 UI 生命周期的操作
 // 在 onCleared() 中取消，避免作用域泄漏
@@ -139,7 +140,7 @@ class ChatViewModel(
     private val chatDetailSettingsStore = com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore(application)
     private val appSettingsStore = AppSettingsStore(application)
     // [P1 FIX] 统一解析上下文设置，消除 ViewModel 中的硬编码上下文条数
-    private val contextResolver = ChatContextResolver(appSettingsStore, chatRepository)
+    private val contextResolver = ChatContextResolver(chatRepository)
 
     // ── 领域类型转换辅助 ──
     private fun CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
@@ -158,6 +159,21 @@ class ChatViewModel(
     )
 
     private fun List<ChatMessage>.toAiChatMessages() = map { it.toAiChatMessage() }
+
+    fun handleIntent(intent: ChatIntent) {
+        when (intent) {
+            is ChatIntent.SendText -> sendMessage(intent.content)
+            is ChatIntent.SendImage -> sendImageMessage(intent.imagePath)
+            is ChatIntent.SendVideo -> sendVideoMessage(intent.videoPath)
+            is ChatIntent.SendVoice -> sendVoiceMessage(intent.audioPath, intent.duration)
+            is ChatIntent.SendSticker -> sendSticker(intent.sticker)
+            is ChatIntent.SwitchApi -> switchApi(intent.provider)
+            ChatIntent.LoadEarlier -> loadMoreHistory()
+            is ChatIntent.QuoteReply -> Unit
+            is ChatIntent.Recall -> recallMessage(intent.message)
+            is ChatIntent.Regenerate -> regenerateMessage(intent.message)
+        }
+    }
 
     // ── 消息：Room Flow 做最新一页数据源，_olderMessages 做加载的历史 ──
     // 进入时先从 ChatRepository 内存缓存读取初始数据（HomeViewModel 预热），避免 loading
@@ -250,6 +266,8 @@ class ChatViewModel(
 
     // 背压: Channel 容量上限 = 100，满时拒绝新消息（不排队，不阻塞）
     private val messageQueue = Channel<String>(capacity = 100)
+    private var messageConsumerJob: Job? = null
+    @Volatile private var isCleared = false
     private val _queueDepth = MutableStateFlow(0)
     val queueDepth: StateFlow<Int> = _queueDepth.asStateFlow()
 
@@ -269,10 +287,11 @@ class ChatViewModel(
         )
     ) { values ->
         @Suppress("UNCHECKED_CAST")
+        val rawMessages = values[1] as List<ChatMessage>
         ChatState(
             companionData = values[0] as CompanionEntity?,
-            messages = values[1] as List<ChatMessage>,
-            visibleMessages = values[1] as List<ChatMessage>,
+            messages = rawMessages.toChatListItems(),
+            visibleMessages = rawMessages,
             isLoading = values[2] as Boolean,
             isTyping = values[3] as Boolean,
             typingText = values[4] as String,
@@ -339,14 +358,20 @@ class ChatViewModel(
 
     private fun startMessageConsumer() {
         ChatDebugLog.log("[ChatVM] startMessageConsumer called, companionId=$companionId")
-        applicationApiScope.launch {
+        if (messageConsumerJob?.isActive == true) return
+        messageConsumerJob = chatBackgroundScope.launch {
             ChatDebugLog.log("[ChatVM] consumer coroutine STARTED (batch-merge mode)")
             try {
                 val batch = mutableListOf<String>()
 
                 while (true) {
                     // 阻塞等待第一条消息（无消息时挂起，不占CPU）
-                    val first = messageQueue.receiveCatching()
+                    val first = if (isCleared) {
+                        withTimeoutOrNull(ChatConstants.MESSAGE_BATCH_POLL_INTERVAL_MS) { messageQueue.receiveCatching() }
+                            ?: break
+                    } else {
+                        messageQueue.receiveCatching()
+                    }
                     if (first.isClosed) {
                         ChatDebugLog.log("[ChatVM] consumer: channel closed, exiting")
                         break
@@ -594,7 +619,7 @@ class ChatViewModel(
             companionId = companion.id,
             groupId = null,
             query = lastUserMessage,
-            limit = 5
+            limit = 50
         ).take(500)
 
         val role = userRepository?.selectedRole?.value ?: CompanionRole.GIRLFRIEND
@@ -672,7 +697,7 @@ class ChatViewModel(
             isFromUser = true,
             timestamp = System.currentTimeMillis()
         )
-        applicationApiScope.launch(Dispatchers.IO) {
+        chatBackgroundScope.launch(Dispatchers.IO) {
             val userMessageId = chatRepository.sendMessage(userMessage)
             broadcastWeChatMessage(userMessageId)
 
@@ -927,7 +952,7 @@ class ChatViewModel(
         appSettingsStore = appSettingsStore,
         contextResolver = contextResolver,
         aiService = aiService,
-        applicationApiScope = applicationApiScope,
+        applicationApiScope = chatBackgroundScope,
         reasoningText = _reasoningText,
         isReasoning = _isReasoning,
         turnState = turnState,
@@ -1301,8 +1326,7 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        // 关闭消息队列，让消费者协程退出等待
-        messageQueue.close()
+        isCleared = true
         // 取消 applicationApiScope：停止当前 ViewModel 的消费者协程、内容预热等 UI 相关任务。
         // [P0 FIX] 不要取消 turnState.sendMessageJob：AI 请求已迁移到 chatBackgroundScope（应用级作用域），
         // 退出聊天页面后应继续运行并写入数据库，重新进入聊天时即可看到回复。
