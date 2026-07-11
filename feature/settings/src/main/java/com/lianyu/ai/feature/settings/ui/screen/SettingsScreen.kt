@@ -2,6 +2,7 @@
 
 package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -162,7 +163,7 @@ fun SettingsScreen(
         }
     }
 
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val backgroundColor = colorScheme.background
     val textPrimaryColor = colorScheme.onSurface
     val textSecondaryColor = colorScheme.onSurfaceVariant
@@ -208,7 +209,7 @@ fun SettingsScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -301,7 +302,7 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .background(AppTheme.colors.surfaceVariant)
                         .clickable { showVisionModelSettings = true }
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -409,8 +410,8 @@ fun SettingsScreen(
     // Provider Picker Dialog
     if (showProviderPicker) {
         val visiblePresets = providerPresets.filter { it.provider != ApiProvider.PARTNER }
-        val cardBackground = MaterialTheme.colorScheme.surfaceVariant
-        val dividerColor = MaterialTheme.colorScheme.outline
+        val cardBackground = AppTheme.colors.surfaceVariant
+        val dividerColor = AppTheme.colors.outline
 
         AlertDialog(
             onDismissRequest = { showProviderPicker = false },
@@ -515,7 +516,7 @@ private fun ApiTestResultDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        containerColor = AppTheme.colors.surfaceVariant,
         icon = {
             Icon(
                 imageVector = if (data.isSuccess) Icons.Filled.Check else Icons.Filled.Close,
@@ -536,7 +537,7 @@ private fun ApiTestResultDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = if (data.isSuccess) "${data.providerName} API 连接测试通过" else "${data.providerName} API 无法连接，请检查配置",
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = AppTheme.colors.onSurface,
                     fontSize = 14.sp
                 )
 
@@ -554,7 +555,7 @@ private fun ApiTestResultDialog(
                             data.latencyMs < 500 -> "🚀 延迟优秀，连接速度很快"
                             data.latencyMs < 1500 -> "✅ 延迟正常，可以正常使用"
                             else -> "⚠️ 延迟较高，可能影响体验"
-                        }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        }, color = AppTheme.colors.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
 
@@ -572,7 +573,7 @@ private fun ApiTestResultDialog(
 
                     Text(
                         text = "常见问题：\n• API Key 是否正确\n• Base URL 是否填到 /chat/completions 的父层级（如 https://api.openai.com/v1）\n• 网络连接是否正常\n• 该服务商是否支持当前模型",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AppTheme.colors.onSurfaceVariant,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
@@ -754,9 +755,9 @@ fun ApiConfigEditDialog(
     availableModels: List<String> = emptyList(),
     modelFetchState: SettingsViewModel.ModelFetchState = SettingsViewModel.ModelFetchState()
 ) {
-    val cardBackground = MaterialTheme.colorScheme.surfaceVariant
-    val dividerColor = MaterialTheme.colorScheme.outline
-    val textTertiary = MaterialTheme.colorScheme.outlineVariant
+    val cardBackground = AppTheme.colors.surfaceVariant
+    val dividerColor = AppTheme.colors.outline
+    val textTertiary = AppTheme.colors.outlineVariant
 
     var apiKey by remember { mutableStateOf(config.apiKey) }
     var extraApiKeys by remember { mutableStateOf(config.extraApiKeys) }

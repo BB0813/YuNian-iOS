@@ -1,15 +1,14 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
-fun ImageMessageBubble(
-    item: ChatListItem.ImageMessage,
+fun StickerMessageItem(
+    item: ChatListItem.StickerMessage,
     companionData: CompanionModel?,
     userAvatar: String?,
     userName: String,
@@ -17,10 +16,6 @@ fun ImageMessageBubble(
     adaptiveSizing: AdaptiveSizing
 ) {
     val message = item.message
-    val isMine = message.isFromUser
-    val imageFile = remember(message.linkString, message.content) {
-        java.io.File(message.linkString.ifBlank { message.content })
-    }
 
     ChatMessageScaffold(
         message = message,
@@ -29,13 +24,9 @@ fun ImageMessageBubble(
         userName = userName,
         onIntent = onIntent,
         adaptiveSizing = adaptiveSizing,
-        drawBubble = false,
-        onClick = { onIntent(ChatIntent.OpenMedia(imageFile.absolutePath, "image/*")) }
+        drawBubble = false
     ) {
-        ImageMessageContent(
-            imageFile = imageFile,
-            isMine = isMine,
-            adaptiveSizing = adaptiveSizing
-        )
+        StickerMessageContent(stickerName = item.stickerName)
     }
 }
+

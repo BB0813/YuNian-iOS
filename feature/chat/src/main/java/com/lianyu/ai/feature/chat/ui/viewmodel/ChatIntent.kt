@@ -12,6 +12,7 @@ sealed interface ChatIntent {
     data class SendVideo(val videoPath: String) : ChatIntent
     data class SendVoice(val audioPath: String, val duration: Int) : ChatIntent
     data class SendSticker(val sticker: StickerInfo) : ChatIntent
+    data object ShareLocation : ChatIntent
     data class SwitchApi(val provider: ApiProviderInfo) : ChatIntent
     data object LoadEarlier : ChatIntent
     data class QuoteReply(val message: ChatMessage) : ChatIntent

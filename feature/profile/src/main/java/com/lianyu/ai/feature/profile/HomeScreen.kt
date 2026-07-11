@@ -79,7 +79,7 @@ fun HomeScreen(
     val groups by groupViewModel.groups.collectAsState(initial = emptyList())
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Box(
         modifier = Modifier
@@ -227,7 +227,7 @@ fun HomeScreen(
 fun SectionTitle(
     title: String
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Row(
         modifier = Modifier
@@ -257,14 +257,14 @@ fun HomeTabBar(
     selectedTab: HomeTab,
     onTabSelected: (HomeTab) -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    val selectedBg = MaterialTheme.colorScheme.primaryContainer
+    val colorScheme = AppTheme.colors
+    val selectedBg = AppTheme.colors.primaryContainer
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .background(AppTheme.colors.surface)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -301,7 +301,7 @@ fun GroupListItem(
     onClick: () -> Unit,
     adaptiveSizing: AdaptiveSizing
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     AppListItemLayout(
         isStartAligned = true,
@@ -392,7 +392,7 @@ fun ChatListItem(
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = lastMessage?.let { dateFormat.format(Date(it.timestamp)) } ?: ""
 
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     AppListItemLayout(
         isStartAligned = true,
@@ -493,7 +493,7 @@ fun ChatListItem(
 
 @Composable
 fun EmptyHomeState() {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Box(
         modifier = Modifier.fillMaxSize(),

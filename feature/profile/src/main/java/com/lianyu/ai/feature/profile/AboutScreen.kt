@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,7 +53,7 @@ fun AboutScreen(
     onNavigateBack: () -> Unit,
     onAgreementClick: () -> Unit = {}
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -198,7 +199,7 @@ fun AboutScreen(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     ),
-                    color = Color(0xFF07C160)
+                    color = AppTheme.colors.success
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -243,7 +244,7 @@ fun AboutScreen(
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = 13.sp,
                     textDecoration = TextDecoration.Underline,
-                    color = Color(0xFF07C160)
+                    color = AppTheme.colors.success
                 ),
                 modifier = Modifier
                     .clickable { onAgreementClick() }
@@ -273,7 +274,7 @@ fun AboutCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(16.dp))
+            .background(AppTheme.colors.surfaceVariant, shape = RoundedCornerShape(16.dp))
             .padding(20.dp)
     ) {
         content()
@@ -282,7 +283,7 @@ fun AboutCard(
 
 @Composable
 fun FeatureItem(title: String, description: String) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Column(modifier = Modifier.padding(vertical = 6.dp)) {
         Text(
             text = title,

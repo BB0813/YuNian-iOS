@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -26,36 +26,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
-import com.lianyu.ai.feature.chat.R
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
-import com.lianyu.ai.feature.chat.ui.theme.withChatSize
 import com.lianyu.ai.uicommon.component.CompanionAvatar
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
+import com.lianyu.ai.uicommon.theme.AppTheme
 
 @Composable
-fun TypingIndicatorBubble(
+fun TypingIndicatorItem(
     companionData: CompanionModel?,
     typingText: String,
     adaptiveSizing: AdaptiveSizing,
     isDarkTheme: Boolean
 ) {
-    val colors = ChatTheme.colors
-    val typography = ChatTheme.typography
-    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
-    val cursorAlpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(500),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "cursor_blink"
-    )
+    val colors = AppTheme.colors
+    val typography = AppTheme.typography
+    val displayText = typingText.trim()
+
+    if (displayText.isEmpty()) return
 
     ChatMessageFrame(
         isMine = false,
@@ -71,38 +60,22 @@ fun TypingIndicatorBubble(
         timestamp = {}
     ) {
         Column(horizontalAlignment = Alignment.Start) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = typingText,
-                    style = typography.messageBody.withChatSize(adaptiveSizing.fontSizeBody.sp, 20.sp),
-                    color = colors.aiContent
-                )
-                Box(
-                    modifier = Modifier
-                        .padding(start = 2.dp)
-                        .size(width = 2.dp, height = 16.dp)
-                        .alpha(cursorAlpha)
-                        .background(colors.aiContent)
-                )
-            }
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = stringResource(R.string.typing),
-                style = typography.timestamp.withChatSize(adaptiveSizing.fontSizeCaption.sp),
-                color = colors.metadata,
-                textAlign = TextAlign.Start
+                text = displayText,
+                style = typography.bodyLarge.copy(fontSize = adaptiveSizing.fontSizeBody.sp, lineHeight = 20.sp),
+                color = colors.secondaryBubbleContent
             )
         }
     }
 }
 
 @Composable
-fun RegeneratingBubble(
+fun RegeneratingItem(
     companionData: CompanionModel?,
     adaptiveSizing: AdaptiveSizing
 ) {
-    val colors = ChatTheme.colors
-    val typography = ChatTheme.typography
+    val colors = AppTheme.colors
+    val typography = AppTheme.typography
     val infiniteTransition = rememberInfiniteTransition(label = "regenerate_dots")
     val dot1Alpha by infiniteTransition.animateFloat(
         initialValue = 0.3f, targetValue = 1f,
@@ -132,8 +105,8 @@ fun RegeneratingBubble(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "正在重新生成",
-                style = typography.messageBody.withChatSize(14.sp),
-                color = colors.aiContent
+                style = typography.bodyLarge.copy(fontSize = 14.sp),
+                color = colors.secondaryBubbleContent
             )
             Spacer(modifier = Modifier.width(4.dp))
             repeat(3) { index ->
@@ -143,7 +116,7 @@ fun RegeneratingBubble(
                         .size(6.dp)
                         .alpha(alpha)
                         .clip(CircleShape)
-                        .background(colors.metadata)
+                        .background(colors.metadataContent)
                 )
                 if (index < 2) {
                     Spacer(modifier = Modifier.width(3.dp))
@@ -154,13 +127,13 @@ fun RegeneratingBubble(
 }
 
 @Composable
-fun ReasoningBubble(
+fun ReasoningItem(
     reasoningText: String,
     adaptiveSizing: AdaptiveSizing
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val colors = ChatTheme.colors
-    val typography = ChatTheme.typography
+    val colors = AppTheme.colors
+    val typography = AppTheme.typography
 
     ChatMessageFrame(
         isMine = false,
@@ -175,18 +148,19 @@ fun ReasoningBubble(
             ) {
                 Text(
                     text = if (expanded) "思考中 ▼" else "已思考 ▶",
-                    style = typography.timestamp.withChatSize(12.sp),
-                    color = colors.metadata
+                    style = typography.labelSmall.copy(fontSize = 12.sp),
+                    color = colors.metadataContent
                 )
             }
             if (expanded) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = reasoningText,
-                    style = typography.quotePreview.withChatSize(12.sp, 16.sp),
-                    color = colors.metadata
+                    style = typography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                    color = colors.metadataContent
                 )
             }
         }
     }
 }
+

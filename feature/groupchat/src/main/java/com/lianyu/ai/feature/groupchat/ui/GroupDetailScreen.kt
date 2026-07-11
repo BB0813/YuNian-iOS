@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.groupchat.ui
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.app.Application
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -110,7 +111,7 @@ fun GroupDetailScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(20.dp))
+                        .background(AppTheme.colors.surface, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -119,7 +120,7 @@ fun GroupDetailScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
-                            tint = MaterialTheme.colorScheme.onBackground,
+                            tint = AppTheme.colors.onBackground,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -129,7 +130,7 @@ fun GroupDetailScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
                         ),
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = AppTheme.colors.onBackground
                     )
                     Spacer(modifier = Modifier.size(32.dp))
                 }
@@ -139,7 +140,7 @@ fun GroupDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(AppTheme.colors.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 16.dp),
@@ -150,7 +151,7 @@ fun GroupDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(AppTheme.colors.surface)
                     .padding(20.dp)
             ) {
                 Column(
@@ -162,7 +163,7 @@ fun GroupDetailScreen(
                         modifier = Modifier
                             .size(80.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background(AppTheme.colors.surfaceVariant)
                             .clickable { imagePicker.launch("image/*") },
                         contentAlignment = Alignment.Center
                     ) {
@@ -178,7 +179,7 @@ fun GroupDetailScreen(
                                 text = groupData?.name?.firstOrNull()?.toString() ?: "?",
                                 fontSize = 32.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = AppTheme.colors.onSurfaceVariant
                             )
                         }
                     }
@@ -193,7 +194,7 @@ fun GroupDetailScreen(
                             text = groupData?.name ?: "群聊",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
+                            color = AppTheme.colors.onBackground
                         )
                         Icon(
                             imageVector = Icons.Filled.Edit,
@@ -204,13 +205,13 @@ fun GroupDetailScreen(
                                     newGroupName = groupData?.name ?: ""
                                     showEditNameDialog = true 
                                 },
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = AppTheme.colors.primary
                         )
                     }
                     Text(
                         text = "${activeCompanions.size} 个AI成员",
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = AppTheme.colors.onSurfaceVariant
                     )
                 }
             }
@@ -220,7 +221,7 @@ fun GroupDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(AppTheme.colors.surface)
                     .padding(16.dp)
             ) {
                 Column {
@@ -228,7 +229,7 @@ fun GroupDetailScreen(
                         text = "群成员",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AppTheme.colors.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
                     activeCompanions.forEach { companion ->
@@ -243,7 +244,7 @@ fun GroupDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(AppTheme.colors.surface)
                     .padding(16.dp)
             ) {
                 Column {
@@ -258,14 +259,14 @@ fun GroupDetailScreen(
                         Icon(
                             imageVector = Icons.Filled.Delete,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onBackground,
+                            tint = AppTheme.colors.onBackground,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "清空聊天记录",
                             fontSize = 15.sp,
-                            color = MaterialTheme.colorScheme.onBackground
+                            color = AppTheme.colors.onBackground
                         )
                     }
 
@@ -282,14 +283,14 @@ fun GroupDetailScreen(
                         Icon(
                             imageVector = Icons.Filled.Delete,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
+                            tint = AppTheme.colors.error,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "退出群聊",
                             fontSize = 15.sp,
-                            color = MaterialTheme.colorScheme.error
+                            color = AppTheme.colors.error
                         )
                     }
                 }
@@ -311,7 +312,7 @@ fun GroupDetailScreen(
                         onGroupDeleted()
                     }
                 ) {
-                    Text("确定", color = MaterialTheme.colorScheme.error)
+                    Text("确定", color = AppTheme.colors.error)
                 }
             },
             dismissButton = {
@@ -334,9 +335,9 @@ fun GroupDetailScreen(
                     label = { Text("群名称") },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary
+                        focusedBorderColor = AppTheme.colors.primary,
+                        unfocusedBorderColor = AppTheme.colors.outline,
+                        focusedLabelColor = AppTheme.colors.primary
                     )
                 )
             },
@@ -347,7 +348,7 @@ fun GroupDetailScreen(
                         showEditNameDialog = false
                     }
                 ) {
-                    Text("确定", color = MaterialTheme.colorScheme.primary)
+                    Text("确定", color = AppTheme.colors.primary)
                 }
             },
             dismissButton = {
@@ -371,7 +372,7 @@ private fun GroupMemberItem(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(AppTheme.colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             if (companion.avatarUrl != null) {
@@ -386,7 +387,7 @@ private fun GroupMemberItem(
                     text = companion.name.firstOrNull()?.toString() ?: "?",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = AppTheme.colors.onSurfaceVariant
                 )
             }
         }
@@ -396,13 +397,13 @@ private fun GroupMemberItem(
                 text = companion.name,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onBackground
+                color = AppTheme.colors.onBackground
             )
             if (companion.personality != null) {
                 Text(
                     text = companion.personality,
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AppTheme.colors.onSurfaceVariant,
                     maxLines = 1
                 )
             }

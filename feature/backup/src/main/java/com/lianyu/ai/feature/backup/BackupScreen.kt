@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.backup
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,7 +43,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BackupScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val scope = rememberCoroutineScope()
     val viewModel: BackupViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
@@ -180,7 +181,7 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
                     title = stringResource(R.string.backup_export_title),
                     description = stringResource(R.string.backup_export_desc),
                     buttonText = stringResource(R.string.backup_export_btn),
-                    buttonColor = Color(0xFF07C160),
+                    buttonColor = AppTheme.colors.success,
                     isLoading = uiState is BackupViewModel.UiState.Exporting,
                     onClick = {
                         passwordMode = PasswordMode.EXPORT
@@ -201,7 +202,7 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
                     title = stringResource(R.string.backup_import_title),
                     description = stringResource(R.string.backup_import_desc),
                     buttonText = stringResource(R.string.backup_import_btn),
-                    buttonColor = Color(0xFFFA5151),
+                    buttonColor = AppTheme.colors.danger,
                     isLoading = uiState is BackupViewModel.UiState.Importing,
                     onClick = { viewModel.requestImport() }
                 )
@@ -264,9 +265,9 @@ private fun PasswordDialog(
         text = {
             Column {
                 if (mode == PasswordMode.EXPORT) {
-                    Text("请设置6位以上密码保护备份文件", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("请设置6位以上密码保护备份文件", style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
                 } else {
-                    Text("请输入备份时设置的密码", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("请输入备份时设置的密码", style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
@@ -300,7 +301,7 @@ private fun PasswordDialog(
                 }
                 error?.let {
                     Spacer(Modifier.height(4.dp))
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(it, color = AppTheme.colors.error, style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
@@ -340,7 +341,7 @@ private fun BackupCard(
     isLoading: Boolean,
     onClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -366,10 +367,10 @@ private fun BackupCard(
                 enabled = !isLoading
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    CircularProgressIndicator(Modifier.size(20.dp), color = AppTheme.colors.staticWhite, strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (isLoading) "处理中..." else buttonText, color = Color.White)
+                Text(if (isLoading) "处理中..." else buttonText, color = AppTheme.colors.staticWhite)
             }
         }
     }

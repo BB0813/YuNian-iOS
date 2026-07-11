@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -24,7 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.common.StickerManager
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
+import com.lianyu.ai.uicommon.theme.AppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -61,7 +61,7 @@ fun StickerContentBubble(
             Text(
                 text = "🎨",
                 fontSize = 32.sp,
-                color = ChatTheme.colors.metadata
+                color = AppTheme.colors.metadataContent
             )
         }
     }
@@ -103,3 +103,4 @@ private suspend fun loadStickerBitmap(context: Context, stickerName: String): Bi
             }
     }.getOrNull()
 }
+

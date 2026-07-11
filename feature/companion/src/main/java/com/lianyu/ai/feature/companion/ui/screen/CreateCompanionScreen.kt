@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.companion.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -228,7 +229,7 @@ fun CreateCompanionScreen(
         }
     }
 
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val accentColor = when (role) {
         CompanionRole.GIRLFRIEND -> Color(0xFFFF6B9D)
         CompanionRole.BOYFRIEND -> Color(0xFF4A90E2)
@@ -282,7 +283,7 @@ fun CreateCompanionScreen(
                             Icon(
                                 imageVector = Icons.Filled.Delete,
                                 contentDescription = stringResource(R.string.delete),
-                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                                tint = AppTheme.colors.error.copy(alpha = 0.7f)
                             )
                         }
                     }
@@ -341,7 +342,7 @@ fun CreateCompanionScreen(
                                     Icon(
                                         imageVector = roleIcon,
                                         contentDescription = stringResource(R.string.add_avatar),
-                                        tint = Color.White.copy(alpha = 0.9f),
+                                        tint = AppTheme.colors.staticWhite.copy(alpha = 0.9f),
                                         modifier = Modifier.size(36.dp)
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
@@ -350,7 +351,7 @@ fun CreateCompanionScreen(
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontSize = 11.sp
                                         ),
-                                        color = Color.White.copy(alpha = 0.8f)
+                                        color = AppTheme.colors.staticWhite.copy(alpha = 0.8f)
                                     )
                                 }
                             }
@@ -783,9 +784,9 @@ fun CreateCompanionScreen(
                         shape = RoundedCornerShape(25.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.Transparent,
-                            contentColor = Color.White,
-                            disabledContainerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            contentColor = AppTheme.colors.staticWhite,
+                            disabledContainerColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.2f),
+                            disabledContentColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         ),
                         enabled = isFormValid && !isSaving,
                         contentPadding = PaddingValues(0.dp)
@@ -799,8 +800,8 @@ fun CreateCompanionScreen(
                                     } else {
                                         Brush.horizontalGradient(
                                             colors = listOf(
-                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
-                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
+                                                AppTheme.colors.onSurfaceVariant.copy(alpha = 0.2f),
+                                                AppTheme.colors.onSurfaceVariant.copy(alpha = 0.1f)
                                             )
                                         )
                                     },
@@ -815,7 +816,7 @@ fun CreateCompanionScreen(
                                 if (isSaving) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(18.dp),
-                                        color = Color.White,
+                                        color = AppTheme.colors.staticWhite,
                                         strokeWidth = 2.dp
                                     )
                                 } else {
@@ -928,7 +929,7 @@ private fun RoleToggleChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val backgroundColor = if (selected) accentColor.copy(alpha = 0.12f) else colorScheme.surface.copy(alpha = 0.5f)
     val borderColor = if (selected) accentColor else colorScheme.outline.copy(alpha = 0.3f)
 
@@ -976,11 +977,11 @@ fun AnimatedFormField(
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Default,
     minLines: Int = 1,
-    accentColor: Color = MaterialTheme.colorScheme.primary,
+    accentColor: Color = AppTheme.colors.primary,
     suggestionChips: List<String> = emptyList(),
     onSuggestionClick: ((String) -> Unit)? = null
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     AnimatedVisibility(
         visible = visible,

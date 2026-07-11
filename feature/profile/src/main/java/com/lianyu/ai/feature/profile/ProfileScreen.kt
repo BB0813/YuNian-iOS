@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -91,7 +92,7 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     val userName by viewModel.userName.collectAsState()
     val userAvatar by viewModel.userAvatar.collectAsState()
@@ -164,7 +165,7 @@ fun ProfileScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF07C160),
+                        focusedBorderColor = AppTheme.colors.success,
                         unfocusedBorderColor = colorScheme.outline,
                         focusedContainerColor = colorScheme.surface,
                         unfocusedContainerColor = colorScheme.surface
@@ -174,7 +175,7 @@ fun ProfileScreen(
                             if (editName.isNotBlank()) viewModel.updateUserName(editName.trim())
                             isEditingName = false
                         }) {
-                            Icon(Icons.Filled.Edit, stringResource(R.string.profile_save), tint = Color(0xFF07C160))
+                            Icon(Icons.Filled.Edit, stringResource(R.string.profile_save), tint = AppTheme.colors.success)
                         }
                     }
                 )
@@ -290,7 +291,7 @@ internal data class MenuItemData(
 
 @Composable
 internal fun SolidMenuGroup(items: List<MenuItemData>) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -307,13 +308,13 @@ internal fun SolidMenuGroup(items: List<MenuItemData>) {
 
 @Composable
 internal fun SolidMenuItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit, showDivider: Boolean) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Column {
         Row(
             modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, title, Modifier.size(24.dp), tint = Color(0xFF07C160))
+            Icon(icon, title, Modifier.size(24.dp), tint = AppTheme.colors.success)
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 16.sp), color = colorScheme.onSurface)

@@ -65,3 +65,4 @@ class ChatTurnState {
         lastStickerContent = content
     }
 }
+

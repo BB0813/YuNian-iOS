@@ -105,7 +105,7 @@ fun MemoryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(20.dp))
+                        .background(AppTheme.colors.surface, shape = RoundedCornerShape(20.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -117,7 +117,7 @@ fun MemoryScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.memory_management),
-                            tint = MaterialTheme.colorScheme.onSurface,
+                            tint = AppTheme.colors.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -128,7 +128,7 @@ fun MemoryScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 15.sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = AppTheme.colors.onSurface
                     )
 
                     Spacer(modifier = Modifier.width(32.dp))
@@ -168,7 +168,7 @@ fun MemoryScreen(
                         indicator = { tabPositions ->
                             TabRowDefaults.SecondaryIndicator(
                                 modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                color = AppTheme.colors.primary.copy(alpha = 0.6f)
                             )
                         }
                     ) {
@@ -182,7 +182,7 @@ fun MemoryScreen(
                                 fontSize = 13.sp,
                                 fontWeight = if (selectedTab == 0) FontWeight.Medium else FontWeight.Normal
                             ),
-                            color = if (selectedTab == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = if (selectedTab == 0) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                             }
                         )
@@ -196,7 +196,7 @@ fun MemoryScreen(
                                 fontSize = 13.sp,
                                 fontWeight = if (selectedTab == 1) FontWeight.Medium else FontWeight.Normal
                             ),
-                            color = if (selectedTab == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = if (selectedTab == 1) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                             }
                         )
@@ -210,7 +210,7 @@ fun MemoryScreen(
                                 fontSize = 13.sp,
                                 fontWeight = if (selectedTab == 2) FontWeight.Medium else FontWeight.Normal
                             ),
-                            color = if (selectedTab == 2) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = if (selectedTab == 2) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                             }
                         )
@@ -229,7 +229,7 @@ fun MemoryScreen(
                         Text(
                             stringResource(R.string.select_companion_hint),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -251,15 +251,15 @@ fun CompanionChip(
                 if (isSelected) {
                     Brush.horizontalGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                            AppTheme.colors.primary.copy(alpha = 0.8f),
+                            AppTheme.colors.primary.copy(alpha = 0.7f)
                         )
                     )
                 } else {
                     Brush.horizontalGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            AppTheme.colors.surfaceVariant.copy(alpha = 0.6f),
+                            AppTheme.colors.surfaceVariant.copy(alpha = 0.4f)
                         )
                     )
                 }
@@ -278,8 +278,8 @@ fun CompanionChip(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                AppTheme.colors.primary.copy(alpha = 0.6f),
+                                AppTheme.colors.primary.copy(alpha = 0.4f)
                             )
                         )
                     ),
@@ -297,7 +297,7 @@ fun CompanionChip(
                         text = companion.name.firstOrNull()?.toString() ?: "?",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            color = AppTheme.colors.primary.copy(alpha = 0.8f)
                         )
                     )
                 }
@@ -308,7 +308,7 @@ fun CompanionChip(
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
                 ),
-                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                color = if (isSelected) AppTheme.colors.onPrimary else AppTheme.colors.onSurface
             )
         }
     }
@@ -355,7 +355,7 @@ fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    .background(AppTheme.colors.primary.copy(alpha = 0.1f))
                     .clickable { showAddDialog = true }
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
@@ -366,7 +366,7 @@ fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = "添加记忆",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = AppTheme.colors.primary,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
@@ -375,7 +375,7 @@ fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        color = MaterialTheme.colorScheme.primary
+                        color = AppTheme.colors.primary
                     )
                 }
             }
@@ -389,7 +389,7 @@ fun CoreMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
                 Text(
                     stringResource(R.string.no_core_memory),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             }
@@ -454,7 +454,7 @@ fun TempMemoryTab(companionId: Long, viewModel: MemoryViewModel) {
             Text(
                 stringResource(R.string.no_temp_memory),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
@@ -485,7 +485,7 @@ fun DiaryTab(companionId: Long, viewModel: MemoryViewModel) {
                 Text(
                     stringResource(R.string.no_diary),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
                     textAlign = TextAlign.Center
                 )
             }
@@ -533,9 +533,9 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
             .clip(RoundedCornerShape(16.dp))
             .background(
                 if (isSelected) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                    AppTheme.colors.primary.copy(alpha = 0.8f)
                 } else {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    AppTheme.colors.surfaceVariant.copy(alpha = 0.5f)
                 }
             )
             .clickable(onClick = onClick)
@@ -547,7 +547,7 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
                 fontSize = 12.sp,
                 fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
             ),
-            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+            color = if (isSelected) AppTheme.colors.onPrimary else AppTheme.colors.onSurface
         )
     }
 }
@@ -568,7 +568,7 @@ fun MemoryItemCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface),
+            .background(AppTheme.colors.surface),
         onClick = { onEdit(memory) },
         slotGap = AppTheme.dimens.avatarGap
     ) {
@@ -586,7 +586,7 @@ fun MemoryItemCard(
                     Icon(
                         imageVector = category.getIcon(),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        tint = AppTheme.colors.primary.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -596,21 +596,21 @@ fun MemoryItemCard(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                        color = AppTheme.colors.primary.copy(alpha = 0.8f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .background(
-                                MaterialTheme.colorScheme.primary.copy(alpha = memory.importance * 0.3f)
+                                AppTheme.colors.primary.copy(alpha = memory.importance * 0.3f)
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.importance, (memory.importance * 100).toInt()),
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                            color = AppTheme.colors.primary.copy(alpha = 0.9f)
                         )
                     }
                 }
@@ -618,7 +618,7 @@ fun MemoryItemCard(
                     Icon(
                         imageVector = Icons.Filled.Delete,
                         contentDescription = stringResource(R.string.memory_management),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -626,7 +626,7 @@ fun MemoryItemCard(
                     Icon(
                         imageVector = Icons.Filled.Edit,
                         contentDescription = "编辑记忆",
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        tint = AppTheme.colors.primary.copy(alpha = 0.7f),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -640,7 +640,7 @@ fun MemoryItemCard(
                     fontSize = 14.sp,
                     lineHeight = 20.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                color = AppTheme.colors.onSurface.copy(alpha = 0.9f)
             )
 
             if (memory.summary.isNotBlank()) {
@@ -648,7 +648,7 @@ fun MemoryItemCard(
                 Text(
                     text = stringResource(R.string.context, memory.summary),
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
                     maxLines = 2
                 )
             }
@@ -657,7 +657,7 @@ fun MemoryItemCard(
             Text(
                 text = dateFormat.format(Date(memory.observedAt)),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
             )
         }
     }
@@ -677,7 +677,7 @@ fun TempMemoryItemCard(tempMemory: MemoryRecord) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface),
+            .background(AppTheme.colors.surface),
         slotGap = AppTheme.dimens.avatarGap
     ) {
         Column(
@@ -689,14 +689,14 @@ fun TempMemoryItemCard(tempMemory: MemoryRecord) {
                 Icon(
                     imageVector = Icons.Filled.History,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = dateFormat.format(Date(tempMemory.createdAt)),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
 
@@ -708,7 +708,7 @@ fun TempMemoryItemCard(tempMemory: MemoryRecord) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = AppTheme.colors.onSurface
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -720,7 +720,7 @@ fun TempMemoryItemCard(tempMemory: MemoryRecord) {
                         fontSize = 13.sp,
                         lineHeight = 18.sp
                     ),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    color = AppTheme.colors.onSurface.copy(alpha = 0.8f)
                 )
             }
         }
@@ -756,7 +756,7 @@ fun DiaryItemCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface),
+            .background(AppTheme.colors.surface),
         onClick = { onEdit(diary) },
         slotGap = AppTheme.dimens.avatarGap
     ) {
@@ -774,7 +774,7 @@ fun DiaryItemCard(
                     Icon(
                         imageVector = Icons.Filled.Book,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        tint = AppTheme.colors.primary.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -784,14 +784,14 @@ fun DiaryItemCard(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                        color = AppTheme.colors.primary.copy(alpha = 0.8f)
                     )
                     if (diary.weather.isNotBlank()) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = diary.weather,
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -800,7 +800,7 @@ fun DiaryItemCard(
                         Icon(
                             imageVector = Icons.Filled.Edit,
                             contentDescription = stringResource(R.string.edit_diary),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            tint = AppTheme.colors.primary.copy(alpha = 0.7f),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -808,7 +808,7 @@ fun DiaryItemCard(
                         Icon(
                             imageVector = Icons.Filled.Delete,
                             contentDescription = stringResource(R.string.memory_management),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -820,7 +820,7 @@ fun DiaryItemCard(
                 Text(
                     text = diary.title,
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = AppTheme.colors.onSurface
                 )
             }
 
@@ -828,7 +828,7 @@ fun DiaryItemCard(
             Text(
                 text = diary.content,
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                color = AppTheme.colors.onSurface.copy(alpha = 0.9f)
             )
 
             if (diary.tags.isNotBlank()) {
@@ -838,13 +838,13 @@ fun DiaryItemCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                                .background(AppTheme.colors.primary.copy(alpha = 0.1f))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
                                 text = tag,
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                                color = AppTheme.colors.primary.copy(alpha = 0.85f)
                             )
                         }
                     }
@@ -855,7 +855,7 @@ fun DiaryItemCard(
             Text(
                 text = dateFormat.format(Date(diary.date)),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
             )
         }
     }
@@ -881,7 +881,7 @@ fun EmptyMemoryState() {
             Icon(
                 imageVector = Icons.Filled.Memory,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.3f),
                 modifier = Modifier.size(64.dp)
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -890,13 +890,13 @@ fun EmptyMemoryState() {
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 stringResource(R.string.create_first),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
     }
@@ -992,9 +992,9 @@ fun DiaryEditDialog(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
                                     if (mood == value) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        AppTheme.colors.primary.copy(alpha = 0.15f)
                                     } else {
-                                        MaterialTheme.colorScheme.surfaceVariant
+                                        AppTheme.colors.surfaceVariant
                                     }
                                 )
                                 .clickable { mood = value }
@@ -1003,7 +1003,7 @@ fun DiaryEditDialog(
                             Text(
                                 text = label,
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                color = if (mood == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (mood == value) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant
                             )
                         }
                     }
@@ -1057,7 +1057,7 @@ fun DiaryEditDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (onDelete != null) {
                     TextButton(onClick = onDelete) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text("删除", color = AppTheme.colors.error)
                     }
                 }
                 TextButton(onClick = onDismiss) {
@@ -1115,9 +1115,9 @@ fun MemoryEditDialog(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
                                     if (selectedCategory == category) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        AppTheme.colors.primary.copy(alpha = 0.15f)
                                     } else {
-                                        MaterialTheme.colorScheme.surfaceVariant
+                                        AppTheme.colors.surfaceVariant
                                     }
                                 )
                                 .clickable { selectedCategory = category }
@@ -1127,9 +1127,9 @@ fun MemoryEditDialog(
                                 text = category.getDisplayName(),
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = if (selectedCategory == category) {
-                                    MaterialTheme.colorScheme.primary
+                                    AppTheme.colors.primary
                                 } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                    AppTheme.colors.onSurfaceVariant
                                 }
                             )
                         }
@@ -1145,13 +1145,13 @@ fun MemoryEditDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("低", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("低", style = MaterialTheme.typography.labelSmall, color = AppTheme.colors.onSurfaceVariant)
                     androidx.compose.material3.Slider(
                         value = importance,
                         onValueChange = { importance = it },
                         modifier = Modifier.weight(1f)
                     )
-                    Text("高", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("高", style = MaterialTheme.typography.labelSmall, color = AppTheme.colors.onSurfaceVariant)
                 }
 
                 OutlinedTextField(
@@ -1199,7 +1199,7 @@ fun MemoryEditDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (onDelete != null) {
                     TextButton(onClick = onDelete) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text("删除", color = AppTheme.colors.error)
                     }
                 }
                 TextButton(onClick = onDismiss) {

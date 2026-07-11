@@ -1,5 +1,6 @@
-﻿package com.lianyu.ai.feature.settings.ui.screen
+package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,7 +65,7 @@ fun ThemeScreen(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val backgroundColor = colorScheme.background
     val textPrimaryColor = colorScheme.onSurface
     val dividerColor = colorScheme.outline
@@ -220,7 +221,7 @@ fun ThemeOptionCard(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (previewColor.luminance() > 0.5f) textPrimaryColor else Color.White,
+                tint = if (previewColor.luminance() > 0.5f) textPrimaryColor else AppTheme.colors.staticWhite,
                 modifier = Modifier.size(24.dp)
             )
         }
@@ -253,8 +254,8 @@ fun ThemeOptionCard(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                AppTheme.colors.primary.copy(alpha = 0.9f),
+                                AppTheme.colors.primary.copy(alpha = 0.7f)
                             )
                         )
                     ),
@@ -263,7 +264,7 @@ fun ThemeOptionCard(
                 Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = stringResource(R.string.cd_selected),
-                    tint = Color.White,
+                    tint = AppTheme.colors.staticWhite,
                     modifier = Modifier.size(16.dp)
                 )
             }

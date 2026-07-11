@@ -4,11 +4,8 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatDebugLog
 
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.SecureLog
-import com.lianyu.ai.common.TimeoutBudgets
-import com.lianyu.ai.common.safety.ContentSafetyVerifier
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * ChatViewModel 消息流水线实现 — 5 阶段结构。
@@ -33,46 +30,10 @@ class MessagePipelineRunner(
         _queueDepth.value = maxOf(0, _queueDepth.value + 1)
 
         return try {
-            ChatDebugLog.log("[Pipeline] calling ContentFilter.checkInput...")
-            ChatDebugLog.log("[Pipeline] STEP1: checkInput start")
-            val filterResult = ContentFilter.checkInput(input.rawText)
-            ChatDebugLog.log("[Pipeline] STEP1: checkInput done, violating=${filterResult.isViolating}")
-            ChatDebugLog.log("[Pipeline] ContentFilter returned: violating=${filterResult.isViolating}")
-            if (filterResult.isViolating) {
-                onViolation?.invoke(filterResult.level)
-                _pipelineState.value = MessagePipeline.PipelineState(
-                    stage = MessagePipeline.Stage.VALIDATE,
-                    error = "内容违规: ${filterResult.reason}"
-                )
-                _queueDepth.value = maxOf(0, _queueDepth.value - 1)
-                return false
-            }
-
-            _pipelineState.value = MessagePipeline.PipelineState(stage = MessagePipeline.Stage.CLASSIFY)
-            ChatDebugLog.log("[Pipeline] STEP2: checkVector start")
-            val vectorResult = ContentFilter.checkVector(input.rawText)
-            ChatDebugLog.log("[Pipeline] STEP2: checkVector done")
-
-            _pipelineState.value = MessagePipeline.PipelineState(stage = MessagePipeline.Stage.CLASSIFY)
-            ChatDebugLog.log("[Pipeline] STEP3: Bayesian start (timeout=${TimeoutBudgets.SAFETY_CLASSIFY_MS}ms)")
-            val bayesianScore = withTimeoutOrNull(TimeoutBudgets.SAFETY_CLASSIFY_MS) {
-                ContentSafetyVerifier.verifyUserInputAsync(input.rawText, filterResult, vectorResult)
-            } ?: com.lianyu.ai.common.safety.SafetyScore(
-                score = 1.0,
-                source = com.lianyu.ai.common.safety.ScoreSource.USER_INPUT,
-                explanation = "Safety check timed out, fail-closed"
-            )
-            ChatDebugLog.log("[Pipeline] STEP3: Bayesian done, dangerous=${bayesianScore.isDangerous}")
-
-            if (bayesianScore.isDangerous) {
-                onViolation?.invoke(ContentFilter.ViolationLevel.HIGH)
-                _pipelineState.value = MessagePipeline.PipelineState(
-                    stage = MessagePipeline.Stage.CLASSIFY,
-                    error = "贝叶斯判定危险: ${bayesianScore.explanation}"
-                )
-                _queueDepth.value = maxOf(0, _queueDepth.value - 1)
-                return false
-            }
+            // [DISABLED] 关键词拦截 + 贝叶斯分类器均暂停，误拦截率过高。
+            // ContentFilter.checkInput / checkVector / Bayesian 全部跳过。
+            // 保留代码供后续调优后重新启用。
+            ChatDebugLog.log("[Pipeline] ContentFilter skipped (disabled)")
 
             // 阶段 3-5 由 ChatViewModel.doStartApiCall 负责
             _pipelineState.value = MessagePipeline.PipelineState(
@@ -98,3 +59,4 @@ class MessagePipelineRunner(
         }
     }
 }
+

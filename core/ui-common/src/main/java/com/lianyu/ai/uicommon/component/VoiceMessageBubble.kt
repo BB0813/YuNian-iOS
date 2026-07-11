@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -45,6 +46,19 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import android.media.MediaPlayer
 
+private object VoicePlaybackCoordinator {
+    private var activeStop: (() -> Unit)? = null
+
+    fun activate(stopPlayback: () -> Unit) {
+        activeStop?.invoke()
+        activeStop = stopPlayback
+    }
+
+    fun clear(stopPlayback: () -> Unit) {
+        if (activeStop === stopPlayback) activeStop = null
+    }
+}
+
 @Composable
 fun VoiceMessageBubble(
     audioPath: String,
@@ -62,6 +76,15 @@ fun VoiceMessageBubble(
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val stopPlayback = remember {
+        {
+            mediaPlayer?.release()
+            mediaPlayer = null
+            isPlaying = false
+            currentPosition = 0L
+        }
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "voice_wave")
     val wavePhase by infiniteTransition.animateFloat(
@@ -76,8 +99,8 @@ fun VoiceMessageBubble(
 
     DisposableEffect(Unit) {
         onDispose {
-            mediaPlayer?.release()
-            mediaPlayer = null
+            stopPlayback()
+            VoicePlaybackCoordinator.clear(stopPlayback)
         }
     }
 
@@ -88,6 +111,7 @@ fun VoiceMessageBubble(
         } else {
             if (mediaPlayer == null || mediaPlayer?.currentPosition == 0) {
                 try {
+                    VoicePlaybackCoordinator.activate(stopPlayback)
                     val player = MediaPlayer().apply {
                         setDataSource(audioPath)
                         prepareAsync()
@@ -98,6 +122,7 @@ fun VoiceMessageBubble(
                         setOnCompletionListener { mp ->
                             isPlaying = false
                             currentPosition = 0L
+                            VoicePlaybackCoordinator.clear(stopPlayback)
                             onPlayComplete?.invoke()
                             mp.seekTo(0)
                         }
@@ -108,6 +133,7 @@ fun VoiceMessageBubble(
                     isPlaying = false
                 }
             } else {
+                VoicePlaybackCoordinator.activate(stopPlayback)
                 mediaPlayer?.start()
                 isPlaying = true
             }
@@ -126,7 +152,11 @@ fun VoiceMessageBubble(
     Surface(
         modifier = modifier
             .widthIn(min = 120.dp, max = 240.dp)
-            .clickable { togglePlayback() },
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { togglePlayback() }
+            ),
         shape = RoundedCornerShape(18.dp),
         color = containerColor,
         border = null,

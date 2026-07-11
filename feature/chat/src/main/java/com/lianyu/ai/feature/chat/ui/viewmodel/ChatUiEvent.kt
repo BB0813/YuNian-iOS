@@ -20,4 +20,7 @@ sealed class ChatUiEvent {
 
     /** Stream completed successfully */
     data object StreamCompleted : ChatUiEvent()
+
+    data class MessageReadyToNavigate(val messageId: Long) : ChatUiEvent()
 }
+

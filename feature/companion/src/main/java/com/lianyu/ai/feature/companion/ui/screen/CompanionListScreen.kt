@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.companion.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -73,6 +74,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.viewmodel.CompanionListViewModel
+import com.lianyu.ai.uicommon.component.AppListItemLayout
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,7 +103,7 @@ fun CompanionListScreen(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     ),
-                    color = Color.White
+                    color = AppTheme.colors.staticWhite
                 )
                 },
                 actions = {
@@ -109,7 +111,7 @@ fun CompanionListScreen(
                         Icon(
                             imageVector = Icons.Filled.Settings,
                             contentDescription = stringResource(R.string.cancel),
-                            tint = Color.White
+                            tint = AppTheme.colors.staticWhite
                         )
                     }
                 },
@@ -118,7 +120,7 @@ fun CompanionListScreen(
                 ),
                 modifier = Modifier.background(
                     Brush.horizontalGradient(
-                        colors = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.8f))
+                        colors = listOf(AppTheme.colors.primary, AppTheme.colors.primary.copy(alpha = 0.8f))
                     )
                 )
             )
@@ -131,8 +133,8 @@ fun CompanionListScreen(
             ) {
                 FloatingActionButton(
                     onClick = onAddClick,
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = Color.White,
+                    containerColor = AppTheme.colors.primary,
+                    contentColor = AppTheme.colors.staticWhite,
                     shape = CircleShape,
                     modifier = Modifier.shadow(8.dp, CircleShape)
                 ) {
@@ -225,50 +227,60 @@ fun CompanionCard(
                 )
                 .padding(20.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Animated Avatar
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .shadow(8.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            AppListItemLayout(
+                isStartAligned = true,
+                startSlot = {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .shadow(8.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        AppTheme.colors.primary.copy(alpha = 0.6f),
+                                        AppTheme.colors.primary.copy(alpha = 0.8f),
+                                        AppTheme.colors.primary.copy(alpha = 0.4f)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (companion.avatarUrl != null) {
+                            AsyncImage(
+                                model = companion.avatarUrl,
+                                contentDescription = companion.name,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Text(
+                                text = companion.name.firstOrNull()?.toString() ?: "?",
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = AppTheme.colors.staticWhite
                                 )
                             )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (companion.avatarUrl != null) {
-                        AsyncImage(
-                            model = companion.avatarUrl,
-                            contentDescription = companion.name,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text(
-                            text = companion.name.firstOrNull()?.toString() ?: "?",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                        }
+                    }
+                },
+                endSlot = {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.alpha(0.6f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = stringResource(R.string.delete),
+                            tint = Color(0xFFFF6B6B),
+                            modifier = Modifier.size(22.dp)
                         )
                     }
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
+                },
+                modifier = Modifier.fillMaxWidth(),
+                slotGap = 16.dp,
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = companion.name,
                         style = MaterialTheme.typography.titleLarge.copy(
@@ -297,7 +309,7 @@ fun CompanionCard(
                                     Box(
                                         modifier = Modifier
                                             .background(
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                                AppTheme.colors.primary.copy(alpha = 0.6f),
                                                 RoundedCornerShape(12.dp)
                                             )
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
@@ -307,25 +319,13 @@ fun CompanionCard(
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontWeight = FontWeight.Medium
                                             ),
-                                            color = Color.White
+                                            color = AppTheme.colors.staticWhite
                                         )
                                     }
                                 }
                             }
                         }
                     }
-                }
-
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.alpha(0.6f)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Delete,
-                        contentDescription = stringResource(R.string.delete),
-                        tint = Color(0xFFFF6B6B),
-                        modifier = Modifier.size(22.dp)
-                    )
                 }
             }
         }
@@ -370,9 +370,9 @@ fun EmptyStateWithAnimation() {
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                AppTheme.colors.primary.copy(alpha = 0.8f),
+                                AppTheme.colors.primary.copy(alpha = 0.6f),
+                                AppTheme.colors.primary.copy(alpha = 0.2f)
                             )
                         )
                     ),

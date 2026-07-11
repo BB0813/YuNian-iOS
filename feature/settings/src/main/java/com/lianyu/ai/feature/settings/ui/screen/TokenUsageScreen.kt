@@ -2,6 +2,7 @@
 
 package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,7 +107,7 @@ fun TokenUsageScreen(
         isVisible = true
     }
 
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val backgroundColor = colorScheme.background
     val textPrimaryColor = colorScheme.onSurface
     val textSecondaryColor = colorScheme.onSurfaceVariant
@@ -128,7 +129,7 @@ fun TokenUsageScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -291,8 +292,8 @@ private fun StatsOverviewCard(
                 subtitle = formatTokenCount(monthStats?.requests?.toLong() ?: 0L) + " 次",
                 modifier = Modifier.weight(1f),
                 isDarkTheme = isDarkTheme,
-                bgColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
-                textColor = MaterialTheme.colorScheme.primary
+                bgColor = AppTheme.colors.primaryContainer.copy(alpha = 0.15f),
+                textColor = AppTheme.colors.primary
             )
         }
 
@@ -312,7 +313,7 @@ private fun StatsOverviewCard(
                 ) {
                     UsageDetailItem(label = "输入Token", value = formatTokenCount(todayUsage!!.inputTokens), color = PetalGreen, textPrimaryColor = textPrimaryColor)
                     UsageDetailItem(label = "输出Token", value = formatTokenCount(todayUsage!!.outputTokens), color = PetalPrimary, textPrimaryColor = textPrimaryColor)
-                    UsageDetailItem(label = "请求次数", value = "${todayUsage!!.requestCount}", color = MaterialTheme.colorScheme.primary, textPrimaryColor = textPrimaryColor)
+                    UsageDetailItem(label = "请求次数", value = "${todayUsage!!.requestCount}", color = AppTheme.colors.primary, textPrimaryColor = textPrimaryColor)
                 }
             }
         }

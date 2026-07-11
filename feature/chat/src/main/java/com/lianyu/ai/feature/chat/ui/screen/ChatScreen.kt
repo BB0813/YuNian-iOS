@@ -93,6 +93,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.chat.R
@@ -101,12 +102,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.database.model.MessageType
+import com.lianyu.ai.feature.chat.ui.message.ChatListItemRenderer
+import com.lianyu.ai.feature.chat.ui.message.ReasoningItem
+import com.lianyu.ai.feature.chat.ui.message.RegeneratingItem
+import com.lianyu.ai.feature.chat.ui.message.TypingIndicatorItem
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
@@ -115,7 +121,6 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
 import com.lianyu.ai.feature.chat.ui.viewmodel.encodeQuotedMessage
 import com.lianyu.ai.feature.chat.ui.viewmodel.toQuoteReply
 import com.lianyu.ai.feature.chat.ui.viewmodel.toChatListItems
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.StickerInfo
@@ -129,6 +134,7 @@ import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
 import com.lianyu.ai.network.tts.ChatTtsMode
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
+import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.common.ReadStatusManager
 import com.lianyu.ai.common.HardwareInfo
@@ -282,6 +288,7 @@ fun ChatScreen(
     val userName by viewModel.userName.collectAsState()
     val messages by viewModel.messages.collectAsState(initial = emptyList())
     val chatItems = remember(messages) { messages.toChatListItems() }
+    val visibleChatItems = remember(chatItems) { chatItems.asReversed() }
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val hasMoreMessages by viewModel.hasMoreMessages.collectAsState()
     val companionData by viewModel.companionData.collectAsState()
@@ -294,11 +301,11 @@ fun ChatScreen(
     val availableApis by viewModel.availableApis.collectAsState()
     val currentApi by viewModel.currentApi.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     // 聊天页 TTS 朗读状态
     val ttsState by viewModel.ttsState.collectAsState()
     val ttsConfig by viewModel.chatTtsConfig.collectAsState()
-    var ttsModeMenu by remember { mutableStateOf(false) }
 
     val themeViewModel: ThemeViewModel = viewModel()
     val themeMode by themeViewModel.themeMode.collectAsState()
@@ -321,6 +328,8 @@ fun ChatScreen(
         viewModel.refreshCompanionData()
     }
 
+    var pendingNavigationMessageId by remember { mutableStateOf<Long?>(null) }
+
     // 收集 ViewModel 一次性副作用事件
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
@@ -335,11 +344,12 @@ fun ChatScreen(
                 )
                 is ChatUiEvent.Info -> snackbarHostState.showSnackbar(event.message)
                 is ChatUiEvent.StreamCompleted -> { /* 流式完成，不需要用户感知 */ }
+                is ChatUiEvent.MessageReadyToNavigate -> pendingNavigationMessageId = event.messageId
             }
         }
     }
 
-    var hasScrolledToBottom by remember { mutableStateOf(false) }
+    var initialBottomScrollSettled by remember { mutableStateOf(false) }
 
     // LazyColumn 实际 item 总数（与 LazyColumn 内部 item 声明保持一致）
     val itemCount = chatItems.size +
@@ -372,26 +382,25 @@ fun ChatScreen(
                 }
             }
             is ChatIntent.NavigateToMessage -> {
-                scope.launch {
-                    val messageIndex = chatItems.indexOfFirst { it.messageOrNull?.id == intent.messageId }
-                    if (messageIndex >= 0) {
-                        val loadingOffset = if (isLoadingMore) 1 else 0
-                        listState.animateScrollToItem(messageIndex + loadingOffset)
-                    } else {
-                        snackbarHostState.showSnackbar("消息已不在当前会话")
-                    }
-                }
+                onIntent(intent)
             }
             else -> onIntent(intent)
         }
     }
 
-    // 首次有消息时同步滚动到底部，避免首帧闪现顶部
+    LaunchedEffect(pendingNavigationMessageId, visibleChatItems) {
+        val targetId = pendingNavigationMessageId ?: return@LaunchedEffect
+        val messageIndex = visibleChatItems.indexOfFirst { it.messageOrNull?.id == targetId }
+        if (messageIndex >= 0) {
+            listState.animateScrollToItem(messageIndex)
+            pendingNavigationMessageId = null
+        }
+    }
+
+    // 反向布局中 index 0 就是视觉底部，首帧天然落在最新消息。
     LaunchedEffect(messages.isNotEmpty()) {
-        if (messages.isNotEmpty() && !hasScrolledToBottom) {
-            hasScrolledToBottom = true
-            delay(50)
-            listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
+        if (messages.isNotEmpty() && !initialBottomScrollSettled) {
+            initialBottomScrollSettled = true
         }
     }
 
@@ -401,8 +410,8 @@ fun ChatScreen(
             val layoutInfo = listState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
             if (totalItems == 0) return@derivedStateOf true
-            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()
-            lastVisible != null && lastVisible.index >= totalItems - 2
+            val firstVisible = layoutInfo.visibleItemsInfo.firstOrNull()
+            firstVisible != null && firstVisible.index <= 1
         }
     }
 
@@ -423,12 +432,7 @@ fun ChatScreen(
         val lastMessage = messages.lastOrNull()
         val isMyMessage = lastMessage?.isFromUser == true
         if (wasAtBottom || isMyMessage) {
-            val currentItemCount = chatItems.size +
-                (if (isLoadingMore) 1 else 0) +
-                (if (isTyping) 1 else 0) +
-                (if (isRegenerating) 1 else 0) +
-                (if (isReasoning && reasoningText.isNotBlank()) 1 else 0)
-            listState.scrollToItem((currentItemCount - 1).coerceAtLeast(0))
+            listState.scrollToItem(0)
             unreadNewMessages = 0
         } else {
             unreadNewMessages += 1
@@ -438,20 +442,20 @@ fun ChatScreen(
     // AI 流式回复时持续滚动到底部（typingText 变化但消息数不变）
     LaunchedEffect(typingText) {
         if (typingText.isNotBlank() && wasAtBottom) {
-            listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
+            listState.scrollToItem(0)
         }
     }
 
     // AI 深度推理时持续滚动到底部（reasoningText 变化但消息数不变）
     LaunchedEffect(reasoningText) {
         if (reasoningText.isNotBlank() && wasAtBottom) {
-            listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
+            listState.scrollToItem(0)
         }
     }
 
     // 键盘弹出时滚动到底部
     LaunchedEffect(WindowInsets.ime.getBottom(LocalDensity.current)) {
-        if (itemCount > 0) listState.scrollToItem((itemCount - 1).coerceAtLeast(0))
+        if (itemCount > 0) listState.scrollToItem(0)
     }
 
     // ── 上划加载历史消息 ──
@@ -459,36 +463,41 @@ fun ChatScreen(
     var historyRestoreScrollOffset by remember { mutableStateOf(0) }
     var isLoadingMoreTriggered by remember { mutableStateOf(false) }
 
-    LaunchedEffect(listState.firstVisibleItemIndex, hasMoreMessages) {
-        // 首次进入时列表可能尚未滚动到底，避免此时误触发加载历史
-        if (!hasScrolledToBottom) return@LaunchedEffect
-        if (listState.firstVisibleItemIndex <= 2 && hasMoreMessages && !isLoadingMore && !isLoadingMoreTriggered) {
-            val anchorItem = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.key != "load_more_indicator" }
-            historyRestoreKey = (anchorItem?.key as? String) ?: chatItems.getOrNull(listState.firstVisibleItemIndex)?.stableId
-            historyRestoreScrollOffset = anchorItem?.offset?.let { -it } ?: listState.firstVisibleItemScrollOffset
-            isLoadingMoreTriggered = true
-            onIntent(ChatIntent.LoadEarlier)
+    LaunchedEffect(listState, initialBottomScrollSettled) {
+        if (!initialBottomScrollSettled) return@LaunchedEffect
+        snapshotFlow {
+            val maxVisibleIndex = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: 0
+            Triple(maxVisibleIndex >= listState.layoutInfo.totalItemsCount - 6, hasMoreMessages, isLoadingMore)
+        }.collect { (nearTop, hasMore, loading) ->
+            if (!nearTop) isLoadingMoreTriggered = false
+            if (nearTop && hasMore && !loading && !isLoadingMoreTriggered) {
+                val anchorItem = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key != "load_more_indicator" }
+                historyRestoreKey = (anchorItem?.key as? String)
+                    ?: visibleChatItems.getOrNull(listState.firstVisibleItemIndex)?.stableId
+                historyRestoreScrollOffset = anchorItem?.offset?.let { -it }
+                    ?: listState.firstVisibleItemScrollOffset
+                isLoadingMoreTriggered = true
+                onIntent(ChatIntent.LoadEarlier)
+            }
         }
     }
 
-    // 加载完成后恢复滚动位置
-    LaunchedEffect(isLoadingMore, historyRestoreKey, chatItems) {
-        val restoreKey = historyRestoreKey
-        if (!isLoadingMore && restoreKey != null) {
-            val anchorIndex = chatItems.indexOfFirst { it.stableId == restoreKey }
-            if (anchorIndex >= 0) {
-                listState.scrollToItem(anchorIndex, historyRestoreScrollOffset)
-            }
+    // 加载完成后恢复滚动位置 — 不等待 isLoadingMore 变 false，
+    // 只要 chatItems 中出现锚点就立即同步滚动，避免用户看到漂移闪烁
+    LaunchedEffect(historyRestoreKey, visibleChatItems) {
+        val restoreKey = historyRestoreKey ?: return@LaunchedEffect
+        val anchorIndex = visibleChatItems.indexOfFirst { it.stableId == restoreKey }
+        if (anchorIndex >= 0) {
+            listState.scrollToItem(anchorIndex, historyRestoreScrollOffset)
             historyRestoreKey = null
             historyRestoreScrollOffset = 0
-            isLoadingMoreTriggered = false
         }
     }
 
     // Background: per-companion > global > default
-    val colors = ChatTheme.colors
-    val defaultBackground = colors.screenBackground
+    val colors = AppTheme.colors
+    val defaultBackground = colors.background
     var targetBgColor by remember { mutableStateOf(defaultBackground) }
     var chatBgGradient by remember { mutableStateOf<Brush?>(null) }
     var isCustomBg by remember { mutableStateOf(false) }
@@ -521,9 +530,9 @@ fun ChatScreen(
 
     val chatBgColor by animateColorAsState(targetBgColor, tween(300), label = "bgColor")
     val backgroundColor = if (isDarkTheme && !isCustomBg) {
-        colors.screenBackground
+        colors.background
     } else if (isDarkTheme && isCustomBg) {
-        colors.screenBackground
+        colors.background
     } else {
         chatBgColor
     }
@@ -543,9 +552,18 @@ fun ChatScreen(
     var isCanceling by remember { mutableStateOf(false) }
     val voiceRecorder = remember { VoiceRecorder.getInstance(context) }
 
+    val exitChat = {
+        focusManager.clearFocus(force = true)
+        showExtensionPanel = false
+        showStickerPanel = false
+        showVoiceRecorder = false
+        onNavigateBack()
+    }
+
     BackHandler(enabled = previewImagePath != null) {
         previewImagePath = null
     }
+    BackHandler(enabled = previewImagePath == null, onBack = exitChat)
 
     // Voice recording timer & actual recording
     LaunchedEffect(isRecording) {
@@ -562,14 +580,14 @@ fun ChatScreen(
     // Sticker data loaded from StickerManager
     val stickers = remember { mutableStateListOf<StickerInfo>() }
 
-    ChatTheme {
-        Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
         // Snackbar host
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 80.dp)
+                .zIndex(10f)
         )
 
         // Background layer
@@ -583,10 +601,11 @@ fun ChatScreen(
         }
 
         // Main content - Column with messages and input only
+        // imePadding is handled by ChatInputRegion only, so the root layout
+        // does not shift when the keyboard is dismissed during exit.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
                 .then(
                     if (isCustomBg) Modifier.background(Color.Transparent)
                     else if (!isDarkTheme && chatBgGradient != null) Modifier.background(chatBgGradient!!)
@@ -601,6 +620,7 @@ fun ChatScreen(
                 // Messages list - takes full space, top bar is overlay
                 LazyColumn(
                     state = listState,
+                    reverseLayout = true,
                     modifier = Modifier
                         .fillMaxSize()
                         .nestedScroll(rememberHorizontalSwipeGuard())
@@ -612,33 +632,37 @@ fun ChatScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // 顶部加载指示器
-                    if (isLoadingMore) {
-                        item(key = "load_more_indicator") {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp,
-                                        color = colors.metadata
-                                    )
-                                    Text(
-                                        "加载更早的消息...",
-                                        fontSize = 12.sp,
-                                        color = colors.metadata
-                                    )
-                                }
-                            }
+                    if (isReasoning && reasoningText.isNotBlank()) {
+                        item(key = "reasoning_indicator") {
+                            ReasoningItem(
+                                reasoningText = reasoningText,
+                                adaptiveSizing = adaptiveSizing
+                            )
                         }
                     }
+
+                    if (isRegenerating) {
+                        item(key = "regenerating_indicator") {
+                            RegeneratingItem(
+                                companionData = companionData,
+                                adaptiveSizing = adaptiveSizing
+                            )
+                        }
+                    }
+
+                    if (isTyping && typingText.isNotBlank()) {
+                        item(key = "typing_indicator") {
+                            TypingIndicatorItem(
+                                companionData = companionData,
+                                typingText = typingText,
+                                adaptiveSizing = adaptiveSizing,
+                                isDarkTheme = isDarkTheme
+                            )
+                        }
+                    }
+
                     items(
-                        items = chatItems,
+                        items = visibleChatItems,
                         key = { it.stableId }
                     ) { item ->
                         val message = item.messageOrNull
@@ -654,7 +678,7 @@ fun ChatScreen(
                             }
                         }
 
-                        ChatListItemBubble(
+                        ChatListItemRenderer(
                             item = item,
                             companionData = companionData,
                             userAvatar = userAvatar,
@@ -662,36 +686,33 @@ fun ChatScreen(
                             onIntent = handleChatIntent,
                             adaptiveSizing = adaptiveSizing,
                             isDarkTheme = isDarkTheme,
+                            onCompanionAvatarClick = { onNavigateToDetail(companionId) },
                             modifier = Modifier.graphicsLayer { this.alpha = alpha.value }
                         )
                     }
 
-                    if (isTyping) {
-                        item(key = "typing_indicator") {
-                            TypingIndicatorBubble(
-                                companionData = companionData,
-                                typingText = typingText,
-                                adaptiveSizing = adaptiveSizing,
-                                isDarkTheme = isDarkTheme
-                            )
-                        }
-                    }
-
-                    if (isRegenerating) {
-                        item(key = "regenerating_indicator") {
-                            RegeneratingBubble(
-                                companionData = companionData,
-                                adaptiveSizing = adaptiveSizing
-                            )
-                        }
-                    }
-
-                    if (isReasoning && reasoningText.isNotBlank()) {
-                        item(key = "reasoning_indicator") {
-                            ReasoningBubble(
-                                reasoningText = reasoningText,
-                                adaptiveSizing = adaptiveSizing
-                            )
+                    if (isLoadingMore) {
+                        item(key = "load_more_indicator") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = colors.metadataContent
+                                    )
+                                    Text(
+                                        "加载更早的消息...",
+                                        fontSize = 12.sp,
+                                        color = colors.metadataContent
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -705,12 +726,12 @@ fun ChatScreen(
                     Surface(
                         modifier = Modifier.clickable {
                             scope.launch {
-                                listState.animateScrollToItem((itemCount - 1).coerceAtLeast(0))
+                                listState.animateScrollToItem(0)
                                 unreadNewMessages = 0
                             }
                         },
                         shape = RoundedCornerShape(999.dp),
-                        color = colors.topBarAccent,
+                        color = colors.primary,
                         tonalElevation = 6.dp,
                         shadowElevation = 6.dp
                     ) {
@@ -722,12 +743,12 @@ fun ChatScreen(
                             Icon(
                                 Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = null,
-                                tint = colors.userContent,
+                                tint = colors.onPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
                                 text = "${unreadNewMessages} 条新消息",
-                                color = colors.userContent,
+                                color = colors.onPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -774,7 +795,26 @@ fun ChatScreen(
                         audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                onLocationClick = { /* TODO: share location */ },
+                onVoiceCallClick = {
+                    showExtensionPanel = false
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        onNavigateToVoiceCall(companionId)
+                    } else {
+                        pendingAudioAction = { onNavigateToVoiceCall(companionId) }
+                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onTtsModeClick = {
+                    val nextMode = when (ttsConfig.mode) {
+                        ChatTtsMode.SILENT -> ChatTtsMode.READ_ALOUD
+                        ChatTtsMode.READ_ALOUD -> ChatTtsMode.VOICE_BAR
+                        ChatTtsMode.VOICE_BAR -> ChatTtsMode.SILENT
+                    }
+                    viewModel.setTtsMode(nextMode)
+                    showExtensionPanel = false
+                    scope.launch { snackbarHostState.showSnackbar("朗读模式：${nextMode.displayName}") }
+                },
+                onLocationClick = { onIntent(ChatIntent.ShareLocation) },
                 onVoiceInputClick = {
                     if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         showExtensionPanel = false
@@ -840,7 +880,7 @@ fun ChatScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(colors.dialogScrim.copy(alpha = 0.5f))
+                    .background(colors.scrim.copy(alpha = 0.5f))
                     .clickable { },
                 contentAlignment = Alignment.Center
             ) {
@@ -851,62 +891,20 @@ fun ChatScreen(
                     Text(
                         text = "录音中...",
                         fontSize = 18.sp,
-                        color = colors.inverseOnSurface,
+                        color = colors.inverseContent,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "${recordingDuration}s",
                         fontSize = 48.sp,
-                        color = colors.inverseOnSurface,
+                        color = colors.inverseContent,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "点击按钮操作",
+                        text = if (isCanceling) "松开取消" else "松开发送，上滑取消",
                         fontSize = 13.sp,
-                        color = colors.inverseOnSurface.copy(alpha = 0.6f)
+                        color = if (isCanceling) colors.danger else colors.inverseContent.copy(alpha = 0.72f)
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(24.dp),
-                        modifier = Modifier.padding(top = 8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.topBarAccent)
-                                .clickable {
-                                    val audioPath = voiceRecorder.stop()
-                                    isRecording = false
-                                    showVoiceRecorder = false
-                                    if (audioPath != null && recordingDuration >= 1) {
-                                        onIntent(ChatIntent.SendVoice(audioPath, recordingDuration))
-                                    }
-                                }
-                                .padding(horizontal = 20.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "发送",
-                                color = colors.userContent,
-                                fontSize = 14.sp
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.destructive)
-                                .clickable {
-                                    voiceRecorder.cancel()
-                                    isRecording = false
-                                    showVoiceRecorder = false
-                                }
-                                .padding(horizontal = 20.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "取消",
-                                color = colors.inverseOnSurface,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -915,29 +913,8 @@ fun ChatScreen(
             companionId = companionId,
             companionData = companionData,
             isLoading = isLoading,
-            isDarkTheme = isDarkTheme,
-            currentTtsMode = ttsConfig.mode,
-            isTtsModeMenuExpanded = ttsModeMenu,
-            onBackClick = onNavigateBack,
+            onBackClick = exitChat,
             onDetailClick = onNavigateToDetail,
-            onTtsModeMenuExpandedChange = { expanded -> ttsModeMenu = expanded },
-            onCycleTtsModeClick = {
-                val nextMode = when (ttsConfig.mode) {
-                    ChatTtsMode.SILENT -> ChatTtsMode.READ_ALOUD
-                    ChatTtsMode.READ_ALOUD -> ChatTtsMode.VOICE_BAR
-                    ChatTtsMode.VOICE_BAR -> ChatTtsMode.SILENT
-                }
-                viewModel.setTtsMode(nextMode)
-            },
-            onTtsModeSelected = { mode -> viewModel.setTtsMode(mode) },
-            onVoiceCallClick = {
-                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                    onNavigateToVoiceCall(companionId)
-                } else {
-                    pendingAudioAction = { onNavigateToVoiceCall(companionId) }
-                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                }
-            },
             adaptiveSizing = adaptiveSizing
         )
 
@@ -945,7 +922,7 @@ fun ChatScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(colors.dialogScrim.copy(alpha = 0.94f))
+                    .background(colors.scrim.copy(alpha = 0.94f))
                     .clickable { previewImagePath = null },
                 contentAlignment = Alignment.Center
             ) {
@@ -966,7 +943,6 @@ fun ChatScreen(
                     }
                 )
             }
-        }
         }
     }
 }
@@ -991,3 +967,4 @@ private fun openChatMedia(context: Context, path: String, mimeType: String): Boo
         false
     }
 }
+

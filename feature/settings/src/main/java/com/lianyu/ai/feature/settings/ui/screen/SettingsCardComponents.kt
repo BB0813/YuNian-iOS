@@ -1,4 +1,5 @@
 package com.lianyu.ai.feature.settings.ui.screen
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -122,7 +123,7 @@ fun ModelSelectionCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cardBackground = MaterialTheme.colorScheme.surfaceVariant
+    val cardBackground = AppTheme.colors.surfaceVariant
     val selectedBorder = if (state.isSelected) PetalPrimary else Color.Transparent
 
     Column(
@@ -137,7 +138,7 @@ fun ModelSelectionCard(
             text = state.displayName,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = AppTheme.colors.onSurface
         )
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -146,7 +147,7 @@ fun ModelSelectionCard(
         Text(
             text = sizeText,
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = AppTheme.colors.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -157,7 +158,7 @@ fun ModelSelectionCard(
                     Text(
                         text = "手动部署",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = AppTheme.colors.onSurfaceVariant
                     )
                 } else {
                     Button(
@@ -184,7 +185,7 @@ fun ModelSelectionCard(
                     )
                     Button(
                         onClick = onCancel,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.outlineVariant),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("取消", fontSize = 12.sp)
@@ -215,7 +216,7 @@ fun ModelSelectionCard(
                 ) {
                     Button(
                         onClick = onDisable,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.outlineVariant),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.outlineVariant),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("禁用", fontSize = 10.sp)
@@ -223,7 +224,7 @@ fun ModelSelectionCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     Button(
                         onClick = onDelete,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.error),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("删除", fontSize = 10.sp)
@@ -235,7 +236,7 @@ fun ModelSelectionCard(
                     Text(
                         text = state.errorMessage ?: "下载失败",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.error
+                        color = AppTheme.colors.error
                     )
                     if (state.downloadUrl.isNotBlank()) {
                         Button(
@@ -292,8 +293,8 @@ fun ProviderLogo(
         )
     } else {
         val (text, bgColor, textColor) = when (provider) {
-            ApiProvider.PARTNER -> Triple("C", Color(0xFFFF69B4), Color.White)
-            ApiProvider.IFLYTEK -> Triple("讯", Color(0xFF1677FF), Color.White)
+            ApiProvider.PARTNER -> Triple("C", Color(0xFFFF69B4), AppTheme.colors.staticWhite)
+            ApiProvider.IFLYTEK -> Triple("讯", Color(0xFF1677FF), AppTheme.colors.staticWhite)
             ApiProvider.CUSTOM -> Triple("?", Color(0xFF888888).copy(alpha = 0.15f), Color(0xFF888888))
             else -> Triple("?", Color(0xFF888888).copy(alpha = 0.15f), Color(0xFF888888))
         }
@@ -345,7 +346,7 @@ fun VisionModelSettingsCard(
     onVisionModelChanged: (String) -> Unit
 ) {
     var showVisionModelDropdown by remember { mutableStateOf(false) }
-    val cardBg = MaterialTheme.colorScheme.surfaceVariant
+    val cardBg = AppTheme.colors.surfaceVariant
 
     Column(
         modifier = Modifier
@@ -413,10 +414,10 @@ fun VisionModelSettingsCard(
                 checked = visionEnabled,
                 onCheckedChange = onVisionEnabledChanged,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                    checkedThumbColor = AppTheme.colors.primary,
+                    checkedTrackColor = AppTheme.colors.primaryContainer.copy(alpha = 0.5f),
+                    uncheckedThumbColor = AppTheme.colors.outline,
+                    uncheckedTrackColor = AppTheme.colors.surfaceVariant
                 )
             )
         }
@@ -434,7 +435,7 @@ fun VisionModelSettingsCard(
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = PetalPrimary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        unfocusedBorderColor = AppTheme.colors.outline,
                         focusedContainerColor = cardBg,
                         unfocusedContainerColor = cardBg,
                         focusedTextColor = textPrimaryColor,
@@ -500,7 +501,7 @@ fun ApiTutorialCard(
 ) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
-    val cardBg = MaterialTheme.colorScheme.surfaceVariant
+    val cardBg = AppTheme.colors.surfaceVariant
 
     Card(
         modifier = Modifier
@@ -590,7 +591,7 @@ fun ApiTutorialCard(
                         ) {
                             Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("去DeepSeek获取免费API Key", color = MaterialTheme.colorScheme.onPrimary, fontSize = 13.sp)
+                            Text("去DeepSeek获取免费API Key", color = AppTheme.colors.onPrimary, fontSize = 13.sp)
                         }
                     }
                 }

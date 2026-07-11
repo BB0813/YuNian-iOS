@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,11 +26,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
-import com.lianyu.ai.feature.chat.ui.theme.withChatSize
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.QuotedTextContent
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
+import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.uicommon.component.VoiceMessageBubble as VoicePlaybackBubble
 
 @Composable
@@ -40,29 +39,28 @@ fun TextMessageContent(
     adaptiveSizing: AdaptiveSizing,
     onIntent: (ChatIntent) -> Unit
 ) {
-    val colors = ChatTheme.colors
-    val typography = ChatTheme.typography
-    val metrics = ChatTheme.metrics
-    val quoteBackground = if (isMine) colors.quoteUserBackground else colors.quoteAiBackground
-    val quoteAuthor = if (isMine) colors.quoteUserAuthor else colors.quoteAiAuthor
-    val quotePreview = if (isMine) colors.quoteUserPreview else colors.quoteAiPreview
+    val colors = AppTheme.colors
+    val typography = AppTheme.typography
+    val dimens = AppTheme.dimens
+    val quoteAuthor = if (isMine) colors.quotePrimaryAuthor else colors.quoteSecondaryAuthor
+    val quotePreview = if (isMine) colors.quotePrimaryPreview else colors.quoteSecondaryPreview
 
     Column(
         modifier = Modifier.widthIn(
-            max = metrics.textBubbleMaxWidth * adaptiveSizing.messageBubbleMaxWidthRatio / 0.75f
+            max = dimens.textBubbleMaxWidth * adaptiveSizing.messageBubbleMaxWidthRatio / 0.75f
         )
     ) {
         Text(
             text = quotedContent.body,
-            style = typography.messageBody.withChatSize(
+            style = typography.bodyLarge.copy(
                 fontSize = adaptiveSizing.fontSizeBody.sp,
                 lineHeight = (adaptiveSizing.fontSizeBody * 1.5).sp
             ),
-            color = if (isMine) colors.userContent else colors.aiContent,
+            color = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent,
             softWrap = true
         )
         quotedContent.quote?.let { quote ->
-            Spacer(modifier = Modifier.height(metrics.quoteBottomGap))
+            Spacer(modifier = Modifier.height(dimens.quoteBottomGap))
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))
@@ -81,18 +79,18 @@ fun TextMessageContent(
                         .width(2.dp)
                         .heightIn(min = 16.dp)
                         .clip(RoundedCornerShape(1.dp))
-                        .background(if (isMine) colors.userContent.copy(alpha = 0.35f) else colors.aiContent.copy(alpha = 0.35f))
+                        .background(if (isMine) colors.primaryBubbleContent.copy(alpha = 0.35f) else colors.secondaryBubbleContent.copy(alpha = 0.35f))
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Column {
                     Text(
                         text = quote.authorName,
-                        style = typography.quoteAuthor,
+                        style = typography.labelSmall.copy(fontSize = dimens.quoteAuthorFontSize),
                         color = quoteAuthor
                     )
                     Text(
                         text = quote.previewText,
-                        style = typography.quotePreview,
+                        style = typography.bodySmall.copy(fontSize = dimens.quotePreviewFontSize),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         color = quotePreview
@@ -109,32 +107,32 @@ fun ImageMessageContent(
     isMine: Boolean,
     adaptiveSizing: AdaptiveSizing
 ) {
-    val colors = ChatTheme.colors
-    val metrics = ChatTheme.metrics
-    val shapes = ChatTheme.shapes
+    val colors = AppTheme.colors
+    val typography = AppTheme.typography
+    val dimens = AppTheme.dimens
 
     if (imageFile.exists()) {
         AsyncImage(
             model = imageFile,
             contentDescription = "图片",
             modifier = Modifier
-                .widthIn(max = metrics.imageMaxWidth)
-                .heightIn(max = metrics.imageMaxHeight)
-                .clip(RoundedCornerShape(shapes.imageCornerRadius)),
+                .widthIn(max = dimens.imageMaxWidth)
+                .heightIn(max = dimens.imageMaxHeight)
+                .clip(RoundedCornerShape(dimens.imageCornerRadius)),
             contentScale = ContentScale.Fit
         )
     } else {
         Box(
             modifier = Modifier
-                .widthIn(max = metrics.imagePlaceholderMaxWidth)
+                .widthIn(max = dimens.imagePlaceholderMaxWidth)
                 .clip(RoundedCornerShape(adaptiveSizing.cornerRadius))
-                .background(if (isMine) colors.userBubble else colors.aiBubble)
+                .background(if (isMine) colors.primaryBubbleBackground else colors.secondaryBubbleBackground)
                 .padding(horizontal = 16.dp, vertical = 24.dp)
         ) {
             Text(
                 text = "📷 图片",
-                style = ChatTheme.typography.messageBody,
-                color = if (isMine) colors.userContent else colors.aiContent
+                style = typography.bodyLarge,
+                color = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent
             )
         }
     }
@@ -147,24 +145,25 @@ fun AttachmentMessageContent(
     isMine: Boolean,
     adaptiveSizing: AdaptiveSizing
 ) {
-    val colors = ChatTheme.colors
-    val metrics = ChatTheme.metrics
+    val colors = AppTheme.colors
+    val typography = AppTheme.typography
+    val dimens = AppTheme.dimens
 
     Row(
-        modifier = Modifier.widthIn(max = metrics.attachmentMaxWidth),
+        modifier = Modifier.widthIn(max = dimens.attachmentMaxWidth),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (isMine) colors.userContent else colors.aiContent,
-            modifier = Modifier.size(metrics.attachmentIconSize)
+            tint = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent,
+            modifier = Modifier.size(dimens.attachmentIconSize)
         )
-        Spacer(modifier = Modifier.width(metrics.attachmentIconTextGap))
+        Spacer(modifier = Modifier.width(dimens.attachmentIconTextGap))
         Text(
             text = label,
-            style = ChatTheme.typography.messageBody.withChatSize(adaptiveSizing.fontSizeBody.sp),
-            color = if (isMine) colors.userContent else colors.aiContent
+            style = typography.bodyLarge.copy(fontSize = adaptiveSizing.fontSizeBody.sp),
+            color = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent
         )
     }
 }
@@ -186,12 +185,13 @@ fun VoiceMessageContent(
     duration: Int,
     isMine: Boolean
 ) {
-    val colors = ChatTheme.colors
+    val colors = AppTheme.colors
     VoicePlaybackBubble(
         audioPath = audioPath,
         duration = duration,
         isUser = isMine,
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
-        contentColor = if (isMine) colors.userContent else colors.aiContent
+        contentColor = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent
     )
 }
+

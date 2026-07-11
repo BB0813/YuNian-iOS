@@ -1,5 +1,6 @@
-﻿package com.lianyu.ai.feature.settings.ui.screen
+package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,7 +68,7 @@ fun FrameRateScreen(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val bgColor = colorScheme.background
     val cardColor = colorScheme.surfaceVariant
     val textPrimary = colorScheme.onSurface
@@ -221,7 +222,7 @@ private fun FrameRateOptionItem(
                 Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = stringResource(R.string.cd_selected),
-                    tint = Color.Black,
+                    tint = AppTheme.colors.staticBlack,
                     modifier = Modifier.size(14.dp)
                 )
             }

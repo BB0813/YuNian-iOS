@@ -63,7 +63,7 @@ fun ContactsScreen(
     isVisible: Boolean = true
 ) {
     val companions by viewModel.companions.collectAsState(initial = emptyList())
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Scaffold { paddingValues ->
         Box(
@@ -144,7 +144,7 @@ fun GroupContactItem(
     group: ChatGroup,
     onClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     AppListItemLayout(
         isStartAligned = true,
@@ -156,8 +156,8 @@ fun GroupContactItem(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF07C160).copy(alpha = 0.6f),
-                                Color(0xFF07C160).copy(alpha = 0.3f)
+                                AppTheme.colors.success.copy(alpha = 0.6f),
+                                AppTheme.colors.success.copy(alpha = 0.3f)
                             )
                         )
                     ),
@@ -205,7 +205,7 @@ fun ContactItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     AppListItemLayout(
         isStartAligned = true,
@@ -258,7 +258,7 @@ fun ContactItem(
 
 @Composable
 fun EmptyContactsState() {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Box(
         modifier = Modifier.fillMaxSize(),

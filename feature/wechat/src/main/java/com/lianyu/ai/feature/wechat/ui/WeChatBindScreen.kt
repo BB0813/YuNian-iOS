@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.wechat.ui
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,22 +69,22 @@ fun WeChatBindScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("绑定微信", color = MaterialTheme.colorScheme.onSurface) },
+                title = { Text("绑定微信", color = AppTheme.colors.onSurface) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回",
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = AppTheme.colors.onSurface
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = AppTheme.colors.background
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = AppTheme.colors.background
     ) { padding ->
         Column(
             modifier = modifier
@@ -100,13 +101,13 @@ fun WeChatBindScreen(
                         text = "✅ 微信已绑定",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4CAF50)
+                        color = AppTheme.colors.success
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Bot ID: ${uiState.account?.ilinkBotId ?: ""}",
                         fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = AppTheme.colors.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
@@ -123,7 +124,7 @@ fun WeChatBindScreen(
                         text = "请使用微信扫码",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = AppTheme.colors.onSurface
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     val qrBitmap = rememberQrBitmap(qrCodeContent, size = 240)
@@ -131,7 +132,7 @@ fun WeChatBindScreen(
                         modifier = Modifier
                             .size(240.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White)
+                            .background(AppTheme.colors.staticWhite)
                             .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -145,7 +146,7 @@ fun WeChatBindScreen(
                             Text(
                                 text = "生成二维码中...",
                                 fontSize = 12.sp,
-                                color = Color.Black,
+                                color = AppTheme.colors.staticBlack,
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -154,7 +155,7 @@ fun WeChatBindScreen(
                     Text(
                         text = "请在手机上打开微信，扫描上方二维码并确认登录",
                         fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AppTheme.colors.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(24.dp))
@@ -169,13 +170,13 @@ fun WeChatBindScreen(
                 uiState.isLoading -> {
                     CircularProgressIndicator(
                         modifier = Modifier.size(48.dp),
-                        color = MaterialTheme.colorScheme.primary
+                        color = AppTheme.colors.primary
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "正在获取二维码...",
                         fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = AppTheme.colors.onSurfaceVariant
                     )
                 }
 
@@ -184,13 +185,13 @@ fun WeChatBindScreen(
                         text = "绑定微信个人号",
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = AppTheme.colors.onSurface
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "通过微信 ilink 协议，你的 AI 伴侣可以直接在微信中与你对话。",
                         fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AppTheme.colors.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         lineHeight = 20.sp
                     )
@@ -212,7 +213,7 @@ fun WeChatBindScreen(
                 Text(
                     text = error,
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.error,
+                    color = AppTheme.colors.error,
                     textAlign = TextAlign.Center
                 )
             }

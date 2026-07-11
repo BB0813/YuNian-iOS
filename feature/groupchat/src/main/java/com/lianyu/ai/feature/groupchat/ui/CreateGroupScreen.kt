@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.groupchat.ui
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -86,7 +87,7 @@ fun CreateGroupScreen(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 17.sp
                     ),
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = AppTheme.colors.onBackground
                 )
                 },
                 navigationIcon = {
@@ -94,7 +95,7 @@ fun CreateGroupScreen(
                         Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.group_chat),
-                        tint = MaterialTheme.colorScheme.onBackground
+                        tint = AppTheme.colors.onBackground
                     )
                     }
                 },
@@ -102,7 +103,7 @@ fun CreateGroupScreen(
                     val canCreate = groupName.isNotBlank() && selectedIds.isNotEmpty()
                     Text(
                         text = stringResource(R.string.create),
-                        color = if (canCreate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (canCreate) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
@@ -114,7 +115,7 @@ fun CreateGroupScreen(
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = AppTheme.colors.background
                 )
             )
         }
@@ -122,7 +123,7 @@ fun CreateGroupScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(AppTheme.colors.background)
                 .padding(top = paddingValues.calculateTopPadding())
                 .padding(horizontal = 16.dp)
         ) {
@@ -134,17 +135,17 @@ fun CreateGroupScreen(
                     value = groupName,
                     onValueChange = { groupName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.group_name), color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    placeholder = { Text(stringResource(R.string.group_name_hint), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                    label = { Text(stringResource(R.string.group_name), color = AppTheme.colors.onSurfaceVariant) },
+                    placeholder = { Text(stringResource(R.string.group_name_hint), color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                        focusedBorderColor = AppTheme.colors.primary,
+                        unfocusedBorderColor = AppTheme.colors.outline,
+                        focusedContainerColor = AppTheme.colors.surface,
+                        unfocusedContainerColor = AppTheme.colors.surface,
+                        focusedTextColor = AppTheme.colors.onSurface,
+                        unfocusedTextColor = AppTheme.colors.onSurface
                     )
                 )
             }
@@ -155,7 +156,7 @@ fun CreateGroupScreen(
                 text = stringResource(R.string.select_companions, selectedIds.size, companions.size),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AppTheme.colors.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
@@ -166,7 +167,7 @@ fun CreateGroupScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.no_companions),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AppTheme.colors.onSurfaceVariant,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(vertical = 32.dp)
                     )
@@ -206,7 +207,7 @@ fun CompanionSelectItem(
         modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surface)
+                .background(AppTheme.colors.surface)
                 .clickable(onClick = onClick)
                 .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
@@ -218,7 +219,7 @@ fun CompanionSelectItem(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(AppTheme.colors.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (companion.avatarUrl != null) {
@@ -232,7 +233,7 @@ fun CompanionSelectItem(
                     Icon(
                         imageVector = Icons.Outlined.Person,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = AppTheme.colors.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -244,7 +245,7 @@ fun CompanionSelectItem(
                 text = companion.name,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = AppTheme.colors.onSurface,
                 modifier = Modifier.weight(1f)
             )
 
@@ -253,13 +254,13 @@ fun CompanionSelectItem(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(AppTheme.colors.primary),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Check,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                        tint = AppTheme.colors.onPrimary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -268,7 +269,7 @@ fun CompanionSelectItem(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .background(AppTheme.colors.surfaceVariant)
                 )
             }
         }

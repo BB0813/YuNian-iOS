@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -61,6 +62,8 @@ fun ChatInputExtensionPanel(
     onAlbumClick: () -> Unit = {},
     onCameraClick: () -> Unit = {},
     onVideoCallClick: () -> Unit = {},
+    onVoiceCallClick: (() -> Unit)? = null,
+    onTtsModeClick: (() -> Unit)? = null,
     onLocationClick: () -> Unit = {},
     onVoiceInputClick: () -> Unit = {},
     onStickerClick: () -> Unit = {},
@@ -101,6 +104,8 @@ fun ChatInputExtensionPanel(
                     onAlbumClick = onAlbumClick,
                     onCameraClick = onCameraClick,
                     onVideoCallClick = onVideoCallClick,
+                    onVoiceCallClick = onVoiceCallClick,
+                    onTtsModeClick = onTtsModeClick,
                     onLocationClick = onLocationClick,
                     onStickerClick = onStickerClick,
                     onVoiceInputClick = onVoiceInputClick,
@@ -122,6 +127,8 @@ private fun ExtensionGridPage(
     onAlbumClick: () -> Unit,
     onCameraClick: () -> Unit,
     onVideoCallClick: () -> Unit,
+    onVoiceCallClick: (() -> Unit)?,
+    onTtsModeClick: (() -> Unit)?,
     onLocationClick: () -> Unit,
     onStickerClick: () -> Unit,
     onVoiceInputClick: () -> Unit,
@@ -133,6 +140,8 @@ private fun ExtensionGridPage(
     items.add(ExtensionItem("相册", Icons.Filled.Image, onAlbumClick))
     items.add(ExtensionItem("拍摄", Icons.Filled.CameraAlt, onCameraClick))
     items.add(ExtensionItem("视频通话", Icons.Filled.Videocam, onVideoCallClick))
+    onVoiceCallClick?.let { items.add(ExtensionItem("语音通话", Icons.Filled.Call, it)) }
+    onTtsModeClick?.let { items.add(ExtensionItem("朗读模式", Icons.AutoMirrored.Filled.VolumeUp, it)) }
     items.add(ExtensionItem("位置", Icons.Filled.LocationOn, onLocationClick))
     items.add(ExtensionItem("表情包", Icons.Filled.Mood, onStickerClick))
     items.add(ExtensionItem("语音输入", Icons.Filled.Mic, onVoiceInputClick))

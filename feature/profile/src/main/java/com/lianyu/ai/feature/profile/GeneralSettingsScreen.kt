@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -92,7 +93,7 @@ fun GeneralSettingsScreen(
     onExperimentalFeaturesClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Scaffold(
         modifier = Modifier.fillMaxSize().background(colorScheme.background).windowInsetsPadding(WindowInsets.statusBars),
@@ -243,7 +244,7 @@ private fun ThinkingSettingsDialog(showDialog: MutableState<Boolean>, settingsSt
 @Composable
 private fun PermissionSettingsCard() {
     val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Column(
         modifier = Modifier
@@ -272,12 +273,12 @@ private fun PermissionSettingsCard() {
 
 @Composable
 private fun PermissionItem(title: String, subtitle: String, onClick: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Filled.PowerSettingsNew, title, Modifier.size(24.dp), tint = Color(0xFF07C160))
+        Icon(Icons.Filled.PowerSettingsNew, title, Modifier.size(24.dp), tint = AppTheme.colors.success)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 16.sp), color = colorScheme.onSurface)
@@ -289,7 +290,7 @@ private fun PermissionItem(title: String, subtitle: String, onClick: () -> Unit)
 
 @Composable
 private fun PermissionDivider() {
-    Box(Modifier.fillMaxWidth().padding(start = 36.dp).height(0.5.dp).background(MaterialTheme.colorScheme.outline))
+    Box(Modifier.fillMaxWidth().padding(start = 36.dp).height(0.5.dp).background(AppTheme.colors.outline))
 }
 
 // ============================================================================

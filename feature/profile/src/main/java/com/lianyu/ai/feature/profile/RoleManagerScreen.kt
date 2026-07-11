@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -135,13 +136,13 @@ fun RoleManagerScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back),
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = AppTheme.colors.onSurface
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
+                    containerColor = AppTheme.colors.background,
+                    titleContentColor = AppTheme.colors.onBackground
                 )
             )
         }
@@ -149,7 +150,7 @@ fun RoleManagerScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(AppTheme.colors.background)
                 .padding(paddingValues)
         ) {
             Column(
@@ -167,7 +168,7 @@ fun RoleManagerScreen(
                         Text(
                             text = stringResource(R.string.role_manager_current),
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = AppTheme.colors.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -204,7 +205,7 @@ fun RoleManagerScreen(
                         Text(
                             text = stringResource(R.string.role_manager_hint),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = AppTheme.colors.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -257,9 +258,9 @@ fun RoleManagerScreen(
                             .height(52.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF07C160),
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            containerColor = AppTheme.colors.success,
+                            disabledContainerColor = AppTheme.colors.surfaceVariant,
+                            disabledContentColor = AppTheme.colors.onSurfaceVariant
                         )
                     ) {
                         Crossfade(
@@ -271,7 +272,7 @@ fun RoleManagerScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = AppTheme.colors.onPrimary,
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.size(10.dp))
@@ -319,7 +320,7 @@ private fun RoleSwitchLoadingOverlay(
     stage: SwitchStage,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val accentColor = when (role) {
         CompanionRole.GIRLFRIEND -> Color(0xFFFF6B9D)
         CompanionRole.BOYFRIEND -> Color(0xFF4A90E2)
@@ -348,7 +349,7 @@ private fun RoleSwitchLoadingOverlay(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f))
+            .background(AppTheme.colors.staticBlack.copy(alpha = 0.45f))
             // 拦截所有点击，避免切换过程中误触返回或卡片
             .clickable(enabled = false) { },
         contentAlignment = Alignment.Center
@@ -457,7 +458,7 @@ private fun RoleManagerCard(
     isCurrent: Boolean,
     onClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val borderColor = if (isSelected) accentColor else colorScheme.outline.copy(alpha = 0.3f)
     val backgroundColor = if (isSelected) accentColor.copy(alpha = 0.08f) else colorScheme.surfaceVariant
 
@@ -514,13 +515,13 @@ private fun RoleManagerCard(
                     Icon(
                         imageVector = Icons.Filled.CheckCircle,
                         contentDescription = stringResource(R.string.role_current),
-                        tint = Color(0xFF07C160),
+                        tint = AppTheme.colors.success,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.size(4.dp))
                     Text(
                         text = stringResource(R.string.role_current),
-                        color = Color(0xFF07C160),
+                        color = AppTheme.colors.success,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )

@@ -150,9 +150,9 @@ private fun PetalApiConfigEditDialog(
     availableModels: List<String> = emptyList(),
     modelFetchState: SettingsViewModel.ModelFetchState = SettingsViewModel.ModelFetchState()
 ) {
-    val cardBackground = MaterialTheme.colorScheme.surfaceVariant
-    val dividerColor = MaterialTheme.colorScheme.outline
-    val textTertiary = MaterialTheme.colorScheme.outlineVariant
+    val cardBackground = AppTheme.colors.surfaceVariant
+    val dividerColor = AppTheme.colors.outline
+    val textTertiary = AppTheme.colors.outlineVariant
 
     var apiKey by remember { mutableStateOf(config.apiKey) }
     var extraApiKeys by remember { mutableStateOf(config.extraApiKeys) }
@@ -1212,7 +1212,7 @@ fun PetalAddApiButton(onClick: () -> Unit, isDarkTheme: Boolean) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.45f))
+                .background(AppTheme.colors.surface.copy(alpha = 0.45f))
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             contentAlignment = Alignment.CenterStart
         ) {

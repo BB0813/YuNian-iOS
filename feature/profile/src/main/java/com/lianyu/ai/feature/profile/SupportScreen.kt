@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -61,7 +62,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 fun SupportScreen(
     onNavigateBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     val context = LocalContext.current
     val sponsorUrl = stringResource(R.string.support_sponsor_url)
@@ -218,12 +219,12 @@ fun SupportScreen(
                     Box(modifier = Modifier.fillMaxWidth().background(colorScheme.surface).padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Column {
                             Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { ageAgreed = !ageAgreed }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = ageAgreed, onCheckedChange = { ageAgreed = it }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF07C160), uncheckedColor = colorScheme.onSurfaceVariant.copy(alpha = 0.5f)))
+                                Checkbox(checked = ageAgreed, onCheckedChange = { ageAgreed = it }, colors = CheckboxDefaults.colors(checkedColor = AppTheme.colors.success, uncheckedColor = colorScheme.onSurfaceVariant.copy(alpha = 0.5f)))
                                 Text(text = stringResource(R.string.support_agreement_age), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp), color = colorScheme.onSurface)
                             }
                             Spacer(modifier = Modifier.height(12.dp))
-                            Button(onClick = { if (ageAgreed) { showAgreement = false; openSponsorSite() } }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = if (ageAgreed) Color(0xFF07C160) else Color.Gray.copy(alpha = 0.3f)), enabled = ageAgreed) {
-                                Text(text = stringResource(R.string.support_agree), style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 16.sp), color = Color.White)
+                            Button(onClick = { if (ageAgreed) { showAgreement = false; openSponsorSite() } }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = if (ageAgreed) AppTheme.colors.success else Color.Gray.copy(alpha = 0.3f)), enabled = ageAgreed) {
+                                Text(text = stringResource(R.string.support_agree), style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 16.sp), color = AppTheme.colors.staticWhite)
                             }
                         }
                     }
@@ -235,7 +236,7 @@ fun SupportScreen(
 
 @Composable
 private fun SupportAgreementSection(title: String, body: String) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Spacer(modifier = Modifier.height(20.dp))
     Text(text = title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp), color = colorScheme.onSurface)
     Spacer(modifier = Modifier.height(8.dp))

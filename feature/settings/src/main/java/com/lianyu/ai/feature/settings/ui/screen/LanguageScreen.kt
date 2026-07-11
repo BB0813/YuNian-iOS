@@ -1,5 +1,6 @@
-﻿package com.lianyu.ai.feature.settings.ui.screen
+package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -75,7 +76,7 @@ fun LanguageScreen(
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val textPrimaryColor = colorScheme.onSurface
     val backgroundColor = colorScheme.background
     val dividerColor = colorScheme.outline
@@ -236,8 +237,8 @@ fun LanguageOptionCard(
                         .background(
                             Brush.radialGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                AppTheme.colors.primary.copy(alpha = 0.9f),
+                                AppTheme.colors.primary.copy(alpha = 0.7f)
                             )
                         )
                         ),
@@ -246,7 +247,7 @@ fun LanguageOptionCard(
                     Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = stringResource(R.string.cd_selected),
-                    tint = MaterialTheme.colorScheme.onPrimary,
+                    tint = AppTheme.colors.onPrimary,
                     modifier = Modifier.size(16.dp)
                 )
                 }

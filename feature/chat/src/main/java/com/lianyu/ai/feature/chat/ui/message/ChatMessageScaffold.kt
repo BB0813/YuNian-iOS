@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -64,3 +64,4 @@ internal fun ChatMessageScaffold(
         }
     )
 }
+

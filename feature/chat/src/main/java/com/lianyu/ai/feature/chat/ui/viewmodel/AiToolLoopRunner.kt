@@ -44,6 +44,10 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
         groupId: Long? = null,
         maxRounds: Int = 3
     ): AiResponse {
+        if (tools.isEmpty()) {
+            return aiService.sendMessage(companionInfo, history, stickerProbability, ntpTimeEnabled)
+        }
+
         // 用可变列表承载 history，工具调用中间轮次追加消息但不入库
         val mutableHistory = history.toMutableList()
         var currentResponse = aiService.sendMessage(companionInfo, mutableHistory.toList(), stickerProbability, ntpTimeEnabled, tools)
@@ -125,3 +129,4 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
         ).toString()
     }
 }
+

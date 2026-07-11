@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,13 +30,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.common.StickerInfo
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
 import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.uicommon.component.ChatInputExtensionPanel
 import com.lianyu.ai.uicommon.component.StickerPanel
 import com.lianyu.ai.uicommon.component.WeChatChatInputBar
 import com.lianyu.ai.uicommon.model.ApiProviderInfo
+import com.lianyu.ai.uicommon.theme.AppTheme
 
 @Composable
 fun ChatInputRegion(
@@ -56,6 +57,8 @@ fun ChatInputRegion(
     onAlbumClick: () -> Unit,
     onCameraClick: () -> Unit,
     onVideoCallClick: () -> Unit,
+    onVoiceCallClick: () -> Unit,
+    onTtsModeClick: () -> Unit,
     onLocationClick: () -> Unit,
     onVoiceInputClick: () -> Unit,
     onStickerPanelClick: () -> Unit,
@@ -66,11 +69,12 @@ fun ChatInputRegion(
     onVoiceRecordCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = ChatTheme.colors
+    val colors = AppTheme.colors
 
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .imePadding()
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
         if (ttsState == ChatTtsState.SPEAKING) {
@@ -79,7 +83,7 @@ fun ChatInputRegion(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(colors.inputAccentContainer)
+                    .background(colors.primary.copy(alpha = 0.12f))
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -88,13 +92,13 @@ fun ChatInputRegion(
                     CircularProgressIndicator(
                         modifier = Modifier.size(12.dp),
                         strokeWidth = 2.dp,
-                        color = colors.inputAccent
+                        color = colors.primary
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "AI 正在朗读...",
                         fontSize = 12.sp,
-                        color = colors.inputAccent
+                        color = colors.primary
                     )
                 }
                 IconButton(
@@ -104,7 +108,7 @@ fun ChatInputRegion(
                     Icon(
                         imageVector = Icons.Filled.Stop,
                         contentDescription = "停止朗读",
-                        tint = colors.inputAccent,
+                        tint = colors.primary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -126,6 +130,8 @@ fun ChatInputRegion(
             onAlbumClick = onAlbumClick,
             onCameraClick = onCameraClick,
             onVideoCallClick = onVideoCallClick,
+            onVoiceCallClick = onVoiceCallClick,
+            onTtsModeClick = onTtsModeClick,
             onLocationClick = onLocationClick,
             onVoiceInputClick = onVoiceInputClick,
             onStickerClick = onStickerPanelClick
@@ -137,14 +143,14 @@ fun ChatInputRegion(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(colors.inputBackground.copy(alpha = 0.95f))
+                    .background(colors.surfaceVariant.copy(alpha = 0.95f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "你已拉黑该联系人",
                     fontSize = 14.sp,
-                    color = colors.inputBlockedContent,
+                    color = colors.error,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -154,16 +160,10 @@ fun ChatInputRegion(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(colors.inputBackground.copy(alpha = 0.95f))
+                    .background(colors.surfaceVariant.copy(alpha = 0.95f))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    if (quoteReply != null) {
-                        QuoteReplyPreview(
-                            quoteReply = quoteReply,
-                            onClearClick = onClearQuoteReply
-                        )
-                    }
                     WeChatChatInputBar(
                         onSendMessage = onSendMessage,
                         isLoading = isLoading,
@@ -176,6 +176,12 @@ fun ChatInputRegion(
                         onVoiceRecordCancel = onVoiceRecordCancel,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (quoteReply != null) {
+                        QuoteReplyPreview(
+                            quoteReply = quoteReply,
+                            onClearClick = onClearQuoteReply
+                        )
+                    }
                 }
             }
         }
@@ -187,14 +193,14 @@ private fun QuoteReplyPreview(
     quoteReply: QuoteReply,
     onClearClick: () -> Unit
 ) {
-    val colors = ChatTheme.colors
+    val colors = AppTheme.colors
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(colors.inputQuoteBackground.copy(alpha = 0.72f))
+            .background(colors.surface.copy(alpha = 0.72f))
             .padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -204,12 +210,12 @@ private fun QuoteReplyPreview(
                 text = "引用 ${quoteReply.authorName}",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = colors.inputAccent
+                color = colors.primary
             )
             Text(
                 text = quoteReply.previewText,
                 fontSize = 12.sp,
-                color = colors.metadata,
+                color = colors.metadataContent,
                 maxLines = 1
             )
         }
@@ -220,7 +226,7 @@ private fun QuoteReplyPreview(
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "取消引用",
-                tint = colors.metadata,
+                tint = colors.metadataContent,
                 modifier = Modifier.size(16.dp)
             )
         }

@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -1160,7 +1161,7 @@ fun ThanksScreen(
     onNavigateBack: () -> Unit,
     onViewFullList: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     var isVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { isVisible = true }
@@ -1242,7 +1243,7 @@ fun ThanksScreen(
 fun ThanksFullListScreen(
     onNavigateBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     var isVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { isVisible = true }
@@ -1322,7 +1323,7 @@ private fun SponsorItem(
     index: Int,
     isVisible: Boolean
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val animated by animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
         animationSpec = tween(400, delayMillis = 200 + index * 80),
@@ -1345,7 +1346,7 @@ private fun SponsorItem(
                     spotColor = colorScheme.primary.copy(alpha = 0.18f)
                 ),
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Row(
@@ -1427,7 +1428,7 @@ private fun SponsorItem(
 private fun ViewFullListButton(
     onClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1451,7 +1452,7 @@ private fun ViewFullListButton(
 
 @Composable
 private fun FooterNote() {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Text(
         text = "排名不分先后    名单持续更新",
         modifier = Modifier

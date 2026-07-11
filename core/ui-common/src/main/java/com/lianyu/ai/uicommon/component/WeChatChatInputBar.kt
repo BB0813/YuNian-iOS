@@ -9,9 +9,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,9 +47,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -76,6 +82,7 @@ fun WeChatChatInputBar(
     val textColor = MaterialTheme.colorScheme.onSurface
     val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
     val onSurface = MaterialTheme.colorScheme.onSurface
+    val controlHeight = adaptiveSizing.inputBarHeight
 
     Column(modifier = modifier) {
         AnimatedVisibility(
@@ -102,7 +109,7 @@ fun WeChatChatInputBar(
             ) {
                 IconButton(
                     onClick = { onPlusClick?.invoke() },
-                    modifier = Modifier.size(adaptiveSizing.iconButtonSize)
+                    modifier = Modifier.size(controlHeight)
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Add,
@@ -113,16 +120,19 @@ fun WeChatChatInputBar(
                 }
 
                 Box(
-                    modifier = Modifier.weight(1f).height(adaptiveSizing.inputBarHeight)
+                    modifier = Modifier.weight(1f).heightIn(min = controlHeight, max = 120.dp)
                         .clip(RoundedCornerShape(21.dp))
                         .background(surfaceVariant)
-                        .padding(horizontal = 16.dp, vertical = 0.dp),
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         androidx.compose.foundation.text.BasicTextField(
                             value = text, onValueChange = { text = it },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                             decorationBox = { innerTextField ->
                                 Box(contentAlignment = Alignment.CenterStart) {
                                     if (text.isEmpty()) {
@@ -135,7 +145,7 @@ fun WeChatChatInputBar(
                                     innerTextField()
                                 }
                             },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                             keyboardActions = KeyboardActions(
                                 onSend = {
                                     if (text.isNotBlank()) {
@@ -143,7 +153,7 @@ fun WeChatChatInputBar(
                                     }
                                 }
                             ),
-                            maxLines = 1, singleLine = true,
+                            maxLines = 5,
                             textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = adaptiveSizing.fontSizeBody.sp, color = textColor)
                         )
 
@@ -159,43 +169,24 @@ fun WeChatChatInputBar(
                     }
                 }
 
-                if (availableApis.size > 1) {
-                    Box(
-                        modifier = Modifier
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(currentApi?.color ?: surfaceVariant)
-                            .clickable { showApiSelector = !showApiSelector }
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = currentApi?.displayName ?: "API",
-                                color = Color.White,
-                                fontSize = adaptiveSizing.fontSizeSmall.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Icon(
-                                imageVector = if (showApiSelector) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                }
-
                 val canSend = text.isNotBlank()
                 val sendBg = if (canSend) MaterialTheme.colorScheme.primary else surfaceVariant
                 val sendIconTint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                 Box(
-                    modifier = Modifier.size(40.dp).clip(CircleShape)
+                    modifier = Modifier.size(controlHeight).clip(CircleShape)
                         .background(sendBg)
-                        .clickable(enabled = canSend) {
-                            onSendMessage(text.trim()); text = ""
-                        },
+                        .combinedClickable(
+                            enabled = canSend || availableApis.size > 1,
+                            onClick = {
+                                if (canSend) {
+                                    onSendMessage(text.trim())
+                                    text = ""
+                                }
+                            },
+                            onLongClick = {
+                                if (availableApis.size > 1) showApiSelector = true
+                            }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.send),
@@ -215,6 +206,8 @@ private fun VoiceHoldButton(
     modifier: Modifier = Modifier
 ) {
     var isRecording by remember { mutableStateOf(false) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var shouldCancel by remember { mutableStateOf(false) }
 
     val iconTint = when {
         isRecording -> Color(0xFFFF3B30)
@@ -224,13 +217,33 @@ private fun VoiceHoldButton(
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    isRecording = true
-                    onRecordStart()
-                }
-            ),
+            .pointerInput(onRecordStart, onRecordStop, onRecordCancel) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        dragOffset = Offset.Zero
+                        shouldCancel = false
+                        isRecording = true
+                        onRecordStart()
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffset += dragAmount
+                        shouldCancel = dragOffset.y < -80.dp.toPx()
+                    },
+                    onDragEnd = {
+                        if (shouldCancel) onRecordCancel() else onRecordStop()
+                        isRecording = false
+                        dragOffset = Offset.Zero
+                        shouldCancel = false
+                    },
+                    onDragCancel = {
+                        if (isRecording) onRecordCancel()
+                        isRecording = false
+                        dragOffset = Offset.Zero
+                        shouldCancel = false
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
