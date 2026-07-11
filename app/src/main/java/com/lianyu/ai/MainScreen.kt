@@ -2,10 +2,6 @@ package com.lianyu.ai
 
 import android.app.Activity
 import androidx.activity.ComponentActivity
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -14,7 +10,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -34,7 +29,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.PersonOutline
-import kotlinx.coroutines.launch
 
 /**
  * 主界面根壳层：维护全局导航状态、tab chrome 和全局弹窗。
@@ -96,8 +90,6 @@ fun MainScreen(mainActivity: Activity) {
         BottomNavItem(stringResource(R.string.nav_profile), Icons.Filled.Person, Icons.Outlined.PersonOutline, MainRoute.Profile.route)
     )
 
-    val showBottomBar = MainRoute.isMainTabRoute(currentRoute)
-
     val pagerState = rememberPagerState(pageCount = { 3 })
     val coroutineScope = rememberCoroutineScope()
 
@@ -132,31 +124,12 @@ fun MainScreen(mainActivity: Activity) {
             pagerState = pagerState,
             mainActivity = mainActivity,
             isDarkTheme = isDark,
-            openCompanionChat = ::openCompanionChat
+            openCompanionChat = ::openCompanionChat,
+            bottomNavItems = bottomNavItems,
+            coroutineScope = coroutineScope,
+            lastTabPage = lastTabPage,
+            onLastTabPageChanged = { lastTabPage = it }
         )
-
-        // 底部导航栏：进出动画与页面瞬间切换同步，不抢跑也不延迟。
-        AnimatedVisibility(
-            visible = showBottomBar,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = tween(durationMillis = 200)
-            ),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = tween(durationMillis = 200)
-            ),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            FloatingGlassBottomNav(
-                items = bottomNavItems,
-                currentIndex = pagerState.currentPage,
-                onItemClick = { index ->
-                    lastTabPage = index
-                    coroutineScope.launch { pagerState.animateScrollToPage(index) }
-                }
-            )
-        }
 
         if (showUpdateDialog && updateInfo != null) {
             UpdateDialog(

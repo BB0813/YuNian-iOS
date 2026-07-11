@@ -1,0 +1,2 @@
+--------- beginning of main
+07-11 15:53:02.266 26576 27684 W Settings: Setting adb_enabled has moved from android.provider.Settings.Secure to android.provider.Settings.Global.

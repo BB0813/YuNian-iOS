@@ -3,13 +3,21 @@ package com.lianyu.ai
 import android.app.Activity
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -17,6 +25,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import kotlinx.coroutines.launch
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.backup.BackupScreen
@@ -65,21 +74,39 @@ internal fun MainNavHost(
     pagerState: PagerState,
     mainActivity: Activity,
     isDarkTheme: Boolean,
-    openCompanionChat: (Long) -> Unit
+    openCompanionChat: (Long) -> Unit,
+    bottomNavItems: List<BottomNavItem>,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    lastTabPage: Int,
+    onLastTabPageChanged: (Int) -> Unit
 ) {
+    val slideTransitionSpec = spring<IntOffset>(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+
     NavHost(
         navController = navController,
         startDestination = MainRoute.Home.route,
-        enterTransition = { EnterTransition.None },
+        enterTransition = { slideInHorizontally(initialOffsetX = { it }, animationSpec = slideTransitionSpec) },
         exitTransition = { ExitTransition.None },
         popEnterTransition = { EnterTransition.None },
-        popExitTransition = { ExitTransition.None }
+        popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = slideTransitionSpec) }
     ) {
-        composable(MainRoute.Home.route) {
-            MainTabPager(
+        composable(
+            MainRoute.Home.route,
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None }
+        ) {
+            MainTabScreen(
                 pagerState = pagerState,
                 navController = navController,
-                openCompanionChat = openCompanionChat
+                openCompanionChat = openCompanionChat,
+                bottomNavItems = bottomNavItems,
+                coroutineScope = coroutineScope,
+                onLastTabPageChanged = onLastTabPageChanged
             )
         }
 
@@ -355,5 +382,35 @@ private fun MainTabPager(
                 onAboutClick = { navController.navigate(MainRoute.About.route) }
             )
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MainTabScreen(
+    pagerState: PagerState,
+    navController: NavHostController,
+    openCompanionChat: (Long) -> Unit,
+    bottomNavItems: List<BottomNavItem>,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    onLastTabPageChanged: (Int) -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        MainTabPager(
+            pagerState = pagerState,
+            navController = navController,
+            openCompanionChat = openCompanionChat
+        )
+        FloatingGlassBottomNav(
+            items = bottomNavItems,
+            currentIndex = pagerState.currentPage,
+            onItemClick = { index ->
+                onLastTabPageChanged(index)
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(index)
+                }
+            },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
