@@ -85,11 +85,11 @@ fun AppListItemLayout(
         val gapPx = slotGap.roundToPx()
 
         // Content gets the remaining width after both slots and gaps
+        val reservedWidth = startPlaceable.width + endPlaceable.width + gapPx * 2
         val contentMaxWidth = if (constraints.hasBoundedWidth) {
-            (constraints.maxWidth - startPlaceable.width - endPlaceable.width - gapPx * 2)
-                .coerceAtLeast(0)
+            (constraints.maxWidth - reservedWidth).coerceAtLeast(0)
         } else {
-            Constraints.Infinity
+            constraints.maxWidth
         }
 
         val contentPlaceable = contentMeasurable.measure(
@@ -102,11 +102,12 @@ fun AppListItemLayout(
         )
 
         val height = maxOf(startPlaceable.height, contentPlaceable.height, endPlaceable.height)
+        val measuredWidth = reservedWidth + contentPlaceable.width
         val layoutWidth = if (constraints.hasBoundedWidth) {
             constraints.maxWidth
         } else {
-            startPlaceable.width + gapPx + contentPlaceable.width + gapPx + endPlaceable.width
-        }.coerceIn(constraints.minWidth, constraints.maxWidth)
+            measuredWidth.coerceAtLeast(constraints.minWidth)
+        }
 
         layout(layoutWidth, height) {
             if (isStartAligned) {

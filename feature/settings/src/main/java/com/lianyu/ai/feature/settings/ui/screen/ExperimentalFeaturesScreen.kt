@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,7 +49,7 @@ fun ExperimentalFeaturesScreen(
     onNavigateBack: () -> Unit,
     onYandereModeClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     val features = listOf(
         FeatureItem(
@@ -107,7 +108,7 @@ fun ExperimentalFeaturesScreen(
 
 @Composable
 private fun ExperimentalFeatureCard(feature: FeatureItem) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()

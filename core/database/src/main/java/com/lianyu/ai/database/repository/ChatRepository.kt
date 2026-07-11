@@ -34,8 +34,8 @@ class ChatRepository(private val chatMessageDao: ChatMessageDao) {
             .map { list -> list.map { ChatMessageCrypto.decryptFromStorage(it) }.reversed() }
             .onEach { decrypted -> recentCache[companionId] = decrypted }
 
-    fun getMessagesBefore(companionId: Long, beforeTimestamp: Long, limit: Int = 200): Flow<List<ChatMessage>> =
-        chatMessageDao.getMessagesBefore(companionId, beforeTimestamp, limit)
+    fun getMessagesBefore(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int = 200): Flow<List<ChatMessage>> =
+        chatMessageDao.getMessagesBefore(companionId, beforeTimestamp, beforeId, limit)
             .map { list -> list.map { ChatMessageCrypto.decryptFromStorage(it) }.reversed() }
 
     fun getLastMessageForCompanion(companionId: Long): Flow<ChatMessage?> =
@@ -59,9 +59,12 @@ class ChatRepository(private val chatMessageDao: ChatMessageDao) {
             .map { ChatMessageCrypto.decryptFromStorage(it) }
             .also { recentCache[companionId] = it.reversed() }
 
-    suspend fun getMessagesBeforeSync(companionId: Long, beforeTimestamp: Long, limit: Int): List<ChatMessage> =
-        chatMessageDao.getMessagesBeforeSync(companionId, beforeTimestamp, limit)
+    suspend fun getMessagesBeforeSync(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int): List<ChatMessage> =
+        chatMessageDao.getMessagesBeforeSync(companionId, beforeTimestamp, beforeId, limit)
             .map { ChatMessageCrypto.decryptFromStorage(it) }
+
+    suspend fun getMessageById(messageId: Long): ChatMessage? =
+        chatMessageDao.getMessageById(messageId)?.let { ChatMessageCrypto.decryptFromStorage(it) }
 
     suspend fun getMessagesForCompanionSync(companionId: Long): List<ChatMessage> =
         chatMessageDao.getMessagesForCompanionSync(companionId)

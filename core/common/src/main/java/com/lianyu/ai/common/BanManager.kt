@@ -14,6 +14,11 @@ import java.security.MessageDigest
  */
 object BanManager {
 
+    // ── 全局封禁开关 ──
+    // 设为 false 后，isBanned() 永远返回 false，recordViolation() / banUser() 变成空操作。
+    // 封禁机制在源码层面被完全解绑，所有调用方无需改动。
+    const val BAN_ENABLED = false
+
     private const val PREFS_NAME = "ban_manager_prefs_v3"
     private const val KEY_BAN_UNTIL = "ban_until"
     private const val KEY_VIOLATION_COUNT = "violation_count"
@@ -165,6 +170,9 @@ object BanManager {
      * 检查设备是否被封禁
      */
     fun isBanned(context: Context): Boolean {
+        // 封禁机制已解绑 — 永远返回 false
+        if (!BAN_ENABLED) return false
+
         val prefs = getPrefs(context)
         val isBanned = prefs.getBoolean(KEY_IS_BANNED, false)
         val banUntil = prefs.getLong(KEY_BAN_UNTIL, 0)
@@ -190,6 +198,13 @@ object BanManager {
      * 获取封禁信息（实时计算）
      */
     fun getBanInfo(context: Context): BanInfo {
+        // 封禁机制已解绑 — 永远返回未封禁
+        if (!BAN_ENABLED) return BanInfo(
+            isBanned = false, banUntil = 0, remainingDays = 0, remainingHours = 0,
+            remainingMinutes = 0, remainingSeconds = 0, reason = "",
+            violationCount = 0
+        )
+
         val prefs = getPrefs(context)
         val banUntil = prefs.getLong(KEY_BAN_UNTIL, 0)
         val violationCount = prefs.getInt(KEY_VIOLATION_COUNT, 0)
@@ -253,6 +268,8 @@ object BanManager {
      */
     @Synchronized
     fun recordViolation(context: Context, level: ContentFilter.ViolationLevel): BanInfo {
+        // 封禁机制已解绑 — 空操作
+        if (!BAN_ENABLED) return getBanInfo(context)
         if (level == ContentFilter.ViolationLevel.NONE) {
             return getBanInfo(context)
         }
@@ -315,6 +332,8 @@ object BanManager {
      * 手动封禁（管理员功能）
      */
     fun banUser(context: Context, days: Long, reason: String = "") {
+        // 封禁机制已解绑 — 空操作
+        if (!BAN_ENABLED) return
         val prefs = getPrefs(context)
         val now = System.currentTimeMillis()
         val banUntil = now + (days * 24 * 60 * 60 * 1000)

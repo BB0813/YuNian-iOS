@@ -29,3 +29,4 @@ object ChatDebugLog {
         } catch (_: Exception) {}
     }
 }
+

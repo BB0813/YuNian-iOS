@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -12,34 +12,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
+import com.lianyu.ai.uicommon.theme.AppTheme
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun TimeDividerBubble(item: ChatListItem.TimeDivider) {
+fun TimeDividerItem(item: ChatListItem.TimeDivider) {
     val label = remember(item.timestamp) { formatTimeDividerLabel(item.timestamp) }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = ChatTheme.metrics.timeDividerVerticalPadding),
+            .padding(vertical = AppTheme.dimens.timeDividerVerticalPadding),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             modifier = Modifier
-                .clip(RoundedCornerShape(ChatTheme.shapes.timeDividerCornerRadius))
-                .background(ChatTheme.colors.timeDividerBackground)
+                .clip(RoundedCornerShape(AppTheme.dimens.timeDividerCornerRadius))
+                .background(AppTheme.colors.dividerBackground)
                 .padding(
-                    horizontal = ChatTheme.metrics.timeDividerHorizontalPadding,
-                    vertical = ChatTheme.metrics.timeDividerInnerVerticalPadding
+                    horizontal = AppTheme.dimens.timeDividerHorizontalPadding,
+                    vertical = AppTheme.dimens.timeDividerInnerVerticalPadding
                 ),
-            style = ChatTheme.typography.timeDivider,
-            color = ChatTheme.colors.metadata,
+            style = AppTheme.typography.labelSmall.copy(fontSize = AppTheme.dimens.timeDividerFontSize),
+            color = AppTheme.colors.metadataContent,
             textAlign = TextAlign.Center
         )
     }
@@ -57,3 +57,4 @@ private fun formatTimeDividerLabel(timestamp: Long): String {
         else -> dateTime.format(DateTimeFormatter.ofPattern("MM月dd日 HH:mm"))
     }
 }
+

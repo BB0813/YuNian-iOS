@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -9,7 +9,7 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.parseQuotedTextContent
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
-fun TextMessageBubble(
+fun TextMessageItem(
     item: ChatListItem.TextMessage,
     companionData: CompanionModel?,
     userAvatar: String?,
@@ -54,3 +54,4 @@ fun TextMessageBubble(
         )
     }
 }
+

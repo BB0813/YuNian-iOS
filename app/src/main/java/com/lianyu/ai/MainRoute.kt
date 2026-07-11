@@ -77,6 +77,10 @@ sealed class MainRoute(val route: String) {
     data class CoffeeOrderQueryWithId(val orderId: String) : MainRoute("coffee_order/$orderId")
 
     companion object {
+        val mainTabRoutes = setOf("home", "contacts", "profile")
+
+        fun isMainTabRoute(route: String?): Boolean = route in mainTabRoutes
+
         /** 从路由字符串解析（用于 NavHost currentRoute） */
         fun fromRoute(route: String?): MainRoute = when {
             route == null -> Home

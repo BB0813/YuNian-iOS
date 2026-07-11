@@ -17,10 +17,10 @@ object ChatConstants {
 
     // ── 聊天消息分页 ──
     /** 初始进入聊天时加载的消息条数 */
-    const val CHAT_PAGE_SIZE = 50
+    const val CHAT_PAGE_SIZE = 80
 
     /** 点击"加载更多"时追加的历史消息条数 */
-    const val CHAT_LOAD_MORE_SIZE = 30
+    const val CHAT_LOAD_MORE_SIZE = 50
 
     // ── 消息队列与批量合并 ──
     /** 发送消息 Channel 容量上限，满时拒绝新消息（不排队、不阻塞） */

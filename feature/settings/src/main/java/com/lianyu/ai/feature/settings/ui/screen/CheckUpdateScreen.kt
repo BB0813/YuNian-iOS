@@ -1,5 +1,6 @@
-﻿package com.lianyu.ai.feature.settings.ui.screen
+package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -91,7 +92,7 @@ fun CheckUpdateScreen(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
-    val cardColor = if (isDarkTheme) WeChatDarkCard else Color.White
+    val cardColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
@@ -147,7 +148,7 @@ fun CheckUpdateScreen(
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
@@ -158,7 +159,7 @@ fun CheckUpdateScreen(
                     Box(
                         modifier = Modifier.size(72.dp).clip(CircleShape).background(
                             Brush.radialGradient(
-                                colors = listOf(Color(0xFF07C160).copy(alpha = 0.8f), Color(0xFF05A350).copy(alpha = 0.6f))
+                                colors = listOf(AppTheme.colors.success.copy(alpha = 0.8f), Color(0xFF05A350).copy(alpha = 0.6f))
                             )
                         ),
                         contentAlignment = Alignment.Center
@@ -166,7 +167,7 @@ fun CheckUpdateScreen(
                         Icon(
                             imageVector = Icons.Filled.NewReleases,
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.9f),
+                            tint = AppTheme.colors.staticWhite.copy(alpha = 0.9f),
                             modifier = Modifier.size(36.dp)
                         )
                     }
@@ -174,12 +175,12 @@ fun CheckUpdateScreen(
                     Text(
                         text = stringResource(R.string.current_version),
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                     Text(
                         text = "v$currentVersion",
                         style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = AppTheme.colors.onSurface
                     )
                 }
             }
@@ -190,19 +191,19 @@ fun CheckUpdateScreen(
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(25.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.White),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = AppTheme.colors.staticWhite),
                 enabled = checkState != UpdateCheckState.CHECKING
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(25.dp)).background(
                         Brush.horizontalGradient(
-                            colors = listOf(Color(0xFF07C160).copy(alpha = 0.9f), Color(0xFF05A350).copy(alpha = 0.8f))
+                            colors = listOf(AppTheme.colors.success.copy(alpha = 0.9f), Color(0xFF05A350).copy(alpha = 0.8f))
                         )
                     ),
                     contentAlignment = Alignment.Center
                 ) {
                     if (checkState == UpdateCheckState.CHECKING) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AppTheme.colors.staticWhite, strokeWidth = 2.dp)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             Icon(imageVector = Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -218,7 +219,7 @@ fun CheckUpdateScreen(
                     AnimatedVisibility(visible = true, enter = fadeIn(tween(400)) + scaleIn(tween(400))) {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                             shape = RoundedCornerShape(16.dp)
                         ) {
@@ -227,13 +228,13 @@ fun CheckUpdateScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Box(
-                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFFE8F5E9)),
+                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(AppTheme.colors.successContainer),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.CheckCircle,
                                         contentDescription = null,
-                                        tint = Color(0xFF4CAF50),
+                                        tint = AppTheme.colors.success,
                                         modifier = Modifier.size(28.dp)
                                     )
                                 }
@@ -241,12 +242,12 @@ fun CheckUpdateScreen(
                                 Text(
                                     text = stringResource(R.string.latest_version),
                                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = AppTheme.colors.onSurface
                                 )
                                 Text(
                                     text = "v$currentVersion",
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                                 )
                             }
                         }
@@ -256,7 +257,7 @@ fun CheckUpdateScreen(
                     AnimatedVisibility(visible = true, enter = fadeIn(tween(400))) {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                             shape = RoundedCornerShape(16.dp)
                         ) {
@@ -271,7 +272,7 @@ fun CheckUpdateScreen(
                                     Icon(
                                         imageVector = Icons.Filled.CloudOff,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
                                         modifier = Modifier.size(26.dp)
                                     )
                                 }
@@ -279,12 +280,12 @@ fun CheckUpdateScreen(
                                 Text(
                                     text = stringResource(R.string.check_failed),
                                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = AppTheme.colors.onSurface
                                 )
                                 Text(
                                     text = stringResource(R.string.check_failed_msg),
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                                 )
                             }
                         }
@@ -294,7 +295,7 @@ fun CheckUpdateScreen(
                     AnimatedVisibility(visible = true, enter = fadeIn(tween(400)) + scaleIn(tween(400))) {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                             shape = RoundedCornerShape(16.dp)
                         ) {
@@ -303,13 +304,13 @@ fun CheckUpdateScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Box(
-                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFFFFF3E0).copy(alpha = 0.15f)),
+                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(AppTheme.colors.warningContainer.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.NewReleases,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF9800),
+                                        tint = AppTheme.colors.warning,
                                         modifier = Modifier.size(28.dp)
                                     )
                                 }
@@ -317,14 +318,14 @@ fun CheckUpdateScreen(
                                 Text(
                                     text = stringResource(R.string.new_version_found, updateInfo?.versionName ?: ""),
                                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = AppTheme.colors.onSurface
                                 )
                                 updateInfo?.updateLog?.takeIf { it.isNotBlank() }?.let { log ->
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = log,
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = AppTheme.colors.onSurfaceVariant
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -345,20 +346,20 @@ fun CheckUpdateScreen(
                                             Text(
                                                 text = stringResource(R.string.downloading, downloadProgress.progress),
                                                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, fontSize = 12.sp),
-                                                color = Color(0xFFFF9800)
+                                                color = AppTheme.colors.warning
                                             )
                                             Text(
                                                 text = formatDownloadBytes(downloadProgress.downloadedBytes),
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                                             )
                                         }
                                         Spacer(modifier = Modifier.height(6.dp))
                                         LinearProgressIndicator(
                                             progress = { if (downloadProgress.totalBytes > 0) downloadProgress.downloadedBytes.toFloat() / downloadProgress.totalBytes else 0f },
                                             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                            color = Color(0xFFFF9800),
-                                            trackColor = Color(0xFFFFF3E0)
+                                            color = AppTheme.colors.warning,
+                                            trackColor = AppTheme.colors.warningContainer
                                         )
                                     }
                                 }
@@ -371,14 +372,14 @@ fun CheckUpdateScreen(
                                         Icon(
                                             imageVector = Icons.Filled.CheckCircle,
                                             contentDescription = null,
-                                            tint = Color(0xFF4CAF50),
+                                            tint = AppTheme.colors.success,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = stringResource(R.string.download_complete),
                                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, fontSize = 13.sp),
-                                            color = Color(0xFF4CAF50)
+                                            color = AppTheme.colors.success
                                         )
                                     }
                                 }
@@ -387,7 +388,7 @@ fun CheckUpdateScreen(
                                     Text(
                                         text = stringResource(R.string.download_failed),
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                        color = Color(0xFFE53935)
+                                        color = AppTheme.colors.danger
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                 }
@@ -409,20 +410,20 @@ fun CheckUpdateScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth().height(44.dp),
                                         shape = RoundedCornerShape(22.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = Color.White),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = AppTheme.colors.staticWhite),
                                         enabled = !isDownloading
                                     ) {
                                         Box(
                                             modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp)).background(
                                                 Brush.horizontalGradient(
-                                                    colors = listOf(Color(0xFFFF9800).copy(alpha = 0.9f), Color(0xFFFFB74D).copy(alpha = 0.85f))
+                                                    colors = listOf(AppTheme.colors.warning.copy(alpha = 0.9f), Color(0xFFFFB74D).copy(alpha = 0.85f))
                                                 )
                                             ),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                                                 if (isDownloading) {
-                                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AppTheme.colors.staticWhite, strokeWidth = 2.dp)
                                                 } else {
                                                     Icon(imageVector = Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                                                 }

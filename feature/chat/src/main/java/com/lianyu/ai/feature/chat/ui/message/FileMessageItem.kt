@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.InsertDriveFile
@@ -9,7 +9,7 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
-fun FileMessageBubble(
+fun FileMessageItem(
     item: ChatListItem.FileMessage,
     companionData: CompanionModel?,
     userAvatar: String?,
@@ -18,7 +18,7 @@ fun FileMessageBubble(
     adaptiveSizing: AdaptiveSizing,
     isDarkTheme: Boolean
 ) {
-    AttachmentMessageBubble(
+    AttachmentMessageItem(
         message = item.message,
         companionData = companionData,
         userAvatar = userAvatar,
@@ -30,3 +30,4 @@ fun FileMessageBubble(
         label = "文件"
     )
 }
+

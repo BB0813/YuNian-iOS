@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -8,25 +8,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
-import com.lianyu.ai.feature.chat.ui.theme.ChatTheme
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
+import com.lianyu.ai.uicommon.theme.AppTheme
 
 @Composable
-fun SystemTipBubble(item: ChatListItem.SystemTip) {
+fun SystemTipItem(item: ChatListItem.SystemTip) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(
-                horizontal = ChatTheme.metrics.systemTipHorizontalPadding,
-                vertical = ChatTheme.metrics.systemTipVerticalPadding
+                horizontal = AppTheme.dimens.systemTipHorizontalPadding,
+                vertical = AppTheme.dimens.systemTipVerticalPadding
             ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = item.content,
-            style = ChatTheme.typography.systemTip,
-            color = ChatTheme.colors.systemTip,
+            style = AppTheme.typography.bodySmall.copy(fontSize = AppTheme.dimens.systemTipFontSize),
+            color = AppTheme.colors.captionContent,
             textAlign = TextAlign.Center
         )
     }
 }
+

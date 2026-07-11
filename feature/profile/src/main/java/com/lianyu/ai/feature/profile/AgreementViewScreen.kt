@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,7 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 fun AgreementViewScreen(
     onNavigateBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -101,7 +102,7 @@ fun AgreementViewScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(AppTheme.colors.surfaceVariant)
                     .padding(16.dp)
             ) {
                 Column {

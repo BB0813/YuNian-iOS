@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -9,7 +9,7 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
-fun VideoMessageBubble(
+fun VideoMessageItem(
     item: ChatListItem.VideoMessage,
     companionData: CompanionModel?,
     userAvatar: String?,
@@ -18,7 +18,7 @@ fun VideoMessageBubble(
     adaptiveSizing: AdaptiveSizing,
     isDarkTheme: Boolean
 ) {
-    AttachmentMessageBubble(
+    AttachmentMessageItem(
         message = item.message,
         companionData = companionData,
         userAvatar = userAvatar,
@@ -30,3 +30,4 @@ fun VideoMessageBubble(
         label = "视频"
     )
 }
+

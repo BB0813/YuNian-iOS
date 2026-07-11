@@ -11,17 +11,17 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChatMessageDao {
-    // Cursor pagination: read messages older than a millisecond timestamp.
-    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId AND timestamp < :beforeTimestamp ORDER BY timestamp DESC LIMIT :limit")
-    fun getMessagesBefore(companionId: Long, beforeTimestamp: Long, limit: Int): Flow<List<ChatMessage>>
+    // Cursor pagination: id disambiguates messages created in the same millisecond.
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    fun getMessagesBefore(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int): Flow<List<ChatMessage>>
 
-    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId AND timestamp < :beforeTimestamp ORDER BY timestamp DESC LIMIT :limit")
-    suspend fun getMessagesBeforeSync(companionId: Long, beforeTimestamp: Long, limit: Int): List<ChatMessage>
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    suspend fun getMessagesBeforeSync(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int): List<ChatMessage>
 
-    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC, id DESC LIMIT :limit")
     fun getRecentMessagesForCompanion(companionId: Long, limit: Int): Flow<List<ChatMessage>>
 
-    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC, id DESC LIMIT :limit")
     suspend fun getRecentMessagesSync(companionId: Long, limit: Int): List<ChatMessage>
 
     @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp ASC")

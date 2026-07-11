@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -80,7 +81,7 @@ fun YandereModeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsStore = remember { AppSettingsStore(context) }
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     val isEnabled by settingsStore.yandereModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
     val collectUsage by settingsStore.yandereModeUsageStatsFlow.collectAsStateWithLifecycle(initialValue = true)
@@ -431,7 +432,7 @@ private fun SettingSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,

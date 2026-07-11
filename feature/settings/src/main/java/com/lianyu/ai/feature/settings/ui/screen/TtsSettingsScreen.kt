@@ -2,6 +2,7 @@
 
 package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -180,7 +181,7 @@ fun TtsSettingsScreen(
         ttsService.getVoices(selectedProvider)
     }
 
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val backgroundColor = colorScheme.background
     val textPrimaryColor = colorScheme.onSurface
     val textSecondaryColor = colorScheme.onSurfaceVariant
@@ -257,7 +258,7 @@ fun TtsSettingsScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -607,10 +608,10 @@ private fun TtsToggleCard(
             checked = enabled,
             onCheckedChange = onToggle,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                checkedThumbColor = AppTheme.colors.onPrimary,
+                checkedTrackColor = AppTheme.colors.primaryContainer,
+                uncheckedThumbColor = AppTheme.colors.outline,
+                uncheckedTrackColor = AppTheme.colors.surfaceVariant
             )
         )
     }
@@ -646,7 +647,7 @@ private fun ProviderSelectionCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.5f))
                     .clickable { onDropdownToggle(!showDropdown) }
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -733,7 +734,7 @@ private fun VoiceSelectionCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.5f))
                     .clickable { onDropdownToggle(!showDropdown) }
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -859,7 +860,7 @@ private fun ApiKeyConfigCard(
     textSecondaryColor: Color,
     textTertiaryColor: Color
 ) {
-    val dividerColor = MaterialTheme.colorScheme.outline
+    val dividerColor = AppTheme.colors.outline
     val context = LocalContext.current
 
     Column(
@@ -966,7 +967,7 @@ private fun ApiKeyConfigCard(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surface)
+                                .background(AppTheme.colors.surface)
                                 .clickable { onShowSfModelDropdown(!showSfModelDropdown) }
                                 .padding(12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -998,7 +999,7 @@ private fun ApiKeyConfigCard(
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surface)
+                                .background(AppTheme.colors.surface)
                                 .clickable { onShowSfRateDropdown(!showSfRateDropdown) }
                                 .padding(12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1120,7 +1121,7 @@ private fun LocalTtsConfigContent(
             Row(
                 modifier = Modifier.fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(AppTheme.colors.surface)
                     .clickable { onShowModelDropdown(!showModelDropdown) }
                     .padding(12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1201,7 +1202,7 @@ private fun LocalTtsConfigContent(
                     onClick = onDisable,
                     modifier = Modifier.weight(1f).height(44.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = textPrimaryColor)
+                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceVariant, contentColor = textPrimaryColor)
                 ) { Text("禁用", fontSize = 13.sp) }
             }
             if (status != LocalTtsUiStatus.NOT_DOWNLOADED && !isDownloading) {
@@ -1275,8 +1276,8 @@ private fun TtsTextField(
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = PetalPrimary,
             unfocusedBorderColor = dividerColor,
-            focusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedContainerColor = AppTheme.colors.surface,
+            unfocusedContainerColor = AppTheme.colors.surface,
             focusedTextColor = textPrimaryColor,
             unfocusedTextColor = textPrimaryColor
         ),
@@ -1337,7 +1338,7 @@ private fun ChatReadAloudSettingsCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(AppTheme.colors.surface)
                     .clickable { onModeDropdownToggle(!showModeDropdown) }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1366,7 +1367,7 @@ private fun ChatReadAloudSettingsCard(
             DropdownMenu(
                 expanded = showModeDropdown,
                 onDismissRequest = { onModeDropdownToggle(false) },
-                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                modifier = Modifier.background(AppTheme.colors.surface)
             ) {
                 ChatTtsMode.entries.forEach { mode ->
                     DropdownMenuItem(
@@ -1401,10 +1402,10 @@ private fun ChatReadAloudSettingsCard(
                 checked = skipParentheses,
                 onCheckedChange = onSkipParenthesesChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                    checkedThumbColor = AppTheme.colors.onPrimary,
+                    checkedTrackColor = AppTheme.colors.primaryContainer,
+                    uncheckedThumbColor = AppTheme.colors.outline,
+                    uncheckedTrackColor = AppTheme.colors.surfaceVariant
                 )
             )
         }
@@ -1423,10 +1424,10 @@ private fun ChatReadAloudSettingsCard(
                 checked = autoDedup,
                 onCheckedChange = onAutoDedupChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                    checkedThumbColor = AppTheme.colors.onPrimary,
+                    checkedTrackColor = AppTheme.colors.primaryContainer,
+                    uncheckedThumbColor = AppTheme.colors.outline,
+                    uncheckedTrackColor = AppTheme.colors.surfaceVariant
                 )
             )
         }
@@ -1445,10 +1446,10 @@ private fun ChatReadAloudSettingsCard(
                 checked = beautify,
                 onCheckedChange = onBeautifyChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                    checkedThumbColor = AppTheme.colors.onPrimary,
+                    checkedTrackColor = AppTheme.colors.primaryContainer,
+                    uncheckedThumbColor = AppTheme.colors.outline,
+                    uncheckedTrackColor = AppTheme.colors.surfaceVariant
                 )
             )
         }

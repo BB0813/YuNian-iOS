@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -83,7 +84,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun OriginOSAdaptionScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     // 触发重新读取权限状态的开关（从设置页返回后递增）
     var refreshTick by remember { mutableStateOf(0) }
 
@@ -165,7 +166,7 @@ fun OriginOSAdaptionScreen(onNavigateBack: () -> Unit) {
 
 @Composable
 private fun DeviceInfoCard() {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val isOriginOS6 = RomUtils.isVivo && RomUtils.isOriginOS6OrAbove()
     Column(
         modifier = Modifier
@@ -180,7 +181,7 @@ private fun DeviceInfoCard() {
                 Icons.Filled.VerifiedUser,
                 null,
                 Modifier.size(28.dp),
-                tint = if (isOriginOS6) Color(0xFF07C160) else colorScheme.onSurfaceVariant
+                tint = if (isOriginOS6) AppTheme.colors.success else colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.width(12.dp))
             Column {
@@ -209,7 +210,7 @@ private fun DeviceInfoCard() {
 
 @Composable
 private fun AdaptionItemsGroup(isVisible: Boolean, refreshTick: Int) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val context = LocalContext.current
 
     // 依赖 refreshTick，每次从设置页返回后强制重新读取状态
@@ -338,12 +339,12 @@ private fun computeAdaptionStates(context: android.content.Context): List<Adapti
 
 @Composable
 private fun AdaptionItemRow(item: AdaptionItem) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = item.action).padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(item.icon, item.title, Modifier.size(24.dp), tint = Color(0xFF07C160))
+        Icon(item.icon, item.title, Modifier.size(24.dp), tint = AppTheme.colors.success)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -358,7 +359,7 @@ private fun AdaptionItemRow(item: AdaptionItem) {
                         Icons.Filled.CheckCircle,
                         null,
                         Modifier.size(16.dp),
-                        tint = Color(0xFF07C160)
+                        tint = AppTheme.colors.success
                     )
                 }
             }
@@ -384,7 +385,7 @@ private fun AdaptionItemRow(item: AdaptionItem) {
 
 @Composable
 private fun GuideTextCard() {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()

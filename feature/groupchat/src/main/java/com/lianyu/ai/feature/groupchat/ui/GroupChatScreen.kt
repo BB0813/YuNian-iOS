@@ -276,7 +276,7 @@ fun GroupChatScreen(
     }
 
     // Background: global > default
-    val defaultBgColor = MaterialTheme.colorScheme.background
+    val defaultBgColor = AppTheme.colors.background
     var targetBgColor by remember { mutableStateOf(defaultBgColor) }
     var chatBgGradient by remember { mutableStateOf<Brush?>(null) }
     var isCustomBg by remember { mutableStateOf(false) }
@@ -303,7 +303,7 @@ fun GroupChatScreen(
     }
 
     val chatBgColor by animateColorAsState(targetBgColor, tween(300), label = "bgColor")
-    val backgroundColor = if (isDarkTheme) MaterialTheme.colorScheme.background else chatBgColor
+    val backgroundColor = if (isDarkTheme) AppTheme.colors.background else chatBgColor
 
     val glassIntensity = when (perfTier) {
         HardwareInfo.Tier.ULTRA -> 1.0f
@@ -425,7 +425,7 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(28.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+                        .background(AppTheme.colors.surface.copy(alpha = 0.95f))
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Row(
@@ -445,7 +445,7 @@ fun GroupChatScreen(
                             Icon(
                                 imageVector = Icons.Filled.Add,
                                 contentDescription = "更多功能",
-                                tint = if (showExtensionPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (showExtensionPanel) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -458,7 +458,7 @@ fun GroupChatScreen(
                             Icon(
                                 imageVector = Icons.Filled.AlternateEmail,
                                 contentDescription = "@艾特",
-                                tint = if (showMentionPicker) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (showMentionPicker) AppTheme.colors.primary else AppTheme.colors.onSurfaceVariant,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -467,7 +467,7 @@ fun GroupChatScreen(
                         Box(
                             modifier = Modifier.weight(1f).height(40.dp)
                                 .clip(RoundedCornerShape(21.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .background(AppTheme.colors.surfaceVariant)
                                 .padding(horizontal = 16.dp, vertical = 0.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
@@ -480,7 +480,7 @@ fun GroupChatScreen(
                                         if (inputText.isEmpty()) {
                                             Text("输入消息...",
                                                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                color = AppTheme.colors.onSurfaceVariant)
                                         }
                                         innerTextField()
                                     }
@@ -499,7 +499,7 @@ fun GroupChatScreen(
                                 maxLines = 4,
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                                     fontSize = 15.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = AppTheme.colors.onSurface
                                 )
                             )
                         }
@@ -508,7 +508,7 @@ fun GroupChatScreen(
                         val canSend = inputText.isNotBlank() && !isLoading
                         Box(
                             modifier = Modifier.size(40.dp).clip(CircleShape)
-                                .background(if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                .background(if (canSend) AppTheme.colors.primary else AppTheme.colors.surfaceVariant)
                                 .clickable(enabled = canSend) {
                                     viewModel.sendMessage(inputText.trim())
                                     inputText = ""
@@ -518,7 +518,7 @@ fun GroupChatScreen(
                             Icon(
                                 imageVector = Icons.Filled.Send,
                                 contentDescription = "发送",
-                                tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (canSend) AppTheme.colors.onPrimary else AppTheme.colors.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -542,13 +542,13 @@ fun GroupChatScreen(
                                 .fillMaxWidth()
                                 .padding(top = 8.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
+                                .background(AppTheme.colors.surface.copy(alpha = 0.98f))
                                 .padding(12.dp)
                         ) {
                             Text(
                                 text = "选择要@的角色",
                                 style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = AppTheme.colors.onSurfaceVariant,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
 
@@ -561,7 +561,7 @@ fun GroupChatScreen(
                                     Row(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(20.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .background(AppTheme.colors.surfaceVariant)
                                             .clickable {
                                                 inputText = "$inputText@${companion.name} "
                                                 showMentionPicker = false
@@ -574,7 +574,7 @@ fun GroupChatScreen(
                                             modifier = Modifier
                                                 .size(24.dp)
                                                 .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                                .background(AppTheme.colors.surfaceVariant),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             if (companion.avatarUrl != null) {
@@ -589,7 +589,7 @@ fun GroupChatScreen(
                                                     text = companion.name.firstOrNull()?.toString() ?: "?",
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    color = AppTheme.colors.onSurfaceVariant
                                                 )
                                             }
                                         }
@@ -597,7 +597,7 @@ fun GroupChatScreen(
                                         Text(
                                             text = companion.name,
                                             fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = AppTheme.colors.onSurface
                                         )
                                     }
                                 }
@@ -618,7 +618,7 @@ fun GroupChatScreen(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                    .background(AppTheme.colors.surface.copy(alpha = 0.85f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -630,7 +630,7 @@ fun GroupChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.group_chat),
-                        tint = MaterialTheme.colorScheme.onBackground,
+                        tint = AppTheme.colors.onBackground,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -649,7 +649,7 @@ fun GroupChatScreen(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(10.dp),
                                     strokeWidth = 1.5.dp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = AppTheme.colors.onSurfaceVariant
                                 )
                                 Text(
                                     text = stringResource(R.string.group_typing),
@@ -657,7 +657,7 @@ fun GroupChatScreen(
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 14.sp
                                     ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = AppTheme.colors.onSurfaceVariant
                                 )
                             }
                         } else {
@@ -667,7 +667,7 @@ fun GroupChatScreen(
                                     modifier = Modifier
                                         .size(24.dp)
                                         .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        .background(AppTheme.colors.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (groupData?.avatarUrl != null) {
@@ -682,7 +682,7 @@ fun GroupChatScreen(
                                             text = groupData?.name?.firstOrNull()?.toString() ?: "?",
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = AppTheme.colors.onSurfaceVariant
                                         )
                                     }
                                 }
@@ -693,7 +693,7 @@ fun GroupChatScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 15.sp
                                     ),
-                                    color = MaterialTheme.colorScheme.onBackground
+                                    color = AppTheme.colors.onBackground
                                 )
                             }
                         }
@@ -708,7 +708,7 @@ fun GroupChatScreen(
                     Icon(
                         imageVector = Icons.Outlined.Info,
                         contentDescription = "群详情",
-                        tint = MaterialTheme.colorScheme.onBackground,
+                        tint = AppTheme.colors.onBackground,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -742,21 +742,21 @@ fun GroupImageMessageBubble(
             modifier = modifier
                 .size(120.dp, 80.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(AppTheme.colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     imageVector = Icons.Filled.Image,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = AppTheme.colors.onSurfaceVariant,
                     modifier = Modifier.size(32.dp)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "图片",
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = AppTheme.colors.onSurfaceVariant
                 )
             }
         }
@@ -827,7 +827,7 @@ fun GroupStickerMessageBubble(
             Text(
                 text = stickerName.take(2),
                 fontSize = 24.sp,
-                color = MaterialTheme.colorScheme.onSurface
+                color = AppTheme.colors.onSurface
             )
         }
     }
@@ -835,7 +835,7 @@ fun GroupStickerMessageBubble(
 
 @Composable
 fun GroupRegeneratingBubble() {
-    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant
+    val aiBubbleColor = AppTheme.colors.surfaceVariant
     val infiniteTransition = rememberInfiniteTransition(label = "group_regenerate")
     val dot1Alpha by infiniteTransition.animateFloat(
         initialValue = 0.3f, targetValue = 1f,
@@ -850,11 +850,13 @@ fun GroupRegeneratingBubble() {
         animationSpec = infiniteRepeatable(tween(400, 300), RepeatMode.Reverse), label = "dot3"
     )
 
-    Row(
+    AppListItemLayout(
+        isStartAligned = true,
+        startSlot = { Spacer(modifier = Modifier.size(40.dp)) },
+        endSlot = {},
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.Start
+        slotGap = AppTheme.dimens.avatarGap
     ) {
-        Spacer(modifier = Modifier.width(48.dp))
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(16.dp))
@@ -865,7 +867,7 @@ fun GroupRegeneratingBubble() {
                 Text(
                     text = "正在重新生成",
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = AppTheme.colors.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 repeat(3) { i ->
@@ -875,7 +877,7 @@ fun GroupRegeneratingBubble() {
                             .size(5.dp)
                             .alpha(alpha)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant)
+                            .background(AppTheme.colors.onSurfaceVariant)
                     )
                     if (i < 2) Spacer(modifier = Modifier.width(3.dp))
                 }
@@ -895,8 +897,8 @@ fun GroupChatBubble(
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = remember(message.timestamp) { dateFormat.format(Date(message.timestamp)) }
 
-    val userBubbleColor = MaterialTheme.colorScheme.primary
-    val aiBubbleColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+    val userBubbleColor = AppTheme.colors.primary
+    val aiBubbleColor = AppTheme.colors.surfaceVariant.copy(alpha = 0.9f)
 
     AppListItemLayout(
         isStartAligned = !isUser,
@@ -905,7 +907,7 @@ fun GroupChatBubble(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(AppTheme.colors.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (isUser) {
@@ -921,7 +923,7 @@ fun GroupChatBubble(
                             text = userName.firstOrNull()?.toString() ?: "?",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = AppTheme.colors.onSurfaceVariant
                             )
                         )
                     }
@@ -937,7 +939,7 @@ fun GroupChatBubble(
                         text = companion?.name?.firstOrNull()?.toString() ?: "?",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = AppTheme.colors.onSurfaceVariant
                         )
                     )
                 }
@@ -955,7 +957,7 @@ fun GroupChatBubble(
                 Text(
                     text = companion.name,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AppTheme.colors.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 2.dp)
                 )
             }
@@ -1014,7 +1016,7 @@ fun GroupChatBubble(
                         Text(
                             text = message.content,
                             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp, lineHeight = 21.sp),
-                            color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                            color = if (isUser) AppTheme.colors.onPrimary else AppTheme.colors.onSurface,
                             softWrap = true
                         )
                     }
@@ -1024,7 +1026,7 @@ fun GroupChatBubble(
             Text(
                 text = time,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AppTheme.colors.onSurfaceVariant,
                 textAlign = if (isUser) TextAlign.End else TextAlign.Start
             )
         }

@@ -2,6 +2,7 @@
 
 package com.lianyu.ai.feature.settings.ui.screen
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -152,7 +153,7 @@ fun VisionModelSettingsScreen(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(if (isDarkTheme) WeChatDarkCard else Color.White.copy(alpha = 0.8f))
+                    .background(if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite.copy(alpha = 0.8f))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -269,8 +270,8 @@ fun VisionModelSettingsScreen(
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = PetalPrimary,
                                         unfocusedBorderColor = if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer,
-                                        focusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
-                                        unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
+                                        focusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
+                                        unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
                                         focusedTextColor = textPrimaryColor,
                                         unfocusedTextColor = textPrimaryColor
                                     ),
@@ -344,7 +345,7 @@ fun VisionModelSettingsScreen(
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = if (useCustomApi) PetalPrimary else Color.Gray,
                                         checkedTrackColor = if (useCustomApi) PetalPrimaryContainer.copy(alpha = 0.5f) else Color.Gray.copy(alpha = 0.3f),
-                                        uncheckedThumbColor = Color.White,
+                                        uncheckedThumbColor = AppTheme.colors.staticWhite,
                                         uncheckedTrackColor = Color.Gray.copy(alpha = 0.2f)
                                     ),
                                     modifier = Modifier.padding(start = 12.dp)
@@ -372,8 +373,8 @@ fun VisionModelSettingsScreen(
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = if (customModelName.isNotBlank()) PetalGreen else PetalPrimary,
                                             unfocusedBorderColor = if (customModelName.isNotBlank()) PetalGreen else if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer,
-                                            focusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
-                                            unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
+                                            focusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
+                                            unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
                                             focusedTextColor = textPrimaryColor,
                                             unfocusedTextColor = textPrimaryColor
                                         ),
@@ -437,8 +438,8 @@ fun VisionModelSettingsScreen(
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = if (visionApiUrl.isNotBlank()) PetalGreen else PetalPrimary,
                                             unfocusedBorderColor = if (visionApiUrl.isNotBlank()) PetalGreen else if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer,
-                                            focusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
-                                            unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
+                                            focusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
+                                            unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
                                             focusedTextColor = textPrimaryColor,
                                             unfocusedTextColor = textPrimaryColor
                                         ),
@@ -457,8 +458,8 @@ fun VisionModelSettingsScreen(
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = if (visionApiKey.isNotBlank()) PetalGreen else PetalPrimary,
                                             unfocusedBorderColor = if (visionApiKey.isNotBlank()) PetalGreen else if (isDarkTheme) WeChatDarkDivider else PetalSurfaceContainer,
-                                            focusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
-                                            unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
+                                            focusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
+                                            unfocusedContainerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
                                             focusedTextColor = textPrimaryColor,
                                             unfocusedTextColor = textPrimaryColor
                                         ),
@@ -637,7 +638,7 @@ private fun TestResultDialog(
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = if (isDarkTheme) WeChatDarkCard else Color.White,
+        containerColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite,
         icon = {
             Icon(
                 imageVector = if (isSuccess) Icons.Filled.Check else Icons.Filled.Close,

@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
@@ -114,9 +115,9 @@ fun QuizScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surface,
-                        MaterialTheme.colorScheme.background
+                        AppTheme.colors.background,
+                        AppTheme.colors.surface,
+                        AppTheme.colors.background
                     )
                 )
             )
@@ -144,7 +145,7 @@ fun QuizScreen(
             Text(
                 text = "第 ${currentIndex + 1} / ${questions.size} 题 · 答对 ${correctCount} 题 · 需答对 ${(questions.size * 0.8).toInt().coerceAtLeast(1)} 题",
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AppTheme.colors.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
@@ -158,7 +159,7 @@ fun QuizScreen(
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = Color(0xFF5C6BC0),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                trackColor = AppTheme.colors.surfaceVariant
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -197,7 +198,7 @@ fun QuizScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(AppTheme.colors.surfaceVariant)
                     .padding(20.dp)
             ) {
                 Text(
@@ -207,7 +208,7 @@ fun QuizScreen(
                         fontSize = 16.sp,
                         lineHeight = 24.sp
                     ),
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = AppTheme.colors.onSurface
                 )
             }
 
@@ -217,13 +218,13 @@ fun QuizScreen(
             currentQuestion.options.forEachIndexed { index, option ->
                 val isSelected = selectedOption == index
                 val bgColor = when {
-                    !showResult -> if (isSelected) Color(0xFFE8EAF6) else Color.White
-                    showResult && index == currentQuestion.correctIndex -> Color(0xFFE8F5E9)
+                    !showResult -> if (isSelected) Color(0xFFE8EAF6) else AppTheme.colors.staticWhite
+                    showResult && index == currentQuestion.correctIndex -> AppTheme.colors.successContainer
                     showResult && isSelected && !isCorrect -> Color(0xFFFFEBEE)
-                    else -> Color.White
+                    else -> AppTheme.colors.staticWhite
                 }
                 val borderColor = when {
-                    showResult && index == currentQuestion.correctIndex -> Color(0xFF4CAF50)
+                    showResult && index == currentQuestion.correctIndex -> AppTheme.colors.success
                     showResult && isSelected && !isCorrect -> Color(0xFFF44336)
                     isSelected && !showResult -> Color(0xFF5C6BC0)
                     else -> Color(0xFFE0E0E0)
@@ -251,7 +252,7 @@ fun QuizScreen(
                             .clip(CircleShape)
                             .background(
                                 when {
-                                    showResult && index == currentQuestion.correctIndex -> Color(0xFF4CAF50)
+                                    showResult && index == currentQuestion.correctIndex -> AppTheme.colors.success
                                     showResult && isSelected && !isCorrect -> Color(0xFFF44336)
                                     isSelected && !showResult -> Color(0xFF5C6BC0)
                                     else -> Color(0xFFF5F5F5)
@@ -266,9 +267,9 @@ fun QuizScreen(
                                 fontSize = 12.sp
                             ),
                             color = when {
-                                showResult && index == currentQuestion.correctIndex -> Color.White
-                                showResult && isSelected && !isCorrect -> Color.White
-                                isSelected && !showResult -> Color.White
+                                showResult && index == currentQuestion.correctIndex -> AppTheme.colors.staticWhite
+                                showResult && isSelected && !isCorrect -> AppTheme.colors.staticWhite
+                                isSelected && !showResult -> AppTheme.colors.staticWhite
                                 else -> Color(0xFF757575)
                             }
                         )
@@ -278,13 +279,13 @@ fun QuizScreen(
                         text = option,
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = AppTheme.colors.onSurfaceVariant
                     )
                     if (showResult && index == currentQuestion.correctIndex) {
                         Icon(
                             Icons.Filled.Check,
                             contentDescription = null,
-                            tint = Color(0xFF4CAF50),
+                            tint = AppTheme.colors.success,
                             modifier = Modifier.size(20.dp)
                         )
                     } else if (showResult && isSelected && !isCorrect) {
@@ -308,7 +309,7 @@ fun QuizScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isCorrect) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                                if (isCorrect) AppTheme.colors.successContainer else Color(0xFFFFEBEE)
                             )
                             .padding(12.dp)
                     ) {
@@ -348,7 +349,7 @@ fun QuizScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp
                             ),
-                            color = Color.White
+                            color = AppTheme.colors.staticWhite
                         )
                     }
                 }
@@ -375,9 +376,9 @@ fun QuizResultScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surface,
-                        MaterialTheme.colorScheme.background
+                        AppTheme.colors.background,
+                        AppTheme.colors.surface,
+                        AppTheme.colors.background
                     )
                 )
             )
@@ -399,14 +400,14 @@ fun QuizResultScreen(
                             .size(80.dp)
                             .clip(CircleShape)
                             .background(
-                                if (passed) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                                if (passed) AppTheme.colors.successContainer else Color(0xFFFFEBEE)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (passed) Icons.Filled.Check else Icons.Filled.Close,
                             contentDescription = null,
-                            tint = if (passed) Color(0xFF4CAF50) else Color(0xFFF44336),
+                            tint = if (passed) AppTheme.colors.success else Color(0xFFF44336),
                             modifier = Modifier.size(40.dp)
                         )
                     }
@@ -427,13 +428,13 @@ fun QuizResultScreen(
                     Text(
                         text = "答对 $correctCount / $totalQuestions 题（正确率 ${percentage}%）",
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = AppTheme.colors.onSurfaceVariant
                     )
 
                     Text(
                         text = "需答对 $requiredCorrect 题（正确率80%以上）才能通过",
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                     )
 
                     Spacer(modifier = Modifier.height(28.dp))
@@ -446,7 +447,7 @@ fun QuizResultScreen(
                                 .height(48.dp),
                             shape = RoundedCornerShape(24.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF4CAF50)
+                                containerColor = AppTheme.colors.success
                             )
                         ) {
                             Text(
@@ -455,7 +456,7 @@ fun QuizResultScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp
                                 ),
-                                color = Color.White
+                                color = AppTheme.colors.staticWhite
                             )
                         }
                     } else {
@@ -479,7 +480,7 @@ fun QuizResultScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 14.sp
                                     ),
-                                    color = Color.White
+                                    color = AppTheme.colors.staticWhite
                                 )
                             }
                             Button(
@@ -498,7 +499,7 @@ fun QuizResultScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 14.sp
                                     ),
-                                    color = Color.White
+                                    color = AppTheme.colors.staticWhite
                                 )
                             }
                         }
@@ -513,7 +514,7 @@ fun QuizResultScreen(
                             textAlign = TextAlign.Center,
                             lineHeight = 16.sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 }
             }

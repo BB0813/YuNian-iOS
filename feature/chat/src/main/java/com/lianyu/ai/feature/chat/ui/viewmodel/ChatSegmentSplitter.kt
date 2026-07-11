@@ -25,3 +25,4 @@ internal object ChatSegmentSplitter {
         return listOf(trimmed)
     }
 }
+

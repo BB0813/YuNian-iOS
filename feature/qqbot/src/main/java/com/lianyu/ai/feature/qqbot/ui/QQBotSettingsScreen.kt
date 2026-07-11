@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.qqbot.ui
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -92,20 +93,20 @@ fun QQBotSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(QQBotStrings.SETTINGS_TITLE, color = MaterialTheme.colorScheme.onSurface) },
+                title = { Text(QQBotStrings.SETTINGS_TITLE, color = AppTheme.colors.onSurface) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = QQBotStrings.BACK,
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = AppTheme.colors.onSurface
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AppTheme.colors.background)
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = AppTheme.colors.background
     ) { padding ->
         Column(
             modifier = modifier
@@ -137,7 +138,7 @@ fun QQBotSettingsScreen(
                         onClick = { bindMode = BindMode.QR },
                         label = { Text(QQBotStrings.QR_BIND) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                            selectedContainerColor = AppTheme.colors.primaryContainer
                         )
                     )
                     FilterChip(
@@ -145,7 +146,7 @@ fun QQBotSettingsScreen(
                         onClick = { bindMode = BindMode.MANUAL },
                         label = { Text(QQBotStrings.MANUAL_BIND) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+                            selectedContainerColor = AppTheme.colors.primaryContainer
                         )
                     )
                 }
@@ -172,7 +173,7 @@ fun QQBotSettingsScreen(
                 text = QQBotStrings.FEATURE_SETTINGS,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AppTheme.colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -188,7 +189,7 @@ fun QQBotSettingsScreen(
                 }
             )
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
             SettingItem(
                 icon = Icons.Outlined.Link,
@@ -202,7 +203,7 @@ fun QQBotSettingsScreen(
                 }
             )
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
             SettingItem(
                 icon = Icons.Outlined.Message,
@@ -217,7 +218,7 @@ fun QQBotSettingsScreen(
             )
 
             if (uiState.availableCompanions.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
                 SettingItem(
                     icon = Icons.Outlined.Message,
@@ -233,13 +234,13 @@ fun QQBotSettingsScreen(
             }
 
             if (uiState.userCompanionMappings.isNotEmpty() && uiState.availableCompanions.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
                 Text(
                     text = QQBotStrings.USER_MAPPING_TITLE,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AppTheme.colors.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
 
@@ -262,7 +263,7 @@ fun QQBotSettingsScreen(
                                     Icon(
                                         imageVector = Icons.Outlined.Delete,
                                         contentDescription = QQBotStrings.DELETE_MAPPING,
-                                        tint = MaterialTheme.colorScheme.error,
+                                        tint = AppTheme.colors.error,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -271,7 +272,7 @@ fun QQBotSettingsScreen(
                     )
 
                     if (index < uiState.userCompanionMappings.size - 1) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 16.dp))
+                        HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
                     }
 
                     if (showMappingDialog) {
@@ -291,7 +292,7 @@ fun QQBotSettingsScreen(
                                             Text(
                                                 companion.name,
                                                 color = if (companion.id == companionId)
-                                                    MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                    AppTheme.colors.primary else AppTheme.colors.onSurface
                                             )
                                         }
                                     }
@@ -316,7 +317,7 @@ fun QQBotSettingsScreen(
                                     viewModel.removeUserCompanionMapping(qqUserId)
                                     showDeleteConfirm = false
                                 }) {
-                                    Text(QQBotStrings.DELETE_LABEL, color = MaterialTheme.colorScheme.error)
+                                    Text(QQBotStrings.DELETE_LABEL, color = AppTheme.colors.error)
                                 }
                             },
                             dismissButton = {
@@ -335,7 +336,7 @@ fun QQBotSettingsScreen(
                 text = QQBotStrings.NOTES_TITLE,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AppTheme.colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
@@ -344,13 +345,13 @@ fun QQBotSettingsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(AppTheme.colors.surfaceVariant)
                     .padding(16.dp)
             ) {
                 Text(
                     text = QQBotStrings.NOTES_BODY,
                     fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AppTheme.colors.onSurfaceVariant,
                     lineHeight = 20.sp
                 )
             }
@@ -367,7 +368,7 @@ fun QQBotSettingsScreen(
                     viewModel.logout()
                     showLogoutDialog = false
                 }) {
-                    Text(QQBotStrings.CONFIRM, color = MaterialTheme.colorScheme.error)
+                    Text(QQBotStrings.CONFIRM, color = AppTheme.colors.error)
                 }
             },
             dismissButton = {
@@ -393,7 +394,7 @@ fun QQBotSettingsScreen(
                     ) {
                         Text(
                             QQBotStrings.AUTO_ASSIGN,
-                            color = if (uiState.defaultCompanionId == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            color = if (uiState.defaultCompanionId == null) AppTheme.colors.primary else AppTheme.colors.onSurface
                         )
                     }
                     uiState.availableCompanions.forEach { companion ->
@@ -406,7 +407,7 @@ fun QQBotSettingsScreen(
                         ) {
                             Text(
                                 companion.name,
-                                color = if (companion.id == uiState.defaultCompanionId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                color = if (companion.id == uiState.defaultCompanionId) AppTheme.colors.primary else AppTheme.colors.onSurface
                             )
                         }
                     }
@@ -468,7 +469,7 @@ private fun QQBotQrBindSection(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(AppTheme.colors.surfaceVariant)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -478,7 +479,7 @@ private fun QQBotQrBindSection(
                 modifier = Modifier
                     .size(240.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White)
+                    .background(AppTheme.colors.staticWhite)
                     .padding(8.dp)
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -493,7 +494,7 @@ private fun QQBotQrBindSection(
                         Text(
                             text = QQBotStrings.WAITING_SCAN,
                             fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.primary
+                            color = AppTheme.colors.primary
                         )
                     }
                 }
@@ -501,21 +502,21 @@ private fun QQBotQrBindSection(
                     Text(
                         text = QQBotStrings.BIND_OK,
                         fontSize = 14.sp,
-                        color = Color(0xFF4CAF50)
+                        color = AppTheme.colors.success
                     )
                 }
                 BindStatus.EXPIRED -> {
                     Text(
                         text = QQBotStrings.QR_EXPIRED,
                         fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.error
+                        color = AppTheme.colors.error
                     )
                 }
                 else -> {}
             }
             Spacer(modifier = Modifier.height(8.dp))
             TextButton(onClick = { viewModel.cancelQrBind() }) {
-                Text(QQBotStrings.CANCEL, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                Text(QQBotStrings.CANCEL, fontSize = 13.sp, color = AppTheme.colors.error)
             }
         }
     } else if (uiState.isLoading) {
@@ -525,13 +526,13 @@ private fun QQBotQrBindSection(
                 .padding(horizontal = 16.dp)
                 .height(320.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(AppTheme.colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(modifier = Modifier.size(32.dp))
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(QQBotStrings.GENERATING_QR, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(QQBotStrings.GENERATING_QR, fontSize = 14.sp, color = AppTheme.colors.onSurfaceVariant)
             }
         }
     } else {
@@ -540,14 +541,14 @@ private fun QQBotQrBindSection(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(AppTheme.colors.surfaceVariant)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Icon(
                 imageVector = Icons.Filled.QrCode,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = AppTheme.colors.primary,
                 modifier = Modifier.size(48.dp)
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -555,13 +556,13 @@ private fun QQBotQrBindSection(
                 text = QQBotStrings.USE_QQ_SCAN,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = AppTheme.colors.onSurface
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = QQBotStrings.SCAN_HINT,
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AppTheme.colors.onSurfaceVariant,
                 lineHeight = 18.sp
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -576,7 +577,7 @@ private fun QQBotQrBindSection(
         Text(
             text = uiState.bindError,
             fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.error,
+            color = AppTheme.colors.error,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
     }
@@ -585,7 +586,7 @@ private fun QQBotQrBindSection(
     Text(
         text = QQBotStrings.QR_FOOTER,
         fontSize = 12.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = AppTheme.colors.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp),
         lineHeight = 18.sp
     )
@@ -606,14 +607,14 @@ private fun QQBotBindForm(
             .fillMaxWidth()
             .padding(16.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(AppTheme.colors.surfaceVariant)
             .padding(16.dp)
     ) {
         Text(
             text = QQBotStrings.BIND_QQBOT,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = AppTheme.colors.onSurface
         )
         Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(
@@ -644,7 +645,7 @@ private fun QQBotBindForm(
             Text(
                 text = error,
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.error
+                color = AppTheme.colors.error
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
@@ -669,11 +670,11 @@ private fun QQBotStatusCard(
     onRenameClick: () -> Unit
 ) {
     val (statusText, statusColor) = when {
-        !isLoggedIn -> QQBotStrings.NOT_BOUND to Color(0xFFFFA000)
-        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED -> QQBotStrings.ONLINE to Color(0xFF4CAF50)
-        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTING -> QQBotStrings.CONNECTING to Color(0xFFFFA000)
-        connectionState == QQBotWebSocketClient.ConnectionState.RECONNECTING -> QQBotStrings.RECONNECTING to Color(0xFFFFA000)
-        connectionState == QQBotWebSocketClient.ConnectionState.AUTH_FAILED -> QQBotStrings.AUTH_FAILED to Color(0xFFFF5252)
+        !isLoggedIn -> QQBotStrings.NOT_BOUND to AppTheme.colors.warning
+        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED -> QQBotStrings.ONLINE to AppTheme.colors.success
+        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTING -> QQBotStrings.CONNECTING to AppTheme.colors.warning
+        connectionState == QQBotWebSocketClient.ConnectionState.RECONNECTING -> QQBotStrings.RECONNECTING to AppTheme.colors.warning
+        connectionState == QQBotWebSocketClient.ConnectionState.AUTH_FAILED -> QQBotStrings.AUTH_FAILED to AppTheme.colors.danger
         else -> QQBotStrings.OFFLINE to Color(0xFF9E9E9E)
     }
 
@@ -683,7 +684,7 @@ private fun QQBotStatusCard(
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
-                Color(0xFF4CAF50).copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant)
+                AppTheme.colors.success.copy(alpha = 0.1f) else AppTheme.colors.surfaceVariant)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -692,7 +693,7 @@ private fun QQBotStatusCard(
                 Icons.Filled.CheckCircle else Icons.Outlined.Warning,
             contentDescription = null,
             tint = if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
-                Color(0xFF4CAF50) else Color(0xFFFFA000),
+                AppTheme.colors.success else AppTheme.colors.warning,
             modifier = Modifier.size(40.dp)
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -700,20 +701,20 @@ private fun QQBotStatusCard(
             text = if (isLoggedIn) customName ?: QQBotStrings.BOUND else QQBotStrings.NOT_BOUND_QQBOT,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = AppTheme.colors.onSurface
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = if (isLoggedIn) statusText else QQBotStrings.BIND_HINT,
             fontSize = 13.sp,
-            color = if (isLoggedIn) statusColor else MaterialTheme.colorScheme.onSurfaceVariant
+            color = if (isLoggedIn) statusColor else AppTheme.colors.onSurfaceVariant
         )
         if (isLoggedIn && !accountId.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "AppID: $accountId",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = AppTheme.colors.onSurfaceVariant
             )
         }
         Spacer(modifier = Modifier.height(12.dp))
@@ -724,17 +725,17 @@ private fun QQBotStatusCard(
                         imageVector = Icons.Outlined.Edit,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = AppTheme.colors.primary
                     )
                     Spacer(modifier = Modifier.size(4.dp))
-                    Text(QQBotStrings.RENAME, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(QQBotStrings.RENAME, fontSize = 13.sp, color = AppTheme.colors.primary)
                 }
                 TextButton(onClick = onUnbindClick, modifier = Modifier.height(32.dp)) {
-                    Text(QQBotStrings.UNBIND, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    Text(QQBotStrings.UNBIND, fontSize = 13.sp, color = AppTheme.colors.error)
                 }
             } else {
                 TextButton(onClick = onBindClick, modifier = Modifier.height(32.dp)) {
-                    Text(QQBotStrings.BIND_NOW, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(QQBotStrings.BIND_NOW, fontSize = 13.sp, color = AppTheme.colors.primary)
                 }
             }
         }
@@ -758,7 +759,7 @@ private fun SettingItem(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = AppTheme.colors.onSurfaceVariant,
             modifier = Modifier.size(20.dp)
         )
         Column(
@@ -766,8 +767,8 @@ private fun SettingItem(
                 .weight(1f)
                 .padding(horizontal = 12.dp)
         ) {
-            Text(text = title, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-            Text(text = subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(text = title, fontSize = 14.sp, color = AppTheme.colors.onSurface, maxLines = 1)
+            Text(text = subtitle, fontSize = 12.sp, color = AppTheme.colors.onSurfaceVariant, maxLines = 1)
         }
         trailing()
     }

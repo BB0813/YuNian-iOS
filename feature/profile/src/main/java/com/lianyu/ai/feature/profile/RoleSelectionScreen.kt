@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -68,7 +69,7 @@ fun RoleSelectionScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(AppTheme.colors.background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -84,7 +85,7 @@ fun RoleSelectionScreen(
                         fontWeight = FontWeight.Bold,
                         fontSize = 26.sp
                     ),
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = AppTheme.colors.onBackground,
                     textAlign = TextAlign.Center
                 )
 
@@ -93,7 +94,7 @@ fun RoleSelectionScreen(
                 Text(
                     text = stringResource(R.string.role_selection_subtitle),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AppTheme.colors.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
             }
@@ -155,9 +156,9 @@ fun RoleSelectionScreen(
                         .height(52.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF07C160),
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        containerColor = AppTheme.colors.success,
+                        disabledContainerColor = AppTheme.colors.surfaceVariant,
+                        disabledContentColor = AppTheme.colors.onSurfaceVariant
                     )
                 ) {
                     Text(
@@ -175,7 +176,7 @@ fun RoleSelectionScreen(
                             .fillMaxWidth()
                             .clickable(onClick = onSkip)
                             .padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AppTheme.colors.onSurfaceVariant,
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center
                     )
@@ -199,7 +200,7 @@ private fun RoleOptionCard(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     val borderColor = if (isSelected) accentColor else colorScheme.outline.copy(alpha = 0.3f)
     val backgroundColor = if (isSelected) accentColor.copy(alpha = 0.08f) else colorScheme.surfaceVariant
 

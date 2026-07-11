@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -102,7 +103,7 @@ fun AppSettingsScreen(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     val backgroundColor = if (isDark) WeChatDarkBackground else WeChatLightBackground
-    val cardColor = if (isDark) WeChatDarkCard else Color.White
+    val cardColor = if (isDark) WeChatDarkCard else AppTheme.colors.staticWhite
     val textPrimary = if (isDark) WeChatDarkTextPrimary else WeChatLightTextPrimary
     val textSecondary = if (isDark) WeChatDarkTextSecondary else WeChatLightTextSecondary
     val dividerColor = if (isDark) WeChatDarkDivider else WeChatLightDivider
@@ -352,7 +353,7 @@ fun SettingsGroup(
     textSecondary: Color,
     dividerColor: Color
 ) {
-    val cardColor = if (isDark) WeChatDarkCard else Color.White
+    val cardColor = if (isDark) WeChatDarkCard else AppTheme.colors.staticWhite
     Column(
         modifier = Modifier
             .fillMaxWidth()

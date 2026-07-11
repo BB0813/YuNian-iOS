@@ -1,5 +1,7 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.component.AppListItemLayout
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -111,7 +113,7 @@ val teamMembers = listOf(
 fun TeamScreen(
     onNavigateBack: () -> Unit
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -207,7 +209,7 @@ fun TeamMemberCard(
     member: TeamMember,
     delayIndex: Int
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colorScheme = AppTheme.colors
     Column(
         modifier = Modifier
                 .fillMaxWidth()
@@ -215,37 +217,38 @@ fun TeamMemberCard(
                 .background(colorScheme.surfaceVariant, shape = RoundedCornerShape(16.dp))
                 .padding(20.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                member.color.copy(alpha = 0.3f),
-                                member.color.copy(alpha = 0.15f)
+        AppListItemLayout(
+            isStartAligned = true,
+            startSlot = {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    member.color.copy(alpha = 0.3f),
+                                    member.color.copy(alpha = 0.15f)
+                                )
                             )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (member.avatarRes != null) {
+                        Image(
+                            painter = painterResource(id = member.avatarRes),
+                            contentDescription = member.name,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
                         )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                if (member.avatarRes != null) {
-                    Image(
-                        painter = painterResource(id = member.avatarRes),
-                        contentDescription = member.name,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
+                    }
                 }
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
+            },
+            endSlot = {},
+            slotGap = 16.dp
+        ) {
             Column {
                 Text(
                     text = member.name,

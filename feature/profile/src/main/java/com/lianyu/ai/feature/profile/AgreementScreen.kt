@@ -1,5 +1,6 @@
-﻿package com.lianyu.ai.feature.profile
+package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -139,7 +140,7 @@ fun AgreementScreen(
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
-                            colors = listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                            colors = listOf(AppTheme.colors.primary.copy(alpha = 0.15f), AppTheme.colors.primary.copy(alpha = 0.08f))
                         )
                     ),
                 contentAlignment = Alignment.Center
@@ -147,7 +148,7 @@ fun AgreementScreen(
                 Icon(
                     imageVector = Icons.Filled.Security,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    tint = AppTheme.colors.primary.copy(alpha = 0.7f),
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -160,7 +161,7 @@ fun AgreementScreen(
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = AppTheme.colors.onSurface
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -168,7 +169,7 @@ fun AgreementScreen(
             Text(
                 text = stringResource(R.string.agreement_read),
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -177,7 +178,7 @@ fun AgreementScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
+                    .background(AppTheme.colors.staticWhite)
                     .padding(16.dp)
             ) {
                 Column {
@@ -205,8 +206,8 @@ fun AgreementScreen(
                     checked = agreedToTerms,
                     onCheckedChange = { agreedToTerms = it },
                     colors = CheckboxDefaults.colors(
-                        checkedColor = MaterialTheme.colorScheme.primary,
-                        uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        checkedColor = AppTheme.colors.primary,
+                        uncheckedColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 )
                 Spacer(modifier = Modifier.width(4.dp))
@@ -216,7 +217,7 @@ fun AgreementScreen(
                         fontWeight = if (agreedToTerms) FontWeight.Medium else FontWeight.Normal,
                         fontSize = 14.sp
                     ),
-                    color = if (agreedToTerms) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    color = if (agreedToTerms) AppTheme.colors.onSurface else AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                 )
             }
 
@@ -233,7 +234,7 @@ fun AgreementScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Transparent,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        contentColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 ) {
                     Box(
@@ -244,7 +245,7 @@ fun AgreementScreen(
                             .background(Color.Transparent)
                             .padding(1.dp)
                             .clip(RoundedCornerShape(23.dp))
-                            .background(Color.White),
+                            .background(AppTheme.colors.staticWhite),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(
@@ -255,7 +256,7 @@ fun AgreementScreen(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
@@ -264,7 +265,7 @@ fun AgreementScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         }
                     }
@@ -278,12 +279,12 @@ fun AgreementScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (agreedToTerms)
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                            AppTheme.colors.primary.copy(alpha = 0.9f)
                         else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                        contentColor = Color.White,
-                        disabledContainerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                        disabledContentColor = Color.White
+                            AppTheme.colors.onSurfaceVariant.copy(alpha = 0.3f),
+                        contentColor = AppTheme.colors.staticWhite,
+                        disabledContainerColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.3f),
+                        disabledContentColor = AppTheme.colors.staticWhite
                     )
                 ) {
                     Box(
@@ -297,11 +298,11 @@ fun AgreementScreen(
                             .background(
                                 if (agreedToTerms)
                                     Brush.horizontalGradient(
-                                        colors = listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.9f), MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                                        colors = listOf(AppTheme.colors.primary.copy(alpha = 0.9f), AppTheme.colors.primary.copy(alpha = 0.85f))
                                     )
                                 else
                                     Brush.horizontalGradient(
-                                        colors = listOf(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f), MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                                        colors = listOf(AppTheme.colors.onSurfaceVariant.copy(alpha = 0.3f), AppTheme.colors.onSurfaceVariant.copy(alpha = 0.2f))
                                     )
                             ),
                         contentAlignment = Alignment.Center
@@ -338,7 +339,7 @@ fun AgreementScreen(
             Text(
                 text = stringResource(R.string.version_info),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.5f)
             )
         }
     }
@@ -353,7 +354,7 @@ internal fun AgreementSection(title: String, content: String) {
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 13.sp
             ),
-            color = MaterialTheme.colorScheme.onSurface
+            color = AppTheme.colors.onSurface
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
@@ -362,7 +363,7 @@ internal fun AgreementSection(title: String, content: String) {
                 fontSize = 11.sp,
                 lineHeight = 17.sp
             ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
         )
     }
 }

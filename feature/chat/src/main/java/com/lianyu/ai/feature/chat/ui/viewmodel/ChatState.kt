@@ -34,3 +34,4 @@ data class ChatState(
     /** 流水线错误信息 */
     val pipelineError: String? = null
 )
+

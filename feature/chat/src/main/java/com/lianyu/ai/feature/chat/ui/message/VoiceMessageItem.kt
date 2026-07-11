@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -9,7 +9,7 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
-fun VoiceMessageBubble(
+fun VoiceMessageItem(
     item: ChatListItem.VoiceMessage,
     companionData: CompanionModel?,
     userAvatar: String?,
@@ -32,8 +32,7 @@ fun VoiceMessageBubble(
         userAvatar = userAvatar,
         userName = userName,
         onIntent = onIntent,
-        adaptiveSizing = adaptiveSizing,
-        drawBubble = true
+        adaptiveSizing = adaptiveSizing
     ) {
         VoiceMessageContent(
             audioPath = voicePath,
@@ -42,3 +41,4 @@ fun VoiceMessageBubble(
         )
     }
 }
+

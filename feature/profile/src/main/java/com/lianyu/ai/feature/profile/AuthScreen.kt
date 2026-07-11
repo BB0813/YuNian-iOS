@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -102,9 +103,9 @@ fun AuthScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        MaterialTheme.colorScheme.surface,
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surface
+                        AppTheme.colors.surface,
+                        AppTheme.colors.background,
+                        AppTheme.colors.surface
                     )
                 )
             )
@@ -124,7 +125,7 @@ fun AuthScreen(
                     fontWeight = FontWeight.Bold,
                     fontSize = 28.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = AppTheme.colors.onSurface
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -134,7 +135,7 @@ fun AuthScreen(
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 14.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
             )
 
             Spacer(modifier = Modifier.height(40.dp))
@@ -143,7 +144,7 @@ fun AuthScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .background(AppTheme.colors.surfaceVariant)
                     .padding(24.dp)
             ) {
                 Column {
@@ -156,7 +157,7 @@ fun AuthScreen(
                             Icon(
                                 imageVector = Icons.Filled.Email,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                         },
                         keyboardOptions = KeyboardOptions(
@@ -165,10 +166,10 @@ fun AuthScreen(
                         ),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                            focusedLabelColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            focusedBorderColor = AppTheme.colors.primary.copy(alpha = 0.8f),
+                            unfocusedBorderColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.3f),
+                            focusedLabelColor = AppTheme.colors.primary.copy(alpha = 0.8f),
+                            unfocusedLabelColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f),
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent
                         ),
@@ -187,7 +188,7 @@ fun AuthScreen(
                             Icon(
                                 imageVector = Icons.Filled.Lock,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                         },
                         trailingIcon = {
@@ -195,7 +196,7 @@ fun AuthScreen(
                                 Icon(
                                     imageVector = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f)
                                 )
                             }
                         },
@@ -206,10 +207,10 @@ fun AuthScreen(
                         ),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                            focusedLabelColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            focusedBorderColor = AppTheme.colors.primary.copy(alpha = 0.8f),
+                            unfocusedBorderColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.3f),
+                            focusedLabelColor = AppTheme.colors.primary.copy(alpha = 0.8f),
+                            unfocusedLabelColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.6f),
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent
                         ),
@@ -221,7 +222,7 @@ fun AuthScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = errorMessage!!,
-                            color = MaterialTheme.colorScheme.error,
+                            color = AppTheme.colors.error,
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
@@ -238,14 +239,14 @@ fun AuthScreen(
                             .height(50.dp),
                         shape = RoundedCornerShape(25.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                            disabledContainerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                            containerColor = AppTheme.colors.primary.copy(alpha = 0.9f),
+                            disabledContainerColor = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.2f)
                         )
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
-                                color = Color.White,
+                                color = AppTheme.colors.staticWhite,
                                 strokeWidth = 2.dp
                             )
                         } else {

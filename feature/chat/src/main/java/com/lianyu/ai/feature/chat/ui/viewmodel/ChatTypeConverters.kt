@@ -28,3 +28,4 @@ internal fun ChatMessage.toAiChatMessage(): AiChatMessage = AiChatMessage(
 )
 
 internal fun List<ChatMessage>.toAiChatMessages(): List<AiChatMessage> = map { it.toAiChatMessage() }
+

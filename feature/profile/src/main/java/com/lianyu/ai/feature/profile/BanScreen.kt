@@ -1,5 +1,6 @@
 package com.lianyu.ai.feature.profile
 
+import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
@@ -139,7 +140,7 @@ fun BanScreen(
                         Text(
                             text = "违规次数: ${banInfo.violationCount} | 等级: ${banInfo.levelName} | 答题: ${banInfo.quizQuestionCount}题",
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = AppTheme.colors.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -153,7 +154,7 @@ fun BanScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
-                        .background(Color.White)
+                        .background(AppTheme.colors.staticWhite)
                         .padding(20.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -161,14 +162,14 @@ fun BanScreen(
                         Icon(
                             imageVector = Icons.Filled.Schedule,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                            tint = AppTheme.colors.error.copy(alpha = 0.7f),
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "剩余封禁时间",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         if (days > 0) {
@@ -178,7 +179,7 @@ fun BanScreen(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 26.sp
                                 ),
-                                color = MaterialTheme.colorScheme.error
+                                color = AppTheme.colors.error
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                         }
@@ -189,7 +190,7 @@ fun BanScreen(
                                 fontSize = if (days > 0) 26.sp else 34.sp,
                                 letterSpacing = 4.sp
                             ),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = AppTheme.colors.onSurface
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -228,7 +229,7 @@ fun BanScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp
                         ),
-                        color = Color.White
+                        color = AppTheme.colors.staticWhite
                     )
                 }
 
@@ -241,7 +242,7 @@ fun BanScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFFFFF3E0).copy(alpha = 0.7f))
+                        .background(AppTheme.colors.warningContainer.copy(alpha = 0.7f))
                         .padding(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.Top) {
@@ -268,7 +269,7 @@ fun BanScreen(
                                     fontSize = 11.sp,
                                     lineHeight = 17.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = AppTheme.colors.onSurfaceVariant
                             )
                         }
                     }
@@ -283,7 +284,7 @@ fun BanScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White)
+                        .background(AppTheme.colors.staticWhite)
                         .padding(16.dp)
                 ) {
                     Column {
@@ -308,12 +309,12 @@ fun BanScreen(
             items(BanManager.getViolationLevels()) { level ->
                 val bgColor = when (level.level) {
                     ContentFilter.ViolationLevel.LOW -> Color(0xFFFFF8E1)
-                    ContentFilter.ViolationLevel.MEDIUM -> Color(0xFFFFF3E0)
+                    ContentFilter.ViolationLevel.MEDIUM -> AppTheme.colors.warningContainer
                     ContentFilter.ViolationLevel.HIGH -> Color(0xFFFFEBEE)
                     ContentFilter.ViolationLevel.SEVERE -> Color(0xFFFCE4EC)
                     ContentFilter.ViolationLevel.CRITICAL -> Color(0xFFF3E5F5)
                     ContentFilter.ViolationLevel.EXTREME -> Color(0xFFE0E0E0)
-                    else -> Color.White
+                    else -> AppTheme.colors.staticWhite
                 }
                 val accentColor = when (level.level) {
                     ContentFilter.ViolationLevel.LOW -> Color(0xFFF9A825)

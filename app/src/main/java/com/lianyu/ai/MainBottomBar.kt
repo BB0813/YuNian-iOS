@@ -1,13 +1,8 @@
 package com.lianyu.ai
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Group
@@ -59,55 +54,62 @@ data class BottomNavItem(
     val route: String
 )
 
-/** 底部毛玻璃导航栏 — 独立重组域 */
+/** 底部导航栏 — 背景延伸至屏幕底部，与内容自然衔接 */
 @Composable
 fun FloatingGlassBottomNav(
     items: List<BottomNavItem>,
     currentIndex: Int,
-    onItemClick: (Int) -> Unit
+    onItemClick: (Int) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val selectedColor = MaterialTheme.colorScheme.primary
     val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val backgroundColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val topBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    val navInset = WindowInsets.navigationBars
 
-    Box(
-        modifier = Modifier
+    Column(
+        modifier = modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        contentAlignment = Alignment.BottomCenter
+            .background(surfaceColor)
+            .windowInsetsPadding(navInset)
     ) {
+        // 顶部细分隔线 — 与内容区域自然过渡
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .height(52.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(backgroundColor),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(topBorderColor)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items.forEachIndexed { index, item ->
-                    val selected = currentIndex == index
+            items.forEachIndexed { index, item ->
+                val selected = currentIndex == index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onItemClick(index) }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
                     Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = { onItemClick(index) }
-                            ),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
                             contentDescription = item.title,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(24.dp),
                             tint = if (selected) selectedColor else unselectedColor
                         )
                         Spacer(modifier = Modifier.height(2.dp))
@@ -115,7 +117,7 @@ fun FloatingGlassBottomNav(
                             text = item.title,
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                fontSize = 9.sp
+                                fontSize = 11.sp
                             ),
                             color = if (selected) selectedColor else unselectedColor
                         )

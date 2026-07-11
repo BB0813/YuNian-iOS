@@ -1,4 +1,4 @@
-package com.lianyu.ai.feature.chat.ui.screen
+package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -9,7 +9,7 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 
 @Composable
-internal fun AttachmentMessageBubble(
+internal fun AttachmentMessageItem(
     message: ChatMessage,
     companionData: CompanionModel?,
     userAvatar: String?,
@@ -49,3 +49,4 @@ internal fun AttachmentMessageBubble(
         )
     }
 }
+
