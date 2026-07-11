@@ -81,7 +81,7 @@ internal fun MainNavHost(
     onLastTabPageChanged: (Int) -> Unit
 ) {
     val slideTransitionSpec = spring<IntOffset>(
-        dampingRatio = Spring.DampingRatioMediumBouncy,
+        dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = Spring.StiffnessMediumLow
     )
 

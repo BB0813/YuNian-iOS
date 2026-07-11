@@ -14,6 +14,7 @@ import com.lianyu.ai.database.dao.ApiProviderPresetDao
 import com.lianyu.ai.database.dao.ChatGroupDao
 import com.lianyu.ai.database.dao.ChatMessageDao
 import com.lianyu.ai.database.dao.CompanionDao
+import com.lianyu.ai.database.dao.ConversationSummaryDao
 import com.lianyu.ai.database.dao.DiaryDao
 import com.lianyu.ai.database.dao.GroupMessageDao
 import com.lianyu.ai.database.dao.KeywordDao
@@ -27,6 +28,7 @@ import com.lianyu.ai.database.model.ApiProviderPreset
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
+import com.lianyu.ai.database.model.ConversationSummary
 import com.lianyu.ai.database.model.DiaryEntry
 import com.lianyu.ai.database.model.FileFormat
 import com.lianyu.ai.database.model.GroupMessage
@@ -57,9 +59,10 @@ import java.io.File
         GroupMessage::class,
         KeywordEntity::class,
         QuizQuestionEntity::class,
-        TokenUsage::class
+        TokenUsage::class,
+        ConversationSummary::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -76,6 +79,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tokenUsageDao(): TokenUsageDao
     abstract fun unifiedMemoryDao(): UnifiedMemoryDao
     abstract fun diaryDao(): DiaryDao
+    abstract fun conversationSummaryDao(): ConversationSummaryDao
 
     companion object {
         private const val DB_NAME = "lianyu_database"
@@ -310,28 +314,30 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private fun createDatabase(context: Context): AppDatabase {
-            // EncryptedFile-based DB encryption — disabled for troubleshooting
-            // com.lianyu.ai.security.EncryptedDatabaseWrapper.prepareDatabase(context)
             return Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 DB_NAME
             )
+                // ── 显式启用 WAL 模式：一写多读，提升并发性能 ──
+                .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .addMigrations(*MIGRATIONS)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         seedApiProviderPresets(db)
+                        // WAL 模式由 setJournalMode(WRITE_AHEAD_LOGGING) 统一设置，无需在回调中重复
+                    }
+                    override fun onOpen(db: SupportSQLiteDatabase) {
+                        // WAL 模式由 setJournalMode(WRITE_AHEAD_LOGGING) 统一设置，无需在回调中重复
                     }
                 })
-                // 移除 fallbackToDestructiveMigration()：它会在 Schema 不匹配时静默删除数据库
-                // 现在由 openVerifiedDatabase() 统一处理异常，优先恢复而非重建
                 .build()
         }
 
         private fun verifyDatabaseCanOpen(database: AppDatabase) {
             // 先尝试 checkpoint WAL 文件，修复覆盖安装后可能存在的脏写
             try {
-                database.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+                database.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").close()
             } catch (_: Exception) { }
             database.openHelper.writableDatabase.query("PRAGMA user_version").close()
         }
@@ -841,6 +847,40 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // ── 复合索引优化：加速「进入会话加载历史消息」查询 ──
+                // chat_messages: (companionId, timestamp DESC, id DESC) 覆盖游标分页
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_chat_msg_comp` ON `chat_messages` (`companionId`, `timestamp` DESC, `id` DESC)"
+                )
+                // group_messages: (groupId, timestamp DESC) 覆盖群聊分页
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_group_msg_comp` ON `group_messages` (`groupId`, `timestamp` DESC)"
+                )
+
+                // ── 会话摘要表：避免联查消息表获取最后一条消息 ──
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `conversation_summary` (
+                        `sessionId` INTEGER NOT NULL,
+                        `sessionType` TEXT NOT NULL,
+                        `lastMessagePreview` TEXT NOT NULL,
+                        `lastMessageTimestamp` INTEGER NOT NULL,
+                        `lastMessageIsFromUser` INTEGER NOT NULL,
+                        `unreadCount` INTEGER NOT NULL,
+                        `isPinned` INTEGER NOT NULL,
+                        `isMuted` INTEGER NOT NULL,
+                        PRIMARY KEY (`sessionId`, `sessionType`)
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_summary_type_time` ON `conversation_summary` (`sessionType`, `lastMessageTimestamp`)"
+                )
+
+                // WAL 模式由 onOpen 回调统一设置，迁移中不执行 PRAGMA（execSQL 不支持返回结果集的语句）
+            }
+        }
+
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -939,7 +979,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_20_21,
             MIGRATION_21_22,
             MIGRATION_22_23,
-            MIGRATION_23_24
+            MIGRATION_23_24,
+            MIGRATION_24_25
         )
 
         private var lastBackupTime: Long = 0L

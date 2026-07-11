@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -25,12 +26,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("message_read_status", android.content.Context.MODE_PRIVATE)
     private val readTimeTriggers = mutableMapOf<Long, MutableStateFlow<Long>>()
 
-    val chatList: Flow<List<ChatListItem>>
+    sealed class UiState {
+        object Loading : UiState()
+        data class Ready(val items: List<ChatListItem>) : UiState()
+    }
+
+    val chatListState: Flow<UiState>
 
     init {
         val database = AppDatabase.getDatabase(application)
         companionRepository = CompanionRepository(database.companionDao())
-        chatRepository = ChatRepository(database.chatMessageDao())
+        chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
 
         viewModelScope.launch {
             ReadStatusManager.readEvents.collect { (id, timestamp) ->
@@ -38,10 +44,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        chatList = companionRepository.getAllCompanions()
+        chatListState = companionRepository.getAllCompanions()
             .flatMapLatest { companions ->
                 if (companions.isEmpty()) {
-                    flowOf(emptyList())
+                    flowOf<UiState>(UiState.Ready(emptyList()))
                 } else {
                     // 预热：为每个 companion 加载最近一页消息到 ChatRepository 内存缓存
                     viewModelScope.launch {
@@ -66,12 +72,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             }
                     }
                     combine(flows) { items: Array<ChatListItem> ->
-                        items.toList()
+                        UiState.Ready(items.toList()) as UiState
                     }
                 }
             }
+            .onStart { emit(UiState.Loading) }
             .catch {
-                emit(emptyList())
+                emit(UiState.Ready(emptyList()))
             }
     }
 

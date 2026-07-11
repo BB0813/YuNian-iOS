@@ -59,7 +59,13 @@ fun MainScreen(mainActivity: Activity) {
     val updateInfo by updateManager.updateInfo.collectAsState()
     val downloadProgress by updateManager.downloadProgress.collectAsState()
 
+    // 导航防抖：防止连续快速点击多次触发页面转场动画
+    var lastNavTime by remember { mutableStateOf(0L) }
+
     fun openCompanionChat(companionId: Long) {
+        val now = System.currentTimeMillis()
+        if (now - lastNavTime < 500) return
+        lastNavTime = now
         LastOpenedCompanionStore.save(context, companionId)
         navController.navigate(MainRoute.Chat(companionId).route)
     }

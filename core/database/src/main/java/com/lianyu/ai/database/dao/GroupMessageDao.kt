@@ -47,4 +47,21 @@ interface GroupMessageDao {
 
     @Query("SELECT COUNT(*) FROM group_messages WHERE groupId = :groupId")
     suspend fun getMessageCount(groupId: Long): Int
+
+    // ── 批量插入：事务写入，减少 I/O 开销 ──
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMessages(messages: List<GroupMessage>): List<Long>
+
+    // ── 数据清理支持 ──
+    @Query("SELECT DISTINCT groupId FROM group_messages")
+    suspend fun getDistinctGroupIds(): List<Long>
+
+    @Query("DELETE FROM group_messages WHERE id IN (SELECT id FROM group_messages WHERE groupId = :groupId ORDER BY timestamp ASC, id ASC LIMIT :count)")
+    suspend fun deleteOldMessagesForGroup(groupId: Long, count: Int): Int
+
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentMessagesForGroupSync(groupId: Long, limit: Int): List<GroupMessage>
+
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLastMessageForGroupSync(groupId: Long): GroupMessage?
 }

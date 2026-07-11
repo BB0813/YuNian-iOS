@@ -58,7 +58,7 @@ class GroupChatViewModel(
     private var sendMessageJob: Job? = null
 
     private val database = AppDatabase.getDatabase(application)
-    private val groupMessageRepository = GroupMessageRepository(database.groupMessageDao())
+    private val groupMessageRepository = GroupMessageRepository(database.groupMessageDao(), database.conversationSummaryDao())
     private val chatGroupRepository = ChatGroupRepository(database.chatGroupDao())
     private val companionRepository = CompanionRepository(database.companionDao())
     private val userRepository = UserRepository(getApplication())

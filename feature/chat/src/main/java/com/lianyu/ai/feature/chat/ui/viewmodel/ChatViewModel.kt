@@ -49,7 +49,7 @@ class ChatViewModel(
 ) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application)
-    private val chatRepository = ChatRepository(database.chatMessageDao())
+    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
     private val contextResolver = ChatContextResolver(chatRepository)

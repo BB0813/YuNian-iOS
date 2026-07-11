@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -75,7 +76,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     groupViewModel: ChatGroupViewModel = viewModel()
 ) {
-    val chatList by viewModel.chatList.collectAsState(initial = emptyList())
+    val chatListState by viewModel.chatListState.collectAsState(initial = HomeViewModel.UiState.Loading)
     val groups by groupViewModel.groups.collectAsState(initial = emptyList())
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
@@ -110,8 +111,13 @@ fun HomeScreen(
                             color = colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(2.dp))
+                        val chatCount = when (chatListState) {
+                            is HomeViewModel.UiState.Ready ->
+                                (chatListState as HomeViewModel.UiState.Ready).items.size
+                            else -> 0
+                        }
                         Text(
-                            text = "${chatList.size} 个会话 · ${groups.size} 个群聊",
+                            text = "${chatCount} 个会话 · ${groups.size} 个群聊",
                             fontSize = 12.sp,
                             color = colorScheme.onSurfaceVariant
                         )
@@ -166,16 +172,33 @@ fun HomeScreen(
                 HomeTab.ALL, HomeTab.GROUP -> groups
                 HomeTab.FRIEND -> emptyList()
             }
-            val displayChats = when (selectedTab) {
-                HomeTab.ALL, HomeTab.FRIEND -> chatList
-                HomeTab.GROUP -> emptyList()
+            val displayChats = when {
+                chatListState is HomeViewModel.UiState.Ready -> {
+                    val items = (chatListState as HomeViewModel.UiState.Ready).items
+                    when (selectedTab) {
+                        HomeTab.ALL, HomeTab.FRIEND -> items
+                        HomeTab.GROUP -> emptyList()
+                    }
+                }
+                else -> emptyList()
             }
 
-            if (displayGroups.isEmpty() && displayChats.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    EmptyHomeState()
+            when {
+                chatListState is HomeViewModel.UiState.Loading && groups.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            color = colorScheme.primary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
-            } else {
+                displayGroups.isEmpty() && displayChats.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        EmptyHomeState()
+                    }
+                }
+                else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
@@ -217,6 +240,7 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
                 }
             }
         }

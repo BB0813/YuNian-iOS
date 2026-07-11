@@ -56,4 +56,27 @@ interface ChatMessageDao {
 
     @Query("UPDATE chat_messages SET content = :content, searchContent = :searchContent WHERE id = :messageId")
     suspend fun updateMessageContent(messageId: Long, content: String, searchContent: String): Int
+
+    // ── 批量插入：事务写入，减少 I/O 开销 ──
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMessages(messages: List<ChatMessage>): List<Long>
+
+    // ── 数据清理支持 ──
+    @Query("SELECT DISTINCT companionId FROM chat_messages")
+    suspend fun getDistinctCompanionIds(): List<Long>
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE companionId = :companionId")
+    suspend fun getMessageCountForCompanion(companionId: Long): Int
+
+    @Query("DELETE FROM chat_messages WHERE id IN (SELECT id FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp ASC, id ASC LIMIT :count)")
+    suspend fun deleteOldMessagesForCompanion(companionId: Long, count: Int): Int
+
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    suspend fun getRecentMessagesForCompanionSync(companionId: Long, limit: Int): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC, id DESC LIMIT 1")
+    suspend fun getLastMessageForCompanionSync(companionId: Long): ChatMessage?
+
+    @Query("SELECT * FROM chat_messages WHERE companionId = :companionId ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    fun getRecentMessagesFlow(companionId: Long, limit: Int): Flow<List<ChatMessage>>
 }
