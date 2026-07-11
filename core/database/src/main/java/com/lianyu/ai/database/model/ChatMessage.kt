@@ -17,7 +17,12 @@ import kotlinx.serialization.Serializable
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("companionId"), Index("timestamp")]
+    indices = [
+        Index("companionId"),
+        Index("timestamp"),
+        // 复合索引：加速进入会话加载历史消息（游标分页）
+        Index(value = ["companionId", "timestamp", "id"], name = "idx_chat_msg_comp", orders = [Index.Order.ASC, Index.Order.DESC, Index.Order.DESC])
+    ]
 )
 @Serializable
 data class ChatMessage(

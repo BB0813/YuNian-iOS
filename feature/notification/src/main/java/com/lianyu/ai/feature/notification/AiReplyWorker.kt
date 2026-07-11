@@ -60,7 +60,7 @@ class AiReplyWorker(
 
             val database = AppDatabase.getDatabase(applicationContext)
             val companionRepository = CompanionRepository(database.companionDao())
-            val chatRepository = ChatRepository(database.chatMessageDao())
+            val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
             val memoryRepository = MemoryRepository(database.memoryDao(), DeviceIdProvider.getDeviceId(applicationContext))
 
             try {

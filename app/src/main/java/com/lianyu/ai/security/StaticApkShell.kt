@@ -3,7 +3,7 @@ package com.lianyu.ai.security
 import android.app.Application
 import android.content.Context
 
-class StaticApkShell : Application() {
+class StaticApkShell : Application(), androidx.work.Configuration.Provider {
 
     init {
         try { System.loadLibrary("lianyu_shell") }
@@ -11,6 +11,11 @@ class StaticApkShell : Application() {
             android.util.Log.e("StaticApkShell", "liblianyu_shell.so not found", e)
         }
     }
+
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = androidx.work.Configuration.Builder()
+            .setMinimumLoggingLevel(android.util.Log.WARN)
+            .build()
 
     override fun attachBaseContext(base: Context) {
         nativeAntiHookInit()

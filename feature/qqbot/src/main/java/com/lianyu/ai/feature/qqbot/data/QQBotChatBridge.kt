@@ -30,7 +30,7 @@ class QQBotChatBridge(
 ) {
     private val database = AppDatabase.getDatabase(context)
     private val deviceId = DeviceIdProvider.getDeviceId(context)
-    private val chatRepository = ChatRepository(database.chatMessageDao())
+    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
     private val mappingManager = QQBotUserMappingManager(tokenStore, companionRepository)

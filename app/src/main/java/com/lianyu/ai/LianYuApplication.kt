@@ -123,8 +123,9 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // 注入应用级后台作用域，供跨越 ViewModel 生命周期的任务使用
             com.lianyu.ai.common.ApplicationScopeProvider.init(bgScope)
 
-            // Seed default companion asynchronously — must exist before any chat opens
-            bgScope.launch { seedDefaultCompanion(app) }
+            // Seed default companion synchronously — must exist before UI loads
+            // 否则冷启动首页先显示空列表，等异步 seed 完成后才刷新
+            runCatching { kotlinx.coroutines.runBlocking { seedDefaultCompanion(app) } }
 
             bgScope.launch { ContentFilter.initialize(app) }
             bgScope.launch { preloadBackground(app) }
@@ -135,6 +136,9 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
             bgScope.launch { initSafetyVerifier(app) }
             bgScope.launch { initYandereMode(app) }
+            // 三级存储架构：注册定期数据清理任务
+            com.lianyu.ai.database.cleanup.DataCleanupManager.schedulePeriodicCleanup(app)
+            bgScope.launch { com.lianyu.ai.database.cleanup.DataCleanupManager.cleanupIfNeeded(app) }
         }
 
         private suspend fun initYandereMode(app: Application) {
@@ -207,7 +211,7 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 CompanionRepository(AppDatabase.getDatabase(app).companionDao())
             }
             ServiceRegistry.registerSingleton(ChatRepository::class.java) {
-                ChatRepository(AppDatabase.getDatabase(app).chatMessageDao())
+                ChatRepository(AppDatabase.getDatabase(app).chatMessageDao(), AppDatabase.getDatabase(app).conversationSummaryDao(), AppDatabase.getDatabase(app))
             }
             ServiceRegistry.registerSingleton(MemoryRepository::class.java) {
                 MemoryRepository(AppDatabase.getDatabase(app).memoryDao(), DeviceIdProvider.getDeviceId(app))

@@ -20,7 +20,9 @@ import kotlinx.serialization.Serializable
     indices = [
         Index(value = ["groupId"]),
         Index(value = ["groupId", "timestamp"]),
-        Index(value = ["groupId", "fileFormat"])
+        Index(value = ["groupId", "fileFormat"]),
+        // 复合索引：加速群聊分页查询
+        Index(value = ["groupId", "timestamp"], name = "idx_group_msg_comp", orders = [Index.Order.ASC, Index.Order.DESC])
     ]
 )
 @Serializable

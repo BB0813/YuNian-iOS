@@ -76,7 +76,7 @@ class ChatGenerationManager private constructor(
     }
     private val database = AppDatabase.getDatabase(application)
     private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
-    private val chatRepository = ChatRepository(database.chatMessageDao())
+    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val contextResolver = ChatContextResolver(chatRepository)
     private val chatDetailSettingsStore = ChatDetailSettingsStore(application)
