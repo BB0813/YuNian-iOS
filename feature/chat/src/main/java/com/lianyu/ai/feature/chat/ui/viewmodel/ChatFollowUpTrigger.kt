@@ -4,6 +4,7 @@ import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.repository.ChatRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.AiCompanionInfo
@@ -44,6 +45,7 @@ internal object ChatFollowUpTrigger {
         companionId: Long,
         companion: AiCompanionInfo,
         chatRepository: ChatRepository,
+        messageWriter: MessageWriteCoordinator,
         aiService: AiServiceProvider,
         broadcastCallback: (Long, String) -> Unit
     ) {
@@ -73,7 +75,7 @@ internal object ChatFollowUpTrigger {
                     isFromUser = false,
                     timestamp = System.currentTimeMillis()
                 )
-                val msgId = chatRepository.sendMessageAndGetId(followUpMsg)
+                val msgId = messageWriter.enqueueChat(followUpMsg)
                 broadcastCallback(msgId, followUp)
                 SecureLog.d("ChatViewModel", "Follow-up question sent: $followUp")
             } catch (e: Exception) {

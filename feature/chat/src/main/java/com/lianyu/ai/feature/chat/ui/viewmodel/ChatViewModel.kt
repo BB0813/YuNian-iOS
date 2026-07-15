@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.lianyu.ai.common.ChatConstants
+import com.lianyu.ai.common.MessageBodyState
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.common.TimeoutBudgets
@@ -15,9 +16,11 @@ import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.MessageType
+import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.domain.AiChatMessage
 import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
@@ -49,7 +52,8 @@ class ChatViewModel(
 ) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application)
-    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
+    private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+    private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
     private val contextResolver = ChatContextResolver(chatRepository)
@@ -62,6 +66,14 @@ class ChatViewModel(
     private val _olderMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val _messages = MutableStateFlow(_recentMessages.value)
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+
+    private val _messageMetadata = MutableStateFlow<List<Message>>(emptyList())
+    val messageMetadata: StateFlow<List<Message>> = _messageMetadata.asStateFlow()
+
+    private val _messageBodies = MutableStateFlow<Map<Long, MessageBodyState<ChatMessage>>>(
+        _recentMessages.value.associate { it.id to MessageBodyState.Ready(it) }
+    )
+    val messageBodies: StateFlow<Map<Long, MessageBodyState<ChatMessage>>> = _messageBodies.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -100,7 +112,7 @@ class ChatViewModel(
     private var avatarUnsubscribe: (() -> Unit)? = null
 
     init {
-        observeMessages()
+        observeMessageMetadata()
         observeCompanion()
         observeApiConfigs()
         observeGenerationEvents()
@@ -134,6 +146,12 @@ class ChatViewModel(
         }
     }
 
+    fun markAsRead() {
+        viewModelScope.launch(Dispatchers.IO) {
+            chatRepository.markReadThroughLatest(companionId)
+        }
+    }
+
     fun clearChatHistory() {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { chatRepository.clearChatHistory(companionId) }
@@ -155,7 +173,7 @@ class ChatViewModel(
     suspend fun sendVoiceCallMessage(text: String): String? {
         val companion = _companionData.value ?: return null
         return runCatching {
-            chatRepository.sendMessage(
+            messageWriter.enqueueChat(
                 ChatMessage(companionId = companionId, content = text, isFromUser = true, timestamp = System.currentTimeMillis())
             )
             val rawHistory = contextResolver.getHistoryForAi(companionId)
@@ -175,20 +193,32 @@ class ChatViewModel(
                 }
             } ?: return null
             response.content.takeUnless { it.startsWith("[TOAST]") }?.also { content ->
-                chatRepository.sendMessage(
+                messageWriter.enqueueChat(
                     ChatMessage(companionId = companionId, content = content, isFromUser = false, timestamp = System.currentTimeMillis())
                 )
             }
         }.onFailure { SecureLog.e("ChatViewModel", "Voice call message failed", it) }.getOrNull()
     }
 
-    private fun observeMessages() {
+    private fun observeMessageMetadata() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                chatRepository.getMessagesForCompanion(companionId, ChatConstants.CHAT_PAGE_SIZE).collect { recent ->
-                    _recentMessages.value = recent
-                    _hasMoreMessages.value = !reachedHistoryStart && recent.size >= ChatConstants.CHAT_PAGE_SIZE
-                    publishMessages()
+                _messageMetadata.value = chatRepository
+                    .getRecentMetadata(companionId, ChatConstants.CHAT_PAGE_SIZE)
+                    .reversed()
+                _hasMoreMessages.value =
+                    _messageMetadata.value.size < chatRepository.getMessageCount(companionId)
+                chatRepository.observeRecentMetadata(companionId, ChatConstants.CHAT_PAGE_SIZE).collect { recent ->
+                    val olderIds = _messageMetadata.value
+                        .asSequence()
+                        .filterNot { current -> recent.any { it.id == current.id } }
+                        .toList()
+                    _messageMetadata.value = (olderIds + recent.reversed())
+                        .distinctBy { it.id }
+                        .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
+                    _hasMoreMessages.value = !reachedHistoryStart &&
+                        _messageMetadata.value.size < chatRepository.getMessageCount(companionId)
+                    if (recent.isNotEmpty()) markAsRead()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -197,6 +227,45 @@ class ChatViewModel(
                 _events.tryEmit(ChatUiEvent.Error("消息加载失败"))
             }
         }
+    }
+
+    fun loadVisibleMessageBodies(messageIds: Set<Long>) {
+        val metadata = _messageMetadata.value.filter { it.id in messageIds }
+        val pending = metadata.filter { item ->
+            when (_messageBodies.value[item.id]) {
+                null, is MessageBodyState.Error -> true
+                else -> false
+            }
+        }
+        if (pending.isEmpty()) return
+
+        _messageBodies.value = _messageBodies.value + pending.associate {
+            it.id to MessageBodyState.Loading
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { chatRepository.loadMessages(pending) }
+                .onSuccess { loaded ->
+                    _messageBodies.value = _messageBodies.value + pending.associate { metadataItem ->
+                        val message = loaded[metadataItem.id]
+                        metadataItem.id to if (message != null) {
+                            MessageBodyState.Ready(message)
+                        } else {
+                            MessageBodyState.Error("正文不存在")
+                        }
+                    }
+                    publishLoadedMessages()
+                }
+                .onFailure { error ->
+                    _messageBodies.value = _messageBodies.value + pending.associate {
+                        it.id to MessageBodyState.Error(error.message ?: "正文加载失败")
+                    }
+                }
+        }
+    }
+
+    fun retryMessageBody(messageId: Long) {
+        _messageBodies.value = _messageBodies.value - messageId
+        loadVisibleMessageBodies(setOf(messageId))
     }
 
     private fun observeCompanion() {
@@ -230,14 +299,16 @@ class ChatViewModel(
         _isLoadingMore.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val cursor = _olderMessages.value.firstOrNull() ?: _recentMessages.value.firstOrNull()
-                val page = chatRepository.getMessagesBeforeSync(
+                val cursor = _messageMetadata.value.firstOrNull()
+                val page = chatRepository.getMetadataBefore(
                     companionId,
                     cursor?.timestamp ?: Long.MAX_VALUE,
                     cursor?.id ?: Long.MAX_VALUE,
                     ChatConstants.CHAT_LOAD_MORE_SIZE
                 )
-                if (page.isNotEmpty()) _olderMessages.value = page.reversed() + _olderMessages.value
+                if (page.isNotEmpty()) {
+                    _messageMetadata.value = (page.reversed() + _messageMetadata.value).distinctBy { it.id }
+                }
                 reachedHistoryStart = page.size < ChatConstants.CHAT_LOAD_MORE_SIZE
                 _hasMoreMessages.value = !reachedHistoryStart
                 publishMessages()
@@ -258,27 +329,25 @@ class ChatViewModel(
                 return@launch
             }
             if (_messages.value.none { it.id == messageId }) {
-                val oldestLoaded = _olderMessages.value.firstOrNull() ?: _recentMessages.value.firstOrNull()
-                var cursorTimestamp = oldestLoaded?.timestamp ?: Long.MAX_VALUE
-                var cursorId = oldestLoaded?.id ?: Long.MAX_VALUE
-                val loaded = mutableListOf<ChatMessage>()
-                while (cursorTimestamp > target.timestamp || (cursorTimestamp == target.timestamp && cursorId >= target.id)) {
-                    val page = chatRepository.getMessagesBeforeSync(
-                        companionId,
-                        cursorTimestamp,
-                        cursorId,
-                        ChatConstants.CHAT_LOAD_MORE_SIZE
-                    )
-                    if (page.isEmpty()) break
-                    loaded += page
-                    val oldestPageMessage = page.last()
-                    cursorTimestamp = oldestPageMessage.timestamp
-                    cursorId = oldestPageMessage.id
-                    if (page.any { it.id == messageId }) break
-                }
-                _olderMessages.value = (loaded.reversed() + _olderMessages.value).distinctBy { it.id }
-                reachedHistoryStart = cursorTimestamp < target.timestamp ||
-                    (cursorTimestamp == target.timestamp && cursorId <= target.id)
+                val halfPage = ChatConstants.CHAT_LOAD_MORE_SIZE / 2
+                val before = chatRepository.getMessagesBeforeSync(
+                    companionId,
+                    target.timestamp,
+                    target.id,
+                    halfPage
+                ).reversed()
+                val after = chatRepository.getMessagesAfterSync(
+                    companionId,
+                    target.timestamp,
+                    target.id,
+                    halfPage
+                )
+                val recentIds = _recentMessages.value.mapTo(HashSet()) { it.id }
+                _olderMessages.value = (before + target + after + _olderMessages.value)
+                    .filterNot { it.id in recentIds }
+                    .distinctBy { it.id }
+                    .sortedWith(compareBy<ChatMessage> { it.timestamp }.thenBy { it.id })
+                reachedHistoryStart = before.size < halfPage
                 _hasMoreMessages.value = !reachedHistoryStart
                 publishMessages()
             }
@@ -290,6 +359,15 @@ class ChatViewModel(
         _messages.value = contextResolver.capUiMessages(
             (_olderMessages.value + _recentMessages.value).distinctBy { it.id }
         ).first
+    }
+
+    private fun publishLoadedMessages() {
+        val loaded = _messageMetadata.value.mapNotNull { metadata ->
+            (_messageBodies.value[metadata.id] as? MessageBodyState.Ready)?.value
+        }
+        _recentMessages.value = loaded.takeLast(ChatConstants.CHAT_PAGE_SIZE)
+        _olderMessages.value = loaded.dropLast(_recentMessages.value.size)
+        publishMessages()
     }
 
     private fun switchApi(apiInfo: ApiProviderInfo) {
@@ -332,7 +410,7 @@ class ChatViewModel(
     private fun sendVoice(audioPath: String, duration: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                chatRepository.sendMessage(
+                messageWriter.enqueueChat(
                     ChatMessage(
                         companionId = companionId,
                         content = "[语音] $duration\"",
@@ -355,7 +433,7 @@ class ChatViewModel(
     private fun sendVideo(videoPath: String) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                chatRepository.sendMessage(
+                messageWriter.enqueueChat(
                     ChatMessage(
                         companionId = companionId,
                         content = "[视频]",

@@ -9,10 +9,14 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 
 class ChatMessageStorageTest {
     private val projectRoot = generateSequence(File(".").canonicalFile) { it.parentFile }
         .first { File(it, "settings.gradle.kts").isFile }
+    private val testKey: SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+    private val testKeyProvider = ChatMessageCrypto.KeyProvider { testKey }
 
     @Test
     fun chat_message_crypto_does_not_use_hardcoded_fallback_key_material() {
@@ -85,12 +89,12 @@ class ChatMessageStorageTest {
             fileFormat = FileFormat.TEXT,
             linkString = ""
         )
-        val encrypted = ChatMessageCrypto.encryptForStorage(sourceMessage)
+        val encrypted = ChatMessageCrypto.encryptForStorage(sourceMessage, testKeyProvider)
         val corrupted = encrypted.copy(content = encrypted.content.dropLast(2) + "AA")
 
-        val decrypted = ChatMessageCrypto.decryptFromStorage(corrupted)
+        val decrypted = ChatMessageCrypto.decryptFromStorage(corrupted, testKeyProvider)
 
-        assertEquals(ChatMessageCrypto.P0, decrypted.content)
+        assertEquals(ChatMessageCrypto.DECRYPT_FAILED_PLACEHOLDER, decrypted.content)
         assertEquals("", decrypted.linkString)
     }
 
@@ -105,7 +109,7 @@ class ChatMessageStorageTest {
             linkString = "lianyu://file?kind=image&uri=content://secure/image/9"
         )
 
-        val encrypted = ChatMessageCrypto.encryptForStorage(message)
+        val encrypted = ChatMessageCrypto.encryptForStorage(message, testKeyProvider)
 
         assertFalse(encrypted.content.contains("需要加密"))
         assertFalse(encrypted.linkString.contains("content://secure"))
@@ -113,8 +117,32 @@ class ChatMessageStorageTest {
         assertEquals(FileFormat.IMAGE, encrypted.fileFormat)
         assertTrue(encrypted.linkString.isNotBlank())
 
-        val decrypted = ChatMessageCrypto.decryptFromStorage(encrypted)
+        val decrypted = ChatMessageCrypto.decryptFromStorage(encrypted, testKeyProvider)
         assertEquals(message.content, decrypted.content)
         assertEquals(message.linkString, decrypted.linkString)
+    }
+
+    @Test
+    fun stored_message_separates_timeline_metadata_from_encrypted_body() {
+        val source = ChatMessage(
+            id = 42,
+            companionId = 9,
+            content = "正文",
+            isFromUser = false,
+            timestamp = 1_700_000_123_456,
+            searchContent = "正文",
+            fileFormat = FileFormat.IMAGE,
+            linkString = "resource"
+        )
+
+        val (metadata, body) = com.lianyu.ai.database.model.StoredMessage.fromChatMessage(source)
+
+        assertEquals(42L, metadata.id)
+        assertEquals(9L, metadata.conversationId)
+        assertEquals(FileFormat.IMAGE, metadata.fileFormat)
+        assertEquals(42L, body.messageId)
+        assertEquals("正文", body.content)
+        assertEquals("正文", body.searchContent)
+        assertEquals("resource", body.linkString)
     }
 }

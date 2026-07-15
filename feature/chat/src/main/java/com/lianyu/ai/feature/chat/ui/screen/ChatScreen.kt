@@ -136,7 +136,6 @@ import com.lianyu.ai.network.tts.ChatTtsMode
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
-import com.lianyu.ai.common.ReadStatusManager
 import com.lianyu.ai.common.HardwareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -287,7 +286,11 @@ fun ChatScreen(
     val userAvatar by viewModel.userAvatar.collectAsState()
     val userName by viewModel.userName.collectAsState()
     val messages by viewModel.messages.collectAsState(initial = emptyList())
-    val chatItems = remember(messages) { messages.toChatListItems() }
+    val messageMetadata by viewModel.messageMetadata.collectAsState()
+    val messageBodies by viewModel.messageBodies.collectAsState()
+    val chatItems = remember(messageMetadata, messageBodies) {
+        toChatListItems(messageMetadata, messageBodies)
+    }
     val visibleChatItems = remember(chatItems) { chatItems.asReversed() }
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val hasMoreMessages by viewModel.hasMoreMessages.collectAsState()
@@ -324,7 +327,7 @@ fun ChatScreen(
     val detailSettings by detailSettingsFlow.collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
 
     LaunchedEffect(Unit) {
-        ReadStatusManager.markAsRead(context, companionId)
+        viewModel.markAsRead()
         viewModel.refreshCompanionData()
     }
 
@@ -423,6 +426,17 @@ fun ChatScreen(
             wasAtBottom = nearBottom
             if (nearBottom) unreadNewMessages = 0
         }
+    }
+
+    LaunchedEffect(listState, visibleChatItems) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.mapNotNull { item ->
+                (item.key as? String)
+                    ?.removePrefix("message-")
+                    ?.takeIf { it != item.key }
+                    ?.toLongOrNull()
+            }.toSet()
+        }.collect(viewModel::loadVisibleMessageBodies)
     }
 
     // 新消息时自动滚动到底部：用户消息始终滚动，AI 消息仅在用户位于底部时滚动
@@ -686,6 +700,7 @@ fun ChatScreen(
                             onIntent = handleChatIntent,
                             adaptiveSizing = adaptiveSizing,
                             isDarkTheme = isDarkTheme,
+                            onRetryBody = viewModel::retryMessageBody,
                             onCompanionAvatarClick = { onNavigateToDetail(companionId) },
                             modifier = Modifier.graphicsLayer { this.alpha = alpha.value }
                         )

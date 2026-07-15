@@ -11,16 +11,19 @@ import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.common.wechat.WeChatBroadcast
 import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
 import com.lianyu.ai.common.ChatConstants
+import com.lianyu.ai.common.MessageBodyState
 import com.lianyu.ai.common.text.MessageSegmenter
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.GroupMessage
+import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.database.repository.ChatGroupRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.GroupMessageRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.feature.groupchat.R
 import com.lianyu.ai.feature.groupchat.mention.MentionEnhancer
 import com.lianyu.ai.feature.groupchat.mention.MentionMessageSnapshot
@@ -41,7 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -58,7 +61,8 @@ class GroupChatViewModel(
     private var sendMessageJob: Job? = null
 
     private val database = AppDatabase.getDatabase(application)
-    private val groupMessageRepository = GroupMessageRepository(database.groupMessageDao(), database.conversationSummaryDao())
+    private val groupMessageRepository = ServiceRegistry.getOrThrow(GroupMessageRepository::class.java)
+    private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val chatGroupRepository = ChatGroupRepository(database.chatGroupDao())
     private val companionRepository = CompanionRepository(database.companionDao())
     private val userRepository = UserRepository(getApplication())
@@ -83,10 +87,16 @@ class GroupChatViewModel(
         isFromUser = companionId == -1L, content = content, timestamp = timestamp,
         companionId = companionId
     )
-    private val _messageLimit = MutableStateFlow(50)
-    val messages = _messageLimit.flatMapLatest { limit ->
-        groupMessageRepository.getMessagesForGroup(groupId, limit)
-    }
+    private val _messages = MutableStateFlow(groupMessageRepository.getCachedRecent(groupId).orEmpty())
+    val messages: StateFlow<List<GroupMessage>> = _messages.asStateFlow()
+
+    private val _messageMetadata = MutableStateFlow<List<Message>>(emptyList())
+    val messageMetadata: StateFlow<List<Message>> = _messageMetadata.asStateFlow()
+
+    private val _messageBodies = MutableStateFlow<Map<Long, MessageBodyState<GroupMessage>>>(
+        _messages.value.associate { it.id to MessageBodyState.Ready(it) }
+    )
+    val messageBodies: StateFlow<Map<Long, MessageBodyState<GroupMessage>>> = _messageBodies.asStateFlow()
 
     private val _hasMore = MutableStateFlow(false)
     val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
@@ -102,8 +112,68 @@ class GroupChatViewModel(
     init {
         loadUserProfile()
         viewModelScope.launch(Dispatchers.IO) {
-            val total = groupMessageRepository.getMessageCount(groupId)
-            _hasMore.value = _messageLimit.value < total
+            _messageMetadata.value = groupMessageRepository
+                .getRecentMetadata(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
+                .reversed()
+            _hasMore.value =
+                _messageMetadata.value.size < groupMessageRepository.getMessageCount(groupId)
+            groupMessageRepository.observeRecentMetadata(
+                groupId,
+                ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
+            ).collectLatest { recent ->
+                val older = _messageMetadata.value.filterNot { current ->
+                    recent.any { it.id == current.id }
+                }
+                _messageMetadata.value = (older + recent.reversed())
+                    .distinctBy { it.id }
+                    .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
+                _hasMore.value = _messageMetadata.value.size < groupMessageRepository.getMessageCount(groupId)
+                if (recent.isNotEmpty()) groupMessageRepository.markReadThroughLatest(groupId)
+            }
+        }
+    }
+
+    fun loadVisibleMessageBodies(messageIds: Set<Long>) {
+        val pending = _messageMetadata.value.filter { metadata ->
+            metadata.id in messageIds && when (_messageBodies.value[metadata.id]) {
+                null, is MessageBodyState.Error -> true
+                else -> false
+            }
+        }
+        if (pending.isEmpty()) return
+
+        _messageBodies.value = _messageBodies.value + pending.associate {
+            it.id to MessageBodyState.Loading
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupMessageRepository.loadMessages(pending) }
+                .onSuccess { loaded ->
+                    _messageBodies.value = _messageBodies.value + pending.associate { metadata ->
+                        val message = loaded[metadata.id]
+                        metadata.id to if (message != null) {
+                            MessageBodyState.Ready(message)
+                        } else {
+                            MessageBodyState.Error("正文不存在")
+                        }
+                    }
+                    publishLoadedMessages()
+                }
+                .onFailure { error ->
+                    _messageBodies.value = _messageBodies.value + pending.associate {
+                        it.id to MessageBodyState.Error(error.message ?: "正文加载失败")
+                    }
+                }
+        }
+    }
+
+    fun retryMessageBody(messageId: Long) {
+        _messageBodies.value = _messageBodies.value - messageId
+        loadVisibleMessageBodies(setOf(messageId))
+    }
+
+    private fun publishLoadedMessages() {
+        _messages.value = _messageMetadata.value.mapNotNull { metadata ->
+            (_messageBodies.value[metadata.id] as? MessageBodyState.Ready)?.value
         }
     }
 
@@ -118,12 +188,27 @@ class GroupChatViewModel(
             if (_isLoadingMore.value) return@launch
             _isLoadingMore.value = true
             try {
-                val total = groupMessageRepository.getMessageCount(groupId)
-                val newLimit = (_messageLimit.value + 50).coerceAtMost(total)
-                if (newLimit > _messageLimit.value) {
-                    _messageLimit.value = newLimit
+                val oldest = _messageMetadata.value.firstOrNull()
+                if (oldest != null) {
+                    val older = groupMessageRepository.getMetadataBefore(
+                        groupId = groupId,
+                        beforeTimestamp = oldest.timestamp,
+                        beforeId = oldest.id,
+                        limit = ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
+                    )
+                    if (older.isNotEmpty()) {
+                        _messageMetadata.value = (older.reversed() + _messageMetadata.value)
+                            .distinctBy { it.id }
+                    }
+                    _hasMore.value = older.size == ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
+                } else {
+                    val recent = groupMessageRepository.getRecentMetadata(
+                        groupId,
+                        ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
+                    )
+                    _messageMetadata.value = recent.reversed()
+                    _hasMore.value = recent.size == ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
                 }
-                _hasMore.value = _messageLimit.value < total
             } finally {
                 _isLoadingMore.value = false
             }
@@ -204,7 +289,7 @@ class GroupChatViewModel(
                     content = normalizedContent,
                     timestamp = System.currentTimeMillis()
                 )
-                groupMessageRepository.sendMessage(userMessage)
+                messageWriter.enqueueGroup(userMessage)
 
                 val userMentionedIds = MentionParser.extractMentionedCharacterIds(normalizedContent, activeCompanions)
                 Log.d("GroupChatMention", "用户提及角色IDs: $userMentionedIds, 原文: $content → 标准化: $normalizedContent")
@@ -984,7 +1069,7 @@ class GroupChatViewModel(
 
         if (stickerNames.isEmpty() && textSegments.size <= 1) {
             val msg = GroupMessage(groupId = groupId, companionId = companionId, content = cleaned, timestamp = System.currentTimeMillis())
-            val msgId = groupMessageRepository.sendMessage(msg)
+            val msgId = messageWriter.enqueueGroup(msg)
             broadcastWeChatMessage(companionId, msgId)
         } else {
             // [M8 FIX] 按原文出现顺序交织发送 text 与 sticker：原实现先发完所有文字再发所有表情包，
@@ -1025,7 +1110,7 @@ class GroupChatViewModel(
                 when (item) {
                     is Either.Left -> {
                         val msg = GroupMessage(groupId = groupId, companionId = companionId, content = item.value, timestamp = System.currentTimeMillis())
-                        val msgId = groupMessageRepository.sendMessage(msg)
+                        val msgId = messageWriter.enqueueGroup(msg)
                         broadcastWeChatMessage(companionId, msgId)
                     }
                     is Either.Right -> {
@@ -1063,7 +1148,7 @@ class GroupChatViewModel(
                     content = "[$stickerId]",
                     timestamp = System.currentTimeMillis()
                 )
-                val msgId = groupMessageRepository.sendMessage(stickerMessage)
+                val msgId = messageWriter.enqueueGroup(stickerMessage)
                 broadcastWeChatMessage(companionId, msgId)
                 Log.d("GroupChatViewModel", "群聊表情包已发送: [$stickerId]")
             } else {
@@ -1074,7 +1159,7 @@ class GroupChatViewModel(
                     content = "[$stickerDescription]",
                     timestamp = System.currentTimeMillis()
                 )
-                groupMessageRepository.sendMessage(fallbackMsg)
+                messageWriter.enqueueGroup(fallbackMsg)
             }
         } catch (e: Exception) {
             Log.e("GroupChatViewModel", "sendStickerMessage failed", e)
@@ -1091,7 +1176,7 @@ class GroupChatViewModel(
                     content = "[$stickerId]",
                     timestamp = System.currentTimeMillis()
                 )
-                groupMessageRepository.sendMessage(stickerMessage)
+                messageWriter.enqueueGroup(stickerMessage)
                 Log.d("GroupChatViewModel", "用户在群聊发送了表情包: [$stickerId]")
             } catch (e: Exception) {
                 Log.e("GroupChatViewModel", "sendUserSticker failed", e)
@@ -1108,7 +1193,7 @@ class GroupChatViewModel(
                     content = "[图片] $imagePath",
                     timestamp = System.currentTimeMillis()
                 )
-                groupMessageRepository.sendMessage(imageMessage)
+                messageWriter.enqueueGroup(imageMessage)
                 Log.d("GroupChatViewModel", "用户在群聊发送了图片: $imagePath")
             } catch (e: Exception) {
                 Log.e("GroupChatViewModel", "sendImageMessage failed", e)

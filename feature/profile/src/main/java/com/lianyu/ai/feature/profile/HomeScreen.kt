@@ -89,71 +89,62 @@ fun HomeScreen(
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 顶部标题 + 统计信息 + 操作按钮
+            // 顶部标题 + 操作按钮
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .padding(top = 4.dp, bottom = 8.dp)
+                    .padding(top = 4.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "消息",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 22.sp
-                            ),
-                            color = colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        val chatCount = when (chatListState) {
-                            is HomeViewModel.UiState.Ready ->
-                                (chatListState as HomeViewModel.UiState.Ready).items.size
-                            else -> 0
-                        }
-                        Text(
-                            text = "${chatCount} 个会话 · ${groups.size} 个群聊",
-                            fontSize = 12.sp,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
+                    // 左侧占位，与右侧按钮对称，使标题居中
+                    Box(modifier = Modifier.weight(1f))
 
-                    // 右侧操作按钮（2个）
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(colorScheme.surfaceVariant)
-                                .clickable { onCreateGroupClick() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Group,
-                                contentDescription = "创建群聊",
-                                modifier = Modifier.size(20.dp),
-                                tint = colorScheme.onSurface
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(colorScheme.surfaceVariant)
-                                .clickable { onAddClick() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Person,
-                                contentDescription = "添加女友",
-                                modifier = Modifier.size(20.dp),
-                                tint = colorScheme.onSurface
-                            )
+                    Text(
+                        text = "恋语",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp
+                        ),
+                        color = colorScheme.onSurface
+                    )
+
+                    // 右侧操作按钮（2个），右对齐
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(colorScheme.surfaceVariant)
+                                    .clickable { onCreateGroupClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Group,
+                                    contentDescription = "创建群聊",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = colorScheme.onSurface
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(colorScheme.surfaceVariant)
+                                    .clickable { onAddClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Person,
+                                    contentDescription = "添加好友",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
@@ -165,6 +156,22 @@ fun HomeScreen(
                     selectedTab = selectedTab,
                     onTabSelected = { selectedTab = it }
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 统计信息（放在导航栏下方）
+                val chatCount = when (chatListState) {
+                    is HomeViewModel.UiState.Ready ->
+                        (chatListState as HomeViewModel.UiState.Ready).items.size
+                    else -> 0
+                }
+                Text(
+                    text = "${chatCount} 个会话 · ${groups.size} 个群聊",
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             // 内容列表
@@ -373,8 +380,8 @@ fun GroupListItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(colorScheme.surfaceVariant)
+            .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
-        onClick = onClick,
         slotGap = AppTheme.dimens.avatarGap
     ) {
         Column(
@@ -466,8 +473,8 @@ fun ChatListItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(colorScheme.surfaceVariant)
+            .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
-        onClick = onClick,
         slotGap = AppTheme.dimens.avatarGap
     ) {
         Column(

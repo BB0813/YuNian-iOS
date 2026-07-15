@@ -155,6 +155,7 @@ private fun PetalApiConfigEditDialog(
     val textTertiary = AppTheme.colors.outlineVariant
 
     var apiKey by remember { mutableStateOf(config.apiKey) }
+    var apiName by remember { mutableStateOf(config.name) }
     var extraApiKeys by remember { mutableStateOf(config.extraApiKeys) }
     var baseUrl by remember { mutableStateOf(config.baseUrl) }
     var model by remember { mutableStateOf(config.model) }
@@ -219,7 +220,7 @@ private fun PetalApiConfigEditDialog(
         tonalElevation = 0.dp,
         title = {
             Text(
-                text = "${config.provider.displayName} 配置",
+                text = "${config.name.ifBlank { config.provider.displayName }} 配置",
                 color = textPrimaryColor,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
@@ -265,6 +266,30 @@ private fun PetalApiConfigEditDialog(
                 }
 
                 if (!isPartner) {
+                // API 名称 — 仅对自定义 API 显示
+                if (isCustom) {
+                    OutlinedTextField(
+                        value = apiName,
+                        onValueChange = { apiName = it },
+                        label = { Text("API 名称", color = textSecondaryColor) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = PetalPrimary,
+                            unfocusedBorderColor = dividerColor,
+                            focusedContainerColor = cardBackground,
+                            unfocusedContainerColor = cardBackground,
+                            focusedTextColor = textPrimaryColor,
+                            unfocusedTextColor = textPrimaryColor
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        singleLine = true,
+                        placeholder = {
+                            Text("如：LianYu专用API", color = textTertiary, fontSize = 12.sp)
+                        }
+                    )
+                }
+
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
@@ -593,6 +618,7 @@ private fun PetalApiConfigEditDialog(
                 Button(
                     onClick = {
                         val currentConfig = if (isPartner) config else config.copy(
+                            name = apiName.trim(),
                             apiKey = apiKey.trim(),
                             extraApiKeys = extraApiKeys.trim(),
                             baseUrl = baseUrl.trim(),
@@ -625,6 +651,7 @@ private fun PetalApiConfigEditDialog(
                     onClick = {
                         onSave(
                             if (isPartner) config else config.copy(
+                                name = apiName.trim(),
                                 apiKey = apiKey.trim(),
                                 extraApiKeys = extraApiKeys.trim(),
                                 baseUrl = baseUrl.trim(),
@@ -714,14 +741,14 @@ fun PetalApiCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = config.provider.displayName,
+                        text = config.name.ifBlank { config.provider.displayName },
                         color = textPrimaryColor,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp
                     )
-                    if (config.name.isNotEmpty()) {
+                    if (config.name.isNotEmpty() && config.name != config.provider.displayName) {
                         Text(
-                            text = config.name,
+                            text = config.provider.displayName,
                             color = textSecondaryColor,
                             fontSize = 12.sp
                         )
@@ -972,14 +999,14 @@ fun PetalSavedApiCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = config.provider.displayName,
+                        text = config.name.ifBlank { config.provider.displayName },
                         color = textPrimaryColor,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp
                     )
-                    if (config.name.isNotEmpty()) {
+                    if (config.name.isNotEmpty() && config.name != config.provider.displayName) {
                         Text(
-                            text = config.name,
+                            text = config.provider.displayName,
                             color = textSecondaryColor,
                             fontSize = 12.sp
                         )
@@ -1193,34 +1220,54 @@ fun PetalSavedApiCard(
 
 @Composable
 fun PetalAddApiButton(onClick: () -> Unit, isDarkTheme: Boolean) {
-    AppListItemLayout(
-        isStartAligned = true,
-        startSlot = {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "添加API",
-                modifier = Modifier.size(18.dp),
-                tint = PetalPrimary
-            )
-        },
-        endSlot = {},
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
-        slotGap = AppTheme.dimens.avatarGap
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDarkTheme) {
+                PetalPrimaryContainer.copy(alpha = 0.08f)
+            } else {
+                PetalSurfaceContainer
+            }
+        )
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(AppTheme.colors.surface.copy(alpha = 0.45f))
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            contentAlignment = Alignment.CenterStart
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "添加API配置",
-                color = PetalPrimary,
-                fontSize = 14.sp
-            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PetalPrimaryContainer.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = PetalPrimary
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "添加 API 设置",
+                    color = AppTheme.colors.onSurface,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "配置新的服务提供商、密钥与模型",
+                    color = AppTheme.colors.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }

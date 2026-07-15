@@ -12,22 +12,21 @@ import com.lianyu.ai.database.AppDatabase
 import java.util.concurrent.TimeUnit
 
 /**
- * 数据清理策略 — 三级存储架构的维护层。
+ * 数据库维护策略 — 三级存储架构的维护层。
  *
  * 策略：
- * - 单会话保留最近 5000 条消息，超出部分删除
- * - 清理后执行 VACUUM 回收空间（仅在闲时）
+ * - 每个会话在热表保留最新 5000 条，较旧消息原子移动到密文归档表
+ * - 使用 SQLite optimize 更新查询规划统计
+ * - 使用被动 WAL checkpoint 回收已完成的 WAL 页
  * - 通过 WorkManager 定期执行（每日一次）
  * - App 启动时也触发一次（如果距上次清理超过 24 小时）
- *
- * 注意：VACUUM 操作耗时，仅在设备空闲时执行。
  */
 object DataCleanupManager {
 
     private const val TAG = "DataCleanupManager"
     private const val WORK_NAME = "lianyu_data_cleanup"
-    private const val MAX_MESSAGES_PER_SESSION = 5000
     private const val CLEANUP_INTERVAL_HOURS = 24L
+    private const val HOT_MESSAGES_PER_CONVERSATION = 5_000
 
     private const val PREF_NAME = "data_cleanup"
     private const val KEY_LAST_CLEANUP = "last_cleanup_time"
@@ -66,62 +65,32 @@ object DataCleanupManager {
 
         if (now - lastCleanup < CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000L) return
 
-        SecureLog.i(TAG, "Starting data cleanup (last cleanup was ${now - lastCleanup}ms ago)")
-        performCleanup(context)
+        SecureLog.i(TAG, "Starting database maintenance (last run was ${now - lastCleanup}ms ago)")
+        performMaintenance(context)
         prefs.edit().putLong(KEY_LAST_CLEANUP, now).apply()
     }
 
-    /**
-     * 执行实际清理操作。
-     */
-    private suspend fun performCleanup(context: Context) {
+    private suspend fun performMaintenance(context: Context) {
         val db = AppDatabase.getDatabase(context)
-        val chatDao = db.chatMessageDao()
-        val groupDao = db.groupMessageDao()
 
         try {
-            // ── 单聊：清理每个会话超出 5000 条的旧消息 ──
-            val companionIds = chatDao.getDistinctCompanionIds()
-            var totalDeleted = 0
-            for (companionId in companionIds) {
-                val count = chatDao.getMessageCountForCompanion(companionId)
-                if (count > MAX_MESSAGES_PER_SESSION) {
-                    val deleted = chatDao.deleteOldMessagesForCompanion(
-                        companionId,
-                        count - MAX_MESSAGES_PER_SESSION
+            val messageDao = db.messageDao()
+            var archivedCount = 0
+            listOf("chat", "group").forEach { type ->
+                messageDao.getDistinctConversationIds(type).forEach { conversationId ->
+                    archivedCount += messageDao.archiveOldMessages(
+                        conversationId,
+                        type,
+                        HOT_MESSAGES_PER_CONVERSATION
                     )
-                    totalDeleted += deleted
-                    SecureLog.i(TAG, "Cleaned $deleted old messages for companion $companionId (had $count)")
                 }
             }
-
-            // ── 群聊：同理 ──
-            val groupIds = groupDao.getDistinctGroupIds()
-            for (groupId in groupIds) {
-                val count = groupDao.getMessageCount(groupId)
-                if (count > MAX_MESSAGES_PER_SESSION) {
-                    val deleted = groupDao.deleteOldMessagesForGroup(
-                        groupId,
-                        count - MAX_MESSAGES_PER_SESSION
-                    )
-                    totalDeleted += deleted
-                    SecureLog.i(TAG, "Cleaned $deleted old messages for group $groupId (had $count)")
-                }
-            }
-
-            // ── VACUUM 回收空间（仅在删除了消息时） ──
-            if (totalDeleted > 0) {
-                SecureLog.i(TAG, "Total deleted: $totalDeleted messages, running VACUUM...")
-                db.openHelper.writableDatabase.execSQL("VACUUM")
-                SecureLog.i(TAG, "VACUUM completed")
-            } else {
-                SecureLog.i(TAG, "No cleanup needed")
-            }
-
-            // ── WAL checkpoint ──
-            db.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+            val sqlite = db.openHelper.writableDatabase
+            sqlite.execSQL("PRAGMA optimize")
+            sqlite.query("PRAGMA wal_checkpoint(PASSIVE)").close()
+            SecureLog.i(TAG, "Database maintenance completed; archived $archivedCount messages")
         } catch (e: Exception) {
-            SecureLog.e(TAG, "Data cleanup failed", e)
+            SecureLog.e(TAG, "Database maintenance failed", e)
         }
     }
 }

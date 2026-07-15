@@ -3,28 +3,23 @@ package com.lianyu.ai.feature.profile
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.lianyu.ai.common.ReadStatusManager
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
+import com.lianyu.ai.domain.ServiceRegistry
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val companionRepository: CompanionRepository
-    private val chatRepository: ChatRepository
-    private val prefs = application.getSharedPreferences("message_read_status", android.content.Context.MODE_PRIVATE)
-    private val readTimeTriggers = mutableMapOf<Long, MutableStateFlow<Long>>()
+    private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+    private val summaryDao = AppDatabase.getDatabase(application).conversationSummaryDao()
 
     sealed class UiState {
         object Loading : UiState()
@@ -36,46 +31,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val database = AppDatabase.getDatabase(application)
         companionRepository = CompanionRepository(database.companionDao())
-        chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
 
-        viewModelScope.launch {
-            ReadStatusManager.readEvents.collect { (id, timestamp) ->
-                readTimeTriggers[id]?.value = timestamp
-            }
-        }
-
-        chatListState = companionRepository.getAllCompanions()
-            .flatMapLatest { companions ->
-                if (companions.isEmpty()) {
-                    flowOf<UiState>(UiState.Ready(emptyList()))
-                } else {
-                    // 预热：为每个 companion 加载最近一页消息到 ChatRepository 内存缓存
-                    viewModelScope.launch {
-                        companions.forEach { companion ->
-                            if (chatRepository.getCachedRecent(companion.id) == null) {
-                                runCatching {
-                                    chatRepository.getRecentMessagesSync(companion.id, 50)
-                                }
-                            }
-                        }
-                    }
-                    val flows: List<Flow<ChatListItem>> = companions.map { companion ->
-                        combine(
-                            chatRepository.getLastMessageForCompanion(companion.id),
-                            getOrCreateReadTimeFlow(companion.id)
-                        ) { message: ChatMessage?, lastReadTime: Long ->
-                            val hasUnread = message != null && !message.isFromUser && message.timestamp > lastReadTime
-                            ChatListItem(companion = companion, lastMessage = message, hasUnread = hasUnread)
-                        }
-                            .catch {
-                                emit(ChatListItem(companion = companion, lastMessage = null, hasUnread = false))
-                            }
-                    }
-                    combine(flows) { items: Array<ChatListItem> ->
-                        UiState.Ready(items.toList()) as UiState
-                    }
+        chatListState = combine(
+            companionRepository.getAllCompanions(),
+            summaryDao.getSummariesByType("chat")
+        ) { companions, summaries ->
+            val summariesById = summaries.associateBy { it.sessionId }
+            val items = companions.map { companion ->
+                val summary = summariesById[companion.id]
+                val lastMessage = summary?.let {
+                    ChatMessage(
+                        companionId = companion.id,
+                        content = it.lastMessagePreview,
+                        isFromUser = it.lastMessageIsFromUser,
+                        timestamp = it.lastMessageTimestamp
+                    )
                 }
+                ChatListItem(
+                    companion = companion,
+                    lastMessage = lastMessage,
+                    hasUnread = (summary?.unreadCount ?: 0) > 0
+                )
             }
+            UiState.Ready(items) as UiState
+        }
             .onStart { emit(UiState.Loading) }
             .catch {
                 emit(UiState.Ready(emptyList()))
@@ -84,15 +63,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun markCompanionAsRead(companionId: Long) {
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            prefs.edit().putLong("read_$companionId", now).apply()
-            readTimeTriggers[companionId]?.value = now
-        }
-    }
-
-    private fun getOrCreateReadTimeFlow(companionId: Long): Flow<Long> {
-        return readTimeTriggers.getOrPut(companionId) {
-            MutableStateFlow(prefs.getLong("read_$companionId", 0L))
+            chatRepository.markReadThroughLatest(companionId)
         }
     }
 }

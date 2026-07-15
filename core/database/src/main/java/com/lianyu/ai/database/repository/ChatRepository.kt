@@ -3,12 +3,15 @@ package com.lianyu.ai.database.repository
 import androidx.room.withTransaction
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.cache.MessageCache
-import com.lianyu.ai.database.dao.ChatMessageDao
 import com.lianyu.ai.database.dao.ConversationSummaryDao
+import com.lianyu.ai.database.dao.MessageDao
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.ConversationSummary
 import com.lianyu.ai.database.model.FileFormat
+import com.lianyu.ai.database.model.Message
+import com.lianyu.ai.database.model.StoredMessage
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 
@@ -16,173 +19,383 @@ import kotlinx.coroutines.flow.onEach
  * 聊天消息仓库 — 三级存储架构集成层。
  *
  * L1: MessageCache (LruCache 内存缓存) — 进入会话时先读缓存，避免 loading 闪烁
- * L2: Room SQLite (WAL 模式 + 复合索引) — 持久化存储
+ * L2: 统一 MessageDao → messages 表 (WAL 模式 + 复合索引)
  * L3: 文件系统 — 图片/视频等大文件，SQLite 仅存路径
  *
- * 写入路径: sendMessage → 加密 → DAO insert → 更新 L1 缓存 → 更新会话摘要
- * 读取路径: getMessagesForCompanion → L1 缓存命中? → 否则 L2 查询 → 解密 → 回填 L1
+ * 对外 API 保持 ChatMessage 类型兼容，内部分 MessageDao + Message→ChatMessage 转换。
  */
 class ChatRepository(
-    private val chatMessageDao: ChatMessageDao,
+    private val messageDao: MessageDao,
     private val summaryDao: ConversationSummaryDao,
     private val database: AppDatabase
 ) {
 
-    /**
-     * 缓存预热：由 HomeViewModel 在加载列表时调用。
-     * 将解密后的消息列表写入 L1 缓存。
-     */
+    /** 缓存预热 */
     fun warmCache(companionId: Long, messages: List<ChatMessage>) {
         MessageCache.putChatMessages(companionId, messages)
     }
 
-    /**
-     * 读取 L1 缓存（可能为 null），ChatViewModel 进入时先用它做初始数据。
-     */
     fun getCachedRecent(companionId: Long): List<ChatMessage>? =
         MessageCache.getChatMessages(companionId)
 
-    // --- 获取最近一页消息，按时间正序排列（UI直接显示） ---
+    fun observeCachedRecent(companionId: Long): StateFlow<List<ChatMessage>> =
+        MessageCache.observeChatMessages(companionId)
+
+    fun observeRecentMetadata(companionId: Long, limit: Int): Flow<List<Message>> =
+        messageDao.getRecentMessageMetadata(companionId, "chat", limit)
+
+    suspend fun getRecentMetadata(companionId: Long, limit: Int): List<Message> =
+        mergeMetadata(
+            messageDao.getRecentMessageMetadataSync(companionId, "chat", limit),
+            messageDao.getRecentArchivedMessageMetadata(companionId, "chat", limit),
+            limit
+        )
+
+    suspend fun getMetadataBefore(
+        companionId: Long,
+        beforeTimestamp: Long,
+        beforeId: Long,
+        limit: Int
+    ): List<Message> = mergeMetadata(
+        messageDao.getMessageMetadataBeforeSync(companionId, "chat", beforeTimestamp, beforeId, limit),
+        messageDao.getArchivedMessageMetadataBefore(companionId, "chat", beforeTimestamp, beforeId, limit),
+        limit
+    )
+
+    suspend fun loadMessages(metadata: List<Message>): Map<Long, ChatMessage> {
+        val companionId = metadata.firstOrNull()?.conversationId
+        val cachedById = companionId?.let(MessageCache::getChatMessages)
+            .orEmpty()
+            .associateBy { it.id }
+        val missing = metadata.filterNot { it.id in cachedById }
+        val loadedById = loadStoredMessages(missing).associate { stored ->
+            stored.metadata.id to fromMessage(stored)
+        }
+        return metadata.mapNotNull { item ->
+            (cachedById[item.id] ?: loadedById[item.id])?.let { item.id to it }
+        }.toMap()
+    }
+
+    suspend fun hydrateRecent(companionId: Long, limit: Int) {
+        if (MessageCache.getChatMessages(companionId) == null) {
+            getRecentMessagesSync(companionId, limit)
+        }
+    }
+
+    // --- 游标分页 ---
     fun getMessagesForCompanion(companionId: Long, limit: Int = 200): Flow<List<ChatMessage>> =
-        chatMessageDao.getRecentMessagesForCompanion(companionId, limit)
-            .map { list -> list.map { ChatMessageCrypto.decryptFromStorage(it) }.reversed() }
+        messageDao.getRecentMessageMetadata(companionId, "chat", limit)
+            .map { loadStoredMessages(getRecentMetadata(companionId, limit)).map { fromMessage(it) }.reversed() }
             .onEach { decrypted -> MessageCache.putChatMessages(companionId, decrypted) }
 
     fun getMessagesBefore(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int = 200): Flow<List<ChatMessage>> =
-        chatMessageDao.getMessagesBefore(companionId, beforeTimestamp, beforeId, limit)
-            .map { list -> list.map { ChatMessageCrypto.decryptFromStorage(it) }.reversed() }
+        messageDao.getMessageMetadataBefore(companionId, "chat", beforeTimestamp, beforeId, limit)
+            .map {
+                loadStoredMessages(getMetadataBefore(companionId, beforeTimestamp, beforeId, limit))
+                    .map { fromMessage(it) }
+                    .reversed()
+            }
+
+    fun getMessagesAfter(companionId: Long, afterTimestamp: Long, afterId: Long, limit: Int = 200): Flow<List<ChatMessage>> =
+        messageDao.getMessageMetadataAfter(companionId, "chat", afterTimestamp, afterId, limit)
+            .map { getMessagesAfterSync(companionId, afterTimestamp, afterId, limit) }
 
     fun getLastMessageForCompanion(companionId: Long): Flow<ChatMessage?> =
-        chatMessageDao.getLastMessageForCompanion(companionId)
-            .map { it?.let(ChatMessageCrypto::decryptFromStorage) }
+        messageDao.getLastMessage(companionId, "chat")
+            .map { hot ->
+                val archived = messageDao.getLastArchivedMessageMetadata(companionId, "chat")
+                val latestMetadata = mergeMetadata(
+                    hot?.let { listOf(it.metadata) }.orEmpty(),
+                    archived?.let(::listOf).orEmpty(),
+                    limit = 1
+                ).firstOrNull()
+                latestMetadata?.let { loadStoredMessages(listOf(it)).firstOrNull() }?.let { fromMessage(it) }
+            }
 
     /**
      * 发送消息 — 写入 L2 + 更新 L1 缓存 + 更新会话摘要。
      */
-    suspend fun sendMessage(message: ChatMessage): Long {
+    internal suspend fun sendMessage(message: ChatMessage): Long {
         val encrypted = ChatMessageCrypto.encryptForStorage(message)
-        val id = chatMessageDao.insertMessage(encrypted)
-        // 回填 L1 缓存
+        val (metadata, body) = StoredMessage.fromChatMessage(encrypted)
+        val id = database.withTransaction {
+            val insertedId = messageDao.insertStoredMessage(metadata, body)
+            updateSummaryForChat(message.companionId, message.copy(id = insertedId), updateCache = false)
+            insertedId
+        }
         MessageCache.appendChatMessage(message.companionId, message.copy(id = id))
-        // 更新会话摘要
-        updateSummaryForChat(message.companionId, message)
+        summaryDao.getSummarySync(message.companionId, "chat")?.let { putSummaryInCache(it) }
         return id
     }
 
     suspend fun deleteMessage(message: ChatMessage) {
-        chatMessageDao.deleteMessage(message)
+        val summary = database.withTransaction {
+            messageDao.getMessageById(message.id)?.let { messageDao.deleteMessage(it.metadata) }
+                ?: messageDao.deleteArchivedMessage(message.id)
+            rebuildSummaryForChat(message.companionId)
+        }
         MessageCache.removeChatMessage(message.companionId, message.id)
+        summary?.let { putSummaryInCache(it) } ?: MessageCache.evictChat(message.companionId)
     }
 
     suspend fun clearChatHistory(companionId: Long) {
-        chatMessageDao.deleteMessagesForCompanion(companionId)
+        database.withTransaction {
+            messageDao.deleteAllMessagesForConversation(companionId, "chat")
+            summaryDao.deleteSummary(companionId, "chat")
+        }
         MessageCache.evictChat(companionId)
-        summaryDao.deleteSummary(companionId, "chat")
     }
 
-    suspend fun getAiMessageCount(companionId: Long): Int = chatMessageDao.getAiMessageCount(companionId)
+    suspend fun markReadThroughLatest(companionId: Long) {
+        summaryDao.markReadThroughLatest(companionId, "chat")
+        summaryDao.getSummarySync(companionId, "chat")?.let { putSummaryInCache(it) }
+    }
+
+    suspend fun getAiMessageCount(companionId: Long): Int =
+        messageDao.getAiMessageCount(companionId, "chat") +
+            messageDao.getArchivedAiMessageCount(companionId, "chat")
+
+    suspend fun getMessageCount(companionId: Long): Int =
+        messageDao.getMessageCount(companionId, "chat") +
+            messageDao.getArchivedMessageCount(companionId, "chat")
 
     suspend fun getRecentMessagesSync(companionId: Long, limit: Int): List<ChatMessage> =
-        chatMessageDao.getRecentMessagesSync(companionId, limit)
-            .map { ChatMessageCrypto.decryptFromStorage(it) }
+        loadStoredMessages(getRecentMetadata(companionId, limit))
+            .map { fromMessage(it) }
             .reversed()
             .also { MessageCache.putChatMessages(companionId, it) }
 
     suspend fun getMessagesBeforeSync(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int): List<ChatMessage> =
-        chatMessageDao.getMessagesBeforeSync(companionId, beforeTimestamp, beforeId, limit)
-            .map { ChatMessageCrypto.decryptFromStorage(it) }
+        loadStoredMessages(getMetadataBefore(companionId, beforeTimestamp, beforeId, limit))
+            .map { fromMessage(it) }
+
+    suspend fun getMessagesAfterSync(companionId: Long, afterTimestamp: Long, afterId: Long, limit: Int): List<ChatMessage> =
+        loadStoredMessages(
+            mergeMetadata(
+                messageDao.getMessageMetadataAfterSync(companionId, "chat", afterTimestamp, afterId, limit),
+                messageDao.getArchivedMessageMetadataAfter(companionId, "chat", afterTimestamp, afterId, limit),
+                limit,
+                descending = false
+            )
+        )
+            .map { fromMessage(it) }
 
     suspend fun getMessageById(messageId: Long): ChatMessage? =
-        chatMessageDao.getMessageById(messageId)?.let { ChatMessageCrypto.decryptFromStorage(it) }
+        messageDao.getMessageById(messageId)?.let { fromMessage(it) }
+            ?: messageDao.getArchivedMessageMetadataById(messageId)?.let { metadata ->
+                loadStoredMessages(listOf(metadata)).firstOrNull()?.let { fromMessage(it) }
+            }
 
     suspend fun getMessagesForCompanionSync(companionId: Long): List<ChatMessage> =
-        chatMessageDao.getMessagesForCompanionSync(companionId)
-            .map { ChatMessageCrypto.decryptFromStorage(it) }
+        loadStoredMessages(
+            (messageDao.getAllMessagesSync(companionId, "chat").map { it.metadata } +
+                messageDao.getAllArchivedMessageMetadata(companionId, "chat"))
+                .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
+        ).map { fromMessage(it) }
+
+    suspend fun archiveOldMessages(companionId: Long, retainCount: Int): Int =
+        messageDao.archiveOldMessages(companionId, "chat", retainCount)
+
+    suspend fun restoreArchivedMessages(companionId: Long): Int =
+        messageDao.restoreArchivedMessages(companionId, "chat")
 
     suspend fun searchMessages(companionId: Long, query: String, limit: Int = 50): List<ChatMessage> =
-        chatMessageDao.searchMessages(companionId, query, limit)
-            .map { ChatMessageCrypto.decryptFromStorage(it) }
+        loadStoredMessages(
+            mergeMetadata(
+                messageDao.searchMessages(companionId, "chat", query, limit).map { it.metadata },
+                messageDao.searchArchivedMessageMetadata(companionId, "chat", query, limit),
+                limit
+            )
+        ).map { fromMessage(it) }
 
     suspend fun getMessagesByFileFormat(companionId: Long, fileFormat: FileFormat, limit: Int = 50): List<ChatMessage> =
-        chatMessageDao.getMessagesByFileFormat(companionId, fileFormat, limit)
-            .map { ChatMessageCrypto.decryptFromStorage(it) }
+        loadStoredMessages(
+            mergeMetadata(
+                messageDao.getMessagesByFileFormat(companionId, "chat", fileFormat, limit).map { it.metadata },
+                messageDao.getArchivedMessageMetadataByFileFormat(companionId, "chat", fileFormat, limit),
+                limit
+            )
+        ).map { fromMessage(it) }
 
     suspend fun getMessagesByFileFormatBefore(
         companionId: Long,
         fileFormat: FileFormat,
         beforeTimestamp: Long,
+        beforeId: Long,
         limit: Int = 50
     ): List<ChatMessage> =
-        chatMessageDao.getMessagesByFileFormatBefore(companionId, fileFormat, beforeTimestamp, limit)
-            .map { ChatMessageCrypto.decryptFromStorage(it) }
-
-    suspend fun sendMessageAndGetId(message: ChatMessage): Long {
-        val encrypted = ChatMessageCrypto.encryptForStorage(message)
-        val id = chatMessageDao.insertMessage(encrypted)
-        MessageCache.appendChatMessage(message.companionId, message.copy(id = id))
-        updateSummaryForChat(message.companionId, message)
-        return id
-    }
+        loadStoredMessages(
+            mergeMetadata(
+                messageDao.getMessagesByFileFormatBefore(
+                    companionId, "chat", fileFormat, beforeTimestamp, beforeId, limit
+                ).map { it.metadata },
+                messageDao.getArchivedMessageMetadataByFileFormatBefore(
+                    companionId, "chat", fileFormat, beforeTimestamp, beforeId, limit
+                ),
+                limit
+            )
+        ).map { fromMessage(it) }
 
     suspend fun updateMessageContent(messageId: Long, content: String) {
-        // [C3 FIX] 必须加密 content 列：sendMessage / sendMessageAndGetId 都会经过 ChatMessageCrypto.encryptForStorage，
-        // 但此处的直接 UPDATE 之前传明文，导致 content 列在流式更新路径上绕过加密层。
-        // searchContent 保持明文以支持 LIKE 查询（与 encryptForStorage 中 searchContent 的处理一致）。
-        chatMessageDao.updateMessageContent(messageId, ChatMessageCrypto.encrypt(content), content)
-        // 同步更新 L1 缓存中的消息内容
-        val updated = chatMessageDao.getMessageById(messageId)
+        val updated = database.withTransaction {
+            val encryptedContent = ChatMessageCrypto.encrypt(content)
+            if (messageDao.updateMessageContent(messageId, encryptedContent, content) == 0) {
+                messageDao.updateArchivedMessageContent(messageId, encryptedContent, content)
+            }
+            getStoredMessageById(messageId)?.also {
+                val summary = summaryDao.getSummarySync(it.metadata.conversationId, "chat")
+                if (summary?.lastMessageId == messageId) {
+                    summaryDao.upsertSummary(summary.copy(lastMessagePreview = content.take(100)))
+                }
+            }
+        }
         if (updated != null) {
-            val decrypted = ChatMessageCrypto.decryptFromStorage(updated)
+            val decrypted = fromMessage(updated)
             MessageCache.updateChatMessage(decrypted.companionId, messageId) { decrypted }
+            summaryDao.getSummarySync(decrypted.companionId, "chat")?.let { putSummaryInCache(it) }
         }
     }
+
+    private suspend fun getStoredMessageById(messageId: Long): StoredMessage? =
+        messageDao.getMessageById(messageId)
+            ?: messageDao.getArchivedMessageMetadataById(messageId)?.let { metadata ->
+                loadStoredMessages(listOf(metadata)).firstOrNull()
+            }
+
+    private suspend fun loadStoredMessages(metadata: List<Message>): List<StoredMessage> {
+        if (metadata.isEmpty()) return emptyList()
+        return database.withTransaction {
+            val messageIds = metadata.map { it.id }
+            val bodiesById = (
+                messageDao.getMessageBodies(messageIds) +
+                    messageDao.getArchivedMessageBodies(messageIds)
+                ).associateBy { it.messageId }
+            metadata.map { message ->
+                StoredMessage(message, requireNotNull(bodiesById[message.id]) { "Missing body for message ${message.id}" })
+            }
+        }
+    }
+
+    private fun mergeMetadata(
+        hot: List<Message>,
+        archived: List<Message>,
+        limit: Int,
+        descending: Boolean = true
+    ): List<Message> =
+        (hot + archived)
+            .distinctBy { it.id }
+            .sortedWith(
+                if (descending) {
+                    compareByDescending<Message> { it.timestamp }.thenByDescending { it.id }
+                } else {
+                    compareBy<Message> { it.timestamp }.thenBy { it.id }
+                }
+            )
+            .take(limit)
 
     /**
      * 批量插入消息 — 事务写入，减少 I/O 开销。
-     * 用于消息同步、批量恢复等场景。
      */
-    suspend fun batchInsertMessages(messages: List<ChatMessage>) {
-        if (messages.isEmpty()) return
-        val encrypted = messages.map { ChatMessageCrypto.encryptForStorage(it) }
-        val ids = database.withTransaction {
-            chatMessageDao.insertMessages(encrypted)
-        }
-        // 回填 L1 缓存
-        messages.groupBy { it.companionId }.forEach { (companionId, msgs) ->
-            msgs.zip(ids).forEach { (msg, id) ->
-                MessageCache.appendChatMessage(companionId, msg.copy(id = id))
+    internal suspend fun batchInsertMessages(messages: List<ChatMessage>): List<Long> {
+        if (messages.isEmpty()) return emptyList()
+        val encrypted = messages.map { StoredMessage.fromChatMessage(ChatMessageCrypto.encryptForStorage(it)) }
+        val persisted = database.withTransaction {
+            val ids = messageDao.insertStoredMessages(encrypted)
+            messages.zip(ids).map { (message, id) -> message.copy(id = id) }.also { inserted ->
+                inserted.groupBy { it.companionId }.forEach { (companionId, grouped) ->
+                    val lastMessage = grouped.maxWith(compareBy<ChatMessage> { it.timestamp }.thenBy { it.id })
+                    updateSummaryForChat(
+                        companionId,
+                        lastMessage,
+                        incomingMessages = grouped,
+                        updateCache = false
+                    )
+                }
             }
         }
-        // 更新最后一条消息的摘要
-        messages.groupBy { it.companionId }.forEach { (companionId, msgs) ->
-            val lastMsg = msgs.maxByOrNull { it.timestamp }
-            if (lastMsg != null) updateSummaryForChat(companionId, lastMsg)
+        persisted.groupBy { it.companionId }.forEach { (companionId, inserted) ->
+            inserted.forEach { MessageCache.appendChatMessage(companionId, it) }
+            summaryDao.getSummarySync(companionId, "chat")?.let { putSummaryInCache(it) }
         }
+        return persisted.map { it.id }
     }
 
-    /**
-     * 更新会话摘要 — 发送/接收消息时调用。
-     */
-    private suspend fun updateSummaryForChat(companionId: Long, message: ChatMessage) {
+    private suspend fun updateSummaryForChat(
+        companionId: Long,
+        message: ChatMessage,
+        incomingMessages: List<ChatMessage> = listOf(message),
+        updateCache: Boolean = true
+    ) {
         val preview = message.content.take(100)
         val existing = summaryDao.getSummarySync(companionId, "chat")
+        val unreadIncrement = incomingMessages.count {
+            !it.isFromUser && isAfterReadCursor(it.timestamp, it.id, existing)
+        }
+        val advancesLatest = existing == null ||
+            message.timestamp > existing.lastMessageTimestamp ||
+            (message.timestamp == existing.lastMessageTimestamp && message.id > (existing.lastMessageId ?: 0L))
         val summary = ConversationSummary(
             sessionId = companionId,
             sessionType = "chat",
-            lastMessagePreview = preview,
-            lastMessageTimestamp = message.timestamp,
-            lastMessageIsFromUser = message.isFromUser,
-            unreadCount = existing?.unreadCount ?: 0,
+            lastMessageId = if (advancesLatest) message.id.takeIf { it > 0 } else existing.lastMessageId,
+            lastMessagePreview = if (advancesLatest) preview else existing.lastMessagePreview,
+            lastMessageTimestamp = if (advancesLatest) message.timestamp else existing.lastMessageTimestamp,
+            lastMessageIsFromUser = if (advancesLatest) message.isFromUser else existing.lastMessageIsFromUser,
+            readThroughMessageTimestamp = existing?.readThroughMessageTimestamp,
+            readThroughMessageId = existing?.readThroughMessageId,
+            unreadCount = (existing?.unreadCount ?: 0) + unreadIncrement,
             isPinned = existing?.isPinned ?: false,
             isMuted = existing?.isMuted ?: false
         )
         summaryDao.upsertSummary(summary)
-        // 同步更新 L1 摘要缓存
-        MessageCache.putChatSummary(companionId, MessageCache.SessionSummary(
-            lastMessagePreview = preview,
+        if (updateCache) putSummaryInCache(summary)
+    }
+
+    private fun isAfterReadCursor(timestamp: Long, id: Long, summary: ConversationSummary?): Boolean {
+        val readTimestamp = summary?.readThroughMessageTimestamp ?: return true
+        return timestamp > readTimestamp ||
+            (timestamp == readTimestamp && id > (summary.readThroughMessageId ?: 0L))
+    }
+
+    private suspend fun rebuildSummaryForChat(companionId: Long): ConversationSummary? {
+        val existing = summaryDao.getSummarySync(companionId, "chat")
+        val latest = messageDao.getLastMessageSync(companionId, "chat")
+        if (latest == null) {
+            summaryDao.deleteSummary(companionId, "chat")
+            return null
+        }
+        val message = fromMessage(latest)
+        return ConversationSummary(
+            sessionId = companionId,
+            sessionType = "chat",
+            lastMessageId = message.id,
+            lastMessagePreview = message.content.take(100),
             lastMessageTimestamp = message.timestamp,
             lastMessageIsFromUser = message.isFromUser,
-            unreadCount = existing?.unreadCount ?: 0
+            readThroughMessageTimestamp = existing?.readThroughMessageTimestamp,
+            readThroughMessageId = existing?.readThroughMessageId,
+            unreadCount = messageDao.getUnreadMessageCount(
+                companionId,
+                "chat",
+                existing?.readThroughMessageTimestamp,
+                existing?.readThroughMessageId
+            ),
+            isPinned = existing?.isPinned ?: false,
+            isMuted = existing?.isMuted ?: false
+        ).also { summaryDao.upsertSummary(it) }
+    }
+
+    private fun putSummaryInCache(summary: ConversationSummary) {
+        MessageCache.putChatSummary(summary.sessionId, MessageCache.SessionSummary(
+            lastMessagePreview = summary.lastMessagePreview,
+            lastMessageTimestamp = summary.lastMessageTimestamp,
+            lastMessageIsFromUser = summary.lastMessageIsFromUser,
+            unreadCount = summary.unreadCount
         ))
     }
+
+    // ── 内部转换 ──
+
+    private fun fromMessage(message: StoredMessage): ChatMessage =
+        ChatMessageCrypto.decryptFromStorage(message.toChatMessage())
 }

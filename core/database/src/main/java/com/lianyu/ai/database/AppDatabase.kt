@@ -12,27 +12,27 @@ import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.dao.ApiConfigDao
 import com.lianyu.ai.database.dao.ApiProviderPresetDao
 import com.lianyu.ai.database.dao.ChatGroupDao
-import com.lianyu.ai.database.dao.ChatMessageDao
 import com.lianyu.ai.database.dao.CompanionDao
 import com.lianyu.ai.database.dao.ConversationSummaryDao
 import com.lianyu.ai.database.dao.DiaryDao
-import com.lianyu.ai.database.dao.GroupMessageDao
 import com.lianyu.ai.database.dao.KeywordDao
 import com.lianyu.ai.database.dao.MemoryDao
+import com.lianyu.ai.database.dao.MessageDao
 import com.lianyu.ai.database.dao.QuizQuestionDao
 import com.lianyu.ai.database.dao.TokenUsageDao
 import com.lianyu.ai.database.dao.UnifiedMemoryDao
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ApiProviderPreset
+import com.lianyu.ai.database.model.ArchivedMessage
+import com.lianyu.ai.database.model.ArchivedMessageBody
 import com.lianyu.ai.database.model.ChatGroup
-import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.ConversationSummary
 import com.lianyu.ai.database.model.DiaryEntry
 import com.lianyu.ai.database.model.FileFormat
-import com.lianyu.ai.database.model.GroupMessage
 import com.lianyu.ai.database.model.KeywordEntity
+import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.database.model.MemoryCategory
 import com.lianyu.ai.database.model.MemoryEntry
 import com.lianyu.ai.database.model.MemoryRecord
@@ -40,6 +40,7 @@ import com.lianyu.ai.database.model.MemoryScope
 import com.lianyu.ai.database.model.MemorySource
 import com.lianyu.ai.database.model.MemoryType
 import com.lianyu.ai.database.model.MessageType
+import com.lianyu.ai.database.model.MessageBody
 import com.lianyu.ai.database.model.QuizQuestionEntity
 import com.lianyu.ai.database.model.TempMemory
 import com.lianyu.ai.database.model.TokenUsage
@@ -48,7 +49,6 @@ import java.io.File
 @Database(
     entities = [
         CompanionEntity::class,
-        ChatMessage::class,
         ApiConfig::class,
         ApiProviderPreset::class,
         MemoryEntry::class,
@@ -56,30 +56,32 @@ import java.io.File
         MemoryRecord::class,
         DiaryEntry::class,
         ChatGroup::class,
-        GroupMessage::class,
         KeywordEntity::class,
         QuizQuestionEntity::class,
         TokenUsage::class,
-        ConversationSummary::class
+        ConversationSummary::class,
+        Message::class,
+        MessageBody::class,
+        ArchivedMessage::class,
+        ArchivedMessageBody::class
     ],
-    version = 25,
+    version = 32,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun companionDao(): CompanionDao
-    abstract fun chatMessageDao(): ChatMessageDao
     abstract fun apiConfigDao(): ApiConfigDao
     abstract fun apiProviderPresetDao(): ApiProviderPresetDao
     abstract fun memoryDao(): MemoryDao
     abstract fun chatGroupDao(): ChatGroupDao
-    abstract fun groupMessageDao(): GroupMessageDao
     abstract fun keywordDao(): KeywordDao
     abstract fun quizQuestionDao(): QuizQuestionDao
     abstract fun tokenUsageDao(): TokenUsageDao
     abstract fun unifiedMemoryDao(): UnifiedMemoryDao
     abstract fun diaryDao(): DiaryDao
     abstract fun conversationSummaryDao(): ConversationSummaryDao
+    abstract fun messageDao(): MessageDao
 
     companion object {
         private const val DB_NAME = "lianyu_database"
@@ -111,7 +113,24 @@ abstract class AppDatabase : RoomDatabase() {
         private fun buildDatabase(context: Context): AppDatabase {
             // [M6 FIX] autoBackupIfNeeded 做文件 copyTo IO，不应在 getDatabase 首次调用路径
             // （可能在主线程）同步执行。这里只构建数据库，备份交给 Application.bgScope 异步触发。
-            return openVerifiedDatabase(context, allowRecovery = true)
+            return createDatabase(context)
+        }
+
+        /**
+         * 在后台线程强制打开并校验数据库，必要时执行恢复。
+         * getDatabase() 仅创建惰性 Room 实例，避免 Application 主线程触发磁盘 IO。
+         */
+        fun verifyAndRecover(context: Context) {
+            synchronized(LOCK) {
+                val current = INSTANCE ?: createDatabase(context.applicationContext).also { INSTANCE = it }
+                try {
+                    verifyDatabaseCanOpen(current)
+                } catch (error: Throwable) {
+                    runCatching { current.close() }
+                    INSTANCE = null
+                    INSTANCE = openVerifiedDatabase(context.applicationContext, allowRecovery = true)
+                }
+            }
         }
 
         private fun openVerifiedDatabase(context: Context, allowRecovery: Boolean): AppDatabase {
@@ -881,6 +900,325 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // ── 索引精简：删除冗余单列索引，仅保留一个复合索引 ──
+                // 原理：[companionId, timestamp DESC, id DESC] 的前缀已覆盖 companionId 单列查询
+                // 删除后每次 INSERT 写入放大从 3x 降至 1x
+
+                // chat_messages: 删除冗余单列索引
+                db.execSQL("DROP INDEX IF EXISTS `index_chat_messages_companionId`")
+                db.execSQL("DROP INDEX IF EXISTS `index_chat_messages_timestamp`")
+
+                // group_messages: 删除冗余索引（groupId 单列、[groupId,timestamp] 重复、[groupId,fileFormat] 状态索引）
+                db.execSQL("DROP INDEX IF EXISTS `index_group_messages_groupId`")
+                db.execSQL("DROP INDEX IF EXISTS `index_group_messages_groupId_timestamp`")
+                db.execSQL("DROP INDEX IF EXISTS `index_group_messages_groupId_fileFormat`")
+
+                // group_messages: 重建 idx_group_msg_comp，新增 id 列作为 tie-breaker
+                // 解决同毫秒多条消息的分页歧义
+                db.execSQL("DROP INDEX IF EXISTS `idx_group_msg_comp`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_group_msg_comp` ON `group_messages` (`groupId`, `timestamp` DESC, `id` DESC)"
+                )
+            }
+        }
+
+        /**
+         * v26→v27: 创建统一 messages 表，迁移 chat_messages 和 group_messages 数据。
+         *
+         * 字段映射：
+         *   chat_messages.companionId → messages.conversationId, conversationType='chat'
+         *   group_messages.groupId    → messages.conversationId, conversationType='group'
+         *   group_messages.companionId → messages.senderId（-1=用户, N=AI 伴侣 ID）
+         *
+         * 策略：保留旧表（渐进式迁移），后续版本再 drop。
+         */
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. 创建统一消息表
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `messages` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `conversationId` INTEGER NOT NULL,
+                        `conversationType` TEXT NOT NULL,
+                        `isFromUser` INTEGER NOT NULL,
+                        `senderId` INTEGER NOT NULL DEFAULT 0,
+                        `content` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL DEFAULT 0,
+                        `type` TEXT NOT NULL DEFAULT 'TEXT',
+                        `searchContent` TEXT NOT NULL DEFAULT '',
+                        `fileFormat` TEXT NOT NULL DEFAULT 'TEXT',
+                        `linkString` TEXT NOT NULL DEFAULT ''
+                    )
+                """.trimIndent())
+
+                // 2. 创建统一复合索引
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_messages_conv` ON `messages` (`conversationId`, `timestamp` DESC, `id` DESC)"
+                )
+
+                // 3. 迁移单聊消息
+                // isFromUser = chat_messages.isFromUser（直接映射）
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `messages`
+                        (`id`, `conversationId`, `conversationType`, `isFromUser`, `senderId`,
+                         `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`)
+                    SELECT
+                        `id`, `companionId`, 'chat', `isFromUser`, 0,
+                        `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`
+                    FROM `chat_messages`
+                """.trimIndent())
+
+                // 4. 迁移群聊消息
+                // isFromUser = (companionId == -1), senderId = companionId
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `messages`
+                        (`id`, `conversationId`, `conversationType`, `isFromUser`, `senderId`,
+                         `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`)
+                    SELECT
+                        `id`, `groupId`, 'group',
+                        CASE WHEN `companionId` = -1 THEN 1 ELSE 0 END,
+                        `companionId`,
+                        `content`, `timestamp`, 'TEXT', `searchContent`, `fileFormat`, `linkString`
+                    FROM `group_messages`
+                """.trimIndent())
+            }
+        }
+
+        /**
+         * v27→v28: 完成统一消息表切换并删除旧表。
+         *
+         * v27 直接复用了两张旧表各自的自增 ID；当单聊和群聊 ID 重叠时，
+         * INSERT OR IGNORE 会静默跳过冲突记录。这里先保留 v27 已有数据，再从
+         * 旧表补齐缺失记录并重新分配冲突 ID，最后才删除旧表。
+         */
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `messages_v28`")
+                db.execSQL(
+                    """
+                    CREATE TABLE `messages_v28` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `conversationId` INTEGER NOT NULL,
+                        `conversationType` TEXT NOT NULL,
+                        `isFromUser` INTEGER NOT NULL,
+                        `senderId` INTEGER NOT NULL DEFAULT 0,
+                        `content` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL DEFAULT 0,
+                        `type` TEXT NOT NULL DEFAULT 'TEXT',
+                        `searchContent` TEXT NOT NULL DEFAULT '',
+                        `fileFormat` TEXT NOT NULL DEFAULT 'TEXT',
+                        `linkString` TEXT NOT NULL DEFAULT ''
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    INSERT INTO `messages_v28` (
+                        `id`, `conversationId`, `conversationType`, `isFromUser`, `senderId`,
+                        `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`
+                    )
+                    SELECT
+                        `id`, `conversationId`, `conversationType`, `isFromUser`, `senderId`,
+                        `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`
+                    FROM `messages`
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `messages_v28` (
+                        `conversationId`, `conversationType`, `isFromUser`, `senderId`,
+                        `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`
+                    )
+                    SELECT
+                        legacy.`companionId`, 'chat', legacy.`isFromUser`, 0,
+                        legacy.`content`, legacy.`timestamp`, legacy.`type`, legacy.`searchContent`,
+                        legacy.`fileFormat`, legacy.`linkString`
+                    FROM `chat_messages` AS legacy
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM `messages_v28` AS current
+                        WHERE current.`conversationType` = 'chat'
+                          AND current.`conversationId` = legacy.`companionId`
+                          AND current.`isFromUser` = legacy.`isFromUser`
+                          AND current.`content` = legacy.`content`
+                          AND current.`timestamp` = legacy.`timestamp`
+                          AND current.`type` = legacy.`type`
+                          AND current.`searchContent` = legacy.`searchContent`
+                          AND current.`fileFormat` = legacy.`fileFormat`
+                          AND current.`linkString` = legacy.`linkString`
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `messages_v28` (
+                        `conversationId`, `conversationType`, `isFromUser`, `senderId`,
+                        `content`, `timestamp`, `type`, `searchContent`, `fileFormat`, `linkString`
+                    )
+                    SELECT
+                        legacy.`groupId`, 'group',
+                        CASE WHEN legacy.`companionId` = -1 THEN 1 ELSE 0 END,
+                        legacy.`companionId`, legacy.`content`, legacy.`timestamp`, 'TEXT',
+                        legacy.`searchContent`, legacy.`fileFormat`, legacy.`linkString`
+                    FROM `group_messages` AS legacy
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM `messages_v28` AS current
+                        WHERE current.`conversationType` = 'group'
+                          AND current.`conversationId` = legacy.`groupId`
+                          AND current.`senderId` = legacy.`companionId`
+                          AND current.`content` = legacy.`content`
+                          AND current.`timestamp` = legacy.`timestamp`
+                          AND current.`searchContent` = legacy.`searchContent`
+                          AND current.`fileFormat` = legacy.`fileFormat`
+                          AND current.`linkString` = legacy.`linkString`
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL("DROP TABLE `messages`")
+                db.execSQL("ALTER TABLE `messages_v28` RENAME TO `messages`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_messages_conv` ON `messages` (`conversationId`, `timestamp` DESC, `id` DESC)"
+                )
+                db.execSQL("DROP TABLE `chat_messages`")
+                db.execSQL("DROP TABLE `group_messages`")
+            }
+        }
+
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP INDEX IF EXISTS `idx_messages_conv`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_messages_conv` ON `messages` (`conversationType`, `conversationId`, `timestamp` DESC, `id` DESC)"
+                )
+            }
+        }
+
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE `message_bodies_v30` (
+                        `messageId` INTEGER NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `searchContent` TEXT NOT NULL DEFAULT '',
+                        `linkString` TEXT NOT NULL DEFAULT '',
+                        PRIMARY KEY(`messageId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `message_bodies_v30` (`messageId`, `content`, `searchContent`, `linkString`)
+                    SELECT `id`, `content`, `searchContent`, `linkString` FROM `messages`
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE `messages_v30` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `conversationId` INTEGER NOT NULL,
+                        `conversationType` TEXT NOT NULL,
+                        `isFromUser` INTEGER NOT NULL,
+                        `senderId` INTEGER NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `fileFormat` TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `messages_v30` (`id`, `conversationId`, `conversationType`, `isFromUser`, `senderId`, `timestamp`, `type`, `fileFormat`)
+                    SELECT `id`, `conversationId`, `conversationType`, `isFromUser`, `senderId`, `timestamp`, `type`, `fileFormat` FROM `messages`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP INDEX IF EXISTS `idx_messages_conv`")
+                db.execSQL("DROP TABLE `messages`")
+                db.execSQL("ALTER TABLE `messages_v30` RENAME TO `messages`")
+                db.execSQL("CREATE INDEX `idx_messages_conv` ON `messages` (`conversationType`, `conversationId`, `timestamp` DESC, `id` DESC)")
+                db.execSQL(
+                    """
+                    CREATE TABLE `message_bodies` (
+                        `messageId` INTEGER NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `searchContent` TEXT NOT NULL DEFAULT '',
+                        `linkString` TEXT NOT NULL DEFAULT '',
+                        PRIMARY KEY(`messageId`),
+                        FOREIGN KEY(`messageId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `message_bodies` (`messageId`, `content`, `searchContent`, `linkString`)
+                    SELECT `messageId`, `content`, `searchContent`, `linkString` FROM `message_bodies_v30`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `message_bodies_v30`")
+                db.execSQL("ALTER TABLE `conversation_summary` ADD COLUMN `lastMessageId` INTEGER")
+                db.execSQL("ALTER TABLE `conversation_summary` ADD COLUMN `readThroughMessageId` INTEGER")
+                db.execSQL(
+                    """
+                    UPDATE `conversation_summary`
+                    SET `lastMessageId` = (
+                        SELECT `id` FROM `messages`
+                        WHERE `conversationType` = `conversation_summary`.`sessionType`
+                          AND `conversationId` = `conversation_summary`.`sessionId`
+                        ORDER BY `timestamp` DESC, `id` DESC LIMIT 1
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `conversation_summary` ADD COLUMN `readThroughMessageTimestamp` INTEGER")
+                db.execSQL(
+                    """
+                    UPDATE `conversation_summary`
+                    SET `readThroughMessageTimestamp` = (
+                        SELECT `timestamp` FROM `messages`
+                        WHERE `id` = `conversation_summary`.`readThroughMessageId`
+                    )
+                    WHERE `readThroughMessageId` IS NOT NULL
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `archived_messages` (
+                        `id` INTEGER NOT NULL,
+                        `conversationId` INTEGER NOT NULL,
+                        `conversationType` TEXT NOT NULL,
+                        `isFromUser` INTEGER NOT NULL,
+                        `senderId` INTEGER NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `fileFormat` TEXT NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )""".trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `idx_archived_messages_conv` ON `archived_messages` (`conversationType`, `conversationId`, `timestamp` DESC, `id` DESC)")
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `archived_message_bodies` (
+                        `messageId` INTEGER NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `searchContent` TEXT NOT NULL,
+                        `linkString` TEXT NOT NULL,
+                        PRIMARY KEY(`messageId`),
+                        FOREIGN KEY(`messageId`) REFERENCES `archived_messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )""".trimIndent()
+                )
+            }
+        }
+
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -980,7 +1318,14 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_21_22,
             MIGRATION_22_23,
             MIGRATION_23_24,
-            MIGRATION_24_25
+            MIGRATION_24_25,
+            MIGRATION_25_26,
+            MIGRATION_26_27,
+            MIGRATION_27_28,
+            MIGRATION_28_29,
+            MIGRATION_29_30,
+            MIGRATION_30_31,
+            MIGRATION_31_32
         )
 
         private var lastBackupTime: Long = 0L

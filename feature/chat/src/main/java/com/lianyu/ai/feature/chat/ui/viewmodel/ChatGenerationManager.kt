@@ -19,6 +19,7 @@ import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.domain.AiChatMessage
 import com.lianyu.ai.domain.AiCompanionInfo
@@ -76,7 +77,8 @@ class ChatGenerationManager private constructor(
     }
     private val database = AppDatabase.getDatabase(application)
     private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
-    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
+    private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+    private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val contextResolver = ChatContextResolver(chatRepository)
     private val chatDetailSettingsStore = ChatDetailSettingsStore(application)
@@ -134,6 +136,7 @@ class ChatGenerationManager private constructor(
     private val responseFinalizer = AiResponseFinalizer(
         companionId = companionId,
         chatRepository = chatRepository,
+        messageWriter = messageWriter,
         memoryProvider = memoryProvider,
         stickerManager = stickerManager,
         chatDetailSettingsStore = chatDetailSettingsStore,
@@ -164,7 +167,7 @@ class ChatGenerationManager private constructor(
             timestamp = System.currentTimeMillis()
         )
         scope.launch(Dispatchers.IO + exceptionHandler) {
-            val userMessageId = chatRepository.sendMessage(userMessage)
+            val userMessageId = messageWriter.enqueueChat(userMessage)
             broadcastWeChatMessage(userMessageId)
 
             if (apiConfigRepository.getActiveEnabledConfig() == null) {
@@ -182,7 +185,7 @@ class ChatGenerationManager private constructor(
 
     fun sendImage(imagePath: String) {
         replaceActiveGeneration("Image message superseded active generation") {
-            val userMessageId = chatRepository.sendMessage(
+            val userMessageId = messageWriter.enqueueChat(
                 ChatMessage(
                     companionId = companionId,
                     content = imagePath,
@@ -329,7 +332,7 @@ class ChatGenerationManager private constructor(
                     return
                 }
             }
-            chatRepository.sendMessage(ChatMessage(companionId = companionId, content = "请先配置API：我 → API设置 → 添加密钥", isFromUser = false, timestamp = System.currentTimeMillis()))
+            messageWriter.enqueueChat(ChatMessage(companionId = companionId, content = "请先配置API：我 → API设置 → 添加密钥", isFromUser = false, timestamp = System.currentTimeMillis()))
             return
         }
 
@@ -377,7 +380,7 @@ class ChatGenerationManager private constructor(
         try {
             val companion = companionRepository.getCompanionById(companionId)
             if (companion == null) {
-                chatRepository.sendMessage(ChatMessage(companionId = companionId, content = "系统正在加载伴侣信息，请稍后再试", isFromUser = false, timestamp = System.currentTimeMillis()))
+                messageWriter.enqueueChat(ChatMessage(companionId = companionId, content = "系统正在加载伴侣信息，请稍后再试", isFromUser = false, timestamp = System.currentTimeMillis()))
                 return@launch
             }
             latestCompanionInfo = companion.toAiCompanionInfo()

@@ -82,6 +82,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -106,6 +107,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.GroupMessage
+import com.lianyu.ai.common.MessageBodyState
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.common.PermissionManager
@@ -147,7 +149,8 @@ fun GroupChatScreen(
     )
     val userAvatar by viewModel.userAvatar.collectAsState()
     val userName by viewModel.userName.collectAsState()
-    val messages by viewModel.messages.collectAsState(initial = emptyList())
+    val messageMetadata by viewModel.messageMetadata.collectAsState()
+    val messageBodies by viewModel.messageBodies.collectAsState()
     val groupData by viewModel.groupData.collectAsState()
     val companions by viewModel.allCompanions.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -253,25 +256,34 @@ fun GroupChatScreen(
     }
 
     var hasDoneInitialScroll by remember { mutableStateOf(false) }
-    LaunchedEffect(messages, messagesReady) {
-        if (messagesReady && messages.isNotEmpty() && !hasDoneInitialScroll) {
-            listState.scrollToItem((messages.size - 1).coerceAtLeast(0))
+    LaunchedEffect(messageMetadata, messagesReady) {
+        if (messagesReady && messageMetadata.isNotEmpty() && !hasDoneInitialScroll) {
+            listState.scrollToItem((messageMetadata.size - 1).coerceAtLeast(0))
             hasDoneInitialScroll = true
         }
     }
 
-    val lastMessageId = messages.lastOrNull()?.id
+    LaunchedEffect(listState, messagesReady) {
+        if (!messagesReady) return@LaunchedEffect
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? Long }.toSet()
+        }.collect { visibleIds ->
+            viewModel.loadVisibleMessageBodies(visibleIds)
+        }
+    }
+
+    val lastMessageId = messageMetadata.lastOrNull()?.id
     LaunchedEffect(lastMessageId) {
         Log.d("HIIR","触发下滑:${lastMessageId}")
-        if (hasDoneInitialScroll && messages.isNotEmpty()) {
-            listState.animateScrollToItem((messages.size - 1).coerceAtLeast(0))
+        if (hasDoneInitialScroll && messageMetadata.isNotEmpty()) {
+            listState.animateScrollToItem((messageMetadata.size - 1).coerceAtLeast(0))
         }
     }
 
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
     LaunchedEffect(imeBottom) {
-        if (imeBottom > 0 && messages.isNotEmpty()) {
-            listState.scrollToItem((messages.size - 1).coerceAtLeast(0))
+        if (imeBottom > 0 && messageMetadata.isNotEmpty()) {
+            listState.scrollToItem((messageMetadata.size - 1).coerceAtLeast(0))
         }
     }
 
@@ -357,13 +369,33 @@ fun GroupChatScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(messages, key = { it.id }) { message ->
-                        val companion = companions.find { it.id == message.companionId }
-                        GroupChatBubble(
-                            message = message, companion = companion,
-                            isUser = message.companionId == -1L,
-                            userAvatar = userAvatar, userName = userName
-                        )
+                    items(messageMetadata, key = { it.id }) { metadata ->
+                        when (val body = messageBodies[metadata.id] ?: MessageBodyState.Loading) {
+                            MessageBodyState.Loading -> Box(
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                            }
+                            is MessageBodyState.Error -> Text(
+                                text = body.message,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.retryMessageBody(metadata.id) }
+                                    .padding(12.dp),
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center
+                            )
+                            is MessageBodyState.Ready -> {
+                                val message = body.value
+                                val companion = companions.find { it.id == message.companionId }
+                                GroupChatBubble(
+                                    message = message, companion = companion,
+                                    isUser = message.companionId == -1L,
+                                    userAvatar = userAvatar, userName = userName
+                                )
+                            }
+                        }
                     }
 
                     if (isRegenerating) {

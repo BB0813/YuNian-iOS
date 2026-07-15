@@ -56,6 +56,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -97,8 +98,11 @@ fun ProfileScreen(
     val userName by viewModel.userName.collectAsState()
     val userAvatar by viewModel.userAvatar.collectAsState()
     val selectedRole by viewModel.selectedRole.collectAsState()
+    val userStatus by viewModel.userStatus.collectAsState()
     var isEditingName by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(userName) }
+    var isEditingStatus by remember { mutableStateOf(false) }
+    var editStatus by remember { mutableStateOf(userStatus) }
 
     var showBackgroundDialog by remember { mutableStateOf(false) }
 
@@ -117,21 +121,21 @@ fun ProfileScreen(
     ) {
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 顶部用户信息区域
-        Column(
+        // 顶部用户信息区域（头像左 + 名称&状态右）
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(colorScheme.surfaceVariant)
-                .clickable { imagePicker.launch("image/*") }
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.size(84.dp), contentAlignment = Alignment.Center) {
+            // 头像（左侧）
+            Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(68.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFE5E5E5))
                         .clickable { imagePicker.launch("image/*") },
@@ -149,57 +153,111 @@ fun ProfileScreen(
                             imageVector = Icons.Filled.Person,
                             contentDescription = stringResource(R.string.profile_avatar),
                             tint = Color(0xFFAAAAAA),
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(34.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.width(16.dp))
 
-            if (isEditingName) {
-                OutlinedTextField(
-                    value = editName,
-                    onValueChange = { editName = it },
-                    modifier = Modifier.fillMaxWidth(0.8f),
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AppTheme.colors.success,
-                        unfocusedBorderColor = colorScheme.outline,
-                        focusedContainerColor = colorScheme.surface,
-                        unfocusedContainerColor = colorScheme.surface
-                    ),
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            if (editName.isNotBlank()) viewModel.updateUserName(editName.trim())
-                            isEditingName = false
-                        }) {
-                            Icon(Icons.Filled.Edit, stringResource(R.string.profile_save), tint = AppTheme.colors.success)
+            // 名称 + 状态（右侧）
+            Column(modifier = Modifier.weight(1f)) {
+                if (isEditingName) {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AppTheme.colors.success,
+                            unfocusedBorderColor = colorScheme.outline,
+                            focusedContainerColor = colorScheme.surface,
+                            unfocusedContainerColor = colorScheme.surface
+                        ),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                if (editName.isNotBlank()) viewModel.updateUserName(editName.trim())
+                                isEditingName = false
+                            }) {
+                                Icon(Icons.Filled.Edit, stringResource(R.string.profile_save), tint = AppTheme.colors.success)
+                            }
                         }
-                    }
-                )
-            } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { isEditingName = true; editName = userName }
-                ) {
-                    Text(
-                        text = userName,
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 22.sp),
-                        color = colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(Icons.Filled.Edit, stringResource(R.string.profile_edit), tint = colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { isEditingName = true; editName = userName }
+                    ) {
+                        Text(
+                            text = userName,
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 20.sp
+                            ),
+                            color = colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.Edit,
+                            stringResource(R.string.profile_edit),
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // 状态行
+                if (isEditingStatus) {
+                    OutlinedTextField(
+                        value = editStatus,
+                        onValueChange = { editStatus = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("输入状态，如：睡觉、工作、开心...", fontSize = 12.sp) },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AppTheme.colors.success,
+                            unfocusedBorderColor = colorScheme.outline,
+                            focusedContainerColor = colorScheme.surface,
+                            unfocusedContainerColor = colorScheme.surface
+                        ),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                viewModel.updateUserStatus(editStatus.trim())
+                                isEditingStatus = false
+                            }) {
+                                Icon(Icons.Filled.Edit, stringResource(R.string.profile_save), tint = AppTheme.colors.success, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    )
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { isEditingStatus = true; editStatus = userStatus }
+                    ) {
+                        Text(
+                            text = userStatus.ifBlank { "设置状态" },
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.sp
+                            ),
+                            color = if (userStatus.isBlank()) colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            Icons.Filled.Edit,
+                            stringResource(R.string.profile_edit),
+                            tint = colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
                 }
             }
-
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.profile_avatar_hint),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                color = colorScheme.onSurfaceVariant
-            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))

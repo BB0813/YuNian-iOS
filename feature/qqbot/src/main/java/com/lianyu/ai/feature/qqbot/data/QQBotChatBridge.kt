@@ -8,6 +8,7 @@ import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiChatMessage
 import com.lianyu.ai.domain.AiCompanionInfo
@@ -30,7 +31,8 @@ class QQBotChatBridge(
 ) {
     private val database = AppDatabase.getDatabase(context)
     private val deviceId = DeviceIdProvider.getDeviceId(context)
-    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
+    private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+    private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
     private val mappingManager = QQBotUserMappingManager(tokenStore, companionRepository)
@@ -139,7 +141,7 @@ class QQBotChatBridge(
                 isFromUser = true,
                 timestamp = System.currentTimeMillis()
             )
-            chatRepository.sendMessage(userMessage)
+            messageWriter.enqueueChat(userMessage)
             companionRepository.updateTimestamp(companionId)
 
             val history = chatRepository.getRecentMessagesSync(companionId, limit = 30).filterDecrypted()
@@ -194,7 +196,7 @@ class QQBotChatBridge(
                 isFromUser = false,
                 timestamp = System.currentTimeMillis()
             )
-            chatRepository.sendMessage(aiMessage)
+            messageWriter.enqueueChat(aiMessage)
 
             // 增加亲密度 + 异步提取记忆
             companionRepository.increaseIntimacy(companionId, 2)
@@ -217,7 +219,7 @@ class QQBotChatBridge(
     }
 
     private suspend fun persistBlockedMessage(companionId: Long, text: String) {
-        chatRepository.sendMessage(
+        messageWriter.enqueueChat(
             ChatMessage(
                 companionId = companionId,
                 content = text,

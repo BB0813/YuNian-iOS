@@ -13,6 +13,7 @@ import com.lianyu.ai.common.text.MessageSegmenter
 import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.repository.ChatRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.feature.chat.data.ChatContextResolver
@@ -58,6 +59,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class AiResponseFinalizer(
     private val companionId: Long,
     private val chatRepository: ChatRepository,
+    private val messageWriter: MessageWriteCoordinator,
     private val memoryProvider: MemoryProvider,
     private val stickerManager: StickerManager,
     private val chatDetailSettingsStore: ChatDetailSettingsStore,
@@ -131,7 +133,7 @@ class AiResponseFinalizer(
                 isFromUser = false,
                 timestamp = System.currentTimeMillis()
             )
-            val id = chatRepository.sendMessageAndGetId(aiMessage)
+            val id = messageWriter.enqueueChat(aiMessage)
             SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id")
             reasoningText.value = ""
             isReasoning.value = false
@@ -158,7 +160,7 @@ class AiResponseFinalizer(
                     isFromUser = false,
                     timestamp = System.currentTimeMillis()
                 )
-                val id = chatRepository.sendMessageAndGetId(msg)
+                val id = messageWriter.enqueueChat(msg)
                 lastId = id
                 SecureLog.d("ChatViewModel", "$logMessage segment ${index + 1}/${segments.size}, length=${segment.length}, id=$id")
             }
@@ -265,7 +267,7 @@ class AiResponseFinalizer(
                     isFromUser = false,
                     timestamp = System.currentTimeMillis()
                 )
-                val msgId = chatRepository.sendMessageAndGetId(followUpMsg)
+                val msgId = messageWriter.enqueueChat(followUpMsg)
                 broadcastWeChatMessage(msgId, followUp)
                 SecureLog.d("ChatViewModel", "Follow-up question sent: $followUp")
             } catch (e: Exception) {
@@ -306,7 +308,7 @@ class AiResponseFinalizer(
             isFromUser = false,
             timestamp = System.currentTimeMillis()
         )
-        val msgId = chatRepository.sendMessageAndGetId(stickerMessage)
+        val msgId = messageWriter.enqueueChat(stickerMessage)
         if (msgId > 0) {
             turnState.lastStickerMsgId = msgId
             turnState.lastStickerContent = stickerContent

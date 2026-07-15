@@ -1,9 +1,18 @@
 package com.lianyu.ai.feature.chat.ui.message
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
@@ -18,12 +27,18 @@ fun ChatListItemRenderer(
     onIntent: (ChatIntent) -> Unit,
     adaptiveSizing: AdaptiveSizing,
     isDarkTheme: Boolean,
+    onRetryBody: (Long) -> Unit = {},
     onCompanionAvatarClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     CompositionLocalProvider(LocalCompanionAvatarClick provides onCompanionAvatarClick) {
     Box(modifier = modifier) {
         when (item) {
+            is ChatListItem.BodyLoading -> BodyStateItem(isError = false)
+            is ChatListItem.BodyError -> BodyStateItem(
+                isError = true,
+                onClick = { onRetryBody(item.metadata.id) }
+            )
             is ChatListItem.TimeDivider -> TimeDividerItem(item = item)
             is ChatListItem.SystemTip -> SystemTipItem(item = item)
             is ChatListItem.TextMessage -> TextMessageItem(
@@ -79,6 +94,23 @@ fun ChatListItemRenderer(
             )
         }
     }
+    }
+}
+
+@Composable
+private fun BodyStateItem(isError: Boolean, onClick: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = isError, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isError) {
+            Text("正文加载失败，点击重试")
+        } else {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+        }
     }
 }
 

@@ -16,7 +16,9 @@ import com.lianyu.ai.database.DefaultCompanionSeeder
 import com.lianyu.ai.database.SecurityDataSeeder
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
+import com.lianyu.ai.database.repository.GroupMessageRepository
 import com.lianyu.ai.database.repository.MemoryRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.EmbeddingProvider
 import com.lianyu.ai.database.repository.SummaryProvider
 import com.lianyu.ai.database.repository.DiaryProvider
@@ -123,9 +125,11 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // 注入应用级后台作用域，供跨越 ViewModel 生命周期的任务使用
             com.lianyu.ai.common.ApplicationScopeProvider.init(bgScope)
 
-            // Seed default companion synchronously — must exist before UI loads
-            // 否则冷启动首页先显示空列表，等异步 seed 完成后才刷新
-            runCatching { kotlinx.coroutines.runBlocking { seedDefaultCompanion(app) } }
+            bgScope.launch {
+                runCatching { AppDatabase.verifyAndRecover(app) }
+                    .onFailure { SecureLog.e("LianYuApplication", "Database verification failed", it) }
+                seedDefaultCompanion(app)
+            }
 
             bgScope.launch { ContentFilter.initialize(app) }
             bgScope.launch { preloadBackground(app) }
@@ -207,14 +211,25 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         private fun registerServiceProviders(app: Application) {
             // ── Repository 单例注册 ──
             // 统一 Repository 获取方式，供 QQ Bot 等跨模块消费者通过 ServiceRegistry 获取。
+            val database = AppDatabase.getDatabase(app)
             ServiceRegistry.registerSingleton(CompanionRepository::class.java) {
-                CompanionRepository(AppDatabase.getDatabase(app).companionDao())
+                CompanionRepository(database.companionDao())
             }
             ServiceRegistry.registerSingleton(ChatRepository::class.java) {
-                ChatRepository(AppDatabase.getDatabase(app).chatMessageDao(), AppDatabase.getDatabase(app).conversationSummaryDao(), AppDatabase.getDatabase(app))
+                ChatRepository(database.messageDao(), database.conversationSummaryDao(), database)
+            }
+            ServiceRegistry.registerSingleton(GroupMessageRepository::class.java) {
+                GroupMessageRepository(database.messageDao(), database.conversationSummaryDao(), database)
+            }
+            ServiceRegistry.registerSingleton(MessageWriteCoordinator::class.java) {
+                MessageWriteCoordinator(
+                    ServiceRegistry.getOrThrow(ChatRepository::class.java),
+                    ServiceRegistry.getOrThrow(GroupMessageRepository::class.java),
+                    bgScope
+                )
             }
             ServiceRegistry.registerSingleton(MemoryRepository::class.java) {
-                MemoryRepository(AppDatabase.getDatabase(app).memoryDao(), DeviceIdProvider.getDeviceId(app))
+                MemoryRepository(database.memoryDao(), DeviceIdProvider.getDeviceId(app))
             }
             // 语义嵌入服务（Phase 3: 本地语义检索）
             // 在 UnifiedMemoryRepository 之前注册，因为后者需要 EmbeddingProvider
