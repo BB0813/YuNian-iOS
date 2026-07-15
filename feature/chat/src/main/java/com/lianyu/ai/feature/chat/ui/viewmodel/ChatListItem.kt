@@ -1,13 +1,25 @@
 package com.lianyu.ai.feature.chat.ui.viewmodel
 
 import androidx.compose.runtime.Stable
+import com.lianyu.ai.common.MessageBodyState
 import com.lianyu.ai.database.model.ChatMessage
+import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.database.model.MessageType
 
 @Stable
 sealed interface ChatListItem {
     val stableId: String
     val messageOrNull: ChatMessage?
+
+    data class BodyLoading(val metadata: Message) : ChatListItem {
+        override val messageOrNull: ChatMessage? = null
+        override val stableId: String = metadata.stableMessageKey()
+    }
+
+    data class BodyError(val metadata: Message, val error: String) : ChatListItem {
+        override val messageOrNull: ChatMessage? = null
+        override val stableId: String = metadata.stableMessageKey()
+    }
 
     data class TextMessage(val message: ChatMessage) : ChatListItem {
         override val messageOrNull: ChatMessage = message
@@ -74,6 +86,27 @@ internal fun List<ChatMessage>.toChatListItems(): List<ChatListItem> {
     return items
 }
 
+internal fun toChatListItems(
+    metadata: List<Message>,
+    bodies: Map<Long, MessageBodyState<ChatMessage>>
+): List<ChatListItem> {
+    val items = mutableListOf<ChatListItem>()
+    var previousTimestamp: Long? = null
+
+    for (messageMetadata in metadata) {
+        if (previousTimestamp == null || messageMetadata.timestamp - previousTimestamp >= TIME_DIVIDER_INTERVAL_MILLIS) {
+            items += ChatListItem.TimeDivider(messageMetadata.timestamp)
+        }
+        items += when (val state = bodies[messageMetadata.id]) {
+            is MessageBodyState.Ready -> state.value.toSystemTipOrNull() ?: state.value.toChatListItem()
+            is MessageBodyState.Error -> ChatListItem.BodyError(messageMetadata, state.message)
+            MessageBodyState.Loading, null -> ChatListItem.BodyLoading(messageMetadata)
+        }
+        previousTimestamp = messageMetadata.timestamp
+    }
+    return items
+}
+
 private fun ChatMessage.toChatListItem(): ChatListItem {
     val stickerName = stickerNameOrNull()
     return when {
@@ -99,8 +132,10 @@ private fun ChatMessage.toSystemTipOrNull(): ChatListItem.SystemTip? {
 }
 
 private fun ChatMessage.stableMessageKey(kind: String): String {
-    return if (id > 0) "$kind-$id" else "$kind-local-$timestamp-${content.hashCode()}"
+    return if (id > 0) "message-$id" else "$kind-local-$timestamp-${content.hashCode()}"
 }
+
+private fun Message.stableMessageKey(): String = "message-$id"
 
 private fun ChatMessage.stickerNameOrNull(): String? {
     val systemTags = setOf("语音", "图片", "视频", "文件", "位置", "红包", "转账")

@@ -14,6 +14,7 @@ import com.lianyu.ai.database.model.MemoryRecord
 import com.lianyu.ai.database.model.MemoryScope
 import com.lianyu.ai.database.model.MemorySource
 import com.lianyu.ai.database.model.MemoryType
+import com.lianyu.ai.database.repository.ChatMessageCrypto
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.DiaryProvider
 import com.lianyu.ai.database.repository.UnifiedMemoryRepository
@@ -30,7 +31,7 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     private val memoryRepository: UnifiedMemoryRepository
     private val companionRepository: CompanionRepository
     private val diaryDao = AppDatabase.getDatabase(application).diaryDao()
-    private val chatMessageDao = AppDatabase.getDatabase(application).chatMessageDao()
+    private val messageDao = AppDatabase.getDatabase(application).messageDao()
     private val deviceId = DeviceIdProvider.getDeviceId(application)
     private val stableMemoryFlows = mutableMapOf<Long, Flow<List<MemoryRecord>>>()
     private val workingMemoryFlows = mutableMapOf<Long, Flow<List<MemoryRecord>>>()
@@ -182,7 +183,9 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
 
                 // 获取最近 50 条聊天记录（倒序），然后反转为正序
                 val recentMessages = withContext(Dispatchers.IO) {
-                    chatMessageDao.getRecentMessagesSync(companionId, 50).reversed()
+                    messageDao.getRecentMessagesSync(companionId, "chat", 50)
+                        .map { ChatMessageCrypto.decryptFromStorage(it.toChatMessage()) }
+                        .reversed()
                 }
                 if (recentMessages.isEmpty()) {
                     Log.w(TAG, "generateDiary: no chat messages for companion=$companionId")

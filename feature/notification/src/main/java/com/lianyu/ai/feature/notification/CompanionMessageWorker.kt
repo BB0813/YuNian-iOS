@@ -14,6 +14,7 @@ import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatMessageCrypto
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.AiCompanionInfo
@@ -82,7 +83,7 @@ class CompanionMessageWorker(
 
             val database = AppDatabase.getDatabase(context)
             val companionDao = database.companionDao()
-            val chatMessageDao = database.chatMessageDao()
+            val messageDao = database.messageDao()
 
             val companions = companionDao.getAllCompanionsSync()
             if (companions.isEmpty()) return@withContext Result.success()
@@ -132,7 +133,8 @@ class CompanionMessageWorker(
                 }
             }
 
-            val recentMessages = chatMessageDao.getRecentMessagesSync(randomCompanion.id, 10)
+            val recentMessages = messageDao.getRecentMessagesSync(randomCompanion.id, "chat", 10)
+                .map { it.toChatMessage() }
                 .map { ChatMessageCrypto.decryptFromStorage(it) }
                 .filterDecrypted()
 
@@ -176,7 +178,8 @@ class CompanionMessageWorker(
                     content = segment,
                     isFromUser = false
                 )
-                val messageId = chatMessageDao.insertMessage(ChatMessageCrypto.encryptForStorage(message))
+                val messageId = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
+                    .enqueueChat(message)
                 broadcastProactiveWeChatMessage(randomCompanion.id, messageId)
                 totalSegmentsSent++
             }

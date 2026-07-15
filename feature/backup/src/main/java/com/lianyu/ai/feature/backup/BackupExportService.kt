@@ -5,6 +5,7 @@ import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.GroupMessage
+import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.database.repository.ChatMessageCrypto
 import com.lianyu.ai.database.repository.MemoryCrypto
 import com.lianyu.ai.feature.backup.model.*
@@ -30,14 +31,18 @@ class BackupExportService(private val context: Context) {
 
         // 读取每条 companion 的聊天消息（已解密）
         for (c in companions) {
-            val raw = db.chatMessageDao().getMessagesForCompanionSync(c.id)
-            chatMessages.addAll(raw.map { ChatMessageCrypto.decryptFromStorage(it).toSnapshot() })
+            val raw = db.messageDao().getAllMessagesSync(c.id, "chat")
+            chatMessages.addAll(raw.map {
+                ChatMessageCrypto.decryptFromStorage(it.toChatMessage()).toSnapshot()
+            })
         }
 
         // 读取每个 group 的群聊消息（已解密）
         for (g in chatGroups) {
-            val raw = db.groupMessageDao().getMessagesForGroupSync(g.id)
-            groupMessages.addAll(raw.map { ChatMessageCrypto.decryptFromStorage(it).toSnapshot() })
+            val raw = db.messageDao().getAllMessagesSync(g.id, "group")
+            groupMessages.addAll(raw.map {
+                ChatMessageCrypto.decryptFromStorage(it.toGroupMessage()).toSnapshot()
+            })
         }
 
         BackupData(

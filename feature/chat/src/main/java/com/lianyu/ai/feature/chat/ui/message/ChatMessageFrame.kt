@@ -4,7 +4,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,13 +76,30 @@ fun ChatMessageFrame(
 
     AppListItemLayout(
         isStartAligned = !isMine,
-        startSlot = avatar,
+        startSlot = {
+            Box(
+                modifier = Modifier.size(adaptiveSizing.avatarSize),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                avatar()
+            }
+        },
         endSlot = {},
         modifier = modifier,
         slotGap = dimens.avatarGap
     ) {
-        Column(horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
-            Box(modifier = gestureModifier.then(bubbleModifier)) { content() }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = dimens.textBubbleMaxWidth)
+                    .then(gestureModifier)
+                    .then(bubbleModifier)
+            ) {
+                content()
+            }
         }
     }
 }

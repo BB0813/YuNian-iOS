@@ -4,13 +4,11 @@ import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.GroupMessage
 import java.nio.ByteBuffer
 import java.security.KeyStore
-import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * Application-layer encryption for chat message payload fields.
@@ -32,45 +30,43 @@ object ChatMessageCrypto {
     private const val GCM_IV_LENGTH = 12
     private const val PREFIX = "enc:v1:"
 
-    /** Primary key from AndroidKeyStore (TEE-backed, AES-256-GCM) */
-    private val keyStoreKey: SecretKey? by lazy {
-        runCatching { getOrCreateAndroidKeyStoreKey() }.getOrNull()
+    fun interface KeyProvider {
+        fun getKey(): SecretKey?
     }
 
-    /** Current encryption key. Refuse storage when AndroidKeyStore is unavailable. */
-    private val encryptionKey: SecretKey
-        get() = keyStoreKey ?: error("AndroidKeyStore chat message key unavailable")
+    private object AndroidKeyStoreKeyProvider : KeyProvider {
+        private val cachedKey: SecretKey? by lazy {
+            runCatching { getOrCreateAndroidKeyStoreKey() }.getOrNull()
+        }
 
-    private val legacyFallbackKey: SecretKey by lazy {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest("lianyu-chat-message-storage-v1".toByteArray(Charsets.UTF_8))
-        SecretKeySpec(digest, "AES")
+        override fun getKey(): SecretKey? = cachedKey
     }
 
-    /** KeyStore first, legacy static key only for pre-existing encrypted rows. */
-    private val decryptionKeys: List<SecretKey>
-        get() = listOfNotNull(keyStoreKey) + legacyFallbackKey
+    private val defaultKeyProvider: KeyProvider = AndroidKeyStoreKeyProvider
 
     // --- Public API (mirrors C0 interface for drop-in replacement) ---
 
     fun encryptForStorage(message: ChatMessage): ChatMessage {
-        return try {
-            message.copy(
-                content = encrypt(message.content),
-                searchContent = message.searchContent.ifBlank { message.content },
-                linkString = encrypt(message.linkString)
-            )
-        } catch (e: Exception) {
-            android.util.Log.e("ChatMessageCrypto", "encryptForStorage failed: ${e.message}", e)
-            throw e
-        }
+        return encryptForStorage(message, defaultKeyProvider)
+    }
+
+    internal fun encryptForStorage(message: ChatMessage, keyProvider: KeyProvider): ChatMessage {
+        return message.copy(
+            content = encrypt(message.content, keyProvider),
+            searchContent = message.searchContent.ifBlank { message.content },
+            linkString = encrypt(message.linkString, keyProvider)
+        )
     }
 
     fun decryptFromStorage(message: ChatMessage): ChatMessage {
+        return decryptFromStorage(message, defaultKeyProvider)
+    }
+
+    internal fun decryptFromStorage(message: ChatMessage, keyProvider: KeyProvider): ChatMessage {
         return try {
             message.copy(
-                content = decrypt(message.content),
-                linkString = decrypt(message.linkString)
+                content = decrypt(message.content, keyProvider),
+                linkString = decrypt(message.linkString, keyProvider)
             )
         } catch (e: Exception) {
             message.copy(
@@ -82,22 +78,26 @@ object ChatMessageCrypto {
 
     fun encryptForStorage(message: GroupMessage): GroupMessage {
         return message.copy(
-            content = encrypt(message.content),
+            content = encrypt(message.content, defaultKeyProvider),
             searchContent = message.searchContent.ifBlank { message.content },
-            linkString = encrypt(message.linkString)
+            linkString = encrypt(message.linkString, defaultKeyProvider)
         )
     }
 
     fun decryptFromStorage(message: GroupMessage): GroupMessage {
         return message.copy(
-            content = decrypt(message.content),
-            linkString = decrypt(message.linkString)
+            content = decrypt(message.content, defaultKeyProvider),
+            linkString = decrypt(message.linkString, defaultKeyProvider)
         )
     }
 
-    fun encrypt(plaintext: String): String {
+    fun encrypt(plaintext: String): String = encrypt(plaintext, defaultKeyProvider)
+
+    private fun encrypt(plaintext: String, keyProvider: KeyProvider): String {
         if (plaintext.isEmpty()) return plaintext
         if (plaintext.startsWith(PREFIX)) return plaintext
+        val encryptionKey = keyProvider.getKey()
+            ?: error("AndroidKeyStore chat message key unavailable")
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, encryptionKey)
         val iv = cipher.iv
@@ -109,24 +109,18 @@ object ChatMessageCrypto {
         return PREFIX + Base64.getEncoder().encodeToString(combined)
     }
 
-    fun decrypt(value: String): String {
+    fun decrypt(value: String): String = decrypt(value, defaultKeyProvider)
+
+    private fun decrypt(value: String, keyProvider: KeyProvider): String {
         if (value.isEmpty() || !value.startsWith(PREFIX)) return value
         val combined = Base64.getDecoder().decode(value.removePrefix(PREFIX))
         val iv = combined.copyOfRange(0, GCM_IV_LENGTH)
         val ciphertext = combined.copyOfRange(GCM_IV_LENGTH, combined.size)
-
-        // Try each key: KeyStore first, then legacy fallback (backward compat)
-        for (key in decryptionKeys) {
-            try {
-                val cipher = Cipher.getInstance(TRANSFORMATION)
-                cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
-                return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
-            } catch (_: Exception) {
-                // Try next key
-            }
-        }
-        // If all keys fail, throw so callers detect failure instead of passing garbage
-        throw javax.crypto.AEADBadTagException("ChatMessage decrypt failed: no key matched")
+        val decryptionKey = keyProvider.getKey()
+            ?: error("AndroidKeyStore chat message key unavailable")
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, decryptionKey, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+        return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
     }
 
     // --- KeyStore helpers ---

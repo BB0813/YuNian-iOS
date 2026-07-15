@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.withTransaction
 import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.database.AppDatabase
+import com.lianyu.ai.database.cache.MessageCache
 import com.lianyu.ai.database.model.*
 import com.lianyu.ai.database.repository.ChatMessageCrypto
 import com.lianyu.ai.database.repository.MemoryCrypto
@@ -29,21 +30,18 @@ class BackupImportService(private val context: Context) {
             // 原实现中途失败会留下半清半填的库，无回滚。事务保证原子性——要么全成功，要么全回滚。
             db.withTransaction {
                 // 1. 清空（先删子表，再删父表）
-                db.groupMessageDao().let { dao ->
-                    data.chatGroups.forEach { dao.deleteMessagesForGroup(it.id) }
-                }
-                db.chatMessageDao().let { dao ->
-                    data.companions.forEach { dao.deleteMessagesForCompanion(it.id) }
-                }
+                db.conversationSummaryDao().deleteAllSummaries()
+                data.chatGroups.forEach { db.messageDao().deleteMessagesForConversation(it.id, "group") }
+                data.companions.forEach { db.messageDao().deleteMessagesForConversation(it.id, "chat") }
                 // 兜底清空（处理不在导入数据中的残留记录）
                 db.memoryDao().deleteAllMemories(deviceId)
                 db.memoryDao().deleteAllTempMemories(deviceId)
                 db.tokenUsageDao().deleteAll(deviceId)
-                db.groupMessageDao().let { dao ->
-                    db.chatGroupDao().getAllGroupsSync().forEach { dao.deleteMessagesForGroup(it.id) }
+                db.chatGroupDao().getAllGroupsSync().forEach {
+                    db.messageDao().deleteMessagesForConversation(it.id, "group")
                 }
-                db.chatMessageDao().let { dao ->
-                    db.companionDao().getAllCompanionsSync().forEach { dao.deleteMessagesForCompanion(it.id) }
+                db.companionDao().getAllCompanionsSync().forEach {
+                    db.messageDao().deleteMessagesForConversation(it.id, "chat")
                 }
                 db.chatGroupDao().getAllGroupsSync().forEach { db.chatGroupDao().deleteGroup(it) }
                 db.companionDao().getAllCompanionsSync().forEach { db.companionDao().deleteCompanion(it) }
@@ -81,7 +79,8 @@ class BackupImportService(private val context: Context) {
                         fileFormat = safeEnum<FileFormat>(s.fileFormat),
                         linkString = s.linkString
                     )
-                    db.chatMessageDao().insertMessage(ChatMessageCrypto.encryptForStorage(msg))
+                    val (metadata, body) = StoredMessage.fromChatMessage(ChatMessageCrypto.encryptForStorage(msg))
+                    db.messageDao().insertStoredMessage(metadata, body)
                 }
 
                 data.groupMessages.forEach { s ->
@@ -92,7 +91,35 @@ class BackupImportService(private val context: Context) {
                         fileFormat = safeEnum<FileFormat>(s.fileFormat),
                         linkString = s.linkString
                     )
-                    db.groupMessageDao().insertMessage(ChatMessageCrypto.encryptForStorage(msg))
+                    val (metadata, body) = StoredMessage.fromGroupMessage(ChatMessageCrypto.encryptForStorage(msg))
+                    db.messageDao().insertStoredMessage(metadata, body)
+                }
+
+                data.chatMessages.groupBy { it.companionId }.forEach { (companionId, messages) ->
+                    val latest = messages.maxWith(compareBy<ChatMessageSnapshot> { it.timestamp }.thenBy { it.id })
+                    db.conversationSummaryDao().upsertSummary(
+                        ConversationSummary(
+                            sessionId = companionId,
+                            sessionType = "chat",
+                            lastMessageId = latest.id,
+                            lastMessagePreview = latest.content.take(100),
+                            lastMessageTimestamp = latest.timestamp,
+                            lastMessageIsFromUser = latest.isFromUser
+                        )
+                    )
+                }
+                data.groupMessages.groupBy { it.groupId }.forEach { (groupId, messages) ->
+                    val latest = messages.maxWith(compareBy<GroupMessageSnapshot> { it.timestamp }.thenBy { it.id })
+                    db.conversationSummaryDao().upsertSummary(
+                        ConversationSummary(
+                            sessionId = groupId,
+                            sessionType = "group",
+                            lastMessageId = latest.id,
+                            lastMessagePreview = latest.content.take(100),
+                            lastMessageTimestamp = latest.timestamp,
+                            lastMessageIsFromUser = latest.companionId == -1L
+                        )
+                    )
                 }
 
                 data.memoryEntries.forEach { s ->
@@ -131,6 +158,7 @@ class BackupImportService(private val context: Context) {
                     )
                 }
             }
+            MessageCache.clearAll()
         }
     }
 

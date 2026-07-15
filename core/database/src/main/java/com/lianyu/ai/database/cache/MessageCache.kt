@@ -3,6 +3,9 @@ package com.lianyu.ai.database.cache
 import android.util.LruCache
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.GroupMessage
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import java.util.ArrayDeque
 
 /**
  * L1 内存缓存层 — 三级存储架构的第一层。
@@ -13,12 +16,12 @@ import com.lianyu.ai.database.model.GroupMessage
  * - 写入时同步更新缓存，读取时优先命中缓存
  * - 缓存失效策略：clear / evict / 超阈值清理
  *
- * 容量计算：假设每条消息 ~2KB，50 条/会话 × 8 会话 ≈ 800KB，安全上限。
+ * 容量计算：假设每条消息 ~2KB，500 条/会话 × 8 会话 ≈ 8MB，安全上限。
  */
 object MessageCache {
 
     /** 单个会话缓存的最大消息条数 */
-    private const val MESSAGES_PER_SESSION = 50
+    private const val MESSAGES_PER_SESSION = 500
 
     /** 最大缓存会话数（LruCache 的 size 单位 = 会话） */
     private const val MAX_SESSIONS = 8
@@ -40,20 +43,21 @@ object MessageCache {
      * @return null 表示缓存未命中，需要从 L2 加载
      */
     fun getChatMessages(companionId: Long): List<ChatMessage>? {
-        return chatCache.get(companionId)?.messages
+        return chatCache.get(companionId)?.snapshot()
     }
+
+    fun observeChatMessages(companionId: Long): StateFlow<List<ChatMessage>> =
+        chatCache.get(companionId)?.state ?: SessionCache<ChatMessage>().also {
+            chatCache.put(companionId, it)
+        }.state
 
     /**
      * 写入单聊缓存（覆盖式）。
      * 调用时机：从 L2 加载完成、收到新消息。
      */
     fun putChatMessages(companionId: Long, messages: List<ChatMessage>) {
-        val trimmed = if (messages.size > MESSAGES_PER_SESSION) {
-            messages.takeLast(MESSAGES_PER_SESSION)
-        } else {
-            messages
-        }
-        chatCache.put(companionId, SessionCache(trimmed))
+        chatCache.get(companionId)?.replace(messages)
+            ?: chatCache.put(companionId, SessionCache(messages))
     }
 
     /**
@@ -62,13 +66,7 @@ object MessageCache {
      */
     fun appendChatMessage(companionId: Long, message: ChatMessage) {
         chatCache.get(companionId)?.let { session ->
-            val updated = session.messages + message
-            val trimmed = if (updated.size > MESSAGES_PER_SESSION) {
-                updated.drop(updated.size - MESSAGES_PER_SESSION)
-            } else {
-                updated
-            }
-            chatCache.put(companionId, SessionCache(trimmed))
+            session.append(message)
         }
     }
 
@@ -77,8 +75,7 @@ object MessageCache {
      */
     fun updateChatMessage(companionId: Long, messageId: Long, transformer: (ChatMessage) -> ChatMessage) {
         chatCache.get(companionId)?.let { session ->
-            val updated = session.messages.map { if (it.id == messageId) transformer(it) else it }
-            chatCache.put(companionId, SessionCache(updated))
+            session.update { if (it.id == messageId) transformer(it) else it }
         }
     }
 
@@ -87,8 +84,7 @@ object MessageCache {
      */
     fun removeChatMessage(companionId: Long, messageId: Long) {
         chatCache.get(companionId)?.let { session ->
-            val updated = session.messages.filterNot { it.id == messageId }
-            chatCache.put(companionId, SessionCache(updated))
+            session.remove { it.id == messageId }
         }
     }
 
@@ -103,41 +99,34 @@ object MessageCache {
     // ── 群聊 ──
 
     fun getGroupMessages(groupId: Long): List<GroupMessage>? {
-        return groupCache.get(groupId)?.messages
+        return groupCache.get(groupId)?.snapshot()
     }
 
+    fun observeGroupMessages(groupId: Long): StateFlow<List<GroupMessage>> =
+        groupCache.get(groupId)?.state ?: SessionCache<GroupMessage>().also {
+            groupCache.put(groupId, it)
+        }.state
+
     fun putGroupMessages(groupId: Long, messages: List<GroupMessage>) {
-        val trimmed = if (messages.size > MESSAGES_PER_SESSION) {
-            messages.takeLast(MESSAGES_PER_SESSION)
-        } else {
-            messages
-        }
-        groupCache.put(groupId, SessionCache(trimmed))
+        groupCache.get(groupId)?.replace(messages)
+            ?: groupCache.put(groupId, SessionCache(messages))
     }
 
     fun appendGroupMessage(groupId: Long, message: GroupMessage) {
         groupCache.get(groupId)?.let { session ->
-            val updated = session.messages + message
-            val trimmed = if (updated.size > MESSAGES_PER_SESSION) {
-                updated.drop(updated.size - MESSAGES_PER_SESSION)
-            } else {
-                updated
-            }
-            groupCache.put(groupId, SessionCache(trimmed))
+            session.append(message)
         }
     }
 
     fun updateGroupMessage(groupId: Long, messageId: Long, transformer: (GroupMessage) -> GroupMessage) {
         groupCache.get(groupId)?.let { session ->
-            val updated = session.messages.map { if (it.id == messageId) transformer(it) else it }
-            groupCache.put(groupId, SessionCache(updated))
+            session.update { if (it.id == messageId) transformer(it) else it }
         }
     }
 
     fun removeGroupMessage(groupId: Long, messageId: Long) {
         groupCache.get(groupId)?.let { session ->
-            val updated = session.messages.filterNot { it.id == messageId }
-            groupCache.put(groupId, SessionCache(updated))
+            session.remove { it.id == messageId }
         }
     }
 
@@ -194,7 +183,48 @@ object MessageCache {
     /**
      * 单个会话的缓存数据结构。
      */
-    private data class SessionCache<T>(
-        val messages: List<T>
-    )
+    private class SessionCache<T>(messages: List<T> = emptyList()) {
+        private val deque = ArrayDeque<T>(MESSAGES_PER_SESSION)
+        private val mutableState = MutableStateFlow<List<T>>(emptyList())
+        val state: StateFlow<List<T>> = mutableState
+
+        init {
+            replace(messages)
+        }
+
+        @Synchronized
+        fun snapshot(): List<T> = deque.toList()
+
+        @Synchronized
+        fun replace(messages: List<T>) {
+            deque.clear()
+            messages.takeLast(MESSAGES_PER_SESSION).forEach(deque::addLast)
+            publish()
+        }
+
+        @Synchronized
+        fun append(message: T) {
+            if (deque.size == MESSAGES_PER_SESSION) deque.removeFirst()
+            deque.addLast(message)
+            publish()
+        }
+
+        @Synchronized
+        fun update(transformer: (T) -> T) {
+            val updated = deque.map(transformer)
+            deque.clear()
+            updated.forEach(deque::addLast)
+            publish()
+        }
+
+        @Synchronized
+        fun remove(predicate: (T) -> Boolean) {
+            deque.removeIf(predicate)
+            publish()
+        }
+
+        private fun publish() {
+            mutableState.value = deque.toList()
+        }
+    }
 }

@@ -21,6 +21,9 @@ class UserRepository(context: Context) {
     )
     val selectedRole: StateFlow<CompanionRole> = _selectedRole
 
+    private val _userStatus = MutableStateFlow(prefs.getString("user_status", "") ?: "")
+    val userStatus: StateFlow<String> = _userStatus
+
     fun updateUserName(name: String) {
         prefs.edit { putString("user_name", name) }
         _userName.value = name
@@ -38,5 +41,10 @@ class UserRepository(context: Context) {
     fun updateSelectedRole(role: CompanionRole) {
         prefs.edit { putString("selected_role", role.name) }
         _selectedRole.value = role
+    }
+
+    fun updateUserStatus(status: String) {
+        prefs.edit { putString("user_status", status) }
+        _userStatus.value = status
     }
 }

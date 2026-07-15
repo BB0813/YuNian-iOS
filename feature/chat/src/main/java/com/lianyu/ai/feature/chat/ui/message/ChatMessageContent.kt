@@ -45,11 +45,7 @@ fun TextMessageContent(
     val quoteAuthor = if (isMine) colors.quotePrimaryAuthor else colors.quoteSecondaryAuthor
     val quotePreview = if (isMine) colors.quotePrimaryPreview else colors.quoteSecondaryPreview
 
-    Column(
-        modifier = Modifier.widthIn(
-            max = dimens.textBubbleMaxWidth * adaptiveSizing.messageBubbleMaxWidthRatio / 0.75f
-        )
-    ) {
+    Column {
         Text(
             text = quotedContent.body,
             style = typography.bodyLarge.copy(

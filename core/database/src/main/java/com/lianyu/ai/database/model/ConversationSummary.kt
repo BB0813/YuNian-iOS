@@ -22,9 +22,12 @@ import androidx.room.Index
 data class ConversationSummary(
     val sessionId: Long,
     val sessionType: String,
+    val lastMessageId: Long? = null,
     val lastMessagePreview: String,
     val lastMessageTimestamp: Long,
     val lastMessageIsFromUser: Boolean,
+    val readThroughMessageTimestamp: Long? = null,
+    val readThroughMessageId: Long? = null,
     val unreadCount: Int = 0,
     val isPinned: Boolean = false,
     val isMuted: Boolean = false

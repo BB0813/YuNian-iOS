@@ -17,6 +17,7 @@ import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.ChatMessageCrypto
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiChatMessage
@@ -60,7 +61,7 @@ class AiReplyWorker(
 
             val database = AppDatabase.getDatabase(applicationContext)
             val companionRepository = CompanionRepository(database.companionDao())
-            val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
+            val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
             val memoryRepository = MemoryRepository(database.memoryDao(), DeviceIdProvider.getDeviceId(applicationContext))
 
             try {
@@ -95,7 +96,7 @@ class AiReplyWorker(
                         content = safeResponse,
                         isFromUser = false
                     )
-                    chatRepository.sendMessage(aiMessage)
+                    ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java).enqueueChat(aiMessage)
                     companionRepository.updateTimestamp(companionId)
                     companionRepository.increaseIntimacy(companionId, 2)
 

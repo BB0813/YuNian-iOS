@@ -440,6 +440,7 @@ fun SettingsScreen(
                                 .clickable {
                                     showProviderPicker = false
                                     newConfigDialog = ApiConfig(
+                                        name = preset.displayName,
                                         provider = preset.provider,
                                         apiKey = "",
                                         baseUrl = preset.baseUrl,
@@ -760,6 +761,7 @@ fun ApiConfigEditDialog(
     val textTertiary = AppTheme.colors.outlineVariant
 
     var apiKey by remember { mutableStateOf(config.apiKey) }
+    var apiName by remember { mutableStateOf(config.name) }
     var extraApiKeys by remember { mutableStateOf(config.extraApiKeys) }
     var baseUrl by remember { mutableStateOf(config.baseUrl) }
     var model by remember { mutableStateOf(config.model) }
@@ -825,7 +827,7 @@ fun ApiConfigEditDialog(
         tonalElevation = 0.dp,
         title = {
             Text(
-                text = "${config.provider.displayName} 配置",
+                text = "${config.name.ifBlank { config.provider.displayName }} 配置",
                 color = textPrimaryColor,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
@@ -838,6 +840,30 @@ fun ApiConfigEditDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // API 名称 — 仅对自定义 API 显示
+                if (isCustom) {
+                    OutlinedTextField(
+                        value = apiName,
+                        onValueChange = { apiName = it },
+                        label = { Text("API 名称", color = textSecondaryColor) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = PetalPrimary,
+                            unfocusedBorderColor = dividerColor,
+                            focusedContainerColor = cardBackground,
+                            unfocusedContainerColor = cardBackground,
+                            focusedTextColor = textPrimaryColor,
+                            unfocusedTextColor = textPrimaryColor
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        singleLine = true,
+                        placeholder = {
+                            Text("如：我的DeepSeek、公司代理API", color = textTertiary, fontSize = 12.sp)
+                        }
+                    )
+                }
+
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
@@ -1164,6 +1190,7 @@ fun ApiConfigEditDialog(
                 Button(
                     onClick = {
                         val currentConfig = config.copy(
+                            name = apiName.trim(),
                             apiKey = apiKey.trim(),
                             extraApiKeys = extraApiKeys.trim(),
                             baseUrl = baseUrl.trim(),
@@ -1196,6 +1223,7 @@ fun ApiConfigEditDialog(
                     onClick = {
                         onSave(
                             config.copy(
+                                name = apiName.trim(),
                                 apiKey = apiKey.trim(),
                                 extraApiKeys = extraApiKeys.trim(),
                                 baseUrl = baseUrl.trim(),

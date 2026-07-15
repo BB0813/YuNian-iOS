@@ -85,7 +85,6 @@ class ApiConfigRepository(
             if (!codec.isEncrypted(config.apiKey)) return config
             val plaintext = codec.decrypt(config.apiKey)
             if (plaintext == null) {
-                android.util.Log.e("ApiConfigRepo", "Failed to decrypt apiKey for config id=${config.id}, provider=${config.provider}")
                 return null
             }
             return config.copy(apiKey = plaintext)

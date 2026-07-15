@@ -10,6 +10,7 @@ android {
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -37,6 +38,9 @@ dependencies {
     // SQLCipher: zetetic not in repos
     // TODO: Add SQLCipher repo
     testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.room.testing)
 }
 
 // Room SQLite verifier needs a temp dir with executable permissions.

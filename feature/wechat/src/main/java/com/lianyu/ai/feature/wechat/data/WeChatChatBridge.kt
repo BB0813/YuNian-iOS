@@ -9,6 +9,7 @@ import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
+import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.feature.wechat.data.model.M0
 import com.lianyu.ai.feature.wechat.data.model.M1
@@ -36,7 +37,8 @@ class WeChatChatBridge(
 ) {
     private val database = AppDatabase.getDatabase(context)
     private val deviceId = DeviceIdProvider.getDeviceId(context)
-    private val chatRepository = ChatRepository(database.chatMessageDao(), database.conversationSummaryDao(), database)
+    private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+    private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val companionRepository = CompanionRepository(database.companionDao())
     private val memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
     private val tokenStore = WeChatTokenStore(context)
@@ -75,7 +77,7 @@ class WeChatChatBridge(
                     isFromUser = false,
                     timestamp = System.currentTimeMillis()
                 )
-                chatRepository.sendMessage(blockedMsg)
+                messageWriter.enqueueChat(blockedMsg)
                 return@withContext blockedResponse
             }
 
@@ -85,7 +87,7 @@ class WeChatChatBridge(
                 isFromUser = true,
                 timestamp = System.currentTimeMillis()
             )
-            chatRepository.sendMessage(userMessage)
+            messageWriter.enqueueChat(userMessage)
             companionRepository.updateTimestamp(companionId)
 
             val history = chatRepository.getRecentMessagesSync(companionId, limit = 30)
@@ -113,7 +115,7 @@ class WeChatChatBridge(
                         isFromUser = false,
                         timestamp = System.currentTimeMillis()
                     )
-                    chatRepository.sendMessage(blockedMsg)
+                    messageWriter.enqueueChat(blockedMsg)
                     return@withContext blockedResponse
                 }
             }
@@ -124,7 +126,7 @@ class WeChatChatBridge(
                 isFromUser = false,
                 timestamp = System.currentTimeMillis()
             )
-            val aiMessageId = chatRepository.sendMessageAndGetId(msg)
+            val aiMessageId = messageWriter.enqueueChat(msg)
 
             if (aiMessageId > 0) {
                 val processed = runCatching { extractStickerTags(aiResponseText) }
@@ -252,7 +254,7 @@ class WeChatChatBridge(
                 type = com.lianyu.ai.database.model.MessageType.IMAGE,
                 linkString = imagePath
             )
-            chatRepository.sendMessage(userMessage)
+            messageWriter.enqueueChat(userMessage)
             companionRepository.updateTimestamp(companionId)
 
             // 安全检查：图片消息暂无法做内容审核，跳过输入安全检查
@@ -280,7 +282,7 @@ class WeChatChatBridge(
                         isFromUser = false,
                         timestamp = System.currentTimeMillis()
                     )
-                    chatRepository.sendMessage(blockedMsg)
+                    messageWriter.enqueueChat(blockedMsg)
                     return@withContext blockedResponse
                 }
             }
@@ -327,7 +329,7 @@ class WeChatChatBridge(
                 isFromUser = false,
                 timestamp = System.currentTimeMillis()
             )
-            chatRepository.sendMessage(aiMessage)
+            messageWriter.enqueueChat(aiMessage)
 
             runCatching {
                 memoryRepository.extractAndSaveMemories(companionId, "[图片]", responseText)

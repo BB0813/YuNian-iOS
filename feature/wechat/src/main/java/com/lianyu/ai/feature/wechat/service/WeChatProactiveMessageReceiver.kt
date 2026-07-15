@@ -148,8 +148,8 @@ class WeChatProactiveMessageReceiver : BroadcastReceiver() {
                             finalContent
                         } else if (messageId != -1L) {
                             val db = com.lianyu.ai.database.AppDatabase.getDatabase(context)
-                            val msg = db.chatMessageDao().getMessageById(messageId)
-                            msg?.content ?: return@withTimeoutOrNull
+                            val msg = db.messageDao().getMessageById(messageId)
+                            msg?.body?.content ?: return@withTimeoutOrNull
                         } else {
                             directContent ?: return@withTimeoutOrNull
                         }

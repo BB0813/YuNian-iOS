@@ -84,8 +84,11 @@ fun AppListItemLayout(
         val endPlaceable = endMeasurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
         val gapPx = slotGap.roundToPx()
 
-        // Content gets the remaining width after both slots and gaps
-        val reservedWidth = startPlaceable.width + endPlaceable.width + gapPx * 2
+        val startGapPx = if (startPlaceable.width > 0) gapPx else 0
+        val endGapPx = if (endPlaceable.width > 0) gapPx else 0
+        // Each occupied slot owns its width and adjacent gap; content receives only the remainder.
+        val reservedWidth = startPlaceable.width + startGapPx +
+            endPlaceable.width + endGapPx
         val contentMaxWidth = if (constraints.hasBoundedWidth) {
             (constraints.maxWidth - reservedWidth).coerceAtLeast(0)
         } else {
@@ -114,7 +117,7 @@ fun AppListItemLayout(
                 // [startSlot] [gap] [content............] [endSlot]
                 startPlaceable.placeRelative(0, 0)
                 contentPlaceable.placeRelative(
-                    startPlaceable.width + gapPx,
+                    startPlaceable.width + startGapPx,
                     0
                 )
                 endPlaceable.placeRelative(
@@ -124,10 +127,10 @@ fun AppListItemLayout(
             } else {
                 // [endSlot] [gap] [content............] [startSlot]
                 val startX = layoutWidth - startPlaceable.width
-                val contentX = startX - gapPx - contentPlaceable.width
+                val contentX = startX - startGapPx - contentPlaceable.width
                 endPlaceable.placeRelative(0, 0)
                 contentPlaceable.placeRelative(
-                    contentX.coerceAtLeast(endPlaceable.width + gapPx),
+                    contentX.coerceAtLeast(endPlaceable.width + endGapPx),
                     0
                 )
                 startPlaceable.placeRelative(

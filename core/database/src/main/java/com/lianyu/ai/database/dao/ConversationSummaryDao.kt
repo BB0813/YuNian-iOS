@@ -42,6 +42,9 @@ interface ConversationSummaryDao {
     @Query("UPDATE conversation_summary SET unreadCount = 0 WHERE sessionId = :sessionId AND sessionType = :sessionType")
     suspend fun clearUnread(sessionId: Long, sessionType: String)
 
+    @Query("UPDATE conversation_summary SET readThroughMessageTimestamp = lastMessageTimestamp, readThroughMessageId = lastMessageId, unreadCount = 0 WHERE sessionId = :sessionId AND sessionType = :sessionType")
+    suspend fun markReadThroughLatest(sessionId: Long, sessionType: String)
+
     @Query("UPDATE conversation_summary SET isPinned = :pinned WHERE sessionId = :sessionId AND sessionType = :sessionType")
     suspend fun setPinned(sessionId: Long, sessionType: String, pinned: Boolean)
 
@@ -50,4 +53,7 @@ interface ConversationSummaryDao {
 
     @Query("DELETE FROM conversation_summary WHERE sessionId = :sessionId AND sessionType = :sessionType")
     suspend fun deleteSummary(sessionId: Long, sessionType: String)
+
+    @Query("DELETE FROM conversation_summary")
+    suspend fun deleteAllSummaries()
 }
