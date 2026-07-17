@@ -22,7 +22,6 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
-import com.lianyu.ai.uicommon.picker.model.MediaItem
 import androidx.compose.ui.platform.LocalContext
 
 /**
