@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.paging.compose.collectAsLazyPagingItems
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
@@ -47,13 +46,12 @@ internal fun ImagePreview(
     val pickerState by viewModel.state.collectAsState()
     val selectionMap by viewModel.selectionMap.collectAsState()
 
-    val lazyPagingItems = viewModel.pagingFlow.collectAsState().value
-        .collectAsLazyPagingItems()
+    val mediaList = viewModel.mediaList.collectAsState().value
 
-    val itemCount = lazyPagingItems.itemCount
+    val itemCount = mediaList.size
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { itemCount })
 
-    val currentItem = lazyPagingItems[pagerState.currentPage]
+    val currentItem = mediaList.getOrNull(pagerState.currentPage)
 
     // 放大/缩略切换
     var isZoomed by remember { mutableStateOf(false) }
@@ -81,7 +79,7 @@ internal fun ImagePreview(
                     indication = null
                 ) { controlsVisible = !controlsVisible }
         ) { page ->
-            val item = lazyPagingItems[page]
+            val item = mediaList.getOrNull(page)
             if (item != null) {
                 val model = if (isZoomed) {
                     ImageRequest.Builder(LocalContext.current)
@@ -108,11 +106,9 @@ internal fun ImagePreview(
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(200))
         ) {
-            Box(
+            PickerTopBar(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .alpha(controlsAlpha)
-                    .statusBarsPadding()
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -123,43 +119,36 @@ internal fun ImagePreview(
                         )
                     )
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            "返回",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    Text(
-                        "${pagerState.currentPage + 1} / $itemCount",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 14.sp,
-                        modifier = Modifier.weight(1f)
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        "返回",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
                     )
+                }
 
-                    if (pickerState.maxSelection > 1) {
-                        TextButton(
-                            onClick = onConfirm,
-                            enabled = selectionMap.isNotEmpty()
-                        ) {
-                            val text = if (selectionMap.isNotEmpty())
-                                "完成(${selectionMap.size})" else "完成"
-                            Text(
-                                text,
-                                color = if (selectionMap.isNotEmpty()) Accent
-                                    else Color.White.copy(alpha = 0.4f),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                Text(
+                    "${pagerState.currentPage + 1} / $itemCount",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (pickerState.maxSelection > 1) {
+                    TextButton(
+                        onClick = onConfirm,
+                        enabled = selectionMap.isNotEmpty()
+                    ) {
+                        val text = if (selectionMap.isNotEmpty())
+                            "完成(${selectionMap.size})" else "完成"
+                        Text(
+                            text,
+                            color = if (selectionMap.isNotEmpty()) Accent
+                                else Color.White.copy(alpha = 0.4f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }

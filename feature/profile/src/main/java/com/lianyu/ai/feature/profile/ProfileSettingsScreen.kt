@@ -3,6 +3,7 @@ package com.lianyu.ai.feature.profile
 import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,12 +28,26 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import android.graphics.drawable.ColorDrawable
+import android.view.WindowManager
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.profile.R
 import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
+import com.lianyu.ai.uicommon.image.cropper.ImageCropperDialog
+import android.net.Uri
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // ============================================================================
 // 个人资料设置页 — 头像/名字/性别/地区/签名，分行显示，可编辑
@@ -44,6 +60,7 @@ fun ProfileSettingsScreen(
     viewModel: ProfileViewModel = viewModel()
 ) {
     val colorScheme = AppTheme.colors
+    val context = LocalContext.current
 
     val userName by viewModel.userName.collectAsState()
     val userAvatar by viewModel.userAvatar.collectAsState()
@@ -61,6 +78,9 @@ fun ProfileSettingsScreen(
 
     // --- 自研图片选择器 ---
     var showPicker by remember { mutableStateOf(false) }
+    // --- 图片裁剪器 ---
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+    var cropBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
     Scaffold(
         topBar = {
@@ -86,38 +106,29 @@ fun ProfileSettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
         ) {
-            // === 头像 ===
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 左侧标签 + 箭头（点击打开相册）
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { showPicker = true }
-                        .padding(end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        stringResource(R.string.profile_avatar),
-                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
-                        color = colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
-                        tint = colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                }
+            // === 头像 — 复用 ProfileSectionRow 原子 ===
+            // 整行点击打开相册；头像区域单独点击全屏查看
+            // 布局：标签 | 头像 | 箭头
+            ProfileSectionRow(onClick = { showPicker = true }) {
+                Text(
+                    stringResource(R.string.profile_avatar),
+                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
 
-                // 右侧头像图片（点击全屏查看）
+                // 头像图片（点击全屏查看，不使用圆形涟漪）
+                val avatarInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .size(56.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFFE8E8E8))
-                        .clickable { showAvatarFullscreen = true },
+                        .clickable(
+                            interactionSource = avatarInteraction,
+                            indication = null,
+                            onClick = { showAvatarFullscreen = true }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     if (userAvatar != null) {
@@ -128,43 +139,55 @@ fun ProfileSettingsScreen(
                             contentScale = ContentScale.Crop
                         )
                     } else {
-                        Icon(Icons.Filled.Person, stringResource(R.string.profile_avatar),
-                            tint = Color(0xFFCCCCCC), modifier = Modifier.size(28.dp))
+                        Icon(
+                            Icons.Filled.Person,
+                            stringResource(R.string.profile_avatar),
+                            tint = Color(0xFFCCCCCC),
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
-            SectionDivider()
+            ProfileSectionDivider()
 
             // === 名字 ===
-            SectionRow(
+            ProfileLabelValueRow(
                 label = stringResource(R.string.profile_name),
                 value = userName.ifBlank { stringResource(R.string.profile_not_set) },
                 dimmed = userName.isBlank(),
                 onClick = { editName = userName; showNameDialog = true }
             )
-            SectionDivider()
+            ProfileSectionDivider()
 
             // === 性别 ===
-            SectionRow(
+            ProfileLabelValueRow(
                 label = stringResource(R.string.profile_gender),
                 value = stringResource(R.string.profile_not_set),
                 dimmed = true,
                 onClick = { showGenderDialog = true }
             )
-            SectionDivider()
+            ProfileSectionDivider()
 
             // === 地区 ===
-            SectionRow(
+            ProfileLabelValueRow(
                 label = stringResource(R.string.profile_region),
                 value = editRegion.ifBlank { stringResource(R.string.profile_not_set) },
                 dimmed = editRegion.isBlank(),
                 onClick = { showRegionDialog = true }
             )
-            SectionDivider()
+            ProfileSectionDivider()
 
             // === 签名 ===
-            SectionRow(
+            ProfileLabelValueRow(
                 label = stringResource(R.string.profile_signature),
                 value = userSignature.ifBlank { stringResource(R.string.profile_not_set) },
                 dimmed = userSignature.isBlank(),
@@ -249,57 +272,52 @@ fun ProfileSettingsScreen(
         CustomImagePicker(
             maxSelection = 1,
             onConfirmed = { uris ->
-                if (uris.isNotEmpty()) {
-                    viewModel.updateUserAvatar(uris.first().toString())
-                }
                 showPicker = false
+                if (uris.isNotEmpty()) {
+                    pendingCropUri = uris.first()
+                }
             },
             onDismiss = { showPicker = false }
         )
     }
-}
 
-// ============================================================================
-// 辅助组件
-// ============================================================================
-
-@Composable
-private fun SectionRow(
-    label: String,
-    value: String,
-    dimmed: Boolean = false,
-    onClick: () -> Unit
-) {
-    val colorScheme = AppTheme.colors
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = colorScheme.onSurface, modifier = Modifier.weight(1f))
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-            color = if (dimmed) colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+    // 加载待裁剪图片
+    LaunchedEffect(pendingCropUri) {
+        val uri = pendingCropUri ?: return@LaunchedEffect
+        val ctx = context
+        cropBitmap = withContext(Dispatchers.IO) {
+            try {
+                ctx.contentResolver.openInputStream(uri)?.use { stream ->
+                    val bmp = BitmapFactory.decodeStream(stream)
+                    bmp?.asImageBitmap()
+                }
+            } catch (_: Exception) { null }
+        }
     }
-}
 
-@Composable
-private fun SectionDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .height(0.5.dp)
-            .background(AppTheme.colors.outline.copy(alpha = 0.3f))
-    )
+    // 图片裁剪器
+    if (cropBitmap != null) {
+        ImageCropperDialog(
+            bitmap = cropBitmap!!,
+            cropRatio = 1f,
+            onConfirm = { cropped ->
+                // 保存裁剪结果到缓存文件
+                val cacheFile = java.io.File(context.cacheDir, "avatar_cropped_${System.currentTimeMillis()}.jpg")
+                try {
+                    java.io.FileOutputStream(cacheFile).use { out ->
+                        cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                    }
+                    viewModel.updateUserAvatar(cacheFile.absolutePath)
+                } catch (_: Exception) { }
+                cropBitmap = null
+                pendingCropUri = null
+            },
+            onDismiss = {
+                cropBitmap = null
+                pendingCropUri = null
+            }
+        )
+    }
 }
 
 // ============================================================================
@@ -313,8 +331,34 @@ private fun AvatarFullscreenDialog(
 ) {
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            decorFitsSystemWindows = false
+        )
     ) {
+        // ═══ 边缘到边缘 ═══
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            dialogWindow?.let { w ->
+                WindowCompat.setDecorFitsSystemWindows(w, false)
+                @Suppress("DEPRECATION")
+                w.addFlags(
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+                )
+                w.setBackgroundDrawable(ColorDrawable(android.graphics.Color.BLACK))
+                w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                w.statusBarColor = android.graphics.Color.TRANSPARENT
+                w.navigationBarColor = android.graphics.Color.TRANSPARENT
+                WindowInsetsControllerCompat(w, w.decorView).apply {
+                    isAppearanceLightStatusBars = false
+                    isAppearanceLightNavigationBars = false
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -328,6 +372,25 @@ private fun AvatarFullscreenDialog(
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit
             )
+
+            // 关闭按钮
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(8.dp)
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.Black.copy(alpha = 0.45f))
+            ) {
+                Icon(
+                    Icons.Filled.Close,
+                    "关闭",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

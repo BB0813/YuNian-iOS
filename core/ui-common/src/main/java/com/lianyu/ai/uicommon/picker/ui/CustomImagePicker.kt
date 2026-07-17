@@ -1,16 +1,27 @@
 package com.lianyu.ai.uicommon.picker.ui
 
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
+import android.view.WindowManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import coil.compose.LocalImageLoader
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lianyu.ai.uicommon.picker.PickerImageLoader
+import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
 
 /**
  * 自研图片选择器顶层入口 — 全屏 Dialog，含转场动画。
@@ -50,8 +61,47 @@ fun CustomImagePicker(
             decorFitsSystemWindows = false
         )
     ) {
+        // ═══ 边缘到边缘：等效 enableEdgeToEdge() 对 Dialog 窗口 ═══
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            dialogWindow?.let { w ->
+                WindowCompat.setDecorFitsSystemWindows(w, false)
+                // FLAG_LAYOUT_IN_SCREEN + FLAG_LAYOUT_INSET_DECOR：
+                // 让 Dialog 窗口布局延伸至状态栏 / 导航栏后方（等效 enableEdgeToEdge）
+                @Suppress("DEPRECATION")
+                w.addFlags(
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+                )
+                w.setBackgroundDrawable(ColorDrawable(0xFF1A1216.toInt()))
+                w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                w.statusBarColor = Color.TRANSPARENT
+                w.navigationBarColor = Color.TRANSPARENT
+                // 深色背景 → 白色系统图标
+                WindowInsetsControllerCompat(w, w.decorView).apply {
+                    isAppearanceLightStatusBars = false
+                    isAppearanceLightNavigationBars = false
+                }
+                // API 29- fallback：旧式 decorView flag 确保状态栏区域可绘制
+                @Suppress("DEPRECATION")
+                if (android.os.Build.VERSION.SDK_INT <= 29) {
+                    w.decorView.systemUiVisibility = w.decorView.systemUiVisibility or
+                        android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                }
+            }
+        }
+
+        val pickerImageLoader = remember { PickerImageLoader.get(context) }
+        CompositionLocalProvider(LocalImageLoader provides pickerImageLoader) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(WeChatDarkBackground)
+        ) {
         // ═══ 页面转场动画 ═══
         AnimatedContent(
+            modifier = Modifier.fillMaxSize(),
             targetState = currentPage,
             transitionSpec = {
                 when {
@@ -124,6 +174,8 @@ fun CustomImagePicker(
                 }
             }
         }
+        } // end Box fillMaxSize
+        } // end CompositionLocalProvider
     }
 }
 
