@@ -2,7 +2,6 @@ package com.lianyu.ai.uicommon.picker.data
 
 import android.content.ContentResolver
 import android.net.Uri
-import android.os.Build
 import android.provider.MediaStore
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
