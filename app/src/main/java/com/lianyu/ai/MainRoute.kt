@@ -32,6 +32,7 @@ sealed class MainRoute(val route: String) {
     object TokenUsage : MainRoute("token_usage")
     object Theme : MainRoute("theme")
     object Language : MainRoute("language")
+    object BackgroundSettings : MainRoute("background_settings")
     object CheckUpdate : MainRoute("check_update")
     object FrameRate : MainRoute("frame_rate")
     object YandereMode : MainRoute("yandere_mode")
@@ -44,6 +45,7 @@ sealed class MainRoute(val route: String) {
     object RoleManager : MainRoute("role_manager")
 
     // === 个人中心 ===
+    object ProfileSettings : MainRoute("profile_settings")
     object Memory : MainRoute("memory")
     object About : MainRoute("about")
     object AgreementView : MainRoute("agreement_view")
@@ -92,10 +94,12 @@ sealed class MainRoute(val route: String) {
             route == "settings" -> Settings
             route == "tts_settings" -> TtsSettings
             route == "token_usage" -> TokenUsage
+            route == "profile_settings" -> ProfileSettings
             route == "memory" -> Memory
             route == "role_manager" -> RoleManager
             route == "theme" -> Theme
             route == "language" -> Language
+            route == "background_settings" -> BackgroundSettings
             route == "check_update" -> CheckUpdate
             route == "about" -> About
             route == "agreement_view" -> AgreementView

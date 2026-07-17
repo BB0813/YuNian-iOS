@@ -64,16 +64,22 @@ class ChatRepository(
 
     suspend fun loadMessages(metadata: List<Message>): Map<Long, ChatMessage> {
         val companionId = metadata.firstOrNull()?.conversationId
-        val cachedById = companionId?.let(MessageCache::getChatMessages)
-            .orEmpty()
-            .associateBy { it.id }
-        val missing = metadata.filterNot { it.id in cachedById }
-        val loadedById = loadStoredMessages(missing).associate { stored ->
-            stored.metadata.id to fromMessage(stored)
+        val cachedById = companionId?.let(MessageCache::getChatMessagesById).orEmpty()
+        val missing = ArrayList<Message>()
+        metadata.forEach { item ->
+            if (item.id !in cachedById) missing += item
         }
-        return metadata.mapNotNull { item ->
-            (cachedById[item.id] ?: loadedById[item.id])?.let { item.id to it }
-        }.toMap()
+        if (missing.isEmpty()) {
+            return buildMap(metadata.size) {
+                metadata.forEach { item -> cachedById[item.id]?.let { put(item.id, it) } }
+            }
+        }
+        val loadedById = fromMessages(loadStoredMessages(missing)).associateBy { it.id }
+        return buildMap(metadata.size) {
+            metadata.forEach { item ->
+                (cachedById[item.id] ?: loadedById[item.id])?.let { put(item.id, it) }
+            }
+        }
     }
 
     suspend fun hydrateRecent(companionId: Long, limit: Int) {
@@ -85,14 +91,13 @@ class ChatRepository(
     // --- 游标分页 ---
     fun getMessagesForCompanion(companionId: Long, limit: Int = 200): Flow<List<ChatMessage>> =
         messageDao.getRecentMessageMetadata(companionId, "chat", limit)
-            .map { loadStoredMessages(getRecentMetadata(companionId, limit)).map { fromMessage(it) }.reversed() }
+            .map { fromMessages(loadStoredMessages(getRecentMetadata(companionId, limit))).reversed() }
             .onEach { decrypted -> MessageCache.putChatMessages(companionId, decrypted) }
 
     fun getMessagesBefore(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int = 200): Flow<List<ChatMessage>> =
         messageDao.getMessageMetadataBefore(companionId, "chat", beforeTimestamp, beforeId, limit)
             .map {
-                loadStoredMessages(getMetadataBefore(companionId, beforeTimestamp, beforeId, limit))
-                    .map { fromMessage(it) }
+                fromMessages(loadStoredMessages(getMetadataBefore(companionId, beforeTimestamp, beforeId, limit)))
                     .reversed()
             }
 
@@ -160,25 +165,24 @@ class ChatRepository(
             messageDao.getArchivedMessageCount(companionId, "chat")
 
     suspend fun getRecentMessagesSync(companionId: Long, limit: Int): List<ChatMessage> =
-        loadStoredMessages(getRecentMetadata(companionId, limit))
-            .map { fromMessage(it) }
+        fromMessages(loadStoredMessages(getRecentMetadata(companionId, limit)))
             .reversed()
             .also { MessageCache.putChatMessages(companionId, it) }
 
     suspend fun getMessagesBeforeSync(companionId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int): List<ChatMessage> =
-        loadStoredMessages(getMetadataBefore(companionId, beforeTimestamp, beforeId, limit))
-            .map { fromMessage(it) }
+        fromMessages(loadStoredMessages(getMetadataBefore(companionId, beforeTimestamp, beforeId, limit)))
 
     suspend fun getMessagesAfterSync(companionId: Long, afterTimestamp: Long, afterId: Long, limit: Int): List<ChatMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.getMessageMetadataAfterSync(companionId, "chat", afterTimestamp, afterId, limit),
-                messageDao.getArchivedMessageMetadataAfter(companionId, "chat", afterTimestamp, afterId, limit),
-                limit,
-                descending = false
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.getMessageMetadataAfterSync(companionId, "chat", afterTimestamp, afterId, limit),
+                    messageDao.getArchivedMessageMetadataAfter(companionId, "chat", afterTimestamp, afterId, limit),
+                    limit,
+                    descending = false
+                )
             )
         )
-            .map { fromMessage(it) }
 
     suspend fun getMessageById(messageId: Long): ChatMessage? =
         messageDao.getMessageById(messageId)?.let { fromMessage(it) }
@@ -187,11 +191,13 @@ class ChatRepository(
             }
 
     suspend fun getMessagesForCompanionSync(companionId: Long): List<ChatMessage> =
-        loadStoredMessages(
-            (messageDao.getAllMessagesSync(companionId, "chat").map { it.metadata } +
-                messageDao.getAllArchivedMessageMetadata(companionId, "chat"))
-                .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
-        ).map { fromMessage(it) }
+        fromMessages(
+            loadStoredMessages(
+                (messageDao.getAllMessagesSync(companionId, "chat").map { it.metadata } +
+                    messageDao.getAllArchivedMessageMetadata(companionId, "chat"))
+                    .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
+            )
+        )
 
     suspend fun archiveOldMessages(companionId: Long, retainCount: Int): Int =
         messageDao.archiveOldMessages(companionId, "chat", retainCount)
@@ -200,22 +206,26 @@ class ChatRepository(
         messageDao.restoreArchivedMessages(companionId, "chat")
 
     suspend fun searchMessages(companionId: Long, query: String, limit: Int = 50): List<ChatMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.searchMessages(companionId, "chat", query, limit).map { it.metadata },
-                messageDao.searchArchivedMessageMetadata(companionId, "chat", query, limit),
-                limit
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.searchMessages(companionId, "chat", query, limit).map { it.metadata },
+                    messageDao.searchArchivedMessageMetadata(companionId, "chat", query, limit),
+                    limit
+                )
             )
-        ).map { fromMessage(it) }
+        )
 
     suspend fun getMessagesByFileFormat(companionId: Long, fileFormat: FileFormat, limit: Int = 50): List<ChatMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.getMessagesByFileFormat(companionId, "chat", fileFormat, limit).map { it.metadata },
-                messageDao.getArchivedMessageMetadataByFileFormat(companionId, "chat", fileFormat, limit),
-                limit
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.getMessagesByFileFormat(companionId, "chat", fileFormat, limit).map { it.metadata },
+                    messageDao.getArchivedMessageMetadataByFileFormat(companionId, "chat", fileFormat, limit),
+                    limit
+                )
             )
-        ).map { fromMessage(it) }
+        )
 
     suspend fun getMessagesByFileFormatBefore(
         companionId: Long,
@@ -224,17 +234,19 @@ class ChatRepository(
         beforeId: Long,
         limit: Int = 50
     ): List<ChatMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.getMessagesByFileFormatBefore(
-                    companionId, "chat", fileFormat, beforeTimestamp, beforeId, limit
-                ).map { it.metadata },
-                messageDao.getArchivedMessageMetadataByFileFormatBefore(
-                    companionId, "chat", fileFormat, beforeTimestamp, beforeId, limit
-                ),
-                limit
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.getMessagesByFileFormatBefore(
+                        companionId, "chat", fileFormat, beforeTimestamp, beforeId, limit
+                    ).map { it.metadata },
+                    messageDao.getArchivedMessageMetadataByFileFormatBefore(
+                        companionId, "chat", fileFormat, beforeTimestamp, beforeId, limit
+                    ),
+                    limit
+                )
             )
-        ).map { fromMessage(it) }
+        )
 
     suspend fun updateMessageContent(messageId: Long, content: String) {
         val updated = database.withTransaction {
@@ -298,7 +310,8 @@ class ChatRepository(
      */
     internal suspend fun batchInsertMessages(messages: List<ChatMessage>): List<Long> {
         if (messages.isEmpty()) return emptyList()
-        val encrypted = messages.map { StoredMessage.fromChatMessage(ChatMessageCrypto.encryptForStorage(it)) }
+        val encrypted = ChatMessageCrypto.encryptForStorage(messages)
+            .map { StoredMessage.fromChatMessage(it) }
         val persisted = database.withTransaction {
             val ids = messageDao.insertStoredMessages(encrypted)
             messages.zip(ids).map { (message, id) -> message.copy(id = id) }.also { inserted ->
@@ -396,6 +409,9 @@ class ChatRepository(
 
     // ── 内部转换 ──
 
-    private fun fromMessage(message: StoredMessage): ChatMessage =
+    private suspend fun fromMessage(message: StoredMessage): ChatMessage =
         ChatMessageCrypto.decryptFromStorage(message.toChatMessage())
+
+    private suspend fun fromMessages(messages: List<StoredMessage>): List<ChatMessage> =
+        ChatMessageCrypto.decryptFromStorage(messages.map { it.toChatMessage() })
 }

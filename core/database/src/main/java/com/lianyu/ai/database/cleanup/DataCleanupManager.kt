@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.AppDatabase
+import com.lianyu.ai.database.cache.MessageCache
 import java.util.concurrent.TimeUnit
 
 /**
@@ -78,11 +79,19 @@ object DataCleanupManager {
             var archivedCount = 0
             listOf("chat", "group").forEach { type ->
                 messageDao.getDistinctConversationIds(type).forEach { conversationId ->
-                    archivedCount += messageDao.archiveOldMessages(
+                    val count = messageDao.archiveOldMessages(
                         conversationId,
                         type,
                         HOT_MESSAGES_PER_CONVERSATION
                     )
+                    archivedCount += count
+                    // 归档后失效 L1 缓存，确保下次读取走 L2 重新加载
+                    if (count > 0) {
+                        when (type) {
+                            "chat" -> MessageCache.evictChat(conversationId)
+                            "group" -> MessageCache.evictGroup(conversationId)
+                        }
+                    }
                 }
             }
             val sqlite = db.openHelper.writableDatabase

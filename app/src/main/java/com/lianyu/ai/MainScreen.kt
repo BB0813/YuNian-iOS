@@ -11,13 +11,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.lianyu.ai.common.BatteryOptimizationHelper
+import com.lianyu.ai.common.PerformanceTrace
 import com.lianyu.ai.feature.update.AppUpdateManager
 import com.lianyu.ai.uicommon.component.UpdateDialog
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
@@ -66,6 +69,7 @@ fun MainScreen(mainActivity: Activity) {
         val now = System.currentTimeMillis()
         if (now - lastNavTime < 500) return
         lastNavTime = now
+        PerformanceTrace.startChat()
         LastOpenedCompanionStore.save(context, companionId)
         navController.navigate(MainRoute.Chat(companionId).route)
     }
@@ -123,7 +127,14 @@ fun MainScreen(mainActivity: Activity) {
     val isDark by themeViewModel.isDarkTheme.collectAsStateWithLifecycle()
 
     Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .drawWithContent {
+                drawContent()
+                PerformanceTrace.markStartupDrawn()
+            }
+            .testTag("app_main_ready")
     ) {
         MainNavHost(
             navController = navController,

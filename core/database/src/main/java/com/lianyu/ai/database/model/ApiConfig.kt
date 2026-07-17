@@ -23,7 +23,6 @@ data class ApiConfig(
     val connectionTested: Boolean = false,
     val connectionTestedAt: Long = 0L,
     val latencyMs: Long = 0L,
-    val skipCertVerify: Boolean = false,
     val formatHint: String = "openai"  // "openai" | "anthropic" | "iflytek" — API format hint for CUSTOM provider
 ) {
     companion object {
@@ -95,7 +94,6 @@ data class ApiProviderPreset(
     val baseUrl: String,
     val model: String,
     val formatHint: String = "openai",
-    val skipCertVerify: Boolean = false,
     val sortOrder: Int = 0,
     val isVisible: Boolean = true,
     val updatedAt: Long = System.currentTimeMillis()

@@ -296,9 +296,9 @@ extern "C"
 extern "C" {
     jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt(JNIEnv*, jclass, jbyteArray);
     jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt(JNIEnv*, jclass, jbyteArray);
-    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2(JNIEnv*, jclass, jbyteArray);
-    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2(JNIEnv*, jclass, jbyteArray);
-    void Java_com_lianyu_ai_security_KmsProvider_nativeInit(JNIEnv*, jclass);
+    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2(JNIEnv*, jclass, jbyteArray, jbyteArray);
+    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2(JNIEnv*, jclass, jbyteArray, jbyteArray);
+    jint Java_com_lianyu_ai_security_KmsProvider_nativeInit(JNIEnv*, jclass);
     void Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain(JNIEnv*, jclass);
     jint Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus(JNIEnv*, jclass);
 }
@@ -2384,29 +2384,42 @@ static int check_maps_for_magisk(void) {
 #include "apk-sig-key.h"
 
 static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context) {
-    // Derive key from APK signing certificate (SM3 of certificate DER)
-    uint8_t derived_key[32];
-    if (!derive_key_from_apk_sig(env, context, derived_key, sizeof(derived_key))) {
+    // Anti-repackaging: compare actual APK signing cert SHA-256 against the
+    // build-time embedded value in g_apk_digests_obs[0..31].
+    //
+    // Previous bug compared derive_key_from_apk_sig() output (KDF of cert DER)
+    // against the raw cert SHA-256 — those never match, so hard-auth always
+    // blocked business init and left MainActivity on a white screen.
+    uint8_t actual_cert_sha256[32];
+    if (!get_apk_cert_sha256(env, context, actual_cert_sha256)) {
         __android_log_print(ANDROID_LOG_ERROR, "LianYu",
             "APK signature verification FAILED — refusing to run");
-        return 0;  // Fail-close: no key = no execution
+        return 0;  // Fail-close: no cert = no execution
     }
-    // Compare with embedded SM3 hash (XOR-obfuscated, deobfuscated below)
-    const uint8_t* expected = g_apk_digests_obs;
-    uint8_t deobfuscated[32];
+
+    uint8_t expected_cert_sha256[32];
     for (int i = 0; i < 32; i++) {
-        deobfuscated[i] = expected[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
+        expected_cert_sha256[i] =
+            g_apk_digests_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
     }
-    if (memcmp(derived_key, deobfuscated, 32) != 0) {
+
+    if (memcmp(actual_cert_sha256, expected_cert_sha256, 32) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, "LianYu",
             "APK signature MISMATCH — re-packaging detected");
-        memset(derived_key, 0, sizeof(derived_key));
+        memset(actual_cert_sha256, 0, sizeof(actual_cert_sha256));
+        memset(expected_cert_sha256, 0, sizeof(expected_cert_sha256));
         return 0;
     }
-    // Store derived key for runtime use (DEX decryption, body encryption, etc.)
-    extern uint8_t g_kms_apk_bound_key[32];
-    memcpy(g_kms_apk_bound_key, derived_key, 32);
-    memset(derived_key, 0, sizeof(derived_key));
+    memset(actual_cert_sha256, 0, sizeof(actual_cert_sha256));
+    memset(expected_cert_sha256, 0, sizeof(expected_cert_sha256));
+
+    // Optional: derive APK-bound runtime key after identity is trusted.
+    uint8_t derived_key[32];
+    if (derive_key_from_apk_sig(env, context, derived_key, sizeof(derived_key))) {
+        extern uint8_t g_kms_apk_bound_key[32];
+        memcpy(g_kms_apk_bound_key, derived_key, 32);
+        memset(derived_key, 0, sizeof(derived_key));
+    }
     return 1;
 }
 
@@ -2814,17 +2827,17 @@ extern "C" {
     JNIEnv* env, jobject thiz) {
 
     jclass kmsClass;
-    // RegisterNatives for KmsProvider (hides 7 JNI exports from SO)
+    // RegisterNatives for KmsProvider (must match KmsProvider.kt signatures)
     kmsClass = env->FindClass("com/lianyu/ai/security/KmsProvider");
     if (kmsClass && !env->ExceptionCheck()) {
         JNINativeMethod kmsMethods[] = {
-            {const_cast<char*>("nativeInit"),             const_cast<char*>("()V"),                     (void*)Java_com_lianyu_ai_security_KmsProvider_nativeInit},
-            {const_cast<char*>("nativeEncrypt"),          const_cast<char*>("([B)[B"),                   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt},
-            {const_cast<char*>("nativeDecrypt"),          const_cast<char*>("([B)[B"),                   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt},
-            {const_cast<char*>("nativeEncryptV2"),        const_cast<char*>("([B)[B"),                   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2},
-            {const_cast<char*>("nativeDecryptV2"),        const_cast<char*>("([B)[B"),                   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2},
-            {const_cast<char*>("nativeDestroyKeychain"),  const_cast<char*>("()V"),                     (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain},
-            {const_cast<char*>("nativeGetStatus"),        const_cast<char*>("()I"),                     (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus},
+            {const_cast<char*>("nativeInit"),             const_cast<char*>("()I"),                      (void*)Java_com_lianyu_ai_security_KmsProvider_nativeInit},
+            {const_cast<char*>("nativeEncrypt"),          const_cast<char*>("([B)[B"),                    (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt},
+            {const_cast<char*>("nativeDecrypt"),          const_cast<char*>("([B)[B"),                    (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt},
+            {const_cast<char*>("nativeEncryptV2"),        const_cast<char*>("([B[B)[B"),                  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2},
+            {const_cast<char*>("nativeDecryptV2"),        const_cast<char*>("([B[B)[B"),                  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2},
+            {const_cast<char*>("nativeDestroyKeychain"),  const_cast<char*>("()V"),                      (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain},
+            {const_cast<char*>("nativeGetStatus"),        const_cast<char*>("()I"),                      (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus},
         };
         jint kmsRc = env->RegisterNatives(kmsClass, kmsMethods, 7);
         if (kmsRc != JNI_OK) {
@@ -2957,26 +2970,35 @@ static const uint8_t g_cert_hash_obf[] = {
 /* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_getExpectedCertSha256(
     JNIEnv* env, jobject thiz) {
     OBF_BARRIER(71);
-    // Deobfuscate: XOR each byte with CERT_HASH_KEY
+    // Prefer build-generated g_cert_hash_config.h when present; otherwise fall
+    // back to the same XOR-obfuscated cert hash embedded in g_apk_digests_obs.
+    // Without this fallback, Kotlin PackageManager verification always fails
+    // because the placeholder is all zeros.
     uint8_t plain[32];
     for (int i = 0; i < 32; i++) {
         plain[i] = g_cert_hash_obf[i] ^ CERT_HASH_KEY;
     }
-    // In release, verify the deobfuscated hash isn't all-zero (placeholder)
     int is_zero = 1;
     for (int i = 0; i < 32; i++) {
         if (plain[i] != 0) { is_zero = 0; break; }
     }
     if (is_zero) {
-        // Placeholder — return null to fail verification
-        memset(plain, 0, 32);
-        return nullptr;
+        for (int i = 0; i < 32; i++) {
+            plain[i] = g_apk_digests_obs[i] ^ (uint8_t)(0xC3 ^ (i * 0x9D));
+        }
+        is_zero = 1;
+        for (int i = 0; i < 32; i++) {
+            if (plain[i] != 0) { is_zero = 0; break; }
+        }
+        if (is_zero) {
+            memset(plain, 0, 32);
+            return nullptr;
+        }
     }
     jbyteArray out = env->NewByteArray(32);
     if (out) {
         env->SetByteArrayRegion(out, 0, 32, (const jbyte*)plain);
     }
-    // Zero the stack copy
     memset(plain, 0, 32);
     return out;
 }
@@ -3053,7 +3075,10 @@ extern "C" int kms_provider_register_natives(JNIEnv*);
 
 JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     JNIEnv* env = NULL;
+    LS_LOGE("JNI_OnLoad: begin");
+
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        LS_LOGE("JNI_OnLoad: GetEnv failed");
         return JNI_ERR;
     }
 
@@ -3061,6 +3086,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
     prctl(PR_SET_DUMPABLE, 0);
     prctl(PR_SET_NO_NEW_PRIVS, 1);
+    LS_LOGE("JNI_OnLoad: ptrace/prctl done");
 
     // RegisterNatives — all NativeBridge methods (hides JNI symbols from SO exports)
     jclass bridgeClass = env->FindClass("com/lianyu/ai/security/NativeBridge");
@@ -3126,8 +3152,11 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 
     // Register KmsProvider natives
     kms_provider_register_natives(env);
+    LS_LOGE("JNI_OnLoad: KmsProvider natives registered");
 
+    LS_LOGE("JNI_OnLoad: calling zero_trust_init");
     zero_trust_init();
+    LS_LOGE("JNI_OnLoad: zero_trust_init returned");
 
     // Save VM interpreter prologue for runtime self-verification
     vm_save_interpreter_prologue();

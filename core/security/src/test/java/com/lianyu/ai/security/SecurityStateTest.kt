@@ -1,5 +1,6 @@
 package com.lianyu.ai.security
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,6 +23,8 @@ class SecurityStateTest {
             "Sensitive operations must not be trusted until KMS is ready.",
             SecurityState.snapshot().isTrustedForSensitiveOps
         )
+        assertEquals(SecurityState.Admission.ALLOW_LOCAL, SecurityState.admission())
+        assertTrue(SecurityState.canStartLocalBusiness())
 
         SecurityState.resetForTest()
     }
@@ -43,6 +46,7 @@ class SecurityStateTest {
             "Sensitive operations must not be trusted before payload verification.",
             SecurityState.snapshot().isTrustedForSensitiveOps
         )
+        assertEquals(SecurityState.Admission.ALLOW_LOCAL, SecurityState.admission())
 
         SecurityState.markPreflightPassed(
             wbAesReady = true,
@@ -57,12 +61,30 @@ class SecurityStateTest {
             "Sensitive operations should be trusted only when every gate is ready.",
             SecurityState.snapshot().isTrustedForSensitiveOps
         )
+        assertEquals(SecurityState.Admission.ALLOW_FULL, SecurityState.admission())
 
         SecurityState.markTampered("unit-test")
         assertFalse(
             "Tamper state must revoke sensitive-operation trust immediately.",
             SecurityState.snapshot().isTrustedForSensitiveOps
         )
+        assertEquals(SecurityState.Admission.ALLOW_LOCAL, SecurityState.admission())
+        assertTrue(
+            "Soft tamper must still allow offline-first local business.",
+            SecurityState.canStartLocalBusiness()
+        )
+
+        SecurityState.resetForTest()
+    }
+
+    @Test
+    fun hardAuthFailureBlocksLocalBusinessInit() {
+        SecurityState.resetForTest()
+        SecurityState.markHardAuthFailure("signature mismatch")
+
+        assertEquals(SecurityState.Admission.BLOCK, SecurityState.admission())
+        assertFalse(SecurityState.canStartLocalBusiness())
+        assertFalse(SecurityState.snapshot().isTrustedForSensitiveOps)
 
         SecurityState.resetForTest()
     }

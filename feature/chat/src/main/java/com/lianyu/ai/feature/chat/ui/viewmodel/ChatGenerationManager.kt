@@ -83,7 +83,7 @@ class ChatGenerationManager private constructor(
     private val contextResolver = ChatContextResolver(chatRepository)
     private val chatDetailSettingsStore = ChatDetailSettingsStore(application)
     private val appSettingsStore = AppSettingsStore(application)
-    private val stickerManager = StickerManager.getInstance(application)
+    private val stickerManager by lazy { StickerManager.getInstance(application) }
     private val memoryProvider: MemoryProvider by lazy {
         ServiceRegistry.getOrThrow(MemoryProvider::class.java).also { it.initialize() }
     }
@@ -93,14 +93,20 @@ class ChatGenerationManager private constructor(
     private val _chatTtsConfig = MutableStateFlow(ChatTtsConfig.fromSharedPreferences(application))
     val chatTtsConfig: StateFlow<ChatTtsConfig> = _chatTtsConfig.asStateFlow()
     @Volatile private var callActive = false
-    private val ttsController = ChatTtsController(
-        context = application.applicationContext,
-        ttsService = TtsService.getInstance(application),
-        scope = scope,
-        configProvider = { _chatTtsConfig.value },
-        callActiveProvider = { callActive }
-    )
-    val ttsState: StateFlow<ChatTtsState> = ttsController.state
+    private val _ttsState = MutableStateFlow(ChatTtsState.IDLE)
+    private val ttsControllerDelegate = lazy {
+        ChatTtsController(
+            context = application.applicationContext,
+            ttsService = TtsService.getInstance(application),
+            scope = scope,
+            configProvider = { _chatTtsConfig.value },
+            callActiveProvider = { callActive }
+        ).also { controller ->
+            scope.launch { controller.state.collect { _ttsState.value = it } }
+        }
+    }
+    private val ttsController by ttsControllerDelegate
+    val ttsState: StateFlow<ChatTtsState> = _ttsState.asStateFlow()
     private val typingState = ChatTypingState()
     private val activeRequests = AtomicInteger(0)
     private val messageQueue = Channel<String>(capacity = 100)
@@ -133,7 +139,7 @@ class ChatGenerationManager private constructor(
     val pipeline = MessagePipelineRunner { level -> BanManager.recordViolation(application, level) }
 
     private val toolLoopRunner = AiToolLoopRunner(aiService)
-    private val responseFinalizer = AiResponseFinalizer(
+    private val responseFinalizer by lazy { AiResponseFinalizer(
         companionId = companionId,
         chatRepository = chatRepository,
         messageWriter = messageWriter,
@@ -152,11 +158,7 @@ class ChatGenerationManager private constructor(
         questionRegex = questionRegex,
     ).apply {
         companionInfoProvider = { latestCompanionInfo }
-    }
-
-    init {
-        startMessageConsumer()
-    }
+    } }
 
     fun sendText(content: String) {
         startMessageConsumer()

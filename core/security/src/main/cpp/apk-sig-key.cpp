@@ -70,9 +70,33 @@ static jboolean get_apk_signature_bytes(JNIEnv* env, jobject ctx,
 }
 
 // ============================================================
+// 标准 SHA-256（证书指纹 / 反重打包校验）
+// ============================================================
+static void sha256_raw_digest(const uint8_t* input, size_t len, uint8_t output[32]) {
+    sha256_ctx ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, input, len);
+    sha256_final(&ctx, output);
+}
+
+// ============================================================
 // 密钥派生核心: SM3(证书) → 解密密钥
 // ============================================================
 extern "C" {
+jboolean get_apk_cert_sha256(JNIEnv* env, jobject ctx, uint8_t out_sha256[32]) {
+    if (!out_sha256) return JNI_FALSE;
+
+    uint8_t* cert_bytes = NULL;
+    jsize cert_len = 0;
+    if (!get_apk_signature_bytes(env, ctx, &cert_bytes, &cert_len) || !cert_bytes || cert_len <= 0) {
+        return JNI_FALSE;
+    }
+
+    sha256_raw_digest(cert_bytes, (size_t)cert_len, out_sha256);
+    free(cert_bytes);
+    return JNI_TRUE;
+}
+
 jboolean derive_key_from_apk_sig(JNIEnv* env, jobject ctx,
                                   uint8_t* out_key, size_t key_len) {
     uint8_t* cert_bytes = NULL;

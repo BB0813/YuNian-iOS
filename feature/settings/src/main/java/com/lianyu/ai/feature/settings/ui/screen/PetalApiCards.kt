@@ -146,7 +146,7 @@ private fun PetalApiConfigEditDialog(
     isDarkTheme: Boolean,
     textPrimaryColor: Color,
     textSecondaryColor: Color,
-    onFetchModels: ((String, String, Boolean) -> Unit)? = null,
+    onFetchModels: ((String, String) -> Unit)? = null,
     availableModels: List<String> = emptyList(),
     modelFetchState: SettingsViewModel.ModelFetchState = SettingsViewModel.ModelFetchState()
 ) {
@@ -162,7 +162,6 @@ private fun PetalApiConfigEditDialog(
     var temperature by remember { mutableFloatStateOf(config.temperature) }
     var maxTokens by remember { mutableStateOf(config.maxTokens?.toString() ?: "") }
     var showModelDropdown by remember { mutableStateOf(false) }
-    var skipCertVerify by remember { mutableStateOf(config.skipCertVerify) }
     var formatHint by remember { mutableStateOf(config.formatHint) }
     var lastFetchedParams by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -181,7 +180,7 @@ private fun PetalApiConfigEditDialog(
         else -> "填写密钥后自动拉取模型"
     }
 
-    LaunchedEffect(apiKey, baseUrl, config.provider, formatHint, skipCertVerify) {
+    LaunchedEffect(apiKey, baseUrl, config.provider, formatHint) {
         val fetchParams = baseUrl.trim() + "|" + apiKey.trim()
         // PARTNER：baseUrl 非空即可自动拉取（密钥可空，由服务器下发）
         // CUSTOM：baseUrl 和 apiKey 都非空才自动拉取
@@ -190,7 +189,7 @@ private fun PetalApiConfigEditDialog(
             delay(600)
             lastFetchedParams = fetchParams
             val keyToUse = apiKey.trim()
-            onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
+            onFetchModels?.invoke(baseUrl, keyToUse)
         }
     }
 
@@ -504,7 +503,7 @@ private fun PetalApiConfigEditDialog(
                         onClick = {
                             model = ""
                             lastFetchedParams = ""
-                            onFetchModels.invoke(baseUrl, apiKey.trim(), skipCertVerify)
+                            onFetchModels.invoke(baseUrl, apiKey.trim())
                         },
                         enabled = canFetchOpenAiModels && !modelFetchState.isLoading,
                         modifier = Modifier.fillMaxWidth(),
@@ -577,38 +576,6 @@ private fun PetalApiConfigEditDialog(
                     singleLine = true
                 )
 
-                // 跳过证书验证 — 仅对非 PARTNER 的 provider 显示（PARTNER 始终固定证书）
-                if (!isPartner) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "跳过证书验证",
-                                color = textPrimaryColor,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "⚠️ 仅限自托管/内网服务器，开启后不再验证 SSL 证书",
-                                color = PetalOrange,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = skipCertVerify,
-                            onCheckedChange = { skipCertVerify = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = PetalOrange,
-                                checkedTrackColor = PetalOrange.copy(alpha = 0.3f),
-                                uncheckedThumbColor = dividerColor,
-                                uncheckedTrackColor = dividerColor.copy(alpha = 0.2f)
-                            )
-                        )
-                    }
-                }
             }
         },
         confirmButton = {
@@ -625,7 +592,6 @@ private fun PetalApiConfigEditDialog(
                             model = model.trim(),
                             temperature = temperature,
                             maxTokens = maxTokens.toIntOrNull(),
-                            skipCertVerify = skipCertVerify,
                             formatHint = formatHint
                         )
                         onTest(currentConfig)
@@ -658,7 +624,6 @@ private fun PetalApiConfigEditDialog(
                                 model = model.trim(),
                                 temperature = temperature,
                                 maxTokens = maxTokens.toIntOrNull(),
-                                skipCertVerify = skipCertVerify,
                                 formatHint = formatHint
                             )
                         )
@@ -699,7 +664,7 @@ fun PetalApiCard(
     onTest: (ApiConfig) -> Unit,
     onToggleEnabled: () -> Unit,
     onSelectActive: () -> Unit,
-    onFetchModels: (String, String, String, Boolean) -> Unit,
+    onFetchModels: (String, String, String) -> Unit,
     fetchedModels: Map<String, List<String>>,
     modelFetchStates: Map<String, SettingsViewModel.ModelFetchState>,
     testedConfigs: Map<String, ApiConfig>,
@@ -932,8 +897,8 @@ fun PetalApiCard(
             isDarkTheme = isDarkTheme,
             textPrimaryColor = textPrimaryColor,
             textSecondaryColor = textSecondaryColor,
-            onFetchModels = { baseUrl: String, apiKey: String, skipCertVerify: Boolean ->
-                onFetchModels(baseUrl, apiKey, editing.provider.name, skipCertVerify)
+            onFetchModels = { baseUrl: String, apiKey: String ->
+                onFetchModels(baseUrl, apiKey, editing.provider.name)
             },
             availableModels = providerModels,
             modelFetchState = fetchState
@@ -957,7 +922,7 @@ fun PetalSavedApiCard(
     onTest: (ApiConfig) -> Unit,
     onToggleEnabled: () -> Unit,
     onSelectActive: () -> Unit,
-    onFetchModels: (String, String, String, Boolean) -> Unit,
+    onFetchModels: (String, String, String) -> Unit,
     fetchedModels: Map<String, List<String>>,
     modelFetchStates: Map<String, SettingsViewModel.ModelFetchState>,
     testedConfigs: Map<String, ApiConfig>,
@@ -1205,8 +1170,8 @@ fun PetalSavedApiCard(
             isDarkTheme = isDarkTheme,
             textPrimaryColor = textPrimaryColor,
             textSecondaryColor = textSecondaryColor,
-            onFetchModels = { baseUrl: String, apiKey: String, skipCertVerify: Boolean ->
-                onFetchModels(baseUrl, apiKey, editing.provider.name, skipCertVerify)
+            onFetchModels = { baseUrl: String, apiKey: String ->
+                onFetchModels(baseUrl, apiKey, editing.provider.name)
             },
             availableModels = providerModels,
             modelFetchState = fetchState
@@ -1225,11 +1190,12 @@ fun PetalAddApiButton(onClick: () -> Unit, isDarkTheme: Boolean) {
             .fillMaxWidth()
             .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isDarkTheme) {
-                PetalPrimaryContainer.copy(alpha = 0.08f)
+                PetalPrimaryContainer.copy(alpha = 0.15f)
             } else {
-                PetalSurfaceContainer
+                PetalSurface
             }
         )
     ) {

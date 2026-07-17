@@ -54,12 +54,14 @@ import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.companion.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.CompanionEntity
+import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
 import com.lianyu.ai.database.viewmodel.CompanionListViewModel
 import com.lianyu.ai.uicommon.component.AppListItemLayout
 import com.lianyu.ai.uicommon.theme.AppTheme
@@ -73,10 +75,13 @@ fun ContactsScreen(
     onGroupClick: (Long) -> Unit,
     onCreateGroupClick: () -> Unit,
     viewModel: CompanionListViewModel = viewModel(),
-    groups: List<com.lianyu.ai.database.model.ChatGroup> = emptyList(),
+    groupViewModel: ChatGroupViewModel = viewModel(),
+    groups: List<ChatGroup>? = null,
     isVisible: Boolean = true
 ) {
-    val companions by viewModel.companions.collectAsState(initial = emptyList())
+    val companions by viewModel.companions.collectAsState()
+    val observedGroups by groupViewModel.groups.collectAsState()
+    val groups = groups ?: observedGroups
     val colorScheme = AppTheme.colors
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -127,7 +132,9 @@ fun ContactsScreen(
         ) {
             LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("contacts_friend_list_ready"),
                     contentPadding = PaddingValues(vertical = 8.dp, horizontal = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {

@@ -70,8 +70,8 @@ class BackupImportService(private val context: Context) {
                     )
                 }
 
-                data.chatMessages.forEach { s ->
-                    val msg = ChatMessage(
+                val chatMessages = data.chatMessages.map { s ->
+                    ChatMessage(
                         id = s.id, companionId = s.companionId, content = s.content,
                         isFromUser = s.isFromUser, timestamp = s.timestamp,
                         type = safeEnum<MessageType>(s.type),
@@ -79,19 +79,23 @@ class BackupImportService(private val context: Context) {
                         fileFormat = safeEnum<FileFormat>(s.fileFormat),
                         linkString = s.linkString
                     )
-                    val (metadata, body) = StoredMessage.fromChatMessage(ChatMessageCrypto.encryptForStorage(msg))
+                }
+                ChatMessageCrypto.encryptForStorage(chatMessages).forEach { encrypted ->
+                    val (metadata, body) = StoredMessage.fromChatMessage(encrypted)
                     db.messageDao().insertStoredMessage(metadata, body)
                 }
 
-                data.groupMessages.forEach { s ->
-                    val msg = GroupMessage(
+                val groupMessages = data.groupMessages.map { s ->
+                    GroupMessage(
                         id = s.id, groupId = s.groupId, companionId = s.companionId,
                         content = s.content, timestamp = s.timestamp,
                         searchContent = s.searchContent.ifEmpty { s.content },
                         fileFormat = safeEnum<FileFormat>(s.fileFormat),
                         linkString = s.linkString
                     )
-                    val (metadata, body) = StoredMessage.fromGroupMessage(ChatMessageCrypto.encryptForStorage(msg))
+                }
+                ChatMessageCrypto.encryptForStorageGroup(groupMessages).forEach { encrypted ->
+                    val (metadata, body) = StoredMessage.fromGroupMessage(encrypted)
                     db.messageDao().insertStoredMessage(metadata, body)
                 }
 

@@ -1,13 +1,7 @@
 package com.lianyu.ai
 
 import android.app.Activity
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import com.lianyu.ai.uicommon.utils.PageTransitions
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.draw.drawWithContent
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -26,6 +20,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
+import com.lianyu.ai.common.PerformanceTrace
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.backup.BackupScreen
@@ -48,7 +43,9 @@ import com.lianyu.ai.feature.profile.AgreementViewScreen
 import com.lianyu.ai.feature.profile.GeneralSettingsScreen
 import com.lianyu.ai.feature.profile.HomeScreen
 import com.lianyu.ai.feature.profile.OriginOSAdaptionScreen
+import com.lianyu.ai.uicommon.component.BackgroundSettingsScreen
 import com.lianyu.ai.feature.profile.ProfileScreen
+import com.lianyu.ai.feature.profile.ProfileSettingsScreen
 import com.lianyu.ai.feature.profile.RoleManagerScreen
 import com.lianyu.ai.feature.profile.SupportScreen
 import com.lianyu.ai.feature.profile.TeamScreen
@@ -80,26 +77,15 @@ internal fun MainNavHost(
     lastTabPage: Int,
     onLastTabPageChanged: (Int) -> Unit
 ) {
-    val slideTransitionSpec = spring<IntOffset>(
-        dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow
-    )
-
     NavHost(
         navController = navController,
         startDestination = MainRoute.Home.route,
-        enterTransition = { slideInHorizontally(initialOffsetX = { it }, animationSpec = slideTransitionSpec) },
-        exitTransition = { ExitTransition.None },
-        popEnterTransition = { EnterTransition.None },
-        popExitTransition = { slideOutHorizontally(targetOffsetX = { it }, animationSpec = slideTransitionSpec) }
+        enterTransition = { PageTransitions.enterTransition() },
+        exitTransition = { PageTransitions.exitTransition() },
+        popEnterTransition = { PageTransitions.popEnterTransition() },
+        popExitTransition = { PageTransitions.popExitTransition() }
     ) {
-        composable(
-            MainRoute.Home.route,
-            enterTransition = { EnterTransition.None },
-            exitTransition = { ExitTransition.None },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = { ExitTransition.None }
-        ) {
+        composable(MainRoute.Home.route) {
             MainTabScreen(
                 pagerState = pagerState,
                 navController = navController,
@@ -213,8 +199,14 @@ internal fun MainNavHost(
         composable(MainRoute.Language.route) {
             LanguageScreen(onNavigateBack = { navController.popBackStack() }, activity = mainActivity)
         }
+        composable(MainRoute.BackgroundSettings.route) {
+            BackgroundSettingsScreen(onNavigateBack = { navController.popBackStack() })
+        }
         composable(MainRoute.CheckUpdate.route) {
             CheckUpdateScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(MainRoute.ProfileSettings.route) {
+            ProfileSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(MainRoute.About.route) {
             AboutScreen(
@@ -374,12 +366,14 @@ private fun MainTabPager(
                 onMemoryClick = { navController.navigate(MainRoute.Memory.route) },
                 onSettingsClick = { navController.navigate(MainRoute.Settings.route) },
                 onThemeClick = { navController.navigate(MainRoute.Theme.route) },
+                onBackgroundSettingsClick = { navController.navigate(MainRoute.BackgroundSettings.route) },
                 onGeneralSettingsClick = { navController.navigate(MainRoute.GeneralSettings.route) },
                 onRoleManagerClick = { navController.navigate(MainRoute.RoleManager.route) },
                 onTeamClick = { navController.navigate(MainRoute.Team.route) },
                 onSupportClick = { navController.navigate(MainRoute.Support.route) },
                 onThanksClick = { navController.navigate(MainRoute.Thanks.route) },
-                onAboutClick = { navController.navigate(MainRoute.About.route) }
+                onAboutClick = { navController.navigate(MainRoute.About.route) },
+                onProfileSettingsClick = { navController.navigate(MainRoute.ProfileSettings.route) }
             )
         }
     }
@@ -395,7 +389,14 @@ private fun MainTabScreen(
     coroutineScope: kotlinx.coroutines.CoroutineScope,
     onLastTabPageChanged: (Int) -> Unit
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .drawWithContent {
+                drawContent()
+                if (pagerState.settledPage == 1) PerformanceTrace.markContactsDrawn()
+            }
+    ) {
         MainTabPager(
             pagerState = pagerState,
             navController = navController,
@@ -406,8 +407,11 @@ private fun MainTabScreen(
             currentIndex = pagerState.currentPage,
             onItemClick = { index ->
                 onLastTabPageChanged(index)
+                if (index == 1) {
+                    PerformanceTrace.startContacts()
+                }
                 coroutineScope.launch {
-                    pagerState.animateScrollToPage(index)
+                    pagerState.scrollToPage(index)
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter)

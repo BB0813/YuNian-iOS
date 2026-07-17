@@ -978,13 +978,18 @@ void zero_trust_init(void)
     g_zt.keys_wiped.store(0, std::memory_order_release);
     g_zt.error_count.store(0, std::memory_order_release);
 
-    /* First evaluation — must pass all checks to reach TRUST */
-    zero_trust_evaluate();
+    /* DEFERRED: First evaluation runs on background thread via
+     * zero_trust_start_continuous_eval() to avoid blocking JNI_OnLoad.
+     * The synchronous zero_trust_evaluate() call was removed because it
+     * includes 28 detection checks (IO-heavy check_dex_integrity reads
+     * 140MB APK, check_proxy_port does 6 TCP connects, etc.) that cause
+     * multi-second blocking on the main thread, resulting in ANR/white screen. */
 
     /* Update JNI references if available */
     /* (JNI env is stored by the JNI_OnLoad or explicit setter) */
 
-    /* Start continuous background evaluation (100ms interval) */
+    /* Start continuous background evaluation (100ms interval).
+     * The first evaluation runs immediately on the new thread. */
     zero_trust_start_continuous_eval();
 }
 

@@ -183,9 +183,10 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
 
                 // 获取最近 50 条聊天记录（倒序），然后反转为正序
                 val recentMessages = withContext(Dispatchers.IO) {
-                    messageDao.getRecentMessagesSync(companionId, "chat", 50)
-                        .map { ChatMessageCrypto.decryptFromStorage(it.toChatMessage()) }
-                        .reversed()
+                    ChatMessageCrypto.decryptFromStorage(
+                        messageDao.getRecentMessagesSync(companionId, "chat", 50)
+                            .map { it.toChatMessage() }
+                    ).reversed()
                 }
                 if (recentMessages.isEmpty()) {
                     Log.w(TAG, "generateDiary: no chat messages for companion=$companionId")

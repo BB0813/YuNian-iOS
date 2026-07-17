@@ -4,18 +4,12 @@ import android.app.Application
 import android.content.Context
 import com.lianyu.ai.LianYuApplication
 
-/**
- * Shell Application — VMP first, dev fallback.
- *
- * Production (build_shell_apk.py):
- *   Shell DEX has only this class + NativeBridge + OnePieceShellGate.
- *   NativeBridge.nativeLoadPayload() decrypts business DEX from SO payload,
- *   injects InMemoryDexClassLoader, bootstraps LianYuApplication.
- *
- * Dev (Gradle assembleRelease):
- *   Native SO absent → falls back to direct LianYuApplication loading.
- *   NativeBridge is never referenced unless VMP payload exists.
- */
+// DEPRECATED legacy shell Application.
+// Production unique entry is pure-Java StaticApkShell packaged by
+// tools/package_thin_shell.py (root DEX ~KB + assets/shell/*.dat).
+// This class remains only for historical VMP experiments / JVM shell module
+// references. Do NOT register it as android:name in AndroidManifest.
+@Deprecated("Production shell entry is pure-Java StaticApkShell via package_thin_shell.py")
 class LianYuShellApplication : Application(), androidx.work.Configuration.Provider {
 
     private var realApp: LianYuApplication? = null

@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import com.lianyu.ai.common.PerformanceTrace
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -76,6 +78,8 @@ class MainActivity : ComponentActivity() {
 
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        lastOnCreateStartedNanos = SystemClock.elapsedRealtimeNanos()
+        PerformanceTrace.startStartup(lastOnCreateStartedNanos)
         super.onCreate(savedInstanceState)
         // WorkManager must be initialized before any schedule() call
         try { androidx.work.WorkManager.initialize(this, androidx.work.Configuration.Builder().setMinimumLoggingLevel(android.util.Log.WARN).build()) } catch (_: Exception) {}
@@ -213,6 +217,10 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val IQOO_KEEP_ALIVE_JOB_ID = 10001
+
+        @Volatile
+        var lastOnCreateStartedNanos: Long = 0L
+            private set
     }
 
     /**

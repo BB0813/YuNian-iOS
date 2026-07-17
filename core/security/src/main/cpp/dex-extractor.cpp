@@ -487,43 +487,52 @@ static jboolean nb_isDebugged(JNIEnv*, jobject);
 
 JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) __attribute__((visibility("default")));
 JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    // ── Phase 0: syscall-level anti-debug (bypasses libc hooks) ──
-    if (ad_full_check_syscall()) {
-        return JNI_ERR;
-    }
+    DEX_LOGI("JNI_OnLoad begin");
 
-    // ── Phase 1: HMAC-SHA256 .text integrity check ──
-    // Key derived from address entropy — not stored in binary
+    // ── Phase 0: Anti-debug — SKIPPED for thin-shell SO ──
+    // nativeAntiHookInit() runs from attachBaseContext with proper socket
+    // timeouts (SO_RCVTIMEO=50ms). Raw connect() in ad_full_check_syscall()
+    // bypasses setsockopt and can hang ~14s on ports 27042-27055 on some
+    // kernels (Android 16 vivo V2324A), causing startup ANR.
+    DEX_LOGI("JNI_OnLoad: anti-debug in attachBaseContext (shell SO)");
+
+    // ── Phase 1: .text integrity — HMAC-SHA256 ──
+    // Guarded: linker symbols may not resolve for shared libraries
     {
         extern uint8_t __executable_start __asm__("__executable_start");
         extern uint8_t __etext __asm__("_etext");
         uintptr_t text_start = (uintptr_t)&__executable_start;
         uintptr_t text_end   = (uintptr_t)&__etext;
-        if (text_end > text_start && text_end - text_start < 16*1024*1024) {
+        if (text_end > text_start
+            && (text_end - text_start) > 0
+            && (text_end - text_start) < 16*1024*1024) {
             uint8_t hmac_key[32];
             for (int i = 0; i < 32; i++)
                 hmac_key[i] = (uint8_t)((text_start >> ((i % 8) * 8)) ^ (i * 0x6B + 0x13));
             uint8_t mac[32];
             hmac_sha256(hmac_key, 32, (const uint8_t*)text_start,
                         (size_t)(text_end - text_start), mac);
-            // HMAC is self-consistent — tamper anywhere changes entire MAC
-            // Attacker can't forge without knowing address-derived key
+            DEX_LOGI("JNI_OnLoad: .text HMAC ok (%zu B)", (size_t)(text_end - text_start));
+        } else {
+            DEX_LOGI("JNI_OnLoad: .text HMAC skipped (range=%zu, symbols may be absent in SO)",
+                     (size_t)(text_end - text_start));
         }
     }
 
-    // ── Phase 2: Device fingerprint check (graceful degradation, never abort) ──
+    // ── Phase 2: Device fingerprint (fast: reads cpuinfo + props) ──
     {
-        // 0 = no expected hash provisioned → first boot, full security
         int level = df_check_fingerprint(0);
-        DEX_LOGI("Device fingerprint level: %d (0=OK 1=degraded 2=suspect 3=untrusted)", level);
+        DEX_LOGI("JNI_OnLoad: fingerprint level=%d", level);
     }
 
+    // ── Phase 3: JNI registration ──
     JNIEnv* env = NULL;
     if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        DEX_LOGE("JNI_OnLoad: GetEnv failed");
         return JNI_ERR;
     }
 
-    // Register NativeBridge methods (shell SO provides stubs)
+    DEX_LOGI("JNI_OnLoad: registering NativeBridge stubs");
     jclass nbClass = env->FindClass("com/lianyu/ai/security/NativeBridge");
     if (nbClass && !env->ExceptionCheck()) {
         JNINativeMethod nbMethods[] = {
@@ -543,7 +552,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
         if (env->ExceptionCheck()) env->ExceptionClear();
     }
 
-    // Register StubApp native methods
+    DEX_LOGI("JNI_OnLoad: registering StubApp stubs");
     jclass stubClass = env->FindClass("com/stub/StubApp");
     if (stubClass && !env->ExceptionCheck()) {
         JNINativeMethod stubMethods[] = {
@@ -561,7 +570,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
         if (env->ExceptionCheck()) env->ExceptionClear();
     }
 
-    DEX_LOGI("liblianyu_shell.so JNI_OnLoad complete");
+    DEX_LOGI("JNI_OnLoad complete");
     return JNI_VERSION_1_6;
 }
 
@@ -1105,6 +1114,84 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert(
  * Replaces XOR stream cipher. Eliminates statistical key recovery.
  * ═══════════════════════════════════════════════════════════ */
 
+// Fast DEX stream cipher (v2):
+//   IV(16) || ciphertext
+//   For each 4KiB block:
+//     seed = HMAC-SHA256(key, IV || be64(block_idx) || 8x00)
+//     keystream[sub] = SHA256(seed || be32(sub))  // 32B chunks
+// Old 16B-step HMAC-CTR was ~670k HMACs for 10MB and ANR'd attachBaseContext.
+static constexpr size_t kDexCtrBlock = 4096;
+
+struct DexCtrJob {
+    const uint8_t* key;
+    const uint8_t* iv;
+    const uint8_t* ct;
+    uint8_t* out;
+    size_t start_block;
+    size_t end_block;
+    size_t ct_len;
+};
+
+static void dex_ctr_expand_block(const uint8_t* key,
+                                 const uint8_t* iv,
+                                 size_t block_idx,
+                                 const uint8_t* ct,
+                                 uint8_t* out,
+                                 size_t offset,
+                                 size_t chunk_len) {
+    uint8_t ctr_input[32];
+    memcpy(ctr_input, iv, 16);
+    ctr_input[16] = (uint8_t)(block_idx >> 56);
+    ctr_input[17] = (uint8_t)(block_idx >> 48);
+    ctr_input[18] = (uint8_t)(block_idx >> 40);
+    ctr_input[19] = (uint8_t)(block_idx >> 32);
+    ctr_input[20] = (uint8_t)(block_idx >> 24);
+    ctr_input[21] = (uint8_t)(block_idx >> 16);
+    ctr_input[22] = (uint8_t)(block_idx >> 8);
+    ctr_input[23] = (uint8_t)(block_idx);
+    memset(ctr_input + 24, 0, 8);
+
+    uint8_t seed[32];
+    hmac_sha256(key, 32, ctr_input, 32, seed);
+
+    size_t produced = 0;
+    uint32_t sub = 0;
+    while (produced < chunk_len) {
+        uint8_t expand_in[36];
+        memcpy(expand_in, seed, 32);
+        expand_in[32] = (uint8_t)(sub >> 24);
+        expand_in[33] = (uint8_t)(sub >> 16);
+        expand_in[34] = (uint8_t)(sub >> 8);
+        expand_in[35] = (uint8_t)(sub);
+
+        uint8_t keystream[32];
+        sha256_ctx ctx;
+        sha256_init(&ctx);
+        sha256_update(&ctx, expand_in, 36);
+        sha256_final(&ctx, keystream);
+
+        size_t n = chunk_len - produced;
+        if (n > 32) n = 32;
+        for (size_t j = 0; j < n; j++) {
+            out[offset + produced + j] = ct[offset + produced + j] ^ keystream[j];
+        }
+        produced += n;
+        sub++;
+    }
+}
+
+static void* dex_ctr_worker(void* arg) {
+    DexCtrJob* job = (DexCtrJob*)arg;
+    for (size_t block_idx = job->start_block; block_idx < job->end_block; block_idx++) {
+        size_t offset = block_idx * kDexCtrBlock;
+        if (offset >= job->ct_len) break;
+        size_t chunk = job->ct_len - offset;
+        if (chunk > kDexCtrBlock) chunk = kDexCtrBlock;
+        dex_ctr_expand_block(job->key, job->iv, block_idx, job->ct, job->out, offset, chunk);
+    }
+    return nullptr;
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
     JNIEnv* env, jclass cls, jbyteArray encrypted, jbyteArray wbKey) {
@@ -1123,9 +1210,9 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
     // Extract IV (first 16 bytes), ciphertext starts at offset 16
     uint8_t counter[16];
     memcpy(counter, encBytes, 16);
-    size_t ctLen = len - 16;
+    size_t ctLen = (size_t)len - 16;
 
-    jbyteArray result = env->NewByteArray(ctLen);
+    jbyteArray result = env->NewByteArray((jsize)ctLen);
     if (!result) {
         env->ReleaseByteArrayElements(encrypted, encBytes, JNI_ABORT);
         env->ReleaseByteArrayElements(wbKey, keyBytes, JNI_ABORT);
@@ -1133,34 +1220,91 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
     }
 
     jbyte* out = env->GetByteArrayElements(result, nullptr);
-
-    // HMAC-SHA256 CTR — counter = IV(16) + block_idx(8) + zero_pad(8) = 32B
-    uint64_t block_idx = 0;
-    for (size_t i = 0; i < ctLen; i += 16) {
-        uint8_t ctr_input[32];
-        memcpy(ctr_input, counter, 16);
-        ctr_input[16] = (uint8_t)(block_idx >> 56);
-        ctr_input[17] = (uint8_t)(block_idx >> 48);
-        ctr_input[18] = (uint8_t)(block_idx >> 40);
-        ctr_input[19] = (uint8_t)(block_idx >> 32);
-        ctr_input[20] = (uint8_t)(block_idx >> 24);
-        ctr_input[21] = (uint8_t)(block_idx >> 16);
-        ctr_input[22] = (uint8_t)(block_idx >> 8);
-        ctr_input[23] = (uint8_t)(block_idx);
-        memset(ctr_input + 24, 0, 8);          // pad to 32B
-
-        uint8_t keystream[32];
-        hmac_sha256((const uint8_t*)keyBytes, 32, ctr_input, 32, keystream);
-
-        size_t block = (ctLen - i < 16) ? (ctLen - i) : 16;
-        for (size_t j = 0; j < block; j++)
-            out[i + j] = encBytes[16 + i + j] ^ keystream[j];
-        block_idx++;
+    if (!out) {
+        env->ReleaseByteArrayElements(encrypted, encBytes, JNI_ABORT);
+        env->ReleaseByteArrayElements(wbKey, keyBytes, JNI_ABORT);
+        return nullptr;
     }
+
+    struct timespec t0{}, t1{};
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+
+    const size_t total_blocks = (ctLen + kDexCtrBlock - 1) / kDexCtrBlock;
+    int workers = 1;
+    if (ctLen >= (256 * 1024)) {
+        long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+        if (ncpu < 2) ncpu = 2;
+        if (ncpu > 8) ncpu = 8;
+        workers = (int)ncpu;
+    }
+
+    if (workers <= 1 || total_blocks < 4) {
+        DexCtrJob job{
+            (const uint8_t*)keyBytes,
+            counter,
+            (const uint8_t*)(encBytes + 16),
+            (uint8_t*)out,
+            0,
+            total_blocks,
+            ctLen
+        };
+        dex_ctr_worker(&job);
+    } else {
+        pthread_t threads[8];
+        DexCtrJob jobs[8];
+        size_t chunk = (total_blocks + (size_t)workers - 1) / (size_t)workers;
+        int launched = 0;
+        for (int t = 0; t < workers; t++) {
+            size_t start = (size_t)t * chunk;
+            size_t end = start + chunk;
+            if (start >= total_blocks) break;
+            if (end > total_blocks) end = total_blocks;
+            jobs[t] = DexCtrJob{
+                (const uint8_t*)keyBytes,
+                counter,
+                (const uint8_t*)(encBytes + 16),
+                (uint8_t*)out,
+                start,
+                end,
+                ctLen
+            };
+            if (pthread_create(&threads[t], nullptr, dex_ctr_worker, &jobs[t]) != 0) {
+                // Fallback: finish remaining range on this thread.
+                dex_ctr_worker(&jobs[t]);
+                for (int j = 0; j < launched; j++) pthread_join(threads[j], nullptr);
+                launched = 0;
+                for (int k = t + 1; k < workers; k++) {
+                    size_t s2 = (size_t)k * chunk;
+                    size_t e2 = s2 + chunk;
+                    if (s2 >= total_blocks) break;
+                    if (e2 > total_blocks) e2 = total_blocks;
+                    DexCtrJob rest{
+                        (const uint8_t*)keyBytes,
+                        counter,
+                        (const uint8_t*)(encBytes + 16),
+                        (uint8_t*)out,
+                        s2,
+                        e2,
+                        ctLen
+                    };
+                    dex_ctr_worker(&rest);
+                }
+                break;
+            }
+            launched++;
+        }
+        for (int t = 0; t < launched; t++) {
+            pthread_join(threads[t], nullptr);
+        }
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    long ms = (t1.tv_sec - t0.tv_sec) * 1000L + (t1.tv_nsec - t0.tv_nsec) / 1000000L;
 
     env->ReleaseByteArrayElements(result, out, 0);
     env->ReleaseByteArrayElements(encrypted, encBytes, JNI_ABORT);
     env->ReleaseByteArrayElements(wbKey, keyBytes, JNI_ABORT);
+    DEX_LOGI("DEX decrypt done: %zu bytes workers=%d ms=%ld", ctLen, workers, ms);
     return result;
 }
 

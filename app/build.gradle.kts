@@ -32,7 +32,11 @@ android {
 
         buildConfigField("String", "HARDENING_LEVEL", "\"VMPv2.0+Keystore+AES256GCM\"")
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = if (providers.gradleProperty("thinShellTestRunner").isPresent) {
+            "com.lianyu.ai.performance.JavaThinShellInstrumentation"
+        } else {
+            "androidx.test.runner.AndroidJUnitRunner"
+        }
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -97,10 +101,42 @@ android {
 }
 
 val isWindows = System.getProperty("os.name").lowercase().contains("windows")
-val pythonExecutable = if (isWindows) "python" else "python3"
+
+// Prefer a real Python interpreter. WindowsApps store stubs often fail.
+fun resolvePythonExecutable(): String {
+    val candidates = mutableListOf<String>()
+    System.getenv("LIANYU_PYTHON")?.let { candidates += it }
+    if (isWindows) {
+        val localAppData = System.getenv("LOCALAPPDATA") ?: ""
+        val userProfile = System.getenv("USERPROFILE") ?: ""
+        candidates += listOf(
+            "$userProfile\\anaconda3\\python.exe",
+            "$localAppData\\Programs\\Python\\Python313\\python.exe",
+            "$localAppData\\Programs\\Python\\Python312\\python.exe",
+            "$localAppData\\Programs\\Python\\Python311\\python.exe",
+            "C:\\Python312\\python.exe",
+            "C:\\Python311\\python.exe",
+            "py",
+            "python",
+        )
+    } else {
+        candidates += listOf("python3", "python")
+    }
+    for (candidate in candidates) {
+        val file = file(candidate)
+        if (file.isFile) return file.absolutePath
+        // bare command names (py/python/python3)
+        if (!candidate.contains('\\') && !candidate.contains('/')) return candidate
+    }
+    return if (isWindows) "python" else "python3"
+}
+
+val pythonExecutable = resolvePythonExecutable()
 
 val shellPayloadAssetsDir = layout.projectDirectory.dir("src/main/assets/lianyu_shell")
 val unsignedReleaseApk = layout.buildDirectory.file("outputs/apk/release/app-release-unsigned.apk")
+val releaseApk = layout.buildDirectory.file("outputs/apk/release/app-release.apk")
+val thinShellReleaseApk = layout.buildDirectory.file("outputs/apk/release/app-release-thin-shell.apk")
 
 tasks.register<Exec>("packageShellPayload") {
     group = "security"
@@ -119,14 +155,157 @@ tasks.register<Exec>("packageShellPayload") {
     )
 }
 
-
-// FIX 1: Strip plaintext classes*.dex from release APK
+// FIX 1: Strip plaintext classes*.dex from release APK and replace root DEX
+// with pure-Java thin shell (~KB). Business DEX is encrypted into assets/shell/*.dat.
 //
-// The encrypted shell payload (assets/lianyu_shell/shell_payload.bin
-// and classes.bin) contains the full DEX. The plaintext classes.dex
-// in the APK root is a reverse-engineering weakness — it must be
-// removed after packaging and before signing.
-// ══════════════════════════════════════════════════════════════
+// Default release gate:
+//   ./gradlew assembleRelease
+//     → packageThinShellRelease (auto)
+//     → promoteThinShellRelease (replaces app-release.apk)
+// Escape hatch (plain multi-MB root DEX, for debugging only):
+//   ./gradlew assembleRelease -PlianyuSkipThinShell=true
+// Optional env:
+//   LIANYU_PYTHON                 absolute path to python.exe
+//   LIANYU_STORE_PASSWORD         release keystore password (for --sign)
+//   LIANYU_KEY_PASSWORD           release key password (for --sign)
+//   LIANYU_KEY_ALIAS              release key alias
+//   LIANYU_THIN_SHELL_SIGN=0      skip re-sign (default: sign when keystore passwords available)
+val skipThinShell = providers.gradleProperty("lianyuSkipThinShell")
+    .map { it.equals("true", ignoreCase = true) || it == "1" }
+    .orElse(false)
+
+tasks.register("packageThinShellRelease") {
+    group = "security"
+    description = "Replace release root DEX with pure-Java thin shell and encrypt business DEX into assets/shell."
+    dependsOn("assembleRelease")
+    onlyIf { !skipThinShell.get() }
+
+    val inputApk = releaseApk
+    val outputApk = thinShellReleaseApk
+    val plainBackup = layout.buildDirectory.file("outputs/apk/release/app-release-plain.apk")
+    val script = rootProject.layout.projectDirectory.file("tools/package_thin_shell.py")
+    val envelopeOut = layout.buildDirectory.file("outputs/apk/release/app-release-thin-shell.apk.envelope.json")
+
+    inputs.file(inputApk)
+    inputs.file(script)
+    inputs.dir(layout.projectDirectory.dir("src/shell/java"))
+    outputs.file(outputApk)
+    outputs.file(envelopeOut)
+
+    // Prefer env; fall back to gradle.properties project properties for local release.
+    val storePass = providers.environmentVariable("LIANYU_STORE_PASSWORD")
+        .orElse(providers.provider { project.findProperty("LIANYU_STORE_PASSWORD")?.toString() ?: "" })
+    val keyPass = providers.environmentVariable("LIANYU_KEY_PASSWORD")
+        .orElse(providers.provider { project.findProperty("LIANYU_KEY_PASSWORD")?.toString() ?: "" })
+    val keyAlias = providers.environmentVariable("LIANYU_KEY_ALIAS")
+        .orElse(providers.provider { project.findProperty("LIANYU_KEY_ALIAS")?.toString() ?: "your_alias" })
+    val signOverride = providers.environmentVariable("LIANYU_THIN_SHELL_SIGN").orNull
+    val shouldSign = when (signOverride?.lowercase()) {
+        "0", "false", "no" -> false
+        "1", "true", "yes" -> true
+        else -> storePass.orNull?.isNotBlank() == true && keyPass.orNull?.isNotBlank() == true
+    }
+
+    doLast {
+        val releaseFile = inputApk.get().asFile
+        val backupFile = plainBackup.get().asFile
+        if (!releaseFile.exists() && !backupFile.exists()) {
+            throw GradleException("Release APK not found: ${releaseFile.absolutePath}")
+        }
+
+        // Prefer a plain multi-MB APK as packaging input.
+        val packageInput = when {
+            releaseFile.exists() && releaseFile.length() > 2L * 1024 * 1024 -> releaseFile
+            backupFile.exists() && backupFile.length() > 2L * 1024 * 1024 -> {
+                println("Using plain backup as thin-shell input: ${backupFile.absolutePath}")
+                backupFile
+            }
+            releaseFile.exists() -> releaseFile
+            else -> throw GradleException("No usable plain release APK for thin-shell packaging")
+        }
+
+        val cmd = mutableListOf(
+            pythonExecutable,
+            script.asFile.absolutePath,
+            "--apk", packageInput.absolutePath,
+            "--out", outputApk.get().asFile.absolutePath,
+            "--release-key",
+            "--envelope", envelopeOut.get().asFile.absolutePath,
+        )
+        if (shouldSign) {
+            cmd += listOf(
+                "--sign",
+                "--store-pass", storePass.get(),
+                "--key-pass", keyPass.get(),
+                "--alias", keyAlias.get(),
+            )
+        }
+
+        println("Thin-shell packaging with python: $pythonExecutable")
+        println("Input APK: ${packageInput.absolutePath}")
+        // Gradle 9 removed Project.exec; use ProcessBuilder for portability.
+        val process = ProcessBuilder(cmd)
+            .directory(rootProject.projectDir)
+            .redirectErrorStream(true)
+            .start()
+        process.inputStream.bufferedReader().use { reader ->
+            reader.lineSequence().forEach { println(it) }
+        }
+        val exit = process.waitFor()
+        if (exit != 0) {
+            throw GradleException("package_thin_shell.py failed with exit code $exit")
+        }
+    }
+}
+
+// Promote thin-shell APK to the canonical release artifact path so
+// assembleRelease consumers never ship plaintext multi-MB root DEX by default.
+tasks.register("promoteThinShellRelease") {
+    group = "security"
+    description = "Replace app-release.apk with thin-shell APK and keep plain backup."
+    dependsOn("packageThinShellRelease")
+    onlyIf { !skipThinShell.get() }
+
+    val inputApk = releaseApk
+    val thinApk = thinShellReleaseApk
+    val plainBackup = layout.buildDirectory.file("outputs/apk/release/app-release-plain.apk")
+
+    inputs.file(thinApk)
+    outputs.file(inputApk)
+    outputs.file(plainBackup)
+
+    doLast {
+        val releaseFile = inputApk.get().asFile
+        val thinFile = thinApk.get().asFile
+        val backupFile = plainBackup.get().asFile
+        if (!thinFile.exists()) {
+            throw GradleException("Thin-shell APK missing: ${thinFile.absolutePath}")
+        }
+        // Only backup if current release still looks like a plain Gradle APK.
+        if (releaseFile.exists() && releaseFile.length() > 2 * 1024 * 1024) {
+            backupFile.parentFile.mkdirs()
+            releaseFile.copyTo(backupFile, overwrite = true)
+            println("Plain release backup: ${backupFile.absolutePath} (${backupFile.length()} bytes)")
+        }
+        thinFile.copyTo(releaseFile, overwrite = true)
+        println("Promoted thin-shell → ${releaseFile.absolutePath} (${releaseFile.length()} bytes)")
+    }
+}
+
+// Wire thin-shell as the default release packaging gate.
+// Order: assembleRelease → packageThinShellRelease → promoteThinShellRelease
+afterEvaluate {
+    if (!skipThinShell.get()) {
+        tasks.named("assembleRelease").configure {
+            finalizedBy("packageThinShellRelease")
+        }
+        tasks.named("packageThinShellRelease").configure {
+            finalizedBy("promoteThinShellRelease")
+        }
+    } else {
+        logger.lifecycle("lianyuSkipThinShell=true — release will keep plaintext root DEX")
+    }
+}
 
 
 

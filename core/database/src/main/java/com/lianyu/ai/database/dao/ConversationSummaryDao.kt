@@ -18,6 +18,9 @@ interface ConversationSummaryDao {
     @Query("SELECT * FROM conversation_summary WHERE sessionType = :sessionType ORDER BY isPinned DESC, lastMessageTimestamp DESC")
     fun getSummariesByType(sessionType: String): Flow<List<ConversationSummary>>
 
+    @Query("SELECT * FROM conversation_summary WHERE sessionType = :sessionType ORDER BY isPinned DESC, lastMessageTimestamp DESC")
+    suspend fun getSummariesByTypeSync(sessionType: String): List<ConversationSummary>
+
     @Query("SELECT * FROM conversation_summary WHERE sessionId = :sessionId AND sessionType = :sessionType")
     fun getSummary(sessionId: Long, sessionType: String): Flow<ConversationSummary?>
 

@@ -6,6 +6,7 @@ import com.lianyu.ai.database.model.GroupMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.ArrayDeque
+import java.util.Collections
 
 /**
  * L1 内存缓存层 — 三级存储架构的第一层。
@@ -42,12 +43,14 @@ object MessageCache {
      * 获取单聊缓存消息（已解密、正序）。
      * @return null 表示缓存未命中，需要从 L2 加载
      */
-    fun getChatMessages(companionId: Long): List<ChatMessage>? {
-        return chatCache.get(companionId)?.snapshot()
-    }
+    fun getChatMessages(companionId: Long): List<ChatMessage>? =
+        chatCache.get(companionId)?.snapshot()
+
+    fun getChatMessagesById(companionId: Long): Map<Long, ChatMessage>? =
+        chatCache.get(companionId)?.snapshotById()
 
     fun observeChatMessages(companionId: Long): StateFlow<List<ChatMessage>> =
-        chatCache.get(companionId)?.state ?: SessionCache<ChatMessage>().also {
+        chatCache.get(companionId)?.state ?: SessionCache<ChatMessage>({ it.id }).also {
             chatCache.put(companionId, it)
         }.state
 
@@ -57,7 +60,7 @@ object MessageCache {
      */
     fun putChatMessages(companionId: Long, messages: List<ChatMessage>) {
         chatCache.get(companionId)?.replace(messages)
-            ?: chatCache.put(companionId, SessionCache(messages))
+            ?: chatCache.put(companionId, SessionCache({ it.id }, messages))
     }
 
     /**
@@ -102,14 +105,17 @@ object MessageCache {
         return groupCache.get(groupId)?.snapshot()
     }
 
+    fun getGroupMessagesById(groupId: Long): Map<Long, GroupMessage>? =
+        groupCache.get(groupId)?.snapshotById()
+
     fun observeGroupMessages(groupId: Long): StateFlow<List<GroupMessage>> =
-        groupCache.get(groupId)?.state ?: SessionCache<GroupMessage>().also {
+        groupCache.get(groupId)?.state ?: SessionCache<GroupMessage>({ it.id }).also {
             groupCache.put(groupId, it)
         }.state
 
     fun putGroupMessages(groupId: Long, messages: List<GroupMessage>) {
         groupCache.get(groupId)?.replace(messages)
-            ?: groupCache.put(groupId, SessionCache(messages))
+            ?: groupCache.put(groupId, SessionCache({ it.id }, messages))
     }
 
     fun appendGroupMessage(groupId: Long, message: GroupMessage) {
@@ -183,17 +189,25 @@ object MessageCache {
     /**
      * 单个会话的缓存数据结构。
      */
-    private class SessionCache<T>(messages: List<T> = emptyList()) {
+    private class SessionCache<T>(
+        private val idOf: (T) -> Long,
+        messages: List<T> = emptyList()
+    ) {
         private val deque = ArrayDeque<T>(MESSAGES_PER_SESSION)
         private val mutableState = MutableStateFlow<List<T>>(emptyList())
+        @Volatile
+        private var publishedSnapshot: List<T> = emptyList()
+        @Volatile
+        private var publishedById: Map<Long, T> = emptyMap()
         val state: StateFlow<List<T>> = mutableState
 
         init {
             replace(messages)
         }
 
-        @Synchronized
-        fun snapshot(): List<T> = deque.toList()
+        fun snapshot(): List<T> = publishedSnapshot
+
+        fun snapshotById(): Map<Long, T> = publishedById
 
         @Synchronized
         fun replace(messages: List<T>) {
@@ -204,7 +218,13 @@ object MessageCache {
 
         @Synchronized
         fun append(message: T) {
-            if (deque.size == MESSAGES_PER_SESSION) deque.removeFirst()
+            val msgId = idOf(message)
+            // 流式回复场景去重：同 ID 消息只保留最新版本，替换旧位置
+            if (deque.any { idOf(it) == msgId }) {
+                deque.removeIf { idOf(it) == msgId }
+            } else if (deque.size == MESSAGES_PER_SESSION) {
+                deque.removeFirst()
+            }
             deque.addLast(message)
             publish()
         }
@@ -224,7 +244,10 @@ object MessageCache {
         }
 
         private fun publish() {
-            mutableState.value = deque.toList()
+            val snapshot = Collections.unmodifiableList(ArrayList(deque))
+            publishedSnapshot = snapshot
+            publishedById = Collections.unmodifiableMap(snapshot.associateBy(idOf))
+            mutableState.value = snapshot
         }
     }
 }

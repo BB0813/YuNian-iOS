@@ -1287,15 +1287,16 @@ extern "C" int kms_provider_register_natives(JNIEnv* env) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         return -1;
     }
+    // Must match KmsProvider.kt external fun signatures exactly.
     JNINativeMethod methods[] = {
-        {(char*)"nativeInit",             (char*)"()V",   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeInit},
-        {(char*)"nativeEncrypt",          (char*)"([B)[B", (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt},
-        {(char*)"nativeDecrypt",          (char*)"([B)[B", (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt},
-        {(char*)"nativeEncryptV2",        (char*)"([B)[B", (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2},
-        {(char*)"nativeDecryptV2",        (char*)"([B)[B", (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2},
-        {(char*)"nativeDestroyKeychain",  (char*)"()V",   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain},
-        {(char*)"nativeGetStatus",        (char*)"()I",   (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus},
-        {(char*)"nativeGetDevAesKey",     (char*)"()[B",  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetDevAesKey},
+        {(char*)"nativeInit",             (char*)"()I",     (void*)Java_com_lianyu_ai_security_KmsProvider_nativeInit},
+        {(char*)"nativeEncrypt",          (char*)"([B)[B",  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt},
+        {(char*)"nativeDecrypt",          (char*)"([B)[B",  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt},
+        {(char*)"nativeEncryptV2",        (char*)"([B[B)[B",(void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2},
+        {(char*)"nativeDecryptV2",        (char*)"([B[B)[B",(void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2},
+        {(char*)"nativeDestroyKeychain",  (char*)"()V",     (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain},
+        {(char*)"nativeGetStatus",        (char*)"()I",     (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus},
+        {(char*)"nativeGetDevAesKey",     (char*)"()[B",    (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetDevAesKey},
     };
     int rc = env->RegisterNatives(cls, methods, 8);
     env->DeleteLocalRef(cls);

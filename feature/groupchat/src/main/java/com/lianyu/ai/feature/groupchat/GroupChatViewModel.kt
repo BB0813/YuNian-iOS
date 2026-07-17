@@ -87,18 +87,22 @@ class GroupChatViewModel(
         isFromUser = companionId == -1L, content = content, timestamp = timestamp,
         companionId = companionId
     )
-    private val _messages = MutableStateFlow(groupMessageRepository.getCachedRecent(groupId).orEmpty())
+    private val cachedRecent = groupMessageRepository.getCachedRecent(groupId).orEmpty()
+    private val _messages = MutableStateFlow(cachedRecent)
     val messages: StateFlow<List<GroupMessage>> = _messages.asStateFlow()
 
-    private val _messageMetadata = MutableStateFlow<List<Message>>(emptyList())
+    // 首帧用 L1 缓存推导 metadata，避免进页先空列表再闪 BodyLoading
+    private val _messageMetadata = MutableStateFlow(
+        cachedRecent.takeLast(ChatConstants.GROUP_CHAT_MESSAGE_LIMIT).map { it.toMetadataMessage() }
+    )
     val messageMetadata: StateFlow<List<Message>> = _messageMetadata.asStateFlow()
 
     private val _messageBodies = MutableStateFlow<Map<Long, MessageBodyState<GroupMessage>>>(
-        _messages.value.associate { it.id to MessageBodyState.Ready(it) }
+        cachedRecent.associate { it.id to MessageBodyState.Ready(it) }
     )
     val messageBodies: StateFlow<Map<Long, MessageBodyState<GroupMessage>>> = _messageBodies.asStateFlow()
 
-    private val _hasMore = MutableStateFlow(false)
+    private val _hasMore = MutableStateFlow(cachedRecent.size >= ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
     val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
 
     private val _isLoadingMore = MutableStateFlow(false)
@@ -112,9 +116,28 @@ class GroupChatViewModel(
     init {
         loadUserProfile()
         viewModelScope.launch(Dispatchers.IO) {
-            _messageMetadata.value = groupMessageRepository
-                .getRecentMetadata(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-                .reversed()
+            var metadataSeeded = cachedRecent.isNotEmpty()
+            if (!metadataSeeded) {
+                runCatching {
+                    groupMessageRepository.hydrateRecent(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
+                }
+                val hydrated = groupMessageRepository.getCachedRecent(groupId).orEmpty()
+                if (hydrated.isNotEmpty()) {
+                    _messages.value = hydrated
+                    _messageBodies.value = hydrated.associate { it.id to MessageBodyState.Ready(it) }
+                    _messageMetadata.value =
+                        hydrated.takeLast(ChatConstants.GROUP_CHAT_MESSAGE_LIMIT).map { it.toMetadataMessage() }
+                    metadataSeeded = true
+                }
+            }
+            // 缓存/Hydrate 已预填 metadata 时，不再用 Room 结果覆盖，避免 recompose 闪烁
+            if (!metadataSeeded) {
+                val recentMetadata = groupMessageRepository
+                    .getRecentMetadata(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
+                    .reversed()
+                _messageMetadata.value = recentMetadata
+                seedBodiesFromCache(recentMetadata)
+            }
             _hasMore.value =
                 _messageMetadata.value.size < groupMessageRepository.getMessageCount(groupId)
             groupMessageRepository.observeRecentMetadata(
@@ -124,14 +147,47 @@ class GroupChatViewModel(
                 val older = _messageMetadata.value.filterNot { current ->
                     recent.any { it.id == current.id }
                 }
-                _messageMetadata.value = (older + recent.reversed())
+                val merged = (older + recent.reversed())
                     .distinctBy { it.id }
                     .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
-                _hasMore.value = _messageMetadata.value.size < groupMessageRepository.getMessageCount(groupId)
+                if (merged != _messageMetadata.value) {
+                    _messageMetadata.value = merged
+                    seedBodiesFromCache(merged)
+                }
+                _hasMore.value = merged.size < groupMessageRepository.getMessageCount(groupId)
                 if (recent.isNotEmpty()) groupMessageRepository.markReadThroughLatest(groupId)
             }
         }
     }
+
+    private fun seedBodiesFromCache(metadata: List<Message>) {
+        if (metadata.isEmpty()) return
+        val cachedById = groupMessageRepository.getCachedRecent(groupId)
+            ?.associateBy { it.id }
+            .orEmpty()
+        if (cachedById.isEmpty()) return
+        val ready = metadata.mapNotNull { item ->
+            val body = cachedById[item.id] ?: return@mapNotNull null
+            when (_messageBodies.value[item.id]) {
+                is MessageBodyState.Ready -> null
+                else -> item.id to MessageBodyState.Ready(body)
+            }
+        }
+        if (ready.isNotEmpty()) {
+            _messageBodies.value = _messageBodies.value + ready
+            publishLoadedMessages()
+        }
+    }
+
+    private fun GroupMessage.toMetadataMessage(): Message = Message(
+        id = id,
+        conversationId = groupId,
+        conversationType = "group",
+        isFromUser = companionId == -1L,
+        senderId = companionId,
+        timestamp = timestamp,
+        fileFormat = fileFormat
+    )
 
     fun loadVisibleMessageBodies(messageIds: Set<Long>) {
         val pending = _messageMetadata.value.filter { metadata ->

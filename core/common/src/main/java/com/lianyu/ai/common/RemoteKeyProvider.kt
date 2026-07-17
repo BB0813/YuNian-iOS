@@ -1,7 +1,10 @@
 package com.lianyu.ai.common
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Base64
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.lianyu.ai.common.security.DeviceRequestSigner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -34,12 +37,18 @@ object RemoteKeyProvider {
         val sessionKey: String?
     )
 
-    private const val PREFS_NAME = "remote_key_provider"
+    // Non-secret metadata only (model preference / last fetch timestamp).
+    private const val META_PREFS_NAME = "suflow_session_meta"
+    // Encrypted session domain — isolated from local DB / payload keys.
+    private const val SESSION_PREFS_NAME = "suflow_session_store_encrypted"
+    private const val LEGACY_PREFS_NAME = "remote_key_provider"
     private const val KEY_CACHE_FILE = "partner_keys.dat"
     private const val KEY_LAST_FETCH = "last_fetch_ms"
     private const val KEY_RANDOM_MODEL = "random_model"
+    private const val KEY_CLIENT_ID = "client_id"
     private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_SESSION_KEY = "session_key"
+    private const val KEY_LEGACY_SECRET = "secret"
     // Server URL set at app init — no hardcoded default
     @Volatile
     var serverUrl: String = SuFlowApi.BASE_URL
@@ -47,7 +56,98 @@ object RemoteKeyProvider {
     private fun resolveServerUrl(): String = serverUrl
     private const val HANDSHAKE_PATH = "/api/auth/handshake"
     private const val CHALLENGE_PATH = "/api/auth/challenge"
-    private const val APP_PROVISION_KEY = "suflow-app-provision-key-2024-secure-32byte!!"
+    /**
+     * Non-secret routing identifier for SuFlow handshake compatibility.
+     * NOT a client authenticity proof. Real attestation is challenge-response
+     * + device key signature (+ future Play Integrity / Key Attestation).
+     */
+    private const val APP_ROUTE_ID = "suflow-app-provision-key-2024-secure-32byte!!"
+
+    private const val KEYS_FETCH_PATH = "/api/keys/fetch"
+    private const val CACHE_TTL_MS = 6 * 60 * 60 * 1000L
+    private const val AES_GCM_ALGORITHM = "AES/GCM/NoPadding"
+
+    // Android Keystore 硬件级密钥隔离
+    private const val KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v4_gcm"
+    private const val LEGACY_KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v3"
+
+    @Volatile
+    private var cachedKeys: List<String> = emptyList()
+
+    @Volatile
+    private var cachedRandomModel: String? = null
+
+    @Volatile
+    private var lastFetchMs: Long = 0
+
+    @Volatile
+    private var sessionPrefsCache: SharedPreferences? = null
+
+    private val random = SecureRandom()
+
+    /**
+     * Encrypted SuFlow session store (token / session_key / client_id).
+     * Isolated from local DB keys and payload root keys.
+     */
+    private fun sessionPrefs(context: Context): SharedPreferences {
+        sessionPrefsCache?.let { return it }
+        val appCtx = context.applicationContext
+        val prefs = try {
+            val masterKey = MasterKey.Builder(appCtx)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                appCtx,
+                SESSION_PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            SecureLog.security("RemoteKeyProvider: EncryptedSharedPreferences failed, using private prefs fallback")
+            appCtx.getSharedPreferences(SESSION_PREFS_NAME, Context.MODE_PRIVATE)
+        }
+        migrateLegacySessionPrefs(appCtx, prefs)
+        sessionPrefsCache = prefs
+        return prefs
+    }
+
+    /** Non-secret metadata only (model preference / last fetch timestamp). */
+    private fun metaPrefs(context: Context): SharedPreferences {
+        return context.applicationContext.getSharedPreferences(META_PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    private fun migrateLegacySessionPrefs(context: Context, target: SharedPreferences) {
+        val legacy = context.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+        val hasLegacySecrets = !legacy.getString(KEY_AUTH_TOKEN, null).isNullOrBlank() ||
+            !legacy.getString(KEY_LEGACY_SECRET, null).isNullOrBlank() ||
+            !legacy.getString(KEY_CLIENT_ID, null).isNullOrBlank() ||
+            !legacy.getString("client_id", null).isNullOrBlank()
+        if (!hasLegacySecrets && target.contains(KEY_CLIENT_ID)) return
+
+        val editor = target.edit()
+        val clientId = legacy.getString(KEY_CLIENT_ID, null)
+            ?: legacy.getString("client_id", null)
+        val token = legacy.getString(KEY_AUTH_TOKEN, null)
+        val sessionKey = legacy.getString(KEY_SESSION_KEY, null)
+        val secret = legacy.getString(KEY_LEGACY_SECRET, null)
+        if (!clientId.isNullOrBlank()) editor.putString(KEY_CLIENT_ID, clientId)
+        if (!token.isNullOrBlank()) editor.putString(KEY_AUTH_TOKEN, token)
+        if (!sessionKey.isNullOrBlank()) editor.putString(KEY_SESSION_KEY, sessionKey)
+        if (!secret.isNullOrBlank()) editor.putString(KEY_LEGACY_SECRET, secret)
+        editor.apply()
+
+        // Move non-secret metadata out of legacy prefs.
+        val metaEditor = metaPrefs(context).edit()
+        if (legacy.contains(KEY_LAST_FETCH)) {
+            metaEditor.putLong(KEY_LAST_FETCH, legacy.getLong(KEY_LAST_FETCH, 0L))
+        }
+        legacy.getString(KEY_RANDOM_MODEL, null)?.let { metaEditor.putString(KEY_RANDOM_MODEL, it) }
+        metaEditor.apply()
+
+        // Wipe plaintext legacy store after migration.
+        legacy.edit().clear().apply()
+    }
 
     /** Direct handshake call — used by SettingsViewModel test button */
     fun cloveHandshake(ctx: Context): JSONObject {
@@ -70,22 +170,23 @@ object RemoteKeyProvider {
      * Save handshake result for subsequent API calls.
      *
      * 同步更新三处存储，确保聊天请求立即使用新凭证：
-     * 1. SharedPreferences（client_id + secret + last_fetch_ms）
+     * 1. Encrypted session store（client_id + secret/session）
      * 2. 内存缓存 cachedKeys（fetchKeysAsync 直接读取）
      * 3. 加密文件 partner_keys.dat（网络失败时的回退）
      *
-     * 如果只写 SharedPreferences 而不更新 cachedKeys / partner_keys.dat，
+     * 如果只写 prefs 而不更新 cachedKeys / partner_keys.dat，
      * fetchKeysAsync(forceRefresh=false) 会因 isCacheValid()=true 直接返回旧内存缓存，
      * 导致聊天请求仍用旧 client_id → 401 Invalid API key。
      */
     fun storeHandshakeResult(ctx: Context, clientId: String, secret: String) {
         val appCtx = ctx.applicationContext
-        val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString("client_id", clientId)
-            .putString("secret", secret)
-            .putLong(KEY_LAST_FETCH, System.currentTimeMillis())
+        sessionPrefs(appCtx).edit()
+            .putString(KEY_CLIENT_ID, clientId)
+            .putString(KEY_LEGACY_SECRET, secret)
+            .remove(KEY_AUTH_TOKEN)
+            .remove(KEY_SESSION_KEY)
             .apply()
+        updateFetchTime(appCtx)
 
         // 同步更新内存缓存和加密文件，使聊天请求立即用上新凭证
         val newKeys = listOf("$clientId:$secret")
@@ -113,37 +214,18 @@ object RemoteKeyProvider {
 
     fun storeSessionResult(ctx: Context, clientId: String, sessionToken: String, sessionKey: String?) {
         val appCtx = ctx.applicationContext
-        val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString("client_id", clientId)
+        sessionPrefs(appCtx).edit()
+            .putString(KEY_CLIENT_ID, clientId)
             .putString(KEY_AUTH_TOKEN, sessionToken)
             .putString(KEY_SESSION_KEY, sessionKey)
-            .putLong(KEY_LAST_FETCH, System.currentTimeMillis())
-            .remove("secret")
+            .remove(KEY_LEGACY_SECRET)
             .apply()
+        updateFetchTime(appCtx)
 
         val sessionKeys = listOf(sessionToken)
         cachedKeys = sessionKeys
         saveLocalKeys(appCtx, sessionKeys)
     }
-    private const val KEYS_FETCH_PATH = "/api/keys/fetch"
-    private const val CACHE_TTL_MS = 6 * 60 * 60 * 1000L
-    private const val AES_GCM_ALGORITHM = "AES/GCM/NoPadding"
-
-    // Android Keystore 硬件级密钥隔离
-    private const val KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v4_gcm"
-    private const val LEGACY_KEYSTORE_KEY_ALIAS = "lianyu_partner_key_v3"
-
-    @Volatile
-    private var cachedKeys: List<String> = emptyList()
-
-    @Volatile
-    private var cachedRandomModel: String? = null
-
-    @Volatile
-    private var lastFetchMs: Long = 0
-
-    private val random = SecureRandom()
 
     /**
      * 从 Android Keystore 获取或创建硬件级 AES-256 密钥。
@@ -283,8 +365,8 @@ object RemoteKeyProvider {
     }
 
     fun getPartnerSession(context: Context): PartnerSession? {
-        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val clientId = prefs.getString("client_id", null)?.takeIf { it.isNotBlank() } ?: return null
+        val prefs = sessionPrefs(context)
+        val clientId = prefs.getString(KEY_CLIENT_ID, null)?.takeIf { it.isNotBlank() } ?: return null
         val token = prefs.getString(KEY_AUTH_TOKEN, null)?.takeIf { it.isNotBlank() } ?: return null
         val sessionKey = prefs.getString(KEY_SESSION_KEY, null)?.takeIf { it.isNotBlank() }
         return PartnerSession(clientId = clientId, token = token, sessionKey = sessionKey)
@@ -338,9 +420,9 @@ object RemoteKeyProvider {
             // 默认模型
             cachedRandomModel = "claude-sonnet-4-20250514"
         }
-        // 保存模型到本地缓存
+        // 保存模型到本地缓存（非敏感元数据）
         try {
-            ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            metaPrefs(ctx)
                 .edit()
                 .putString(KEY_RANDOM_MODEL, cachedRandomModel)
                 .apply()
@@ -399,14 +481,14 @@ object RemoteKeyProvider {
     }
 
     private fun getClientId(ctx: Context): String {
-        val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        var clientId = prefs.getString("client_id", null)
+        val prefs = sessionPrefs(ctx)
+        var clientId = prefs.getString(KEY_CLIENT_ID, null)
         if (clientId == null) {
             val androidId = android.provider.Settings.Secure.getString(
                 ctx.contentResolver, android.provider.Settings.Secure.ANDROID_ID
             ) ?: "unknown"
             clientId = androidId + "_" + android.os.Build.MODEL.replace(" ", "_")
-            prefs.edit().putString("client_id", clientId).apply()
+            prefs.edit().putString(KEY_CLIENT_ID, clientId).apply()
         }
         return clientId
     }
@@ -421,7 +503,8 @@ object RemoteKeyProvider {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("x-app-key", APP_PROVISION_KEY)
+                // Compatibility routing id only — not an authenticity secret.
+                setRequestProperty("x-app-key", APP_ROUTE_ID)
                 doOutput = true
                 doInput = true
             }
@@ -458,7 +541,8 @@ object RemoteKeyProvider {
                 readTimeout = 5_000
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("x-app-key", APP_PROVISION_KEY)
+                // Compatibility routing id only — not an authenticity secret.
+                setRequestProperty("x-app-key", APP_ROUTE_ID)
                 doInput = true
             }
 
@@ -522,9 +606,9 @@ object RemoteKeyProvider {
                     cachedRandomModel = randomModel
                     SecureLog.d("RemoteKeyProvider", "Server recommended random model: $randomModel")
 
-                    // 保存到本地缓存
+                    // 保存到本地缓存（非敏感元数据）
                     try {
-                        ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        metaPrefs(ctx)
                             .edit()
                             .putString(KEY_RANDOM_MODEL, randomModel)
                             .apply()
@@ -580,8 +664,7 @@ object RemoteKeyProvider {
 
             // 恢复缓存的随机模型
             if (cachedRandomModel == null) {
-                cachedRandomModel = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .getString(KEY_RANDOM_MODEL, null)
+                cachedRandomModel = metaPrefs(context).getString(KEY_RANDOM_MODEL, null)
                 if (cachedRandomModel != null) {
                     SecureLog.d("RemoteKeyProvider", "Restored random model from cache: $cachedRandomModel")
                 }
@@ -607,35 +690,36 @@ object RemoteKeyProvider {
 
         // 尝试从本地缓存恢复
         if (context != null) {
-            cachedRandomModel = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_RANDOM_MODEL, null)
+            cachedRandomModel = metaPrefs(context).getString(KEY_RANDOM_MODEL, null)
         }
         return cachedRandomModel
     }
 
     private fun isCacheValid(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val lastFetch = prefs.getLong(KEY_LAST_FETCH, 0)
+        val lastFetch = metaPrefs(context).getLong(KEY_LAST_FETCH, 0)
         return System.currentTimeMillis() - lastFetch < CACHE_TTL_MS
     }
 
     private fun isCacheExpired(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val lastFetch = prefs.getLong(KEY_LAST_FETCH, 0)
+        val lastFetch = metaPrefs(context).getLong(KEY_LAST_FETCH, 0)
         return System.currentTimeMillis() - lastFetch >= CACHE_TTL_MS * 24
     }
 
     private fun updateFetchTime(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putLong(KEY_LAST_FETCH, System.currentTimeMillis()).apply()
+        metaPrefs(context).edit().putLong(KEY_LAST_FETCH, System.currentTimeMillis()).apply()
     }
 
     fun clearCache(context: Context) {
         cachedKeys = emptyList()
         cachedRandomModel = null
-        val file = File(context.filesDir, KEY_CACHE_FILE)
+        sessionPrefsCache = null
+        val appCtx = context.applicationContext
+        val file = File(appCtx.filesDir, KEY_CACHE_FILE)
         file.delete()
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+        // Wipe encrypted session domain + metadata + any leftover legacy plaintext.
+        runCatching { sessionPrefs(appCtx).edit().clear().apply() }
+        metaPrefs(appCtx).edit().clear().apply()
+        appCtx.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
     private fun getAppVersion(context: Context): String {

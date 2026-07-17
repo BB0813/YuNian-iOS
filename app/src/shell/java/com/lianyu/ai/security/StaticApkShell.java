@@ -2,10 +2,12 @@ package com.lianyu.ai.security;
 
 import android.app.Application;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 import android.os.Build;
+import android.os.SystemClock;
 import android.util.Log;
 
 import java.io.ByteArrayOutputStream;
@@ -22,8 +24,18 @@ import dalvik.system.InMemoryDexClassLoader;
 public class StaticApkShell extends Application {
     private static final String TAG = "StaticApkShell";
     private static final String REAL_APP = "com.lianyu.ai.LianYuApplication";
+    private static final String METRICS_PREFS = "release_performance_metrics";
 
     private Application realApplication;
+    private long shellStarted;
+    private long antiHookDone;
+    private long certificateDone;
+    private long vmpPayloadDone;
+    private long dexLoadDone;
+    private long recoveryDone;
+    private long memoryGuardDone;
+    private long realAppCreated;
+    private long realAppAttached;
 
     static {
         System.loadLibrary("lianyu_shell");
@@ -31,25 +43,190 @@ public class StaticApkShell extends Application {
 
     @Override
     protected void attachBaseContext(Context base) {
+        shellStarted = SystemClock.elapsedRealtimeNanos();
         super.attachBaseContext(base);
+        stageLog("attach.begin");
         nativeAntiHookInit();
+        antiHookDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.antiHook", antiHookDone - shellStarted);
         initApkCertificate(base);
-        initVmpPayload(base);
+        certificateDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.certificate", certificateDone - antiHookDone);
+        // MethodRecoveryEngine is currently a no-op; skip the 5.8MB VMP blob on the
+        // critical startup path to avoid multi-second main-thread I/O.
+        // Keep the hook for future recovery without blocking Application attach.
+        vmpPayloadDone = certificateDone;
+        stageLog("attach.vmpPayload.skipped");
         loadEncryptedDex(base);
+        dexLoadDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.dexLoad", dexLoadDone - vmpPayloadDone);
         MethodRecoveryEngine.install(base.getClassLoader());
+        recoveryDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.recovery", recoveryDone - dexLoadDone);
         nativeEnableMemoryGuard();
+        memoryGuardDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.memoryGuard", memoryGuardDone - recoveryDone);
         realApplication = createRealApplication(base);
+        realAppCreated = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.realAppCreate", realAppCreated - memoryGuardDone);
         if (realApplication != null) {
             attachRealApplication(base, realApplication);
         }
+        realAppAttached = SystemClock.elapsedRealtimeNanos();
+        stageLog("attach.realAppAttach", realAppAttached - realAppCreated);
+        stageLog("attach.total", realAppAttached - shellStarted);
+        persistAttachMetrics(base);
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
-        if (realApplication != null) {
-            realApplication.onCreate();
+        long businessStarted = SystemClock.elapsedRealtimeNanos();
+        stageLog("onCreate.begin", businessStarted - shellStarted);
+        // Production unique shell chain:
+        // 1) encrypted business DEX already loaded in attachBaseContext
+        // 2) run SecurityGuard preflight via G0 (business DEX)
+        // 3) only then allow real Application.onCreate / initBusiness
+        runSecurityPreflight();
+        long preflightDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("onCreate.preflight", preflightDone - businessStarted);
+        runSecurityRuntimeInit();
+        long runtimeDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("onCreate.runtime", runtimeDone - preflightDone);
+        if (!canStartLocalBusiness()) {
+            Log.e(TAG, "BLOCK business init: hard auth failed");
+            persistBusinessBlocked(businessStarted);
+            return;
         }
+        if (realApplication != null) {
+            long wmStarted = SystemClock.elapsedRealtimeNanos();
+            initializeWorkManager();
+            stageLog("onCreate.workManager", SystemClock.elapsedRealtimeNanos() - wmStarted);
+            long appStarted = SystemClock.elapsedRealtimeNanos();
+            realApplication.onCreate();
+            stageLog("onCreate.realApp", SystemClock.elapsedRealtimeNanos() - appStarted);
+        }
+        long businessDone = SystemClock.elapsedRealtimeNanos();
+        stageLog("onCreate.total", businessDone - businessStarted);
+        stageLog("startup.total", businessDone - shellStarted);
+        getSharedPreferences(METRICS_PREFS, MODE_PRIVATE).edit()
+                .putLong("java_shell_business_on_create", businessDone - businessStarted)
+                .putLong("java_shell_to_business_ready", businessDone - shellStarted)
+                .putLong("java_shell_business_run_id", shellStarted)
+                .commit();
+    }
+
+    private void stageLog(String stage) {
+        Log.i(TAG, "stage " + stage);
+    }
+
+    private void stageLog(String stage, long nanos) {
+        Log.i(TAG, "stage " + stage + " ms=" + (nanos / 1_000_000L));
+    }
+
+    private void persistBusinessBlocked(long businessStarted) {
+        long now = SystemClock.elapsedRealtimeNanos();
+        getSharedPreferences(METRICS_PREFS, MODE_PRIVATE).edit()
+                .putLong("java_shell_business_on_create", now - businessStarted)
+                .putLong("java_shell_to_business_ready", -1L)
+                .putLong("java_shell_business_run_id", shellStarted)
+                .putBoolean("java_shell_business_blocked", true)
+                .commit();
+    }
+
+    /**
+     * Invoke com.lianyu.ai.security.G0.b(Context) from business DEX.
+     * Soft-fail: missing class during transition must not crash shell.
+     */
+    private void runSecurityPreflight() {
+        try {
+            invokeKotlinObjectMethod("com.lianyu.ai.security.G0", "b", this);
+        } catch (Throwable error) {
+            Log.w(TAG, "security preflight unavailable: " + error.getClass().getSimpleName()
+                    + (error.getMessage() != null ? (": " + error.getMessage()) : ""));
+        }
+    }
+
+    /** Invoke com.lianyu.ai.security.G0.a(Context) runtime init. */
+    private void runSecurityRuntimeInit() {
+        try {
+            invokeKotlinObjectMethod("com.lianyu.ai.security.G0", "a", this);
+        } catch (Throwable error) {
+            Log.w(TAG, "security runtime init unavailable: " + error.getClass().getSimpleName()
+                    + (error.getMessage() != null ? (": " + error.getMessage()) : ""));
+        }
+    }
+
+    /**
+     * Reflect SecurityState.canStartLocalBusiness().
+     * Default true if class missing (should not happen after DEX load).
+     */
+    private boolean canStartLocalBusiness() {
+        try {
+            Class<?> state = Class.forName("com.lianyu.ai.security.SecurityState", true, getClassLoader());
+            Object result = invokeKotlinObjectMethod(state, "canStartLocalBusiness");
+            return !(result instanceof Boolean) || (Boolean) result;
+        } catch (Throwable error) {
+            Log.w(TAG, "SecurityState unavailable, allowing local business: " + error.getClass().getSimpleName());
+            return true;
+        }
+    }
+
+    /** Call a method on a Kotlin `object` (INSTANCE) or a static Java method. */
+    private Object invokeKotlinObjectMethod(String className, String methodName, Object... args) throws Exception {
+        Class<?> clazz = Class.forName(className, true, getClassLoader());
+        return invokeKotlinObjectMethod(clazz, methodName, args);
+    }
+
+    private Object invokeKotlinObjectMethod(Class<?> clazz, String methodName, Object... args) throws Exception {
+        Class<?>[] paramTypes = new Class<?>[args.length];
+        for (int i = 0; i < args.length; i++) {
+            // Context-compatible args: use Context.class for Application instances.
+            if (args[i] instanceof Context) {
+                paramTypes[i] = Context.class;
+            } else {
+                paramTypes[i] = args[i].getClass();
+            }
+        }
+        Method method = clazz.getMethod(methodName, paramTypes);
+        Object target = null;
+        try {
+            Field instance = clazz.getField("INSTANCE");
+            target = instance.get(null);
+        } catch (NoSuchFieldException ignored) {
+            // Java static method / @JvmStatic path.
+        }
+        return method.invoke(target, args);
+    }
+
+    private void initializeWorkManager() {
+        try {
+            ClassLoader loader = getClassLoader();
+            Class<?> configurationClass = Class.forName("androidx.work.Configuration", true, loader);
+            Class<?> builderClass = Class.forName("androidx.work.Configuration$Builder", true, loader);
+            Object builder = builderClass.getDeclaredConstructor().newInstance();
+            Object configuration = builderClass.getMethod("build").invoke(builder);
+            Class<?> workManagerClass = Class.forName("androidx.work.WorkManager", true, loader);
+            workManagerClass.getMethod("initialize", Context.class, configurationClass)
+                    .invoke(null, this, configuration);
+        } catch (Throwable error) {
+            throw new RuntimeException("initialize WorkManager failed", error);
+        }
+    }
+
+    private void persistAttachMetrics(Context context) {
+        SharedPreferences.Editor editor = context.getSharedPreferences(METRICS_PREFS, MODE_PRIVATE).edit();
+        editor.putLong("java_shell_anti_hook", antiHookDone - shellStarted);
+        editor.putLong("java_shell_certificate", certificateDone - antiHookDone);
+        editor.putLong("java_shell_vmp_payload", vmpPayloadDone - certificateDone);
+        editor.putLong("java_shell_dex_load", dexLoadDone - vmpPayloadDone);
+        editor.putLong("java_shell_recovery", recoveryDone - dexLoadDone);
+        editor.putLong("java_shell_memory_guard", memoryGuardDone - recoveryDone);
+        editor.putLong("java_shell_real_app_create", realAppCreated - memoryGuardDone);
+        editor.putLong("java_shell_real_app_attach", realAppAttached - realAppCreated);
+        editor.putLong("java_shell_attach_total", realAppAttached - shellStarted);
+        editor.putLong("java_shell_attach_run_id", shellStarted);
+        editor.commit();
     }
 
     private void initApkCertificate(Context context) {

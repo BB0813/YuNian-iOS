@@ -21,7 +21,6 @@ import java.util.Base64
 import java.util.concurrent.TimeUnit
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
-import com.lianyu.ai.network.CertificatePins
 
 class XunfeiTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -30,7 +29,6 @@ class XunfeiTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
-        builder.certificatePinner(CertificatePins.certificatePinner)
         builder.build()
     }
 
