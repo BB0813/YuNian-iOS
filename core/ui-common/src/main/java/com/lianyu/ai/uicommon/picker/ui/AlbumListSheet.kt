@@ -1,18 +1,24 @@
 package com.lianyu.ai.uicommon.picker.ui
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -21,12 +27,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.lianyu.ai.uicommon.picker.model.AlbumInfo
+import com.lianyu.ai.uicommon.theme.*
+
+/** 选择器品牌色 */
+private val Accent = PinkPrimary
+private val Bg = WeChatDarkBackground
+private val SurfaceColor = WeChatDarkSurface
+private val DividerColor = WeChatDarkDivider
 
 /**
- * 文件夹列表 BottomSheet。
- *
- * 展示所有相册文件夹（包括「全部照片」），点击切换当前相册。
- * 每个相册显示封面缩略图、名称和图片数量。
+ * 文件夹列表页。
  */
 @Composable
 internal fun AlbumListSheet(
@@ -39,65 +49,92 @@ internal fun AlbumListSheet(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF1A1A1A))
+            .background(Bg)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // ---------- 顶部栏 ----------
-            Row(
+            // ═══ 顶部栏 ═══
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-                    .statusBarsPadding(),
-                verticalAlignment = Alignment.CenterVertically
+                    .statusBarsPadding()
+                    .background(SurfaceColor)
+                    .padding(vertical = 4.dp)
             ) {
-                Spacer(modifier = Modifier.width(48.dp))
-
-                Text(
-                    "选择相册",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, "关闭", tint = Color.White)
-                }
-            }
-
-            // ---------- 加载中 ----------
-            if (pickerState.isAlbumsLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(color = Color(0xFF4FC3F7))
-                }
-            }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.Filled.ChevronLeft,
+                            "返回",
+                            tint = WeChatDarkTextPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
 
-            // ---------- 错误 ----------
-            if (pickerState.error != null) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(pickerState.error!!, color = Color(0xFFFF6E6E))
-                }
-            }
-
-            // ---------- 相册列表 ----------
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(pickerState.albums) { album ->
-                    AlbumRow(
-                        album = album,
-                        isSelected = album.bucketId == pickerState.currentBucketId,
-                        onClick = { onAlbumSelected(album.bucketId, album.displayName) }
+                    Text(
+                        "选择相册",
+                        color = WeChatDarkTextPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
                     )
+                }
+            }
+
+            // ═══ 内容 ═══
+            when {
+                pickerState.isAlbumsLoading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Accent)
+                    }
+                }
+                pickerState.error != null -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            pickerState.error!!,
+                            color = ErrorRed,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(
+                            items = pickerState.albums,
+                            key = { it.bucketId }
+                        ) { album ->
+                            AlbumRow(
+                                album = album,
+                                isSelected = album.bucketId == pickerState.currentBucketId,
+                                onClick = { onAlbumSelected(album.bucketId, album.displayName) }
+                            )
+                            // 分割线
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 78.dp, end = 16.dp)
+                                    .height(0.5.dp)
+                                    .background(DividerColor)
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 单行相册
+// ═════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun AlbumRow(
@@ -105,19 +142,33 @@ private fun AlbumRow(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    // 选中弹簧动画
+    val checkScale by animateFloatAsState(
+        targetValue = if (isSelected) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "checkScale"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .background(
+                if (isSelected) Accent.copy(alpha = 0.08f)
+                else Color.Transparent
+            )
+            .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 封面缩略图
         Box(
             modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF333333)),
+                .size(52.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(WeChatDarkSurface),
             contentAlignment = Alignment.Center
         ) {
             if (album.coverUri != null) {
@@ -127,29 +178,46 @@ private fun AlbumRow(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
+            } else {
+                Text("📷", fontSize = 20.sp)
             }
         }
 
         Spacer(modifier = Modifier.width(14.dp))
 
+        // 名称 + 数量
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 album.displayName,
-                color = if (isSelected) Color(0xFF4FC3F7) else Color.White,
+                color = if (isSelected) Accent else WeChatDarkTextPrimary,
                 fontSize = 15.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
-                "${album.count} 张",
-                color = Color(0xFF999999),
-                fontSize = 12.sp
+                "${album.count} 张照片",
+                color = WeChatDarkTextSecondary,
+                fontSize = 13.sp
             )
         }
 
-        if (isSelected) {
-            Text("✓", color = Color(0xFF4FC3F7), fontSize = 18.sp)
+        // 选中勾
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .scale(checkScale),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isSelected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Accent,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

@@ -1,20 +1,27 @@
 package com.lianyu.ai.uicommon.picker.ui
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -24,15 +31,19 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import coil.compose.AsyncImage
 import com.lianyu.ai.uicommon.picker.model.MediaItem
+import com.lianyu.ai.uicommon.theme.PinkPrimary
+import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
+import com.lianyu.ai.uicommon.theme.WeChatDarkSurface
+import com.lianyu.ai.uicommon.theme.WeChatDarkTextPrimary
+import com.lianyu.ai.uicommon.theme.WeChatDarkTextSecondary
+
+/** 选择器品牌色 */
+private val Accent = PinkPrimary
+private val Bg = WeChatDarkBackground
+private val SurfaceColor = WeChatDarkSurface
 
 /**
  * 图片网格主界面 — Paging 3 + Compose。
- *
- * 核心性能要点：
- * - `key = { it.id }` — 确保 Compose 精确识别每个 Item
- * - `derivedStateOf { selectionMap.containsKey(id) }` — 隔离重组范围，
- *   选中 1 张图只重组那 1 个 Item，其他 59 个不重组
- * - `collectAsLazyPagingItems()` — Paging 3 原生 Compose 集成
  */
 @Composable
 internal fun ImageGrid(
@@ -55,65 +66,79 @@ internal fun ImageGrid(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF1A1A1A))
+            .background(Bg)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // ---------- 顶部栏 ----------
-            Row(
+            // ═══ 顶部栏 — 渐变背景 ═══
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-                    .statusBarsPadding(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 取消
-                TextButton(onClick = onDismiss) {
-                    Text("取消", color = Color.White, fontSize = 16.sp)
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // 相册名 + 下拉箭头
-                TextButton(onClick = onShowAlbums) {
-                    Text(
-                        pickerState.currentAlbumName,
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Icon(
-                        Icons.Filled.ArrowDropDown,
-                        contentDescription = "切换相册",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // 完成按钮
-                if (maxSelection > 1) {
-                    TextButton(
-                        onClick = onConfirm,
-                        enabled = hasSelection
-                    ) {
-                        val text = if (hasSelection) "完成(${selectionMap.size})" else "完成"
-                        Text(
-                            text,
-                            color = if (hasSelection) Color(0xFF4FC3F7) else Color.Gray,
-                            fontSize = 16.sp
+                    .statusBarsPadding()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                SurfaceColor,
+                                SurfaceColor.copy(alpha = 0.95f),
+                                SurfaceColor.copy(alpha = 0f)
+                            )
                         )
+                    )
+                    .padding(horizontal = 4.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 取消
+                    TextButton(onClick = onDismiss) {
+                        Text("取消", color = WeChatDarkTextPrimary, fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // 相册名 + 下拉箭头
+                    TextButton(onClick = onShowAlbums) {
+                        Text(
+                            pickerState.currentAlbumName,
+                            color = WeChatDarkTextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = "切换相册",
+                            tint = WeChatDarkTextPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // 完成按钮
+                    if (maxSelection > 1) {
+                        TextButton(
+                            onClick = onConfirm,
+                            enabled = hasSelection
+                        ) {
+                            val text = if (hasSelection) "完成(${selectionMap.size})" else "完成"
+                            Text(
+                                text,
+                                color = if (hasSelection) Accent else WeChatDarkTextSecondary,
+                                fontSize = 16.sp,
+                                fontWeight = if (hasSelection) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
                     }
                 }
             }
 
-            // ---------- 图片网格 ----------
+            // ═══ 图片网格 ═══
             LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalItemSpacing = 2.dp
+                contentPadding = PaddingValues(horizontal = 1.dp, vertical = 1.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.dp),
+                verticalItemSpacing = 1.dp
             ) {
                 items(
                     count = lazyPagingItems.itemCount,
@@ -121,7 +146,6 @@ internal fun ImageGrid(
                 ) { index ->
                     val item = lazyPagingItems[index]
                     if (item != null) {
-                        // 关键：derivedStateOf 隔离重组范围
                         val isSelected by remember(item.id) {
                             derivedStateOf { selectionMap.containsKey(item.id) }
                         }
@@ -129,26 +153,21 @@ internal fun ImageGrid(
                             derivedStateOf { selectionMap[item.id] }
                         }
 
-                        // 点击：根据元素在适配器中的位置，传给 Item 自己在 Grid 里回调
                         GridPhotoItem(
                             item = item,
                             isSelected = isSelected,
                             selectedOrder = order,
                             maxSelection = maxSelection,
-                            onClick = {
-                                onItemClick(item.id)
-                            },
-                            onRequestPreview = {
-                                onItemPreview(index)
-                            }
+                            onClick = { onItemClick(item.id) },
+                            onRequestPreview = { onItemPreview(index) }
                         )
                     } else {
-                        // 占位
+                        // 占位骨架
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
-                                .background(Color(0xFF333333))
+                                .background(WeChatDarkSurface)
                         )
                     }
                 }
@@ -157,9 +176,9 @@ internal fun ImageGrid(
     }
 }
 
-// ============================================================================
+// ═════════════════════════════════════════════════════════════════════════════
 // 网格中的单张图片 Item
-// ============================================================================
+// ═════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun GridPhotoItem(
@@ -170,38 +189,66 @@ private fun GridPhotoItem(
     onClick: () -> Unit,
     onRequestPreview: () -> Unit
 ) {
+    // 选中动画 — 弹簧缩放
+    val scale by animateFloatAsState(
+        targetValue = if (isSelected) 0.92f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "selectionScale"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
+            .scale(scale)
     ) {
-        // 图片 — 点击=选中/取消
+        // 图片
         AsyncImage(
             model = item.uri,
             contentDescription = item.displayName,
             modifier = Modifier
                 .fillMaxSize()
-                .clickable { onClick() },
+                .clip(RoundedCornerShape(2.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onClick() },
             contentScale = ContentScale.Crop
         )
 
-        // 选中角标 — 多选模式下点击角标=预览
+        // 选中蒙层
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Accent.copy(alpha = 0.15f))
+            )
+        }
+
+        // 选中角标 / 预览入口
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(6.dp)
-                .size(22.dp)
+                .padding(5.dp)
+                .size(24.dp)
                 .clip(CircleShape)
                 .background(
-                    if (isSelected) Color(0xFF4FC3F7)
-                    else Color(0x88000000)
+                    if (isSelected) Accent
+                    else Color(0x55000000)
                 )
                 .then(
-                    if (!isSelected) Modifier.border(1.5.dp, Color.White, CircleShape)
+                    if (!isSelected) Modifier.border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape)
                     else Modifier
                 )
                 .then(
-                    if (maxSelection > 1) Modifier.clickable { onRequestPreview() }
+                    if (maxSelection > 1) Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onRequestPreview() }
                     else Modifier
                 ),
             contentAlignment = Alignment.Center
@@ -210,7 +257,7 @@ private fun GridPhotoItem(
                 Text(
                     "$selectedOrder",
                     color = Color.White,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
