@@ -31,10 +31,14 @@ internal class AlbumRepository(
     suspend fun loadAlbums(): List<AlbumInfo> = withContext(Dispatchers.IO) {
         val bucketMap = LinkedHashMap<Long, BucketAcc>()
 
+        // 按时间倒序扫描，保证首次命中的封面更接近最新图；
+        // 聚合仍以 DATE_ADDED 比较为准，避免无序游标导致封面/计数异常。
         contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             projection,
-            null, null, null
+            null,
+            null,
+            "${MediaStore.Images.Media.DATE_ADDED} DESC"
         )?.use { cursor ->
             val idCol       = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val bucketCol   = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
@@ -42,20 +46,27 @@ internal class AlbumRepository(
             val dateCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 
             while (cursor.moveToNext()) {
+                // MediaStore BUCKET_ID 为路径哈希，可为负；0 仅保留给 UI「全部照片」
                 val bucketId = cursor.getLong(bucketCol)
                 val mediaId  = cursor.getLong(idCol)
                 val date     = cursor.getLong(dateCol)
+                val rawName  = cursor.getString(nameCol)?.trim().orEmpty()
+                val name     = rawName.ifEmpty { "未知相册" }
 
                 val acc = bucketMap[bucketId]
                 if (acc == null) {
                     bucketMap[bucketId] = BucketAcc(
-                        name    = cursor.getString(nameCol) ?: "未知相册",
+                        name    = name,
                         count   = 1,
                         latestDate = date,
                         coverId = mediaId
                     )
                 } else {
                     acc.count++
+                    // 名称偶发为空时，用后续非空名称回填
+                    if (acc.name == "未知相册" && name != "未知相册") {
+                        acc.name = name
+                    }
                     if (date > acc.latestDate) {
                         acc.latestDate = date
                         acc.coverId = mediaId

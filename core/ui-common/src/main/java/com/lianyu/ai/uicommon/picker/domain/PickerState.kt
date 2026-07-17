@@ -6,7 +6,7 @@ import com.lianyu.ai.uicommon.picker.model.AlbumInfo
  * 选择器全局不可变状态。
  *
  * 由 [PickerViewModel] 通过 StateFlow 下发，
- * 不包含 PagingData（Paging 3 有独立的 Flow 管道）。
+ * 数据列表由独立的 `mediaList: StateFlow<List<MediaItem>>` 管道提供。
  */
 data class PickerState(
     /** 相册文件夹列表 */
@@ -17,6 +17,8 @@ data class PickerState(
     val currentAlbumName: String = "全部照片",
     /** 相册列表是否正在加载 */
     val isAlbumsLoading: Boolean = false,
+    /** 图片列表是否正在加载 */
+    val isMediaLoading: Boolean = false,
     /** 错误信息 */
     val error: String? = null,
     /** 最大可选数量 */

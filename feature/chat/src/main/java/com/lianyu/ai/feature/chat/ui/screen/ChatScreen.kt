@@ -134,6 +134,7 @@ import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
 import com.lianyu.ai.network.tts.ChatTtsMode
+import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
@@ -165,6 +166,8 @@ fun ChatScreen(
     var quoteReply by remember { mutableStateOf<QuoteReply?>(null) }
     var previewImagePath by remember { mutableStateOf<String?>(null) }
     var showExtensionPanel by remember { mutableStateOf(false) }
+    // 自研图片选择器（多选模式，复选框）
+    var showImagePicker by remember { mutableStateOf(false) }
 
     // File picker for sticker import
     val stickerPickerLauncher = rememberLauncherForActivityResult(
@@ -182,27 +185,6 @@ fun ChatScreen(
                     }
                 } catch (e: Exception) {
                     snackbarHostState.showSnackbar("导入失败: ${e.message}")
-                }
-            }
-        }
-    }
-
-    // Image picker for album
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            showExtensionPanel = false
-            scope.launch {
-                try {
-                    val imagePath = copyUriToCache(context, it)
-                    if (imagePath != null) {
-                        onIntent(ChatIntent.SendImage(imagePath))
-                    } else {
-                        snackbarHostState.showSnackbar("图片读取失败")
-                    }
-                } catch (e: Exception) {
-                    snackbarHostState.showSnackbar("图片处理失败: ${e.message}")
                 }
             }
         }
@@ -808,7 +790,10 @@ fun ChatScreen(
                 },
                 onSwitchApi = { provider -> onIntent(ChatIntent.SwitchApi(provider)) },
                 onClearQuoteReply = { quoteReply = null },
-                onAlbumClick = { imagePickerLauncher.launch("image/*") },
+                onAlbumClick = {
+                    showExtensionPanel = false
+                    showImagePicker = true
+                },
                 onCameraClick = { cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA) },
                 onVideoCallClick = {
                     if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -966,6 +951,31 @@ fun ChatScreen(
                     }
                 )
             }
+        }
+
+        // ═══ 自研图片选择器（多选，复选框） ═══
+        if (showImagePicker) {
+            CustomImagePicker(
+                maxSelection = 9,
+                onConfirmed = { uris ->
+                    showImagePicker = false
+                    if (uris.isNotEmpty()) {
+                        scope.launch {
+                            for (uri in uris) {
+                                try {
+                                    val path = copyUriToCache(context, uri)
+                                    if (path != null) {
+                                        onIntent(ChatIntent.SendImage(path))
+                                    }
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar("图片处理失败: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                },
+                onDismiss = { showImagePicker = false }
+            )
         }
     }
 }

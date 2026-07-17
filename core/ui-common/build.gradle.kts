@@ -40,6 +40,5 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.activity.compose)
     implementation(libs.coil.compose)
-    implementation(libs.androidx.paging.compose)
     implementation(libs.androidx.core.ktx)
 }

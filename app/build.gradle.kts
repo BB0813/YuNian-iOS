@@ -13,8 +13,8 @@ android {
         applicationId = "com.lianyu.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.9.1"
+        versionCode = 14
+        versionName = "1.9.2"
 
         manifestPlaceholders["developerName"] = "苏苏"
         manifestPlaceholders["developerOrg"] = "LianYu"

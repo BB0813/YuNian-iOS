@@ -53,34 +53,26 @@ internal fun AlbumListSheet(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // ═══ 顶部栏 ═══
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .background(SurfaceColor)
-                    .padding(vertical = 4.dp)
+            PickerTopBar(
+                modifier = Modifier.background(SurfaceColor),
+                contentPadding = PaddingValues(vertical = 4.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            Icons.Filled.ChevronLeft,
-                            "返回",
-                            tint = WeChatDarkTextPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-
-                    Text(
-                        "选择相册",
-                        color = WeChatDarkTextPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f)
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Filled.ChevronLeft,
+                        "返回",
+                        tint = WeChatDarkTextPrimary,
+                        modifier = Modifier.size(26.dp)
                     )
                 }
+
+                Text(
+                    "选择相册",
+                    color = WeChatDarkTextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             // ═══ 内容 ═══

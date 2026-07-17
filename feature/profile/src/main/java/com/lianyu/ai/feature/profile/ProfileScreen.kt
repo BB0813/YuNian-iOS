@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -102,19 +101,11 @@ fun ProfileScreen(
             .padding(top = 48.dp)
     ) {
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(colorScheme.surface)
-                .clickable { onProfileSettingsClick() }
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        // === 头像行 — 复用 ProfileSectionRow 原子 ===
+        ProfileSectionRow(onClick = onProfileSettingsClick) {
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(56.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFFE8E8E8)),
                 contentAlignment = Alignment.Center
@@ -131,7 +122,7 @@ fun ProfileScreen(
                         Icons.Filled.Person,
                         stringResource(R.string.profile_avatar),
                         tint = Color(0xFFCCCCCC),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }
@@ -142,13 +133,9 @@ fun ProfileScreen(
                 Text(
                     userName,
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
-                    color = colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    "@${userName.ifBlank { "user" }}",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    color = colorScheme.onSurfaceVariant
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -160,16 +147,14 @@ fun ProfileScreen(
                 )
             }
 
-            if (!isSelf) {
-                IconButton(onClick = { showMoreSheet = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "更多", tint = colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                }
-            } else {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
+        ProfileSectionDivider()
 
         Row(
             modifier = Modifier
@@ -232,6 +217,7 @@ fun ProfileScreen(
             }
         }
     }
+
 }
 
 @Composable
@@ -291,3 +277,7 @@ internal fun BottomSheetItem(icon: ImageVector, label: String, destructive: Bool
         Text(label, fontSize = 16.sp, color = if (destructive) Color(0xFFFF3B30) else AppTheme.colors.onSurface)
     }
 }
+
+
+
+
