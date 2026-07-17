@@ -76,8 +76,8 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     groupViewModel: ChatGroupViewModel = viewModel()
 ) {
-    val chatListState by viewModel.chatListState.collectAsState(initial = HomeViewModel.UiState.Loading)
-    val groups by groupViewModel.groups.collectAsState(initial = emptyList())
+    val chatListState by viewModel.chatListState.collectAsState()
+    val groups by groupViewModel.groups.collectAsState()
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
     val colorScheme = AppTheme.colors

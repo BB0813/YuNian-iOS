@@ -4,16 +4,18 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lianyu.ai.database.AppDatabase
+import com.lianyu.ai.database.cache.HomeListCache
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
+import com.lianyu.ai.database.model.ConversationSummary
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.domain.ServiceRegistry
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -26,45 +28,67 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         data class Ready(val items: List<ChatListItem>) : UiState()
     }
 
-    val chatListState: Flow<UiState>
+    val chatListState: StateFlow<UiState>
 
     init {
         val database = AppDatabase.getDatabase(application)
         companionRepository = CompanionRepository(database.companionDao())
 
+        val initialState = if (HomeListCache.isWarmed()) {
+            buildReady(
+                HomeListCache.snapshotCompanions(),
+                HomeListCache.snapshotChatSummaries()
+            )
+        } else {
+            UiState.Loading
+        }
+
         chatListState = combine(
             companionRepository.getAllCompanions(),
             summaryDao.getSummariesByType("chat")
         ) { companions, summaries ->
-            val summariesById = summaries.associateBy { it.sessionId }
-            val items = companions.map { companion ->
-                val summary = summariesById[companion.id]
-                val lastMessage = summary?.let {
-                    ChatMessage(
-                        companionId = companion.id,
-                        content = it.lastMessagePreview,
-                        isFromUser = it.lastMessageIsFromUser,
-                        timestamp = it.lastMessageTimestamp
-                    )
-                }
-                ChatListItem(
-                    companion = companion,
-                    lastMessage = lastMessage,
-                    hasUnread = (summary?.unreadCount ?: 0) > 0
-                )
-            }
-            UiState.Ready(items) as UiState
+            HomeListCache.putCompanions(companions)
+            HomeListCache.putChatSummaries(summaries)
+            buildReady(companions, summaries)
         }
-            .onStart { emit(UiState.Loading) }
             .catch {
                 emit(UiState.Ready(emptyList()))
             }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = initialState
+            )
     }
 
     fun markCompanionAsRead(companionId: Long) {
         viewModelScope.launch {
             chatRepository.markReadThroughLatest(companionId)
         }
+    }
+
+    private fun buildReady(
+        companions: List<CompanionEntity>,
+        summaries: List<ConversationSummary>
+    ): UiState.Ready {
+        val summariesById = summaries.associateBy { it.sessionId }
+        val items = companions.map { companion ->
+            val summary = summariesById[companion.id]
+            val lastMessage = summary?.let {
+                ChatMessage(
+                    companionId = companion.id,
+                    content = it.lastMessagePreview,
+                    isFromUser = it.lastMessageIsFromUser,
+                    timestamp = it.lastMessageTimestamp
+                )
+            }
+            ChatListItem(
+                companion = companion,
+                lastMessage = lastMessage,
+                hasUnread = (summary?.unreadCount ?: 0) > 0
+            )
+        }
+        return UiState.Ready(items)
     }
 }
 

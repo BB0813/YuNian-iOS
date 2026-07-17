@@ -12,6 +12,8 @@
     <string name="theme_mode_desc">Switch light/dark theme</string>
     <string name="chat_background">Chat Background</string>
     <string name="chat_background_desc">Customize chat background</string>
+    <string name="background_settings">Background</string>
+    <string name="background_settings_desc">Customize main &amp; chat background</string>
     <string name="qqbot_settings">QQ Bot</string>
     <string name="qqbot_settings_desc">Bind official QQ bot</string>
     <string name="language">Language</string>

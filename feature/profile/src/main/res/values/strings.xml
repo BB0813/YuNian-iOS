@@ -4,6 +4,21 @@
     <string name="profile_save">保存</string>
     <string name="profile_edit">编辑</string>
     <string name="profile_avatar_hint">点击头像更换，点击名字编辑</string>
+    <string name="profile_settings_title">个人资料</string>
+    <string name="profile_name">名字</string>
+    <string name="profile_gender">性别</string>
+    <string name="profile_region">地区</string>
+    <string name="profile_signature">签名</string>
+    <string name="profile_gender_male">男</string>
+    <string name="profile_gender_female">女</string>
+    <string name="profile_not_set">未设置</string>
+    <string name="profile_cancel">取消</string>
+    <string name="profile_confirm">确认</string>
+
+    <!-- 权限 -->
+    <string name="permission_storage_title">需要相册访问权限</string>
+    <string name="permission_storage_rationale">为了设置头像，需要访问你的相册以选择图片。你可以在系统设置中开启相册访问权限。</string>
+    <string name="permission_go_settings">前往系统设置</string>
     <string name="memory_management">记忆管理</string>
     <string name="memory_management_desc">查看虚拟恋人记住的关于你的事</string>
     <string name="api_settings">API设置</string>
@@ -12,6 +27,8 @@
     <string name="theme_mode_desc">切换浅色/深色主题</string>
     <string name="chat_background">聊天背景</string>
     <string name="chat_background_desc">自定义聊天页面背景</string>
+    <string name="background_settings">背景设置</string>
+    <string name="background_settings_desc">自定义主界面与聊天背景</string>
     <string name="wechat_settings">微信设置</string>
     <string name="wechat_settings_desc">绑定微信个人号</string>
     <string name="qqbot_settings">QQ机器人</string>
