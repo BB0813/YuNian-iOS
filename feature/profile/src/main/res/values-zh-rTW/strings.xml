@@ -12,6 +12,8 @@
     <string name="theme_mode_desc">切換淺色/深色主題</string>
     <string name="chat_background">聊天背景</string>
     <string name="chat_background_desc">自定義聊天頁面背景</string>
+    <string name="background_settings">背景設定</string>
+    <string name="background_settings_desc">自定義主畫面與聊天背景</string>
     <string name="language">語言設置</string>
     <string name="language_desc">當前為繁體中文</string>
     <string name="framerate">幀率設置</string>

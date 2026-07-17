@@ -12,6 +12,8 @@
     <string name="theme_mode_desc">라이트/다크 전환</string>
     <string name="chat_background">채팅 배경</string>
     <string name="chat_background_desc">채팅 배경 사용자 지정</string>
+    <string name="background_settings">배경 설정</string>
+    <string name="background_settings_desc">메인 화면 및 채팅 배경 사용자 지정</string>
     <string name="language">언어 설정</string>
     <string name="language_desc">현재: 한국어</string>
     <string name="framerate">프레임 레이트</string>
