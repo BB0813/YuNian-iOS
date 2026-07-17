@@ -31,6 +31,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.profile.R
+import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
 
 // ============================================================================
 // 个人资料设置页 — 头像/名字/性别/地区/签名，分行显示，可编辑
@@ -58,10 +59,8 @@ fun ProfileSettingsScreen(
     var editRegion by remember { mutableStateOf("") }
     var showAvatarFullscreen by remember { mutableStateOf(false) }
 
-    // --- 头像选择：原子化权限中间件 → 直接打开系统相册 ---
-    val galleryLauncher = rememberGalleryPermissionLauncher { uri ->
-        viewModel.updateUserAvatar(uri.toString())
-    }
+    // --- 自研图片选择器 ---
+    var showPicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -98,7 +97,7 @@ fun ProfileSettingsScreen(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { galleryLauncher.pickImage() }
+                        .clickable { showPicker = true }
                         .padding(end = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -240,6 +239,22 @@ fun ProfileSettingsScreen(
             placeholder = "如：广东·深圳",
             onConfirm = { showRegionDialog = false },
             onDismiss = { showRegionDialog = false }
+        )
+    }
+
+    // ================================================================
+    // 自研图片选择器（替换系统相册）
+    // ================================================================
+    if (showPicker) {
+        CustomImagePicker(
+            maxSelection = 1,
+            onConfirmed = { uris ->
+                if (uris.isNotEmpty()) {
+                    viewModel.updateUserAvatar(uris.first().toString())
+                }
+                showPicker = false
+            },
+            onDismiss = { showPicker = false }
         )
     }
 }
