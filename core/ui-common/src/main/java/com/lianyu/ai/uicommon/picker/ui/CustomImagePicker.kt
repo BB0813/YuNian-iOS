@@ -62,8 +62,7 @@ fun CustomImagePicker(
                     onItemClick = { index ->
                         if (maxSelection == 1) {
                             // 单选模式：点图直接确认
-                            val uri = contentResolverToUri(context.contentResolver, index)
-                            if (uri != null) onConfirmed(listOf(uri))
+                            onConfirmed(listOf(contentResolverToUri(index)))
                         }
                     },
                     onItemPreview = { index ->
@@ -71,8 +70,8 @@ fun CustomImagePicker(
                         currentPage = PickerPage.PREVIEW
                     },
                     onConfirm = {
-                        val uris = viewModel.selectedIds().mapNotNull { id ->
-                            contentResolverToUri(context.contentResolver, id)
+                        val uris = viewModel.selectedIds().map { id ->
+                            contentResolverToUri(id)
                         }
                         onConfirmed(uris)
                     },
@@ -97,8 +96,8 @@ fun CustomImagePicker(
                     initialIndex = previewInitialIndex,
                     onBack = { currentPage = PickerPage.GRID },
                     onConfirm = {
-                        val uris = viewModel.selectedIds().mapNotNull { id ->
-                            contentResolverToUri(context.contentResolver, id)
+                        val uris = viewModel.selectedIds().map { id ->
+                            contentResolverToUri(id)
                         }
                         onConfirmed(uris)
                     }
@@ -111,21 +110,6 @@ fun CustomImagePicker(
 /** 子页面路由 */
 private enum class PickerPage { GRID, ALBUMS, PREVIEW }
 
-/** 根据 mediaId 构造 Content URI */
-private fun contentResolverToUri(
-    contentResolver: android.content.ContentResolver,
-    mediaId: Long
-): Uri? {
-    val cursor = contentResolver.query(
-        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-        arrayOf(android.provider.MediaStore.Images.Media._ID),
-        "${android.provider.MediaStore.Images.Media._ID} = ?",
-        arrayOf(mediaId.toString()),
-        null
-    )
-    return cursor?.use {
-        if (it.moveToFirst()) {
-            Uri.parse("${android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI}/$mediaId")
-        } else null
-    }
-}
+/** 根据 mediaId 构造 Content URI — 纯拼接，无 I/O */
+private fun contentResolverToUri(mediaId: Long): Uri =
+    Uri.parse("${android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI}/$mediaId")

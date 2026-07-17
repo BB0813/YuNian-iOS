@@ -1,7 +1,6 @@
 package com.lianyu.ai.uicommon.picker.domain
 
 import com.lianyu.ai.uicommon.picker.model.AlbumInfo
-import com.lianyu.ai.uicommon.picker.model.MediaItem
 
 /**
  * 选择器全局不可变状态。

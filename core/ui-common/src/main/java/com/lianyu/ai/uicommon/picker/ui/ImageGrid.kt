@@ -175,7 +175,7 @@ private fun GridPhotoItem(
             .fillMaxWidth()
             .aspectRatio(1f)
     ) {
-        // 图片
+        // 图片 — 点击=选中/取消
         AsyncImage(
             model = item.uri,
             contentDescription = item.displayName,
@@ -185,16 +185,7 @@ private fun GridPhotoItem(
             contentScale = ContentScale.Crop
         )
 
-        // 多选模式下长按进入预览
-        if (maxSelection > 1) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable { onRequestPreview() }
-            )
-        }
-
-        // 选中角标
+        // 选中角标 — 多选模式下点击角标=预览
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -207,6 +198,10 @@ private fun GridPhotoItem(
                 )
                 .then(
                     if (!isSelected) Modifier.border(1.5.dp, Color.White, CircleShape)
+                    else Modifier
+                )
+                .then(
+                    if (maxSelection > 1) Modifier.clickable { onRequestPreview() }
                     else Modifier
                 ),
             contentAlignment = Alignment.Center
