@@ -2,7 +2,6 @@ package com.lianyu.ai.network.stt
 
 import android.content.Context
 import com.lianyu.ai.common.SecureLog
-import com.lianyu.ai.network.CertificatePins
 import com.lianyu.ai.network.NetworkConstants
 import com.lianyu.ai.network.RequestSecurityInterceptor
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +31,6 @@ class SiliconFlowSttProvider : SttProviderInterface {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
-        builder.certificatePinner(CertificatePins.certificatePinner)
         builder.build()
     }
 

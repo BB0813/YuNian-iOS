@@ -26,6 +26,7 @@
 -keep class com.lianyu.ai.security.StaticApkShell { *; }
 -keep class com.lianyu.ai.security.LianYuShellApplication { *; }
 -keep class com.lianyu.ai.security.G0 { *; }
+-keep class com.lianyu.ai.security.SecurityState { *; }
 -keep class com.lianyu.ai.security.SActivity { *; }
 -keep class com.lianyu.ai.security.SReceiver { *; }
 -keep class com.lianyu.ai.security.SService { *; }
@@ -34,6 +35,16 @@
 -keep class com.lianyu.ai.security.Sm4Cipher { *; }
 -keep class com.lianyu.ai.security.CompositeVmpRuntime { *; }
 -keep class com.lianyu.ai.security.SecurityGuard { *; }
+# Thin-shell Java entry reflects these names after InMemoryDexClassLoader merge.
+# Kotlin `object` methods are instance methods on INSTANCE (not @JvmStatic).
+-keepclassmembers class com.lianyu.ai.security.G0 {
+    public static final com.lianyu.ai.security.G0 INSTANCE;
+    public <methods>;
+}
+-keepclassmembers class com.lianyu.ai.security.SecurityState {
+    public static final com.lianyu.ai.security.SecurityState INSTANCE;
+    public <methods>;
+}
 
 # P2-15: 阻止 R8 内联 Dex2C 白名单方法，确保转译器能找到字节码
 # 使用 <methods> 匹配所有方法（ProGuard 不支持 *** 通配符）

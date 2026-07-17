@@ -2,6 +2,8 @@ package com.lianyu.ai.database.repository
 
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.GroupMessage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import java.util.Base64
@@ -45,9 +47,18 @@ object ChatMessageCrypto {
     private val defaultKeyProvider: KeyProvider = AndroidKeyStoreKeyProvider
 
     // --- Public API (mirrors C0 interface for drop-in replacement) ---
+    //
+    // Single-item APIs hop to Dispatchers.IO once.
+    // Batch APIs hop once for the whole list so message loading never pays
+    // N coroutine dispatches for N AES-GCM operations.
 
-    fun encryptForStorage(message: ChatMessage): ChatMessage {
-        return encryptForStorage(message, defaultKeyProvider)
+    suspend fun encryptForStorage(message: ChatMessage): ChatMessage = withContext(Dispatchers.IO) {
+        encryptForStorage(message, defaultKeyProvider)
+    }
+
+    suspend fun encryptForStorage(messages: List<ChatMessage>): List<ChatMessage> = withContext(Dispatchers.IO) {
+        if (messages.isEmpty()) emptyList()
+        else messages.map { encryptForStorage(it, defaultKeyProvider) }
     }
 
     internal fun encryptForStorage(message: ChatMessage, keyProvider: KeyProvider): ChatMessage {
@@ -58,8 +69,13 @@ object ChatMessageCrypto {
         )
     }
 
-    fun decryptFromStorage(message: ChatMessage): ChatMessage {
-        return decryptFromStorage(message, defaultKeyProvider)
+    suspend fun decryptFromStorage(message: ChatMessage): ChatMessage = withContext(Dispatchers.IO) {
+        decryptFromStorage(message, defaultKeyProvider)
+    }
+
+    suspend fun decryptFromStorage(messages: List<ChatMessage>): List<ChatMessage> = withContext(Dispatchers.IO) {
+        if (messages.isEmpty()) emptyList()
+        else messages.map { decryptFromStorage(it, defaultKeyProvider) }
     }
 
     internal fun decryptFromStorage(message: ChatMessage, keyProvider: KeyProvider): ChatMessage {
@@ -76,22 +92,51 @@ object ChatMessageCrypto {
         }
     }
 
-    fun encryptForStorage(message: GroupMessage): GroupMessage {
+    suspend fun encryptForStorage(message: GroupMessage): GroupMessage = withContext(Dispatchers.IO) {
+        encryptForStorage(message, defaultKeyProvider)
+    }
+
+    suspend fun encryptForStorageGroup(messages: List<GroupMessage>): List<GroupMessage> =
+        withContext(Dispatchers.IO) {
+            if (messages.isEmpty()) emptyList()
+            else messages.map { encryptForStorage(it, defaultKeyProvider) }
+        }
+
+    internal fun encryptForStorage(message: GroupMessage, keyProvider: KeyProvider = defaultKeyProvider): GroupMessage {
         return message.copy(
-            content = encrypt(message.content, defaultKeyProvider),
+            content = encrypt(message.content, keyProvider),
             searchContent = message.searchContent.ifBlank { message.content },
-            linkString = encrypt(message.linkString, defaultKeyProvider)
+            linkString = encrypt(message.linkString, keyProvider)
         )
     }
 
-    fun decryptFromStorage(message: GroupMessage): GroupMessage {
-        return message.copy(
-            content = decrypt(message.content, defaultKeyProvider),
-            linkString = decrypt(message.linkString, defaultKeyProvider)
-        )
+    suspend fun decryptFromStorage(message: GroupMessage): GroupMessage = withContext(Dispatchers.IO) {
+        decryptFromStorage(message, defaultKeyProvider)
     }
 
-    fun encrypt(plaintext: String): String = encrypt(plaintext, defaultKeyProvider)
+    suspend fun decryptFromStorageGroup(messages: List<GroupMessage>): List<GroupMessage> =
+        withContext(Dispatchers.IO) {
+            if (messages.isEmpty()) emptyList()
+            else messages.map { decryptFromStorage(it, defaultKeyProvider) }
+        }
+
+    internal fun decryptFromStorage(message: GroupMessage, keyProvider: KeyProvider = defaultKeyProvider): GroupMessage {
+        return try {
+            message.copy(
+                content = decrypt(message.content, keyProvider),
+                linkString = decrypt(message.linkString, keyProvider)
+            )
+        } catch (e: Exception) {
+            message.copy(
+                content = DECRYPT_FAILED_PLACEHOLDER,
+                linkString = ""
+            )
+        }
+    }
+
+    suspend fun encrypt(plaintext: String): String = withContext(Dispatchers.IO) {
+        encrypt(plaintext, defaultKeyProvider)
+    }
 
     private fun encrypt(plaintext: String, keyProvider: KeyProvider): String {
         if (plaintext.isEmpty()) return plaintext
@@ -109,7 +154,9 @@ object ChatMessageCrypto {
         return PREFIX + Base64.getEncoder().encodeToString(combined)
     }
 
-    fun decrypt(value: String): String = decrypt(value, defaultKeyProvider)
+    suspend fun decrypt(value: String): String = withContext(Dispatchers.IO) {
+        decrypt(value, defaultKeyProvider)
+    }
 
     private fun decrypt(value: String, keyProvider: KeyProvider): String {
         if (value.isEmpty() || !value.startsWith(PREFIX)) return value

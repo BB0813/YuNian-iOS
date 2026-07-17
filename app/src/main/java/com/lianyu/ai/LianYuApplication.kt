@@ -44,12 +44,16 @@ import com.lianyu.ai.network.AiService
 import com.lianyu.ai.network.NtpTimeProvider
 import com.lianyu.ai.security.G0
 import com.lianyu.ai.security.SecurityState
+import android.content.ComponentCallbacks2
 import com.lianyu.ai.uicommon.component.ChatBackgroundCache
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
+import coil.Coil
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,6 +71,12 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .memoryCache {
             MemoryCache.Builder(this).maxSizeBytes(128 * 1024 * 1024).build()
+        }
+        .diskCache {
+            DiskCache.Builder()
+                .directory(File(cacheDir, "coil_images"))
+                .maxSizeBytes(150L * 1024 * 1024)
+                .build()
         }
         .build()
 
@@ -87,12 +97,52 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         System.setProperty("sun.net.spi.nameservice.domain", ".")
         super.onCreate()
         instance = this
+        // Fail-closed: hard cryptographic auth failure must not start business services.
+        // Soft risk (root/hook/debug heuristics) still allows offline-first local business.
+        if (!SecurityState.canStartLocalBusiness()) {
+            SecureLog.e(
+                "LianYuApplication",
+                "BLOCK business init: ${SecurityState.snapshot().reason ?: "hard auth failed"}"
+            )
+            return
+        }
         initBusiness(this)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         applyStoredLanguage(this)
+    }
+
+    /**
+     * 多级内存回收：根据系统压力逐级释放缓存。
+     * 目标设备 ≥4GB，但仍做最优适配：
+     * - CRITICAL / LOW：清空所有重量缓存
+     * - MODERATE / BACKGROUND：仅清 Coil 图片内存缓存
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        val imageLoader = Coil.imageLoader(this)
+        when (level) {
+            // 系统濒临 OOM — 清空全部缓存
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {
+                imageLoader.memoryCache?.clear()
+                com.lianyu.ai.database.cache.MessageCache.clearAll()
+                ChatBackgroundCache.clear()
+            }
+            // 内存压力大 — 清除图片和背景缓存，保留消息缓存（LruCache 自有淘汰）
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                imageLoader.memoryCache?.clear()
+                ChatBackgroundCache.clear()
+            }
+            // 中等压力 / 切到后台 — 仅清理 Coil 内存缓存
+            ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE,
+            ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
+            ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
+                imageLoader.memoryCache?.clear()
+            }
+            else -> {}
+        }
     }
 
     override fun onTerminate() {
@@ -102,6 +152,7 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // EncryptedDatabaseWrapper.sealDatabase(this@LianYuApplication)
             AppDatabase.shutdown()
             ChatBackgroundCache.clear()
+            com.lianyu.ai.database.cache.HomeListCache.clear()
         }
         ServiceRegistry.clear()
         super.onTerminate()
@@ -114,21 +165,49 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         fun initBusiness(app: Application) {
+            if (!SecurityState.canStartLocalBusiness()) {
+                SecureLog.e(
+                    "LianYuApplication",
+                    "initBusiness refused: ${SecurityState.snapshot().reason ?: "hard auth failed"}"
+                )
+                return
+            }
             SaltStore.init(app)
             SecureLog.init(com.lianyu.ai.BuildConfig.DEBUG)
             applyStoredLanguage(app)
             AiService.initialize(app)
             NtpTimeProvider.initialize(app)
-            registerServiceProviders(app)
             clearUpdateIgnore(app)
 
             // 注入应用级后台作用域，供跨越 ViewModel 生命周期的任务使用
             com.lianyu.ai.common.ApplicationScopeProvider.init(bgScope)
 
             bgScope.launch {
+                registerServiceProviders(app)
                 runCatching { AppDatabase.verifyAndRecover(app) }
                     .onFailure { SecureLog.e("LianYuApplication", "Database verification failed", it) }
                 seedDefaultCompanion(app)
+                // 必须在 markInitialized 之前完成：MainActivity 以 ServiceRegistry 就绪为进入主界面门槛
+                runCatching {
+                    com.lianyu.ai.database.cache.HomeListCache.warm(AppDatabase.getDatabase(app))
+                }.onFailure {
+                    SecureLog.e("LianYuApplication", "HomeListCache warm failed", it)
+                }
+                // 预热上次打开的聊天消息缓存，必须在 markInitialized 之前完成
+                // 确保用户进入聊天页时 MessageCache L1 直接命中，消除首帧空白闪烁
+                runCatching {
+                    val lastOpenedId = LastOpenedCompanionStore.get(app)
+                    if (lastOpenedId > 0L) {
+                        ServiceRegistry.getOrThrow(ChatRepository::class.java)
+                            .hydrateRecent(lastOpenedId, com.lianyu.ai.common.ChatConstants.CHAT_PAGE_SIZE)
+                    }
+                }.onFailure {
+                    SecureLog.e("LianYuApplication", "Pre-warm last-opened chat cache failed", it)
+                }
+                ServiceRegistry.markInitialized()
+                // 主界面就绪后再后台预热最近会话消息，避免阻塞首屏
+                bgScope.launch { warmRecentChatCaches(app) }
+                initYandereMode(app)
             }
 
             bgScope.launch { ContentFilter.initialize(app) }
@@ -139,7 +218,6 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initVectorLibrary(app) }
             ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
             bgScope.launch { initSafetyVerifier(app) }
-            bgScope.launch { initYandereMode(app) }
             // 三级存储架构：注册定期数据清理任务
             com.lianyu.ai.database.cleanup.DataCleanupManager.schedulePeriodicCleanup(app)
             bgScope.launch { com.lianyu.ai.database.cleanup.DataCleanupManager.cleanupIfNeeded(app) }
@@ -163,6 +241,52 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
 
         private suspend fun seedDefaultCompanion(app: Application) {
             DefaultCompanionSeeder.seedIfNeeded(app)
+        }
+
+        /**
+         * 后台预热最近会话的消息 L1 缓存。
+         * 不阻塞 markInitialized / 首屏；进入聊天页时可直接命中 MessageCache。
+         */
+        private suspend fun warmRecentChatCaches(app: Application) {
+            runCatching {
+                val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+                val groupRepository = ServiceRegistry.getOrThrow(GroupMessageRepository::class.java)
+                val lastOpenedId = LastOpenedCompanionStore.get(app)
+                val summaries = com.lianyu.ai.database.cache.HomeListCache.snapshotChatSummaries()
+                    .sortedByDescending { it.lastMessageTimestamp }
+                val companionIds = buildList {
+                    if (lastOpenedId > 0L) add(lastOpenedId)
+                    summaries.asSequence()
+                        .map { it.sessionId }
+                        .filter { it > 0L && it != lastOpenedId }
+                        .forEach { add(it) }
+                }.distinct().take(2)
+                companionIds.forEach { companionId ->
+                    runCatching {
+                        chatRepository.hydrateRecent(companionId, com.lianyu.ai.common.ChatConstants.CHAT_PAGE_SIZE)
+                    }.onFailure {
+                        SecureLog.e("LianYuApplication", "hydrate chat $companionId failed", it)
+                    }
+                }
+                // 群聊：预热最近 1 个有摘要的群（若有）
+                val groupId = AppDatabase.getDatabase(app)
+                    .conversationSummaryDao()
+                    .getSummariesByTypeSync("group")
+                    .maxByOrNull { it.lastMessageTimestamp }
+                    ?.sessionId
+                if (groupId != null && groupId > 0L) {
+                    runCatching {
+                        groupRepository.hydrateRecent(
+                            groupId,
+                            com.lianyu.ai.common.ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
+                        )
+                    }.onFailure {
+                        SecureLog.e("LianYuApplication", "hydrate group $groupId failed", it)
+                    }
+                }
+            }.onFailure {
+                SecureLog.e("LianYuApplication", "warmRecentChatCaches failed", it)
+            }
         }
 
         private suspend fun initWeChat(app: Application) {
@@ -299,8 +423,8 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             com.lianyu.ai.feature.memory.MemoryRecallTools.registerAll(
                 ServiceRegistry.getOrThrow(MemoryProvider::class.java)
             )
-
-            ServiceRegistry.markInitialized()
+            // markInitialized 延后到 seed + HomeListCache.warm 之后，
+            // 保证主界面首帧即可拿到联系人/会话快照。
         }
 
         private fun clearUpdateIgnore(app: Application) {

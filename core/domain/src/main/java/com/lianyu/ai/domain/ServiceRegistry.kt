@@ -84,8 +84,13 @@ object ServiceRegistry {
         singletons[type]?.let { return it as T }
         // 2. 单例工厂：首次创建并缓存
         singletonFactories[type]?.let { factory ->
-            val instance = singletons.computeIfAbsent(type) {
-                factory.invoke() ?: throw NullPointerException("Singleton factory returned null for ${type.name}")
+            val instance = synchronized(singletons) {
+                singletons[type] ?: run {
+                    val created = factory.invoke()
+                        ?: throw NullPointerException("Singleton factory returned null for ${type.name}")
+                    singletons[type] = created
+                    created
+                }
             }
             return instance as T
         }

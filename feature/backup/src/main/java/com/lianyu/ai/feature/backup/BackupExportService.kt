@@ -32,17 +32,19 @@ class BackupExportService(private val context: Context) {
         // 读取每条 companion 的聊天消息（已解密）
         for (c in companions) {
             val raw = db.messageDao().getAllMessagesSync(c.id, "chat")
-            chatMessages.addAll(raw.map {
-                ChatMessageCrypto.decryptFromStorage(it.toChatMessage()).toSnapshot()
-            })
+            chatMessages.addAll(
+                ChatMessageCrypto.decryptFromStorage(raw.map { it.toChatMessage() })
+                    .map { it.toSnapshot() }
+            )
         }
 
         // 读取每个 group 的群聊消息（已解密）
         for (g in chatGroups) {
             val raw = db.messageDao().getAllMessagesSync(g.id, "group")
-            groupMessages.addAll(raw.map {
-                ChatMessageCrypto.decryptFromStorage(it.toGroupMessage()).toSnapshot()
-            })
+            groupMessages.addAll(
+                ChatMessageCrypto.decryptFromStorageGroup(raw.map { it.toGroupMessage() })
+                    .map { it.toSnapshot() }
+            )
         }
 
         BackupData(

@@ -224,7 +224,8 @@ class AiService(context: Context) : AiServiceProvider {
 
             RequestSecurityInterceptor.enforceTls(builder)
 
-            builder.certificatePinner(CertificatePins.certificatePinner)
+            // 主客户端仅对 PARTNER 请求使用证书固定；第三方 API 走系统 CA 信任链
+            // 不再在 OkHttpClient 级别设置 certificatePinner（getEffectiveClient 路由）
             builder
                 .connectionPool(okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
                 // [P1 FIX] 超时值归一到 TimeoutBudgets，与 ChatViewModel 层对齐
@@ -237,84 +238,27 @@ class AiService(context: Context) : AiServiceProvider {
                 .build()
         }
 
-        // All-trusting client for CUSTOM providers with skipCertVerify enabled.
-        // Only used when config.skipCertVerify == true && config.provider == ApiProvider.CUSTOM.
-        // Skips certificate chain validation and hostname verification entirely.
-        // WARNING: This disables MITM protection — only for self-hosted/internal servers.
-        private val unpinnedClient: OkHttpClient by lazy {
-            try {
-                val trustAllCerts = object : javax.net.ssl.X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
-                    override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
-                    override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-                }
-                val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
-                sslContext.init(null, arrayOf(trustAllCerts), java.security.SecureRandom())
-                OkHttpClient.Builder()
-                    .sslSocketFactory(sslContext.socketFactory, trustAllCerts)
-                    .hostnameVerifier { _, _ -> true }
-                    .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
-                    .connectTimeout(TimeoutBudgets.HTTP_CONNECT_MS, TimeUnit.MILLISECONDS)
-                    .readTimeout(TimeoutBudgets.HTTP_READ_MS, TimeUnit.MILLISECONDS)
-                    .writeTimeout(TimeoutBudgets.HTTP_WRITE_MS, TimeUnit.MILLISECONDS)
-                    .retryOnConnectionFailure(true)
-                    .build()
-            } catch (e: Exception) {
-                SecureLog.e("AiService", "Failed to create unpinnedClient, falling back to okHttpClient", e)
-                okHttpClient
-            }
-        }
-
-        // Standard TLS client without certificate pinning — used for auto-fallback
-        // when a hardcoded pin expires. Still validates certs against system trust store.
-        private val standardTlsClient: OkHttpClient by lazy {
-            okHttpClient.newBuilder()
-                .certificatePinner(okhttp3.CertificatePinner.DEFAULT)
-                .build()
-        }
-
         /**
-         * Executes a request with adaptive certificate handling:
-         * 1. Try with pinned client (hardcoded pins + dynamic pin if exists)
-         * 2. On SSLPeerUnverifiedException (pin expired) → auto-fallback to standard TLS
-         * 3. If skipCertVerify is enabled → use unpinnedClient directly
-         *
-         * This means: when a provider rotates their cert, the app auto-adapts
-         * without user intervention, while still maintaining standard TLS security.
+         * 执行 HTTP 请求。
+         * PARTNER → partnerHttpClient（证书固定）
+         * 其他 → okHttpClient（系统 CA，无证书固定）
          */
         private fun executeAdaptive(
             config: ApiConfig,
             request: okhttp3.Request,
             client: OkHttpClient = getEffectiveClient(config)
         ): okhttp3.Response {
-            // If user explicitly enabled skipCertVerify, go straight to unpinned
-            if (config.skipCertVerify && config.provider != ApiProvider.PARTNER) {
-                return unpinnedClient.newCall(request).execute()
-            }
-
-            return try {
-                client.newCall(request).execute()
-            } catch (e: javax.net.ssl.SSLPeerUnverifiedException) {
-                // Pin expired (cert rotated but still valid per system trust store)
-                SecureLog.w("AiService", "🔐 Pin expired for ${config.provider}, auto-fallback to standard TLS")
-                standardTlsClient.newCall(request).execute()
-            }
+            return client.newCall(request).execute()
         }
 
         /**
          * Returns the appropriate OkHttpClient for the given API config.
-         * - Any provider with skipCertVerify (except PARTNER) → unpinnedClient (trusts all certs)
-         * - PARTNER provider → partnerHttpClient (SuFlowAPI, HTTP for now)
-         * - All others → okHttpClient (with cert pinning + TLS enforcement)
+         * - PARTNER → partnerHttpClient（suflow.cloud 证书固定 + TLS 1.2+）
+         * - Other  → okHttpClient（系统 CA 验证，无证书固定）
          */
         private fun getEffectiveClient(config: ApiConfig): OkHttpClient {
-            // PARTNER (SuFlowAPI relay) — uses dedicated client
             if (config.provider == ApiProvider.PARTNER) {
                 return partnerHttpClient
-            }
-            // Any user-configured provider (CUSTOM, DeepSeek, OpenAI, etc.) can skip cert verification
-            if (config.skipCertVerify) {
-                return unpinnedClient
             }
             return okHttpClient
         }
@@ -322,8 +266,11 @@ class AiService(context: Context) : AiServiceProvider {
         // Dedicated client for SuFlowAPI (PARTNER) — avoids creating a new
         // OkHttpClient on every call (which leaks connection pools and dispatcher threads).
         // Uses longer connect timeout since self-hosted servers may be slower to accept.
+        // Pin failure is fail-closed; no trust-all and no pin-fallback.
         private val partnerHttpClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
+            val builder = OkHttpClient.Builder()
+            RequestSecurityInterceptor.enforceTls(builder)
+            builder
                 .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
                 .certificatePinner(CertificatePins.certificatePinner)
                 .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
@@ -878,19 +825,17 @@ class AiService(context: Context) : AiServiceProvider {
             }
         }
         
-        if (keysToTry.isEmpty()) return Result.failure(Exception("API Key 未配置"))
-
         val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl).trimEnd('/')
-        // Use appropriate client: unpinned when skipCertVerify is enabled (any provider), otherwise pinned
-        val balanceClient = if (config.skipCertVerify) {
-            unpinnedClient.newBuilder()
+        val balanceClient = if (config.provider == ApiProvider.PARTNER) {
+            partnerHttpClient.newBuilder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(20, TimeUnit.SECONDS)
                 .build()
         } else {
-            OkHttpClient.Builder()
-                .certificatePinner(CertificatePins.certificatePinner)
-                // [P0 FIX] 余额查询超时对齐
+            val builder = OkHttpClient.Builder()
+            RequestSecurityInterceptor.enforceTls(builder)
+            builder
+                // 系统 CA 验证，无证书固定
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(20, TimeUnit.SECONDS)
                 .build()
@@ -969,7 +914,7 @@ class AiService(context: Context) : AiServiceProvider {
         return Result.success(BalanceInfo(totalLimit, totalUsed, totalAvailable, remaining, rawSub, rawUsage))
     }
 
-    suspend fun fetchModels(baseUrl: String, apiKey: String, provider: ApiProvider? = null, skipCertVerify: Boolean = false): Result<List<String>> {
+    suspend fun fetchModels(baseUrl: String, apiKey: String, provider: ApiProvider? = null): Result<List<String>> {
         return withContext(Dispatchers.IO) {
             try {
                 val normalizedBaseUrl = normalizeOpenAiBaseUrl(baseUrl)
@@ -992,30 +937,24 @@ class AiService(context: Context) : AiServiceProvider {
                 SecureLog.api("MODELS", "Fetching models from ${url.take(60)}...")
 
                 val fetchClient = when {
-                    provider == ApiProvider.PARTNER -> partnerHttpClient  // SuFlowAPI
-                    skipCertVerify -> unpinnedClient  // any user-configured provider can skip
-                    else -> okHttpClient
+                    provider == ApiProvider.PARTNER -> partnerHttpClient  // SuFlowAPI pinned
+                    else -> okHttpClient  // 系统 CA 验证
                 }
 
                 val response = runCatching {
-                // 🔒 FIX: Use shared thread pool instead of per-call newSingleThreadExecutor
-                //    Prevents native thread leak from repeated fetchModels() calls
-                val future = fetchModelsExecutor.submit<okhttp3.Response> {
-                    try {
+                    // 🔒 FIX: Use shared thread pool instead of per-call newSingleThreadExecutor
+                    //    Prevents native thread leak from repeated fetchModels() calls
+                    val future = fetchModelsExecutor.submit<okhttp3.Response> {
+                        // Pin mismatch fails closed — no auto-fallback to unpinned TLS.
                         fetchClient.newCall(request).execute()
-                    } catch (e: javax.net.ssl.SSLPeerUnverifiedException) {
-                        // Pin expired — auto-fallback to standard TLS
-                        SecureLog.w("AiService", "🔐 Pin expired for models fetch, auto-fallback to standard TLS")
-                        standardTlsClient.newCall(request).execute()
                     }
+                    future.get(25, java.util.concurrent.TimeUnit.SECONDS)
+                }.getOrElse { e ->
+                    throw if (e is java.util.concurrent.TimeoutException)
+                        java.net.SocketTimeoutException("Request timeout after 25s (DNS/proxy may be unreachable)")
+                    else if (e is java.util.concurrent.ExecutionException) e.cause ?: e
+                    else e
                 }
-                future.get(25, java.util.concurrent.TimeUnit.SECONDS)
-            }.getOrElse { e ->
-                throw if (e is java.util.concurrent.TimeoutException)
-                    java.net.SocketTimeoutException("Request timeout after 25s (DNS/proxy may be unreachable)")
-                else if (e is java.util.concurrent.ExecutionException) e.cause ?: e
-                else e
-            }
                 val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty response"))
 
                 if (!response.isSuccessful) {

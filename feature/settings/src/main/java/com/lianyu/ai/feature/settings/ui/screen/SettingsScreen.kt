@@ -291,6 +291,8 @@ fun SettingsScreen(
                 testedConfigs = testedConfigs
             )
 
+            Spacer(modifier = Modifier.height(20.dp))
+
             // ====== Vision Model Settings Section ======
             AnimatedVisibility(
                 visible = isVisible,
@@ -396,8 +398,8 @@ fun SettingsScreen(
                 newConfigDialog = null
             },
             onTest = { testConfig: ApiConfig -> viewModel.testConnection(testConfig) },
-            onFetchModels = { baseUrl: String, apiKey: String, skipCertVerify: Boolean ->
-                viewModel.fetchModels(baseUrl, apiKey, newConfig.provider.name, skipCertVerify)
+            onFetchModels = { baseUrl: String, apiKey: String ->
+                viewModel.fetchModels(baseUrl, apiKey, newConfig.provider.name)
             },
             isDarkTheme = isDarkTheme,
             textPrimaryColor = textPrimaryColor,
@@ -445,7 +447,6 @@ fun SettingsScreen(
                                         apiKey = "",
                                         baseUrl = preset.baseUrl,
                                         model = preset.model,
-                                        skipCertVerify = preset.skipCertVerify,
                                         formatHint = preset.formatHint
                                     )
                                 }
@@ -629,7 +630,6 @@ private fun ApiCardsSection(
                     extraApiKeys = "",
                     baseUrl = partnerPreset?.baseUrl ?: ApiProvider.PARTNER.defaultBaseUrl,
                     model = partnerPreset?.model ?: ApiProvider.PARTNER.defaultModel,
-                    skipCertVerify = partnerPreset?.skipCertVerify ?: false,
                     formatHint = partnerPreset?.formatHint ?: "openai"
                 )
 
@@ -652,8 +652,8 @@ private fun ApiCardsSection(
                 },
                 onToggleEnabled = { viewModel.toggleConfigEnabled(partnerConfig) },
                 onSelectActive = { viewModel.selectActiveConfig(partnerConfig) },
-                onFetchModels = { baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean ->
-                    viewModel.fetchModels(baseUrl, apiKey, provider, skipCertVerify)
+                onFetchModels = { baseUrl: String, apiKey: String, provider: String ->
+                    viewModel.fetchModels(baseUrl, apiKey, provider)
                 },
                 fetchedModels = fetchedModels,
                 modelFetchStates = modelFetchStates,
@@ -685,8 +685,8 @@ private fun ApiCardsSection(
                     onTest = { viewModel.testConnection(config) },
                     onToggleEnabled = { viewModel.toggleConfigEnabled(config) },
                     onSelectActive = { viewModel.selectActiveConfig(config) },
-                    onFetchModels = { baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean ->
-                        viewModel.fetchModels(baseUrl, apiKey, provider, skipCertVerify)
+                    onFetchModels = { baseUrl: String, apiKey: String, provider: String ->
+                        viewModel.fetchModels(baseUrl, apiKey, provider)
                     },
                     fetchedModels = fetchedModels,
                     modelFetchStates = modelFetchStates,
@@ -752,7 +752,7 @@ fun ApiConfigEditDialog(
     isDarkTheme: Boolean,
     textPrimaryColor: Color,
     textSecondaryColor: Color,
-    onFetchModels: ((String, String, Boolean) -> Unit)? = null,
+    onFetchModels: ((String, String) -> Unit)? = null,
     availableModels: List<String> = emptyList(),
     modelFetchState: SettingsViewModel.ModelFetchState = SettingsViewModel.ModelFetchState()
 ) {
@@ -768,7 +768,6 @@ fun ApiConfigEditDialog(
     var temperature by remember { mutableFloatStateOf(config.temperature) }
     var maxTokens by remember { mutableStateOf(config.maxTokens?.toString() ?: "") }
     var showModelDropdown by remember { mutableStateOf(false) }
-    var skipCertVerify by remember { mutableStateOf(config.skipCertVerify) }
     var formatHint by remember { mutableStateOf(config.formatHint) }
     var lastFetchedParams by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -787,7 +786,7 @@ fun ApiConfigEditDialog(
         else -> "填写密钥后自动拉取模型"
     }
 
-    LaunchedEffect(apiKey, baseUrl, config.provider, formatHint, skipCertVerify) {
+    LaunchedEffect(apiKey, baseUrl, config.provider, formatHint) {
         val fetchParams = baseUrl.trim() + "|" + apiKey.trim()
         // PARTNER：baseUrl 非空即可自动拉取（密钥可空，由服务器下发）
         // CUSTOM：baseUrl 和 apiKey 都非空才自动拉取
@@ -797,7 +796,7 @@ fun ApiConfigEditDialog(
             lastFetchedParams = fetchParams
             // PARTNER 模式下，如果用户没有填写密钥，使用空字符串触发从服务器获取
             val keyToUse = apiKey.trim()
-            onFetchModels?.invoke(baseUrl, keyToUse, skipCertVerify)
+            onFetchModels?.invoke(baseUrl, keyToUse)
         }
     }
 
@@ -1078,7 +1077,7 @@ fun ApiConfigEditDialog(
                         onClick = {
                             model = ""
                             lastFetchedParams = ""
-                            onFetchModels.invoke(baseUrl, apiKey.trim(), skipCertVerify)
+                            onFetchModels.invoke(baseUrl, apiKey.trim())
                         },
                         enabled = canFetchOpenAiModels && !modelFetchState.isLoading,
                         modifier = Modifier.fillMaxWidth(),
@@ -1149,38 +1148,6 @@ fun ApiConfigEditDialog(
                     singleLine = true
                 )
 
-                // 跳过证书验证 — 仅对非 PARTNER 的 provider 显示（PARTNER 始终固定证书）
-                if (!isPartner) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "跳过证书验证",
-                                color = textPrimaryColor,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "⚠️ 仅限自托管/内网服务器，开启后不再验证 SSL 证书",
-                                color = PetalOrange,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Switch(
-                            checked = skipCertVerify,
-                            onCheckedChange = { skipCertVerify = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = PetalOrange,
-                                checkedTrackColor = PetalOrange.copy(alpha = 0.3f),
-                                uncheckedThumbColor = dividerColor,
-                                uncheckedTrackColor = dividerColor.copy(alpha = 0.2f)
-                            )
-                        )
-                    }
-                }
             }
         },
         confirmButton = {
@@ -1197,7 +1164,6 @@ fun ApiConfigEditDialog(
                             model = model.trim(),
                             temperature = temperature,
                             maxTokens = maxTokens.toIntOrNull(),
-                            skipCertVerify = skipCertVerify,
                             formatHint = formatHint
                         )
                         onTest(currentConfig)
@@ -1230,7 +1196,6 @@ fun ApiConfigEditDialog(
                                 model = model.trim(),
                                 temperature = temperature,
                                 maxTokens = maxTokens.toIntOrNull(),
-                                skipCertVerify = skipCertVerify,
                                 formatHint = formatHint
                             )
                         )

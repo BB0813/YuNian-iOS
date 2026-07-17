@@ -16,7 +16,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
-import com.lianyu.ai.network.CertificatePins
 
 class AliyunTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -25,7 +24,6 @@ class AliyunTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
-        builder.certificatePinner(CertificatePins.certificatePinner)
         builder.build()
     }
 

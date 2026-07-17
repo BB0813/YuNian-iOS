@@ -17,13 +17,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import com.lianyu.ai.uicommon.theme.ThemeMode
+import com.lianyu.ai.common.PerformanceTrace
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -89,12 +90,12 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.chat.R
 import androidx.compose.ui.text.font.FontWeight
@@ -137,6 +138,7 @@ import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 import com.lianyu.ai.common.HardwareInfo
+import com.lianyu.ai.common.MessageBodyState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -154,7 +156,6 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val stickerManager = remember { StickerManager.getInstance(context) }
 
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
@@ -174,7 +175,7 @@ fun ChatScreen(
                 try {
                     val path = copyUriToCache(context, it)
                     if (path != null) {
-                        val count = stickerManager.importStickerZip(path)
+                        val count = StickerManager.getInstance(context).importStickerZip(path)
                         snackbarHostState.showSnackbar("成功导入 $count 个表情包")
                     } else {
                         snackbarHostState.showSnackbar("文件读取失败")
@@ -285,13 +286,17 @@ fun ChatScreen(
 
     val userAvatar by viewModel.userAvatar.collectAsState()
     val userName by viewModel.userName.collectAsState()
-    val messages by viewModel.messages.collectAsState(initial = emptyList())
+    // 不要强制 emptyList：ViewModel 已用 MessageCache 预填首帧
+    val messages by viewModel.messages.collectAsState()
     val messageMetadata by viewModel.messageMetadata.collectAsState()
     val messageBodies by viewModel.messageBodies.collectAsState()
     val chatItems = remember(messageMetadata, messageBodies) {
         toChatListItems(messageMetadata, messageBodies)
     }
     val visibleChatItems = remember(chatItems) { chatItems.asReversed() }
+    val visibleMessagesReady = messageMetadata.lastOrNull()?.let { latest ->
+        messageBodies[latest.id] is MessageBodyState.Ready
+    } == true
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val hasMoreMessages by viewModel.hasMoreMessages.collectAsState()
     val companionData by viewModel.companionData.collectAsState()
@@ -594,7 +599,15 @@ fun ChatScreen(
     // Sticker data loaded from StickerManager
     val stickers = remember { mutableStateListOf<StickerInfo>() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .drawWithContent {
+                PerformanceTrace.markChatShellDrawn()
+                drawContent()
+            }
+            .testTag("chat_shell_ready")
+    ) {
         // Snackbar host
         SnackbarHost(
             hostState = snackbarHostState,
@@ -637,6 +650,14 @@ fun ChatScreen(
                     reverseLayout = true,
                     modifier = Modifier
                         .fillMaxSize()
+                        .drawWithContent {
+                            drawContent()
+                            if (visibleMessagesReady) PerformanceTrace.markChatMessagesDrawn()
+                        }
+                        .then(
+                            if (visibleMessagesReady) Modifier.testTag("chat_messages_ready")
+                            else Modifier
+                        )
                         .nestedScroll(rememberHorizontalSwipeGuard())
                         .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
                     contentPadding = PaddingValues(
@@ -675,23 +696,11 @@ fun ChatScreen(
                         }
                     }
 
+
                     items(
                         items = visibleChatItems,
                         key = { it.stableId }
                     ) { item ->
-                        val message = item.messageOrNull
-
-                        val alpha = remember(item.stableId) { Animatable(1f) }
-                        val shouldFadeIn = perfTier != HardwareInfo.Tier.LOW && message?.id == lastMessageId
-                        LaunchedEffect(item.stableId, shouldFadeIn) {
-                            if (shouldFadeIn) {
-                                alpha.snapTo(0f)
-                                alpha.animateTo(1f, animationSpec = tween(180))
-                            } else {
-                                alpha.snapTo(1f)
-                            }
-                        }
-
                         ChatListItemRenderer(
                             item = item,
                             companionData = companionData,
@@ -701,8 +710,7 @@ fun ChatScreen(
                             adaptiveSizing = adaptiveSizing,
                             isDarkTheme = isDarkTheme,
                             onRetryBody = viewModel::retryMessageBody,
-                            onCompanionAvatarClick = { onNavigateToDetail(companionId) },
-                            modifier = Modifier.graphicsLayer { this.alpha = alpha.value }
+                            onCompanionAvatarClick = { onNavigateToDetail(companionId) }
                         )
                     }
 

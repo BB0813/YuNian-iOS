@@ -59,16 +59,22 @@ class GroupMessageRepository(
 
     suspend fun loadMessages(metadata: List<Message>): Map<Long, GroupMessage> {
         val groupId = metadata.firstOrNull()?.conversationId
-        val cachedById = groupId?.let(MessageCache::getGroupMessages)
-            .orEmpty()
-            .associateBy { it.id }
-        val missing = metadata.filterNot { it.id in cachedById }
-        val loadedById = loadStoredMessages(missing).associate { stored ->
-            stored.metadata.id to fromMessage(stored)
+        val cachedById = groupId?.let(MessageCache::getGroupMessagesById).orEmpty()
+        val missing = ArrayList<Message>()
+        metadata.forEach { item ->
+            if (item.id !in cachedById) missing += item
         }
-        return metadata.mapNotNull { item ->
-            (cachedById[item.id] ?: loadedById[item.id])?.let { item.id to it }
-        }.toMap()
+        if (missing.isEmpty()) {
+            return buildMap(metadata.size) {
+                metadata.forEach { item -> cachedById[item.id]?.let { put(item.id, it) } }
+            }
+        }
+        val loadedById = fromMessages(loadStoredMessages(missing)).associateBy { it.id }
+        return buildMap(metadata.size) {
+            metadata.forEach { item ->
+                (cachedById[item.id] ?: loadedById[item.id])?.let { put(item.id, it) }
+            }
+        }
     }
 
     suspend fun hydrateRecent(groupId: Long, limit: Int) {
@@ -80,19 +86,17 @@ class GroupMessageRepository(
 
     fun getMessagesForGroup(groupId: Long, limit: Int = 50): Flow<List<GroupMessage>> =
         messageDao.getRecentMessageMetadata(groupId, "group", limit)
-            .map { loadStoredMessages(getRecentMetadata(groupId, limit)).map { fromMessage(it) }.reversed() }
+            .map { fromMessages(loadStoredMessages(getRecentMetadata(groupId, limit))).reversed() }
             .onEach { decrypted -> MessageCache.putGroupMessages(groupId, decrypted) }
 
     suspend fun getRecentMessagesSync(groupId: Long, limit: Int = 50): List<GroupMessage> =
-        loadStoredMessages(messageDao.getRecentMessageMetadataSync(groupId, "group", limit))
-            .map { fromMessage(it) }
+        fromMessages(loadStoredMessages(messageDao.getRecentMessageMetadataSync(groupId, "group", limit)))
             .reversed()
 
     fun getMessagesBefore(groupId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int = 30): Flow<List<GroupMessage>> =
         messageDao.getMessageMetadataBefore(groupId, "group", beforeTimestamp, beforeId, limit)
             .map {
-                loadStoredMessages(getMetadataBefore(groupId, beforeTimestamp, beforeId, limit))
-                    .map { fromMessage(it) }
+                fromMessages(loadStoredMessages(getMetadataBefore(groupId, beforeTimestamp, beforeId, limit)))
                     .reversed()
             }
 
@@ -143,38 +147,42 @@ class GroupMessageRepository(
     }
 
     suspend fun getMessagesBeforeSync(groupId: Long, beforeTimestamp: Long, beforeId: Long, limit: Int): List<GroupMessage> =
-        loadStoredMessages(getMetadataBefore(groupId, beforeTimestamp, beforeId, limit))
-            .map { fromMessage(it) }
+        fromMessages(loadStoredMessages(getMetadataBefore(groupId, beforeTimestamp, beforeId, limit)))
             .reversed()
 
     suspend fun getMessagesAfterSync(groupId: Long, afterTimestamp: Long, afterId: Long, limit: Int): List<GroupMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.getMessageMetadataAfterSync(groupId, "group", afterTimestamp, afterId, limit),
-                messageDao.getArchivedMessageMetadataAfter(groupId, "group", afterTimestamp, afterId, limit),
-                limit,
-                descending = false
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.getMessageMetadataAfterSync(groupId, "group", afterTimestamp, afterId, limit),
+                    messageDao.getArchivedMessageMetadataAfter(groupId, "group", afterTimestamp, afterId, limit),
+                    limit,
+                    descending = false
+                )
             )
         )
-            .map { fromMessage(it) }
 
     suspend fun searchMessages(groupId: Long, query: String, limit: Int = 50): List<GroupMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.searchMessages(groupId, "group", query, limit).map { it.metadata },
-                messageDao.searchArchivedMessageMetadata(groupId, "group", query, limit),
-                limit
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.searchMessages(groupId, "group", query, limit).map { it.metadata },
+                    messageDao.searchArchivedMessageMetadata(groupId, "group", query, limit),
+                    limit
+                )
             )
-        ).map { fromMessage(it) }
+        )
 
     suspend fun getMessagesByFileFormat(groupId: Long, fileFormat: FileFormat, limit: Int = 50): List<GroupMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.getMessagesByFileFormat(groupId, "group", fileFormat, limit).map { it.metadata },
-                messageDao.getArchivedMessageMetadataByFileFormat(groupId, "group", fileFormat, limit),
-                limit
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.getMessagesByFileFormat(groupId, "group", fileFormat, limit).map { it.metadata },
+                    messageDao.getArchivedMessageMetadataByFileFormat(groupId, "group", fileFormat, limit),
+                    limit
+                )
             )
-        ).map { fromMessage(it) }
+        )
 
     suspend fun getMessagesByFileFormatBefore(
         groupId: Long,
@@ -183,17 +191,19 @@ class GroupMessageRepository(
         beforeId: Long,
         limit: Int = 50
     ): List<GroupMessage> =
-        loadStoredMessages(
-            mergeMetadata(
-                messageDao.getMessagesByFileFormatBefore(
-                    groupId, "group", fileFormat, beforeTimestamp, beforeId, limit
-                ).map { it.metadata },
-                messageDao.getArchivedMessageMetadataByFileFormatBefore(
-                    groupId, "group", fileFormat, beforeTimestamp, beforeId, limit
-                ),
-                limit
+        fromMessages(
+            loadStoredMessages(
+                mergeMetadata(
+                    messageDao.getMessagesByFileFormatBefore(
+                        groupId, "group", fileFormat, beforeTimestamp, beforeId, limit
+                    ).map { it.metadata },
+                    messageDao.getArchivedMessageMetadataByFileFormatBefore(
+                        groupId, "group", fileFormat, beforeTimestamp, beforeId, limit
+                    ),
+                    limit
+                )
             )
-        ).map { fromMessage(it) }
+        )
 
     suspend fun getMessageCount(groupId: Long): Int =
         messageDao.getMessageCount(groupId, "group") +
@@ -211,7 +221,8 @@ class GroupMessageRepository(
 
     internal suspend fun batchInsertMessages(messages: List<GroupMessage>): List<Long> {
         if (messages.isEmpty()) return emptyList()
-        val encrypted = messages.map { StoredMessage.fromGroupMessage(ChatMessageCrypto.encryptForStorage(it)) }
+        val encrypted = ChatMessageCrypto.encryptForStorageGroup(messages)
+            .map { StoredMessage.fromGroupMessage(it) }
         val persisted = database.withTransaction {
             val ids = messageDao.insertStoredMessages(encrypted)
             messages.zip(ids).map { (message, id) -> message.copy(id = id) }.also { inserted ->
@@ -342,6 +353,9 @@ class GroupMessageRepository(
 
     // ── 内部转换 ──
 
-    private fun fromMessage(message: StoredMessage): GroupMessage =
+    private suspend fun fromMessage(message: StoredMessage): GroupMessage =
         ChatMessageCrypto.decryptFromStorage(message.toGroupMessage())
+
+    private suspend fun fromMessages(messages: List<StoredMessage>): List<GroupMessage> =
+        ChatMessageCrypto.decryptFromStorageGroup(messages.map { it.toGroupMessage() })
 }

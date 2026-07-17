@@ -60,18 +60,22 @@ class ChatViewModel(
     private val generation = ChatGenerationManager.get(application, companionId)
     private val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
-    private val sttService = SttService.getInstance(application)
+    private val sttService by lazy { SttService.getInstance(application) }
 
-    private val _recentMessages = MutableStateFlow(chatRepository.getCachedRecent(companionId).orEmpty())
+    private val cachedRecent = chatRepository.getCachedRecent(companionId).orEmpty()
+    private val _recentMessages = MutableStateFlow(cachedRecent)
     private val _olderMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    private val _messages = MutableStateFlow(_recentMessages.value)
+    private val _messages = MutableStateFlow(cachedRecent)
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
-    private val _messageMetadata = MutableStateFlow<List<Message>>(emptyList())
+    // 首帧用 L1 缓存推导 metadata，避免进页先空列表再闪 BodyLoading
+    private val _messageMetadata = MutableStateFlow(
+        cachedRecent.takeLast(ChatConstants.CHAT_PAGE_SIZE).map { it.toMetadataMessage() }
+    )
     val messageMetadata: StateFlow<List<Message>> = _messageMetadata.asStateFlow()
 
     private val _messageBodies = MutableStateFlow<Map<Long, MessageBodyState<ChatMessage>>>(
-        _recentMessages.value.associate { it.id to MessageBodyState.Ready(it) }
+        cachedRecent.associate { it.id to MessageBodyState.Ready(it) }
     )
     val messageBodies: StateFlow<Map<Long, MessageBodyState<ChatMessage>>> = _messageBodies.asStateFlow()
 
@@ -201,11 +205,36 @@ class ChatViewModel(
     }
 
     private fun observeMessageMetadata() {
+        // 缓存命中时先给出 hasMore 乐观值，DB 结果回来后再校正
+        if (cachedRecent.isNotEmpty()) {
+            _hasMoreMessages.value = cachedRecent.size >= ChatConstants.CHAT_PAGE_SIZE
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _messageMetadata.value = chatRepository
-                    .getRecentMetadata(companionId, ChatConstants.CHAT_PAGE_SIZE)
-                    .reversed()
+                // 缓存未命中时尽快 hydrate，减少首进冷加载
+                var metadataSeeded = cachedRecent.isNotEmpty()
+                if (!metadataSeeded) {
+                    runCatching {
+                        chatRepository.hydrateRecent(companionId, ChatConstants.CHAT_PAGE_SIZE)
+                    }
+                    val hydrated = chatRepository.getCachedRecent(companionId).orEmpty()
+                    if (hydrated.isNotEmpty()) {
+                        _recentMessages.value = hydrated
+                        _messages.value = hydrated
+                        _messageBodies.value = hydrated.associate { it.id to MessageBodyState.Ready(it) }
+                        _messageMetadata.value =
+                            hydrated.takeLast(ChatConstants.CHAT_PAGE_SIZE).map { it.toMetadataMessage() }
+                        metadataSeeded = true
+                    }
+                }
+                // 缓存/Hydrate 已预填 metadata 时，不再用 Room 结果覆盖，避免 recompose 闪烁
+                if (!metadataSeeded) {
+                    val recentMetadata = chatRepository
+                        .getRecentMetadata(companionId, ChatConstants.CHAT_PAGE_SIZE)
+                        .reversed()
+                    _messageMetadata.value = recentMetadata
+                    seedBodiesFromCache(recentMetadata)
+                }
                 _hasMoreMessages.value =
                     _messageMetadata.value.size < chatRepository.getMessageCount(companionId)
                 chatRepository.observeRecentMetadata(companionId, ChatConstants.CHAT_PAGE_SIZE).collect { recent ->
@@ -213,11 +242,17 @@ class ChatViewModel(
                         .asSequence()
                         .filterNot { current -> recent.any { it.id == current.id } }
                         .toList()
-                    _messageMetadata.value = (olderIds + recent.reversed())
+                    val merged = (olderIds + recent.reversed())
                         .distinctBy { it.id }
                         .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
+                    // 仅在数据确实变化时才更新 StateFlow，防止内容相同的 List 触发
+                    // recompose → chatItems 重建 → LazyColumn layout → 最后一条消息闪烁
+                    if (merged != _messageMetadata.value) {
+                        _messageMetadata.value = merged
+                        seedBodiesFromCache(merged)
+                    }
                     _hasMoreMessages.value = !reachedHistoryStart &&
-                        _messageMetadata.value.size < chatRepository.getMessageCount(companionId)
+                        merged.size < chatRepository.getMessageCount(companionId)
                     if (recent.isNotEmpty()) markAsRead()
                 }
             } catch (cancelled: CancellationException) {
@@ -226,6 +261,26 @@ class ChatViewModel(
                 SecureLog.e("ChatViewModel", "Message observation failed", exception)
                 _events.tryEmit(ChatUiEvent.Error("消息加载失败"))
             }
+        }
+    }
+
+    /** 将 L1 已有正文直接标 Ready，跳过 BodyLoading 闪烁。 */
+    private fun seedBodiesFromCache(metadata: List<Message>) {
+        if (metadata.isEmpty()) return
+        val cachedById = chatRepository.getCachedRecent(companionId)
+            ?.associateBy { it.id }
+            .orEmpty()
+        if (cachedById.isEmpty()) return
+        val ready = metadata.mapNotNull { item ->
+            val body = cachedById[item.id] ?: return@mapNotNull null
+            when (_messageBodies.value[item.id]) {
+                is MessageBodyState.Ready -> null
+                else -> item.id to MessageBodyState.Ready(body)
+            }
+        }
+        if (ready.isNotEmpty()) {
+            _messageBodies.value = _messageBodies.value + ready
+            publishLoadedMessages()
         }
     }
 
@@ -471,6 +526,17 @@ class ChatViewModel(
         timestamp = timestamp,
         type = if (type == MessageType.IMAGE) AiMessageType.IMAGE else AiMessageType.TEXT,
         companionId = companionId
+    )
+
+    /** 从 L1 明文消息推导列表元数据，仅用于首帧渲染。 */
+    private fun ChatMessage.toMetadataMessage(): Message = Message(
+        id = id,
+        conversationId = companionId,
+        conversationType = "chat",
+        isFromUser = isFromUser,
+        timestamp = timestamp,
+        type = type,
+        fileFormat = fileFormat
     )
 
     override fun onCleared() {

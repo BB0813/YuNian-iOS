@@ -133,10 +133,10 @@ class CompanionMessageWorker(
                 }
             }
 
-            val recentMessages = messageDao.getRecentMessagesSync(randomCompanion.id, "chat", 10)
-                .map { it.toChatMessage() }
-                .map { ChatMessageCrypto.decryptFromStorage(it) }
-                .filterDecrypted()
+            val recentMessages = ChatMessageCrypto.decryptFromStorage(
+                    messageDao.getRecentMessagesSync(randomCompanion.id, "chat", 10)
+                        .map { it.toChatMessage() }
+                ).filterDecrypted()
 
             // 传入自定义设置，让 shouldProactivelyMessage/generateProactiveMessage 按其行为
             val domainSettings = settings.toDomain()

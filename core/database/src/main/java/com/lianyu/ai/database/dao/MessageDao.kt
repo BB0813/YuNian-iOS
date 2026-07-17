@@ -9,7 +9,9 @@ import androidx.room.Transaction
 import com.lianyu.ai.database.model.FileFormat
 import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.database.model.MessageBody
+import com.lianyu.ai.database.model.MessageSearchIndex
 import com.lianyu.ai.database.model.StoredMessage
+import com.lianyu.ai.database.repository.MessageSearchTokenizer
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -108,16 +110,25 @@ interface MessageDao {
                                  AND EXISTS (
                                          SELECT 1 FROM archived_message_bodies
                                          WHERE messageId = archived_messages.id
-                                             AND searchContent LIKE '%' || :query || '%'
+                                             AND messageId IN (SELECT rowid FROM message_search_index WHERE message_search_index MATCH :matchQuery)
                                  )
                              ORDER BY timestamp DESC, id DESC LIMIT :limit"""
                 )
+        suspend fun searchArchivedMessageMetadataByMatch(
+            conversationId: Long,
+            type: String,
+            matchQuery: String,
+            limit: Int
+        ): List<Message>
+
         suspend fun searchArchivedMessageMetadata(
             conversationId: Long,
             type: String,
             query: String,
             limit: Int
-        ): List<Message>
+        ): List<Message> = MessageSearchTokenizer.matchQuery(query)?.let { matchQuery ->
+            searchArchivedMessageMetadataByMatch(conversationId, type, matchQuery, limit)
+        } ?: emptyList()
 
         @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND fileFormat = :fileFormat ORDER BY timestamp DESC, id DESC LIMIT :limit")
         suspend fun getArchivedMessageMetadataByFileFormat(
@@ -206,7 +217,18 @@ interface MessageDao {
     suspend fun insertMessage(message: Message): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBody(body: MessageBody)
+    suspend fun insertBodyRecord(body: MessageBody)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSearchIndex(index: MessageSearchIndex)
+
+    @Transaction
+    suspend fun insertBody(body: MessageBody) {
+        insertBodyRecord(body)
+        upsertSearchIndex(
+            MessageSearchIndex(body.messageId, MessageSearchTokenizer.indexTokens(body.searchContent))
+        )
+    }
 
     @Transaction
     suspend fun insertStoredMessage(message: Message, body: MessageBody): Long {
@@ -229,12 +251,26 @@ interface MessageDao {
                          AND EXISTS (
                                  SELECT 1 FROM message_bodies
                                  WHERE messageId = messages.id
-                                     AND searchContent LIKE '%' || :query || '%'
+                                     AND messageId IN (SELECT rowid FROM message_search_index WHERE message_search_index MATCH :matchQuery)
                          )
                      ORDER BY timestamp DESC, id DESC LIMIT :limit"""
         )
     @Transaction
-    suspend fun searchMessages(conversationId: Long, type: String, query: String, limit: Int): List<StoredMessage>
+    suspend fun searchMessagesByMatch(
+        conversationId: Long,
+        type: String,
+        matchQuery: String,
+        limit: Int
+    ): List<StoredMessage>
+
+    suspend fun searchMessages(
+        conversationId: Long,
+        type: String,
+        query: String,
+        limit: Int
+    ): List<StoredMessage> = MessageSearchTokenizer.matchQuery(query)?.let { matchQuery ->
+        searchMessagesByMatch(conversationId, type, matchQuery, limit)
+    } ?: emptyList()
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId AND conversationType = :type AND fileFormat = :fileFormat ORDER BY timestamp DESC, id DESC LIMIT :limit")
     @Transaction
@@ -270,16 +306,49 @@ interface MessageDao {
         messages.map { (message, body) -> insertStoredMessage(message, body) }
 
     @Delete
-    suspend fun deleteMessage(message: Message): Int
+    suspend fun deleteMessageMetadata(message: Message): Int
+
+    @Query("DELETE FROM message_search_index WHERE rowid = :messageId")
+    suspend fun deleteSearchIndex(messageId: Long)
+
+    @Transaction
+    suspend fun deleteMessage(message: Message): Int {
+        deleteSearchIndex(message.id)
+        return deleteMessageMetadata(message)
+    }
 
     @Query("DELETE FROM archived_messages WHERE id = :messageId")
-    suspend fun deleteArchivedMessage(messageId: Long): Int
+    suspend fun deleteArchivedMessageMetadata(messageId: Long): Int
+
+    @Transaction
+    suspend fun deleteArchivedMessage(messageId: Long): Int {
+        deleteSearchIndex(messageId)
+        return deleteArchivedMessageMetadata(messageId)
+    }
 
     @Query("DELETE FROM messages WHERE conversationId = :conversationId AND conversationType = :type")
-    suspend fun deleteMessagesForConversation(conversationId: Long, type: String): Int
+    suspend fun deleteMessageMetadataForConversation(conversationId: Long, type: String): Int
+
+    @Query("DELETE FROM message_search_index WHERE rowid IN (SELECT id FROM messages WHERE conversationId = :conversationId AND conversationType = :type)")
+    suspend fun deleteHotSearchIndexForConversation(conversationId: Long, type: String)
+
+    @Transaction
+    suspend fun deleteMessagesForConversation(conversationId: Long, type: String): Int {
+        deleteHotSearchIndexForConversation(conversationId, type)
+        return deleteMessageMetadataForConversation(conversationId, type)
+    }
 
     @Query("DELETE FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type")
-    suspend fun deleteArchivedMessagesForConversation(conversationId: Long, type: String): Int
+    suspend fun deleteArchivedMessageMetadataForConversation(conversationId: Long, type: String): Int
+
+    @Query("DELETE FROM message_search_index WHERE rowid IN (SELECT id FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type)")
+    suspend fun deleteArchivedSearchIndexForConversation(conversationId: Long, type: String)
+
+    @Transaction
+    suspend fun deleteArchivedMessagesForConversation(conversationId: Long, type: String): Int {
+        deleteArchivedSearchIndexForConversation(conversationId, type)
+        return deleteArchivedMessageMetadataForConversation(conversationId, type)
+    }
 
     @Transaction
     suspend fun deleteAllMessagesForConversation(conversationId: Long, type: String): Int =
@@ -287,10 +356,32 @@ interface MessageDao {
             deleteArchivedMessagesForConversation(conversationId, type)
 
     @Query("UPDATE message_bodies SET content = :content, searchContent = :searchContent WHERE messageId = :messageId")
-    suspend fun updateMessageContent(messageId: Long, content: String, searchContent: String): Int
+    suspend fun updateHotMessageContent(messageId: Long, content: String, searchContent: String): Int
+
+    @Transaction
+    suspend fun updateMessageContent(messageId: Long, content: String, searchContent: String): Int {
+        val updated = updateHotMessageContent(messageId, content, searchContent)
+        if (updated > 0) {
+            upsertSearchIndex(
+                MessageSearchIndex(messageId, MessageSearchTokenizer.indexTokens(searchContent))
+            )
+        }
+        return updated
+    }
 
     @Query("UPDATE archived_message_bodies SET content = :content, searchContent = :searchContent WHERE messageId = :messageId")
-    suspend fun updateArchivedMessageContent(messageId: Long, content: String, searchContent: String): Int
+    suspend fun updateColdMessageContent(messageId: Long, content: String, searchContent: String): Int
+
+    @Transaction
+    suspend fun updateArchivedMessageContent(messageId: Long, content: String, searchContent: String): Int {
+        val updated = updateColdMessageContent(messageId, content, searchContent)
+        if (updated > 0) {
+            upsertSearchIndex(
+                MessageSearchIndex(messageId, MessageSearchTokenizer.indexTokens(searchContent))
+            )
+        }
+        return updated
+    }
 
     @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND conversationType = :type AND isFromUser = 0")
     suspend fun getAiMessageCount(conversationId: Long, type: String): Int
@@ -316,11 +407,34 @@ interface MessageDao {
               ORDER BY timestamp ASC, id ASC LIMIT :count
            )"""
     )
-    suspend fun deleteOldMessagesForConversation(
+    suspend fun deleteOldMessageMetadataForConversation(
         conversationId: Long,
         type: String,
         count: Int
     ): Int
+
+    @Query(
+        """DELETE FROM message_search_index WHERE rowid IN (
+              SELECT id FROM messages
+              WHERE conversationId = :conversationId AND conversationType = :type
+              ORDER BY timestamp ASC, id ASC LIMIT :count
+           )"""
+    )
+    suspend fun deleteOldSearchIndexForConversation(
+        conversationId: Long,
+        type: String,
+        count: Int
+    )
+
+    @Transaction
+    suspend fun deleteOldMessagesForConversation(
+        conversationId: Long,
+        type: String,
+        count: Int
+    ): Int {
+        deleteOldSearchIndexForConversation(conversationId, type, count)
+        return deleteOldMessageMetadataForConversation(conversationId, type, count)
+    }
 
     @Query(
         """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat
@@ -409,7 +523,7 @@ interface MessageDao {
         val archivedCount = getArchivedMessageCount(conversationId, type)
         restoreArchivedMetadata(conversationId, type)
         restoreArchivedBodies(conversationId, type)
-        deleteArchivedMessagesForConversation(conversationId, type)
+        deleteArchivedMessageMetadataForConversation(conversationId, type)
         return archivedCount
     }
 

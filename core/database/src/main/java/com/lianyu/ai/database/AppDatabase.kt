@@ -41,9 +41,11 @@ import com.lianyu.ai.database.model.MemorySource
 import com.lianyu.ai.database.model.MemoryType
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.model.MessageBody
+import com.lianyu.ai.database.model.MessageSearchIndex
 import com.lianyu.ai.database.model.QuizQuestionEntity
 import com.lianyu.ai.database.model.TempMemory
 import com.lianyu.ai.database.model.TokenUsage
+import com.lianyu.ai.database.repository.MessageSearchTokenizer
 import java.io.File
 
 @Database(
@@ -63,9 +65,10 @@ import java.io.File
         Message::class,
         MessageBody::class,
         ArchivedMessage::class,
-        ArchivedMessageBody::class
+        ArchivedMessageBody::class,
+        MessageSearchIndex::class
     ],
-    version = 32,
+    version = 34,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -402,6 +405,35 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
             db.execSQL("ALTER TABLE `$tableName` ADD COLUMN $columnName $columnDefinition")
+        }
+
+        /** 安全移除列 — 通过重建表实现（兼容 minSdk 26 的旧 SQLite） */
+        private fun dropColumnIfExists(
+            db: SupportSQLiteDatabase,
+            tableName: String,
+            columnName: String
+        ) {
+            // 检查列是否存在
+            var exists = false
+            val columns = mutableListOf<String>()
+            db.query("PRAGMA table_info(`$tableName`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                while (cursor.moveToNext()) {
+                    val col = cursor.getString(nameIndex)
+                    if (col == columnName) exists = true
+                    columns.add(col)
+                }
+            }
+            if (!exists) return
+
+            // 重建表：创建新表(无该列) → 复制数据 → 删旧表 → 重命名
+            val keepColumns = columns.filter { it != columnName }
+            val columnList = keepColumns.joinToString(", ") { "`$it`" }
+            val tempTable = "${tableName}_temp"
+
+            db.execSQL("CREATE TABLE `$tempTable` AS SELECT $columnList FROM `$tableName`")
+            db.execSQL("DROP TABLE `$tableName`")
+            db.execSQL("ALTER TABLE `$tempTable` RENAME TO `$tableName`")
         }
 
         private fun migrateLegacyTo6(db: SupportSQLiteDatabase) {
@@ -1219,6 +1251,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS `message_search_index` USING FTS4(`tokens` TEXT NOT NULL)"
+                )
+                db.query(
+                    """SELECT messageId, searchContent FROM message_bodies
+                       UNION ALL
+                       SELECT messageId, searchContent FROM archived_message_bodies""".trimIndent()
+                ).use { cursor ->
+                    val messageIdIndex = cursor.getColumnIndexOrThrow("messageId")
+                    val contentIndex = cursor.getColumnIndexOrThrow("searchContent")
+                    while (cursor.moveToNext()) {
+                        db.execSQL(
+                            "INSERT OR REPLACE INTO message_search_index(rowid, tokens) VALUES (?, ?)",
+                            arrayOf<Any>(
+                                cursor.getLong(messageIdIndex),
+                                MessageSearchTokenizer.indexTokens(cursor.getString(contentIndex))
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 移除 api_configs 和 api_provider_presets 的 skipCertVerify 列
+                dropColumnIfExists(db, "api_configs", "skipCertVerify")
+                dropColumnIfExists(db, "api_provider_presets", "skipCertVerify")
+            }
+        }
+
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -1245,7 +1310,6 @@ abstract class AppDatabase : RoomDatabase() {
                     `baseUrl` TEXT NOT NULL,
                     `model` TEXT NOT NULL,
                     `formatHint` TEXT NOT NULL,
-                    `skipCertVerify` INTEGER NOT NULL,
                     `sortOrder` INTEGER NOT NULL,
                     `isVisible` INTEGER NOT NULL,
                     `updatedAt` INTEGER NOT NULL
@@ -1277,8 +1341,8 @@ abstract class AppDatabase : RoomDatabase() {
                     """
                     INSERT OR IGNORE INTO `api_provider_presets` (
                         `provider`, `displayName`, `baseUrl`, `model`, `formatHint`,
-                        `skipCertVerify`, `sortOrder`, `isVisible`, `updatedAt`
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                        `sortOrder`, `isVisible`, `updatedAt`
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)
                     """.trimIndent(),
                     arrayOf<Any>(
                         provider.name,
@@ -1286,7 +1350,6 @@ abstract class AppDatabase : RoomDatabase() {
                         provider.defaultBaseUrl,
                         provider.defaultModel,
                         if (provider == ApiProvider.ANTHROPIC) "anthropic" else "openai",
-                        0,
                         sortOrder,
                         now
                     )
@@ -1325,7 +1388,9 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_28_29,
             MIGRATION_29_30,
             MIGRATION_30_31,
-            MIGRATION_31_32
+            MIGRATION_31_32,
+            MIGRATION_32_33,
+            MIGRATION_33_34
         )
 
         private var lastBackupTime: Long = 0L

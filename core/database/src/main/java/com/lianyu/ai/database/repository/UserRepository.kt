@@ -24,6 +24,9 @@ class UserRepository(context: Context) {
     private val _userStatus = MutableStateFlow(prefs.getString("user_status", "") ?: "")
     val userStatus: StateFlow<String> = _userStatus
 
+    private val _userSignature = MutableStateFlow(prefs.getString("user_signature", "") ?: "")
+    val userSignature: StateFlow<String> = _userSignature
+
     fun updateUserName(name: String) {
         prefs.edit { putString("user_name", name) }
         _userName.value = name
@@ -46,5 +49,10 @@ class UserRepository(context: Context) {
     fun updateUserStatus(status: String) {
         prefs.edit { putString("user_status", status) }
         _userStatus.value = status
+    }
+
+    fun updateUserSignature(signature: String) {
+        prefs.edit { putString("user_signature", signature) }
+        _userSignature.value = signature
     }
 }

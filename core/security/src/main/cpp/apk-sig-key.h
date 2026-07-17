@@ -24,6 +24,12 @@ extern "C" {
 jboolean derive_key_from_apk_sig(JNIEnv* env, jobject ctx,
                                   uint8_t* out_key, size_t key_len);
 
+/**
+ * 读取 APK 签名证书 DER 并计算标准 SHA-256。
+ * 用于反重打包校验（与 g_apk_digests_obs 中嵌入的证书哈希对比）。
+ */
+jboolean get_apk_cert_sha256(JNIEnv* env, jobject ctx, uint8_t out_sha256[32]);
+
 #ifdef __cplusplus
 }
 #endif

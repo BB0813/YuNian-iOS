@@ -18,7 +18,6 @@ import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.MessageWriteCoordinator
-import com.lianyu.ai.database.repository.ChatMessageCrypto
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiChatMessage
 import com.lianyu.ai.domain.AiCompanionInfo
@@ -71,7 +70,6 @@ class AiReplyWorker(
                 }
 
                 val history = chatRepository.getRecentMessagesSync(companionId, limit = 50)
-                    .map { ChatMessageCrypto.decryptFromStorage(it) }
                     .filterDecrypted()
 
                 val response = aiServiceProvider.sendMessage(

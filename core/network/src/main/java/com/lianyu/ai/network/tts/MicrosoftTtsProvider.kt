@@ -12,7 +12,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
-import com.lianyu.ai.network.CertificatePins
 
 class MicrosoftTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -21,7 +20,6 @@ class MicrosoftTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
-        builder.certificatePinner(CertificatePins.certificatePinner)
         builder.build()
     }
 

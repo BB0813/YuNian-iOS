@@ -410,4 +410,31 @@ class ConversationSummaryRepositoryTest {
         assertEquals(null, database.conversationSummaryDao().getSummarySync(companionId, "chat"))
         assertEquals(null, chatRepository.getCachedRecent(companionId))
     }
+
+    @Test
+    fun message_search_supports_unicode_substrings_and_tracks_lifecycle() = runBlocking {
+        val companionId = 21L
+        val chineseId = chatRepository.sendMessage(
+            ChatMessage(companionId = companionId, content = "今天去图书馆看书", isFromUser = true)
+        )
+        val englishId = chatRepository.sendMessage(
+            ChatMessage(companionId = companionId, content = "Alpha-Beta release", isFromUser = false)
+        )
+
+        assertEquals(listOf(chineseId), chatRepository.searchMessages(companionId, "书馆").map { it.id })
+        assertEquals(listOf(englishId), chatRepository.searchMessages(companionId, "ha-Be").map { it.id })
+        assertEquals(listOf(englishId), chatRepository.searchMessages(companionId, "-").map { it.id })
+
+        chatRepository.updateMessageContent(chineseId, "已经修改为新内容")
+        assertTrue(chatRepository.searchMessages(companionId, "图书馆").isEmpty())
+        assertEquals(listOf(chineseId), chatRepository.searchMessages(companionId, "新内容").map { it.id })
+
+        assertEquals(1, chatRepository.archiveOldMessages(companionId, retainCount = 1))
+        assertEquals(listOf(chineseId), chatRepository.searchMessages(companionId, "新内容").map { it.id })
+        assertEquals(1, chatRepository.restoreArchivedMessages(companionId))
+        assertEquals(listOf(chineseId), chatRepository.searchMessages(companionId, "新内容").map { it.id })
+
+        chatRepository.deleteMessage(chatRepository.getMessageById(chineseId)!!)
+        assertTrue(chatRepository.searchMessages(companionId, "新内容").isEmpty())
+    }
 }

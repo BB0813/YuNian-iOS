@@ -3,6 +3,7 @@ package com.lianyu.ai.security
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.os.Debug
+import com.lianyu.ai.common.PerformanceTrace
 import java.io.File
 
 /**
@@ -39,67 +40,106 @@ object SecurityGuard {
      */
     fun productionPreflight(context: Context) {
         if ((context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) return
+        val appCtx = context.applicationContext
 
-        fun recordFailure(reason: String) {
+        fun recordSoftFailure(reason: String) {
             tampered = true
             SecurityState.markTampered(reason)
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+            AuditLogger.log(appCtx, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.TAMPER_DETECTED, reason)
         }
 
-        // Anti-debug: ptrace self-attach + inotify watcher (per-OS-version gating)
-        // JNI_OnLoad already does early ptrace on all versions.
-        // Android 14-15: inotify watcher is safe (dl_iterate_phdr replaces /proc/self/maps).
-        // Android 16+: vivo kernel kills process on late ptrace/inotify → skip.
-        val sdkInt = android.os.Build.VERSION.SDK_INT
-        if (sdkInt <= 35) {
-            val antiDebugOk = runCatching { NativeBridge.antiDebugInit() }.getOrDefault(false)
-            if (!antiDebugOk && sdkInt <= 33) {
-                // Only critical on pre-14 where we don't have dl_iterate_phdr fallback
-                recordFailure("anti-debug initialization failed")
-            }
+        fun recordHardFailure(reason: String) {
+            tampered = true
+            SecurityState.markHardAuthFailure(reason)
+            AuditLogger.log(appCtx, AuditLogger.Level.CRITICAL,
+                AuditLogger.Event.TAMPER_DETECTED, reason)
         }
 
+        // Hard auth only on the main-thread startup path.
+        // Soft integrity (full APK/SO hashing) is deferred — check_dex_integrity()
+        // currently reads the entire ~140MB APK and will ANR if run here.
         val wbAesReady = runCatching { NativeBridge.wbAesInit() }.isSuccess
-        if (!wbAesReady) recordFailure("white-box AES init failed")
-
-        // VMP v2.0: Trust-anchor verification inside VM bytecode
-        // MUST run AFTER wbAesInit() — wb_aes_keycheck selftest needs initialized T-Box tables.
-        // Non-fatal: failure flags tampered state but doesn't kill process.
-        val vmpAnchorsOk = runCatching { CompositeVmpRuntime.verifyTrustAnchors() }.getOrDefault(false)
-        if (!vmpAnchorsOk) recordFailure("VMP trust anchors verification failed")
+        if (!wbAesReady) recordHardFailure("white-box AES init failed")
 
         val signatureOk = runCatching { NativeBridge.verifySignature(context) }.getOrDefault(false)
                 || verifySignatureViaPackageManager(context)
-        if (!signatureOk) recordFailure("APK signature verification failed")
+        if (!signatureOk) recordHardFailure("APK signature verification failed")
 
-        val dexOk = runCatching { NativeBridge.checkDexIntegrity() }.getOrDefault(false)
-        if (!dexOk) recordFailure("DEX integrity verification failed")
-
-        val soOk = runCatching { NativeBridge.checkSoIntegrity() }.getOrDefault(false)
-        if (!soOk) recordFailure("native library integrity verification failed")
-
-        val resourcesOk = runCatching { NativeBridge.checkResourcesIntegrity() }.getOrDefault(false)
-        if (!resourcesOk) recordFailure("resource integrity verification failed")
-
-        val digest = runCatching { NativeBridge.computeIntegrityDigest() }.getOrNull()
-        val digestOk = digest != null && digest.size == 32
-        if (digestOk) {
-            DatabaseKeyProvider.setIntegrityDigest(digest!!)
-        } else {
-            recordFailure("APK integrity digest unavailable")
-        }
-
-        if (wbAesReady && signatureOk && dexOk && soOk && resourcesOk && digestOk) {
+        // Allow offline-first local business once hard auth holds.
+        // Soft gates start as "not yet verified" and are filled in background.
+        if (wbAesReady && signatureOk) {
             SecurityState.markPreflightPassed(
                 wbAesReady = true,
                 signatureTrusted = true,
-                dexTrusted = true,
-                soTrusted = true,
-                resourcesTrusted = true,
-                payloadVerified = true,
+                dexTrusted = false,
+                soTrusted = false,
+                resourcesTrusted = false,
+                payloadVerified = false,
                 kmsReady = KmsProvider.isReady
             )
+        }
+
+        // Soft checks off the critical path: anti-debug, VMP anchors, APK/SO/resource digests.
+        Thread({
+            try {
+                val sdkInt = android.os.Build.VERSION.SDK_INT
+                if (sdkInt <= 35) {
+                    val antiDebugOk = runCatching { NativeBridge.antiDebugInit() }.getOrDefault(false)
+                    if (!antiDebugOk && sdkInt <= 33) {
+                        recordSoftFailure("anti-debug initialization failed")
+                    }
+                }
+
+                val vmpAnchorsOk = runCatching {
+                    CompositeVmpRuntime.verifyTrustAnchors()
+                }.getOrDefault(false)
+                if (!vmpAnchorsOk) recordSoftFailure("VMP trust anchors verification failed")
+
+                val dexOk = runCatching { NativeBridge.checkDexIntegrity() }.getOrDefault(false)
+                if (!dexOk) recordSoftFailure("DEX integrity verification failed")
+
+                val soOk = runCatching { NativeBridge.checkSoIntegrity() }.getOrDefault(false)
+                if (!soOk) recordSoftFailure("native library integrity verification failed")
+
+                val resourcesOk = runCatching {
+                    NativeBridge.checkResourcesIntegrity()
+                }.getOrDefault(false)
+                if (!resourcesOk) recordSoftFailure("resource integrity verification failed")
+
+                val digest = runCatching { NativeBridge.computeIntegrityDigest() }.getOrNull()
+                val digestOk = digest != null && digest.size == 32
+                if (digestOk) {
+                    DatabaseKeyProvider.setIntegrityDigest(digest!!)
+                } else {
+                    recordSoftFailure("APK integrity digest unavailable")
+                }
+
+                // Refresh preflight snapshot with soft results when hard auth already passed.
+                if (wbAesReady && signatureOk) {
+                    SecurityState.markPreflightPassed(
+                        wbAesReady = true,
+                        signatureTrusted = true,
+                        dexTrusted = dexOk,
+                        soTrusted = soOk,
+                        resourcesTrusted = resourcesOk,
+                        payloadVerified = digestOk,
+                        kmsReady = KmsProvider.isReady
+                    )
+                    // Re-apply soft risk markers after snapshot so sensitive ops stay restricted.
+                    if (!dexOk) recordSoftFailure("DEX integrity verification failed")
+                    if (!soOk) recordSoftFailure("native library integrity verification failed")
+                    if (!resourcesOk) recordSoftFailure("resource integrity verification failed")
+                    if (!digestOk) recordSoftFailure("APK integrity digest unavailable")
+                    if (!vmpAnchorsOk) recordSoftFailure("VMP trust anchors verification failed")
+                }
+            } catch (t: Throwable) {
+                recordSoftFailure("background preflight failed: ${t.javaClass.simpleName}")
+            }
+        }, "ly-preflight-soft").apply {
+            isDaemon = true
+            priority = Thread.NORM_PRIORITY - 1
+            start()
         }
     }
 
@@ -110,21 +150,22 @@ object SecurityGuard {
     fun init(context: Context) {
         if (inited) return
         inited = true
+        val appCtx = context.applicationContext
 
-        val isEmulator = runCatching { NativeBridge.isEmulator() }.getOrDefault(false)
-                || android.os.Build.FINGERPRINT.contains("generic")
-                || android.os.Build.FINGERPRINT.contains("sdk_gphone")
-                || android.os.Build.MODEL.contains("sdk_gphone")
+        // Critical-path only: crypto primitives needed before local business starts.
+        // Heavy Keystore/TEE/integrity work is deferred so Application.onCreate
+        // cannot ANR ("failed to complete startup").
 
         // Tink AEAD — primary encryption path (hardware-backed KEK + AEAD)
         try {
             TinkAeadProvider.initialize()
         } catch (e: Exception) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+            AuditLogger.log(appCtx, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.TAMPER_DETECTED, "Tink AEAD init failed")
             tampered = true
             SecurityState.markTampered("Tink AEAD init failed")
         }
+        PerformanceTrace.markSecurityTinkDone()
 
         // White-box AES table load (defense-in-depth, non-fatal)
         var wbAesReady = false
@@ -132,34 +173,28 @@ object SecurityGuard {
             NativeBridge.wbAesInit()
             wbAesReady = true
         } catch (e: Exception) {
-
-        // Hardware Key Attestation — trust anchor binding to TEE/StrongBox
-        try {
-            HardwareKeyAttestation.ensureKeyPair()
-            val securityLevel = HardwareKeyAttestation.getSecurityLevel()
-            android.util.Log.i(TAG, "Hardware key attestation: level=$securityLevel (2=StrongBox 1=TEE 0=SW)")
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "Hardware key attestation unavailable", e)
-        }
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+            AuditLogger.log(appCtx, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.TAMPER_DETECTED, "white-box AES init failed")
             tampered = true
             SecurityState.markTampered("white-box AES init failed")
         }
+        PerformanceTrace.markSecurityWhiteBoxDone()
 
-        // APK signature verification
-        val sigOk = runCatching { NativeBridge.verifySignature(context) }.getOrDefault(false)
+        // APK signature verification (hard identity; keep on critical path)
+        runCatching { NativeBridge.verifySignature(context) }.getOrDefault(false)
+        PerformanceTrace.markSecuritySignatureDone()
 
         // KMS initialize (random/KDF/NEON registers)
         var kmsOk = false
         try {
             kmsOk = KmsProvider.initialize()
         } catch (e: Exception) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
+            AuditLogger.log(appCtx, AuditLogger.Level.CRITICAL,
                 AuditLogger.Event.KEYSTORE_ERROR, "KMS initialization failed")
             tampered = true
             SecurityState.markTampered("KMS initialization failed")
         }
+        PerformanceTrace.markSecurityKmsDone()
 
         // Re-init WB-AES after KMS: kms_derive_dk_ephemeral() may have
         // poisoned g_wb_tampered=1 on platforms where T-Box checksums
@@ -167,64 +202,107 @@ object SecurityGuard {
         // must not be held hostage by KMS initialization.
         try {
             NativeBridge.wbAesInit()
+            wbAesReady = true
         } catch (_: Exception) { /* body enc will still try */ }
 
-        // L2: boot-time table obfuscation + side-channel defense
-        // Only apply when WB-AES is confirmed ready (KMS may have tainted it)
-        if (kmsOk) {
-            try {
-                val seed = java.security.SecureRandom().generateSeed(32)
-                NativeBridge.wbAesObfuscateTables(seed)
-                NativeBridge.wbAesSideChannelDefense()
-            } catch (e: Exception) {
-                AuditLogger.log(context, AuditLogger.Level.WARNING,
-                    AuditLogger.Event.TAMPER_DETECTED, "L2 white-box hardening initialization failed")
-            }
-        }
-
-        // Phase 5: Bind database key to APK integrity (DEX+SO+ARSC)
-        try {
-            val digest = NativeBridge.computeIntegrityDigest()
-            if (digest != null && digest.size == 32) {
-                DatabaseKeyProvider.setIntegrityDigest(digest)
-            } else {
-                AuditLogger.log(context, AuditLogger.Level.ERROR,
-                    AuditLogger.Event.TAMPER_DETECTED, "Integrity digest unavailable")
-            }
-        } catch (e: Exception) {
-            AuditLogger.log(context, AuditLogger.Level.ERROR,
-                AuditLogger.Event.TAMPER_DETECTED, "Integrity digest binding failed")
-        }
-
-        // ═══════════════════════════════════════════════════
-        // P0: RELEASE builds must NEVER run on emulators.
-        // Emulators have no TEE, can be snapshot-debugged, and
-        // expose all security internals to dynamic analysis.
-        // ═══════════════════════════════════════════════════
-        if (isEmulator && (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
-            android.util.Log.e(TAG, "FATAL: emulator detected on release build — locking up")
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.TAMPER_DETECTED, "emulator_detected_deadloop")
-            // Sleep 10s to trigger sandbox timeout, then enter VMP dead loop.
-            // No exit — sandbox can't intercept a busy-wait.
-            try { Thread.sleep(10000) } catch (e: Exception) {}
-            NativeBridge.enterDeadLoop()
-            return
-        }
-
-        // Start native CRC32 heartbeat (runs every 30s in background thread)
-        try {
-            NativeBridge.startHeartbeat()
-        } catch (e: Exception) {
-            AuditLogger.log(context, AuditLogger.Level.CRITICAL,
-                AuditLogger.Event.TAMPER_DETECTED, "heartbeat start failed")
-        }
-
-        // Phase 5 was done above. Integrity check deferred to background.
+        // Mark runtime ready before deferred work so offline-first business can start.
         SecurityState.markRuntimeReady(
             wbAesReady = wbAesReady,
             kmsReady = KmsProvider.isReady
         )
+        PerformanceTrace.markSecurityAttestationDone()
+        PerformanceTrace.markSecurityIntegrityDone()
+
+        // Deferred: HKA, L2 hardening, integrity digest, emulator soft-risk, heartbeat.
+        // Never sleep/deadloop on the main thread — that causes startup ANR.
+        Thread({
+            try {
+                try {
+                    HardwareKeyAttestation.ensureKeyPair()
+                    val securityLevel = HardwareKeyAttestation.getSecurityLevel()
+                    android.util.Log.i(
+                        TAG,
+                        "Hardware key attestation: level=$securityLevel (2=StrongBox 1=TEE 0=SW)"
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "Hardware key attestation unavailable", e)
+                }
+
+                if (kmsOk) {
+                    try {
+                        val seed = java.security.SecureRandom().generateSeed(32)
+                        NativeBridge.wbAesObfuscateTables(seed)
+                        NativeBridge.wbAesSideChannelDefense()
+                    } catch (e: Exception) {
+                        AuditLogger.log(
+                            appCtx,
+                            AuditLogger.Level.WARNING,
+                            AuditLogger.Event.TAMPER_DETECTED,
+                            "L2 white-box hardening initialization failed"
+                        )
+                    }
+                }
+
+                try {
+                    val digest = NativeBridge.computeIntegrityDigest()
+                    if (digest != null && digest.size == 32) {
+                        DatabaseKeyProvider.setIntegrityDigest(digest)
+                    } else {
+                        AuditLogger.log(
+                            appCtx,
+                            AuditLogger.Level.ERROR,
+                            AuditLogger.Event.TAMPER_DETECTED,
+                            "Integrity digest unavailable"
+                        )
+                        SecurityState.markTampered("Integrity digest unavailable")
+                    }
+                } catch (e: Exception) {
+                    AuditLogger.log(
+                        appCtx,
+                        AuditLogger.Level.ERROR,
+                        AuditLogger.Event.TAMPER_DETECTED,
+                        "Integrity digest binding failed"
+                    )
+                    SecurityState.markTampered("Integrity digest binding failed")
+                }
+
+                val isEmulator = runCatching { NativeBridge.isEmulator() }.getOrDefault(false)
+                        || android.os.Build.FINGERPRINT.contains("generic")
+                        || android.os.Build.FINGERPRINT.contains("sdk_gphone")
+                        || android.os.Build.MODEL.contains("sdk_gphone")
+                if (isEmulator &&
+                    (appCtx.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0
+                ) {
+                    // Soft risk for offline-first: do not brick local startup with deadloop.
+                    android.util.Log.e(TAG, "emulator heuristic matched on release build")
+                    AuditLogger.log(
+                        appCtx,
+                        AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.EMULATOR_DETECTED,
+                        "emulator_detected_soft"
+                    )
+                    tampered = true
+                    SecurityState.markTampered("emulator heuristic matched")
+                }
+
+                try {
+                    NativeBridge.startHeartbeat()
+                } catch (e: Exception) {
+                    AuditLogger.log(
+                        appCtx,
+                        AuditLogger.Level.CRITICAL,
+                        AuditLogger.Event.TAMPER_DETECTED,
+                        "heartbeat start failed"
+                    )
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w(TAG, "background security init failed", t)
+            }
+        }, "ly-security-deferred").apply {
+            isDaemon = true
+            priority = Thread.NORM_PRIORITY - 1
+            start()
+        }
     }
 
     /**

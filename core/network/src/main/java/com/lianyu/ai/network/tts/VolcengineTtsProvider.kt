@@ -13,7 +13,6 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import com.lianyu.ai.network.CertificatePins
 
 class VolcengineTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -22,7 +21,6 @@ class VolcengineTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
-        builder.certificatePinner(CertificatePins.certificatePinner)
         builder.build()
     }
 

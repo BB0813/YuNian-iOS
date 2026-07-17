@@ -547,7 +547,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val keyToUse = allKeys.firstOrNull() ?: currentConfig.apiKey
                 SecureLog.d("SettingsViewModel", "Fetching models with key: ${keyToUse.take(8)}...")
 
-                val modelsResult = aiService.fetchModels(currentConfig.baseUrl, keyToUse, currentConfig.provider, currentConfig.skipCertVerify)
+                val modelsResult = aiService.fetchModels(currentConfig.baseUrl, keyToUse, currentConfig.provider)
                 val models = modelsResult.getOrNull()
 
                 if (models != null && models.isNotEmpty()) {
@@ -736,7 +736,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _modelFetchStates = MutableStateFlow<Map<String, ModelFetchState>>(emptyMap())
     val modelFetchStates: StateFlow<Map<String, ModelFetchState>> = _modelFetchStates.asStateFlow()
 
-    fun fetchModels(baseUrl: String, apiKey: String, provider: String, skipCertVerify: Boolean = false) {
+    fun fetchModels(baseUrl: String, apiKey: String, provider: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _fetchedModels.value = _fetchedModels.value.toMutableMap().apply {
                 remove(provider)
@@ -758,7 +758,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     apiKey = apiKey,
                     baseUrl = baseUrl,
                     model = "",
-                    skipCertVerify = skipCertVerify,
                     formatHint = if (provider == "CUSTOM_ANTHROPIC") "anthropic" else "openai"
                 )
                 if (!com.lianyu.ai.network.AiService.supportsOpenAiModelList(modelListConfig)) {
@@ -784,7 +783,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 if (!earlyReturn) {
-                val result = aiService.fetchModels(baseUrl, keyToUse, resolvedProvider, skipCertVerify)
+                val result = aiService.fetchModels(baseUrl, keyToUse, resolvedProvider)
                 result.onSuccess { models ->
                     _fetchedModels.value = _fetchedModels.value.toMutableMap().apply {
                         put(provider, models)
