@@ -61,9 +61,13 @@ internal class MediaPagingSource(
                 val list = mutableListOf<MediaItem>()
                 if (c == null) return@use list
 
-                // 定位到 offset
-                if (offset > 0) c.moveToPosition(offset.coerceAtMost(c.count - 1))
-                else c.moveToPosition(-1)
+                // 定位到 offset 前一行，确保 moveToNext() 从 offset 开始
+                if (offset > 0) {
+                    val target = (offset - 1).coerceAtMost(c.count - 1)
+                    c.moveToPosition(target)
+                } else {
+                    c.moveToPosition(-1)
+                }
 
                 var count = 0
                 while (c.moveToNext() && count < limit) {
