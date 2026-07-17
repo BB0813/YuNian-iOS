@@ -1,107 +1,115 @@
 package com.lianyu.ai.uicommon.picker.data
 
 import android.content.ContentResolver
-import android.net.Uri
+import android.content.ContentUris
 import android.provider.MediaStore
 import com.lianyu.ai.uicommon.picker.model.AlbumInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 相册文件夹聚合仓库。
+ * 相册文件夹聚合仓库 — 单次全表扫描，零 N+1 查询。
  *
  * 核心要点：
- * - 通过 ContentResolver SQL 层的 GROUP BY BUCKET_ID 聚合，
- *   不在内存中遍历全量数据，避免 10000+ 图片时的 UI 卡顿。
- * - 每个相册取最新一张图片作为封面。
+ * - 一次 ContentResolver.query 扫描所有图片行，在内存中按键聚合，
+ *   避免 1+2N 次 SQL 查询导致的严重卡顿。
+ * - 每个相册跟踪计数和最新图片的 mediaId（通过比较 DATE_ADDED），
+ *   无需额外 SQL。
  */
 internal class AlbumRepository(
     private val contentResolver: ContentResolver
 ) {
 
+    /** 单次扫描所需四列 */
+    private val projection = arrayOf(
+        MediaStore.Images.Media._ID,
+        MediaStore.Images.Media.BUCKET_ID,
+        MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+        MediaStore.Images.Media.DATE_ADDED
+    )
+
     suspend fun loadAlbums(): List<AlbumInfo> = withContext(Dispatchers.IO) {
-        val albums = mutableListOf<AlbumInfo>()
-
-        // 先加「全部照片」虚拟相册
-        val allCover = queryLatestImageUri(null)
-        albums.add(
-            AlbumInfo(
-                bucketId = 0L,
-                displayName = "全部照片",
-                count = queryCount(null),
-                coverUri = allCover
-            )
-        )
-
-        // 按 BUCKET_ID 聚合 — 先取所有不重复的 bucket，
-        // 再分别查询各 bucket 的图片数量和封面
-        val bucketProjection = arrayOf(
-            "DISTINCT ${MediaStore.Images.Media.BUCKET_ID}",
-            MediaStore.Images.Media.BUCKET_DISPLAY_NAME
-        )
+        val bucketMap = LinkedHashMap<Long, BucketAcc>()
 
         contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            bucketProjection,
-            null, null,
-            MediaStore.Images.Media.BUCKET_DISPLAY_NAME
+            projection,
+            null, null, null
         )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
-            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val idCol       = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val bucketCol   = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_ID)
+            val nameCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+            val dateCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 
             while (cursor.moveToNext()) {
-                val bucketId = cursor.getLong(idCol)
-                val displayName = cursor.getString(nameCol) ?: "未知相册"
-                val count = queryCount(bucketId)
-                val cover = queryLatestImageUri(bucketId)
+                val bucketId = cursor.getLong(bucketCol)
+                val mediaId  = cursor.getLong(idCol)
+                val date     = cursor.getLong(dateCol)
 
-                albums.add(
-                    AlbumInfo(
-                        bucketId = bucketId,
-                        displayName = displayName,
-                        count = count,
-                        coverUri = cover
+                val acc = bucketMap[bucketId]
+                if (acc == null) {
+                    bucketMap[bucketId] = BucketAcc(
+                        name    = cursor.getString(nameCol) ?: "未知相册",
+                        count   = 1,
+                        latestDate = date,
+                        coverId = mediaId
                     )
-                )
+                } else {
+                    acc.count++
+                    if (date > acc.latestDate) {
+                        acc.latestDate = date
+                        acc.coverId = mediaId
+                    }
+                }
             }
         }
+
+        // 构建结果：全部照片 + 各相册
+        var totalCount = 0
+        var allCoverId: Long? = null
+        var allLatestDate = Long.MIN_VALUE
+
+        val albums = mutableListOf<AlbumInfo>()
+
+        for ((bucketId, acc) in bucketMap) {
+            totalCount += acc.count
+            if (acc.latestDate > allLatestDate) {
+                allLatestDate = acc.latestDate
+                allCoverId = acc.coverId
+            }
+            albums.add(
+                AlbumInfo(
+                    bucketId    = bucketId,
+                    displayName = acc.name,
+                    count       = acc.count,
+                    coverUri    = ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, acc.coverId
+                    )
+                )
+            )
+        }
+
+        // 按数量降序排序（全部照片放最前）
+        albums.sortByDescending { it.count }
+
+        // 全部照片插在最前
+        albums.add(0, AlbumInfo(
+            bucketId    = 0L,
+            displayName = "全部照片",
+            count       = totalCount,
+            coverUri    = allCoverId?.let {
+                ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, it)
+            }
+        ))
 
         albums
     }
-
-    private fun queryCount(bucketId: Long?): Int {
-        val selection = bucketId?.let { "${MediaStore.Images.Media.BUCKET_ID} = ?" }
-        val args = bucketId?.let { arrayOf(it.toString()) }
-        val projection = arrayOf("COUNT(*) AS _count")
-
-        contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection, args, null
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                return cursor.getInt(cursor.getColumnIndexOrThrow("_count"))
-            }
-        }
-        return 0
-    }
-
-    private fun queryLatestImageUri(bucketId: Long?): Uri? {
-        val selection = bucketId?.let { "${MediaStore.Images.Media.BUCKET_ID} = ?" }
-        val args = bucketId?.let { arrayOf(it.toString()) }
-        val projection = arrayOf(MediaStore.Images.Media._ID)
-
-        contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection, args,
-            "${MediaStore.Images.Media.DATE_ADDED} DESC LIMIT 1"
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                return Uri.parse("${MediaStore.Images.Media.EXTERNAL_CONTENT_URI}/$id")
-            }
-        }
-        return null
-    }
 }
+
+/** 每个相册的累加器 */
+private class BucketAcc(
+    var name: String,
+    var count: Int,
+    var latestDate: Long,
+    var coverId: Long
+)
