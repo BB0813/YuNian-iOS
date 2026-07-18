@@ -3,11 +3,9 @@ package com.lianyu.ai
 import android.app.Activity
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -15,6 +13,9 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -23,6 +24,8 @@ import com.lianyu.ai.common.BatteryOptimizationHelper
 import com.lianyu.ai.common.PerformanceTrace
 import com.lianyu.ai.feature.update.AppUpdateManager
 import com.lianyu.ai.uicommon.component.UpdateDialog
+import com.lianyu.ai.uicommon.component.WindowMainBackground
+import com.lianyu.ai.uicommon.component.getMainBackgroundKey
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 
 import androidx.compose.material.icons.Icons
@@ -126,10 +129,32 @@ fun MainScreen(mainActivity: Activity) {
     val themeViewModel: ThemeViewModel = viewModel()
     val isDark by themeViewModel.isDarkTheme.collectAsStateWithLifecycle()
 
+    // 主界面背景：窗口层绘制（windowBackground / setBackgroundDrawable）
+    // 设置页写入 prefs 后，回到主 tab 或 ON_RESUME 时同步到 window，不在 Compose 根层二次绘制
+    fun syncWindowMainBackground() {
+        val key = getMainBackgroundKey(context)
+        WindowMainBackground.apply(mainActivity.window, context, key, isDark)
+    }
+    LaunchedEffect(currentRoute, isDark) {
+        if (MainRoute.isMainTabRoute(currentRoute)) {
+            syncWindowMainBackground()
+        }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, isDark) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                syncWindowMainBackground()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            // 背景由 window 层负责；此处仅保留启动绘制标记与测试锚点
             .drawWithContent {
                 drawContent()
                 PerformanceTrace.markStartupDrawn()

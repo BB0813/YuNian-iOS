@@ -6,6 +6,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -116,6 +117,44 @@ object ImageTransform {
             imageSize = imageSize,
             viewportSize = viewportSize,
         )
+    }
+
+    /**
+     * 预览适配：图片完整落入 viewport（contain），居中放置。
+     * 与 [fitToCropRect] 的 cover 策略相对，用于全屏查看器。
+     */
+    fun fitInside(imageSize: Size, viewportSize: Size): TransformState {
+        if (imageSize.width <= 0f || imageSize.height <= 0f ||
+            viewportSize.width <= 0f || viewportSize.height <= 0f
+        ) {
+            return TransformState(imageSize = imageSize, viewportSize = viewportSize)
+        }
+        val scale = min(
+            viewportSize.width / imageSize.width,
+            viewportSize.height / imageSize.height
+        )
+        val scaledW = imageSize.width * scale
+        val scaledH = imageSize.height * scale
+        val offsetX = (viewportSize.width - scaledW) / 2f
+        val offsetY = (viewportSize.height - scaledH) / 2f
+        return TransformState(
+            scale = scale,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            imageSize = imageSize,
+            viewportSize = viewportSize,
+        )
+    }
+
+    /**
+     * 预览边界约束：以整个 viewport 为可视区。
+     * - 放大后：保证 viewport 不越出图片（与裁剪器一致）
+     * - 未放大：居中（允许 letterbox）
+     */
+    fun clampToViewport(state: TransformState): TransformState {
+        val viewport = Rect(0f, 0f, state.viewportSize.width, state.viewportSize.height)
+        if (viewport.width <= 0f || viewport.height <= 0f) return state
+        return clampToBounds(state, viewport)
     }
 
     // ═══════════════════════════════════════════════════════════

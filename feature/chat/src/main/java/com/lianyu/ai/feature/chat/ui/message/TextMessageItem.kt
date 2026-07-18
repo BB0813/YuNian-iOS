@@ -45,12 +45,13 @@ fun TextMessageItem(
         adaptiveSizing = adaptiveSizing,
         isDarkTheme = isDarkTheme,
         copyText = quotedContent.body
-    ) {
+    ) { menuExpanded ->
         TextMessageContent(
             quotedContent = quotedContent,
             isMine = isMine,
             adaptiveSizing = adaptiveSizing,
-            onIntent = onIntent
+            onIntent = onIntent,
+            textSelectable = menuExpanded
         )
     }
 }

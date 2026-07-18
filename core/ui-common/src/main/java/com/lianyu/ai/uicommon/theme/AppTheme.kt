@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 
@@ -138,11 +139,23 @@ fun materialAppThemeColors(): AppThemeColors {
         outline = colorScheme.outline,
         outlineVariant = colorScheme.outlineVariant,
         success = Color(0xFF07C160),
-        successContainer = Color(0xFFE8F5E9),
+        successContainer = if (colorScheme.surface.luminance() < 0.5f) {
+            Color(0xFF16351F)
+        } else {
+            Color(0xFFE8F5E9)
+        },
         warning = Color(0xFFFF9800),
-        warningContainer = Color(0xFFFFF3E0),
+        warningContainer = if (colorScheme.surface.luminance() < 0.5f) {
+            Color(0xFF3A2A12)
+        } else {
+            Color(0xFFFFF3E0)
+        },
         danger = colorScheme.error,
-        dangerContainer = Color(0xFFFFEBEE),
+        dangerContainer = if (colorScheme.surface.luminance() < 0.5f) {
+            Color(0xFF3A1518)
+        } else {
+            Color(0xFFFFEBEE)
+        },
         inverseContent = Color.White,
         staticWhite = Color.White,
         staticBlack = Color.Black,

@@ -106,9 +106,10 @@ fun ContactsScreen(
     }
 
     // 计算每个 section 在 LazyColumn 中的索引（用于侧边栏跳转）
+    // 标题已移出 LazyColumn，固定在不透明顶栏中
     val sectionIndexMap = remember(groups, groupedCompanions, sectionKeys) {
         val map = mutableMapOf<String, Int>()
-        var idx = 1 // title
+        var idx = 0
         if (groups.isNotEmpty()) {
             idx += groups.size + 2 // group header + items + spacer
         }
@@ -120,16 +121,91 @@ fun ContactsScreen(
         map
     }
 
-    Scaffold { paddingValues ->
-        Box(
+    Scaffold(
+        containerColor = Color.Transparent
+    ) { paddingValues ->
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(colorScheme.background)
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(
-                    bottom = paddingValues.calculateBottomPadding()
-                )
+                // 列表区域透出 MainScreen 主界面背景层；顶栏单独铺不透明底
+                .background(Color.Transparent)
+                .padding(bottom = paddingValues.calculateBottomPadding())
         ) {
+            // 不透明顶部导航栏：标题「通讯录」/搜索框 + 两个操作图标
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colorScheme.surface)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 4.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.weight(1f))
+
+                if (isSearching) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.weight(2f),
+                        singleLine = true,
+                        placeholder = { Text("搜索好友") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colorScheme.primary,
+                            unfocusedBorderColor = colorScheme.outline
+                        )
+                    )
+                } else {
+                    Text(
+                        text = "通讯录",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 22.sp
+                        ),
+                        color = colorScheme.onSurface
+                    )
+                }
+
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(colorScheme.surfaceVariant)
+                                .clickable {
+                                    isSearching = !isSearching
+                                    if (!isSearching) searchQuery = ""
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isSearching) Icons.Outlined.Close else Icons.Outlined.Search,
+                                contentDescription = if (isSearching) "关闭搜索" else "搜索好友",
+                                modifier = Modifier.size(20.dp),
+                                tint = colorScheme.onSurface
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(colorScheme.surfaceVariant)
+                                .clickable { onAddClick() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.PersonAdd,
+                                contentDescription = "添加好友",
+                                modifier = Modifier.size(20.dp),
+                                tint = colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -138,79 +214,6 @@ fun ContactsScreen(
                     contentPadding = PaddingValues(vertical = 8.dp, horizontal = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // 通讯录标题（居中 + 搜索/添加按钮）
-                    item(key = "title") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 4.dp, end = 4.dp, bottom = 8.dp, top = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(modifier = Modifier.weight(1f))
-
-                            if (isSearching) {
-                                OutlinedTextField(
-                                    value = searchQuery,
-                                    onValueChange = { searchQuery = it },
-                                    modifier = Modifier.weight(2f),
-                                    singleLine = true,
-                                    placeholder = { Text("搜索好友") },
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = colorScheme.primary,
-                                        unfocusedBorderColor = colorScheme.outline
-                                    )
-                                )
-                            } else {
-                                Text(
-                                    text = "通讯录",
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 22.sp
-                                    ),
-                                    color = colorScheme.onSurface
-                                )
-                            }
-
-                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(18.dp))
-                                            .background(colorScheme.surfaceVariant)
-                                            .clickable {
-                                                isSearching = !isSearching
-                                                if (!isSearching) searchQuery = ""
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isSearching) Icons.Outlined.Close else Icons.Outlined.Search,
-                                            contentDescription = if (isSearching) "关闭搜索" else "搜索好友",
-                                            modifier = Modifier.size(20.dp),
-                                            tint = colorScheme.onSurface
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(18.dp))
-                                            .background(colorScheme.surfaceVariant)
-                                            .clickable { onAddClick() },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.PersonAdd,
-                                            contentDescription = "添加好友",
-                                            modifier = Modifier.size(20.dp),
-                                            tint = colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     if (groups.isNotEmpty()) {
                         item(key = "groups_header") {
                             Text(
@@ -287,6 +290,7 @@ fun ContactsScreen(
                         }
                     )
                 }
+            }
         }
     }
 }
@@ -421,13 +425,13 @@ fun EmptyContactsState() {
                 modifier = Modifier
                     .size(80.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFE5E5E5)),
+                    .background(colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Person,
                     contentDescription = null,
-                    tint = Color(0xFF888888),
+                    tint = colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(36.dp)
                 )
             }

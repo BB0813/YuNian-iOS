@@ -60,9 +60,15 @@ class PickerViewModel(
     private val _mediaList = MutableStateFlow<List<MediaItem>>(emptyList())
     val mediaList: StateFlow<List<MediaItem>> = _mediaList.asStateFlow()
 
-    init {
+    // 不在 init 中加载：首次打开时权限可能尚未授予，
+    // 由 CustomImagePicker 在权限就绪后调用 reload()。
+
+    /** 权限就绪后重新加载相册与当前文件夹图片 */
+    fun reload() {
         loadAlbums()
-        switchAlbum(0L, "全部照片")
+        val bucketId = _state.value.currentBucketId
+        val name = _state.value.currentAlbumName.ifBlank { "全部照片" }
+        switchAlbum(bucketId, name)
     }
 
     // ---------- 文件夹 ----------

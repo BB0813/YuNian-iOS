@@ -47,6 +47,7 @@ import com.lianyu.ai.uicommon.component.BackgroundSettingsScreen
 import com.lianyu.ai.feature.profile.ProfileScreen
 import com.lianyu.ai.feature.profile.ProfileSettingsScreen
 import com.lianyu.ai.feature.profile.RoleManagerScreen
+import com.lianyu.ai.feature.profile.UserProfileReadonlyScreen
 import com.lianyu.ai.feature.profile.SupportScreen
 import com.lianyu.ai.feature.profile.TeamScreen
 import com.lianyu.ai.feature.profile.ThanksFullListScreen
@@ -119,7 +120,13 @@ internal fun MainNavHost(
                 companionId = companionId,
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToDetail = { navController.navigate(MainRoute.ChatDetail(it).route) },
+                onNavigateToUserProfile = { navController.navigate(MainRoute.UserProfileReadonly.route) },
                 onNavigateToVoiceCall = { navController.navigate(MainRoute.VoiceCall(it).route) }
+            )
+        }
+        composable(MainRoute.UserProfileReadonly.route) {
+            UserProfileReadonlyScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
         composable(

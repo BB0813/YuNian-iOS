@@ -5,7 +5,7 @@ package com.lianyu.ai.domain
  * Implemented by feature:profile (or app-level bridge).
  *
  * 注意：此接口属于 core:domain 零依赖模块，不得引入 kotlinx.coroutines 等外部依赖。
- * 头像变化监听采用回调模式，返回取消订阅的函数。
+ * 资料变化监听采用回调模式，返回取消订阅的函数。
  */
 interface UserProfileProvider {
     fun getUserId(): String
@@ -17,6 +17,12 @@ interface UserProfileProvider {
      * @return 取消订阅的函数，调用后不再收到回调
      */
     fun observeAvatar(onChange: (String?) -> Unit): () -> Unit
+
+    /**
+     * 观察昵称变化。调用方在协程中订阅，[onChange] 每次昵称更新时回调。
+     * @return 取消订阅的函数，调用后不再收到回调
+     */
+    fun observeNickname(onChange: (String) -> Unit): () -> Unit
 
     fun isLoggedIn(): Boolean
 }

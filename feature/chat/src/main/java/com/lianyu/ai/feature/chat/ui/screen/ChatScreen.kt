@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -72,6 +73,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -90,6 +92,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -117,6 +120,7 @@ import com.lianyu.ai.feature.chat.ui.message.TypingIndicatorItem
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
+import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatUiEvent
 import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
 import com.lianyu.ai.feature.chat.ui.viewmodel.encodeQuotedMessage
@@ -128,12 +132,12 @@ import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.uicommon.component.UserAvatar
 import com.lianyu.ai.uicommon.component.VoiceRecorder
 import com.lianyu.ai.uicommon.component.VoiceMessageBubble
-import com.lianyu.ai.uicommon.component.getChatBackground
 import com.lianyu.ai.uicommon.component.getChatBackgroundByKey
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
 import com.lianyu.ai.network.tts.ChatTtsMode
+import com.lianyu.ai.uicommon.image.viewer.FullscreenImageViewer
 import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.AppTheme
@@ -152,6 +156,7 @@ fun ChatScreen(
     companionId: Long,
     onNavigateBack: () -> Unit,
     onNavigateToDetail: (Long) -> Unit = {},
+    onNavigateToUserProfile: () -> Unit = {},
     onNavigateToVoiceCall: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -166,6 +171,7 @@ fun ChatScreen(
     var quoteReply by remember { mutableStateOf<QuoteReply?>(null) }
     var previewImagePath by remember { mutableStateOf<String?>(null) }
     var showExtensionPanel by remember { mutableStateOf(false) }
+    var showStickerPanel by remember { mutableStateOf(false) }
     // 自研图片选择器（多选模式，复选框）
     var showImagePicker by remember { mutableStateOf(false) }
 
@@ -275,6 +281,13 @@ fun ChatScreen(
     val chatItems = remember(messageMetadata, messageBodies) {
         toChatListItems(messageMetadata, messageBodies)
     }
+    // 时间正序图片列表：配合 reverseLayout 实现「左滑上一张、右滑下一张」
+    val chatImagePaths = remember(chatItems) {
+        chatItems.mapNotNull { item ->
+            val message = (item as? ChatListItem.ImageMessage)?.message ?: return@mapNotNull null
+            message.linkString.ifBlank { message.content }.takeIf { it.isNotBlank() }
+        }.distinct()
+    }
     val visibleChatItems = remember(chatItems) { chatItems.asReversed() }
     val visibleMessagesReady = messageMetadata.lastOrNull()?.let { latest ->
         messageBodies[latest.id] is MessageBodyState.Ready
@@ -363,6 +376,7 @@ fun ChatScreen(
             }
             is ChatIntent.OpenMedia -> {
                 if (intent.mimeType.startsWith("image/")) {
+                    // 打开当前图；列表由 chatItems 中全部图片消息构成，支持左右滑切换
                     previewImagePath = intent.path
                 } else {
                     scope.launch {
@@ -454,9 +468,14 @@ fun ChatScreen(
         }
     }
 
-    // 键盘弹出时滚动到底部
-    LaunchedEffect(WindowInsets.ime.getBottom(LocalDensity.current)) {
-        if (itemCount > 0) listState.scrollToItem(0)
+    // 键盘弹出时滚动到底部，并收起“+”/表情扩展面板（输入框下方面板与键盘互斥）
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    LaunchedEffect(imeBottom) {
+        if (imeBottom > 0) {
+            showExtensionPanel = false
+            showStickerPanel = false
+            if (itemCount > 0) listState.scrollToItem(0)
+        }
     }
 
     // ── 上划加载历史消息 ──
@@ -497,8 +516,10 @@ fun ChatScreen(
     }
 
     // Background: per-companion > global > default
+    // 解析结果直接驱动绘制；仅 default 跟随主题底色，禁止深色模式整页覆盖用户背景
     val colors = AppTheme.colors
     val defaultBackground = colors.background
+    var resolvedBgKey by remember { mutableStateOf("default") }
     var targetBgColor by remember { mutableStateOf(defaultBackground) }
     var chatBgGradient by remember { mutableStateOf<Brush?>(null) }
     var isCustomBg by remember { mutableStateOf(false) }
@@ -521,6 +542,7 @@ fun ChatScreen(
             }
             val custom = isCustomBackground(effectiveKey)
             withContext(Dispatchers.Main) {
+                resolvedBgKey = effectiveKey
                 targetBgColor = color
                 chatBgGradient = gradient
                 isCustomBg = custom
@@ -530,12 +552,10 @@ fun ChatScreen(
     }
 
     val chatBgColor by animateColorAsState(targetBgColor, tween(300), label = "bgColor")
-    val backgroundColor = if (isDarkTheme && !isCustomBg) {
-        colors.background
-    } else if (isDarkTheme && isCustomBg) {
-        colors.background
-    } else {
-        chatBgColor
+    val backgroundColor = when {
+        isCustomBg -> Color.Transparent
+        resolvedBgKey == "default" -> colors.background
+        else -> chatBgColor
     }
 
     val glassIntensity = when (perfTier) {
@@ -546,7 +566,6 @@ fun ChatScreen(
     }
 
     // Voice recording
-    var showStickerPanel by remember { mutableStateOf(false) }
     var showVoiceRecorder by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var recordingDuration by remember { mutableStateOf(0) }
@@ -561,9 +580,6 @@ fun ChatScreen(
         onNavigateBack()
     }
 
-    BackHandler(enabled = previewImagePath != null) {
-        previewImagePath = null
-    }
     BackHandler(enabled = previewImagePath == null, onBack = exitChat)
 
     // Voice recording timer & actual recording
@@ -616,9 +632,13 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .then(
-                    if (isCustomBg) Modifier.background(Color.Transparent)
-                    else if (!isDarkTheme && chatBgGradient != null) Modifier.background(chatBgGradient!!)
-                    else Modifier.background(backgroundColor)
+                    when {
+                        isCustomBg -> Modifier.background(Color.Transparent)
+                        // 预设渐变在深/浅色下都生效；default 已在 backgroundColor 中跟随主题
+                        chatBgGradient != null && resolvedBgKey != "default" ->
+                            Modifier.background(chatBgGradient!!)
+                        else -> Modifier.background(backgroundColor)
+                    }
                 )
         ) {
             Box(
@@ -641,7 +661,14 @@ fun ChatScreen(
                             else Modifier
                         )
                         .nestedScroll(rememberHorizontalSwipeGuard())
-                        .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
+                        .pointerInput(Unit) {
+                            detectTapGestures {
+                                keyboardController?.hide()
+                                focusManager.clearFocus(force = true)
+                                showExtensionPanel = false
+                                showStickerPanel = false
+                            }
+                        },
                     contentPadding = PaddingValues(
                         start = adaptiveSizing.listHorizontalPadding, end = adaptiveSizing.listHorizontalPadding,
                         top = ChatTopBarOverlayDefaults.ContentTopPadding,
@@ -692,7 +719,8 @@ fun ChatScreen(
                             adaptiveSizing = adaptiveSizing,
                             isDarkTheme = isDarkTheme,
                             onRetryBody = viewModel::retryMessageBody,
-                            onCompanionAvatarClick = { onNavigateToDetail(companionId) }
+                            onCompanionAvatarClick = { onNavigateToDetail(companionId) },
+                            onUserAvatarClick = onNavigateToUserProfile
                         )
                     }
 
@@ -836,8 +864,15 @@ fun ChatScreen(
                     }
                 },
                 onStickerPanelClick = {
+                    val opening = !showStickerPanel
                     showExtensionPanel = false
-                    showStickerPanel = !showStickerPanel
+                    if (opening) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus(force = true)
+                        showStickerPanel = true
+                    } else {
+                        showStickerPanel = false
+                    }
                 },
                 onSendMessage = { msg ->
                     val currentQuote = quoteReply
@@ -846,8 +881,16 @@ fun ChatScreen(
                     onIntent(ChatIntent.SendText(content))
                 },
                 onPlusClick = {
-                    showExtensionPanel = !showExtensionPanel
+                    val opening = !showExtensionPanel
                     showStickerPanel = false
+                    if (opening) {
+                        // 收起键盘后在输入框下方展开面板，输入区整体上移
+                        keyboardController?.hide()
+                        focusManager.clearFocus(force = true)
+                        showExtensionPanel = true
+                    } else {
+                        showExtensionPanel = false
+                    }
                 },
                 onVoiceRecordStart = {
                     if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -926,32 +969,35 @@ fun ChatScreen(
             adaptiveSizing = adaptiveSizing
         )
 
-        previewImagePath?.let { imagePath ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(colors.scrim.copy(alpha = 0.94f))
-                    .clickable { previewImagePath = null },
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model = java.io.File(imagePath),
-                    contentDescription = "图片预览",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 720.dp)
-                        .clickable { },
-                    contentScale = ContentScale.Fit,
-                    onError = {
-                        previewImagePath = null
-                        scope.launch {
-                            val result = openChatMedia(context, imagePath, "image/*")
-                            if (!result) snackbarHostState.showSnackbar("无法打开该文件")
-                        }
-                    }
-                )
+        // 全屏图片预览：AtomicImageViewer + 多图左右滑
+        val previewPath = previewImagePath
+        val previewModels = remember(previewPath, chatImagePaths) {
+            when {
+                previewPath == null -> emptyList()
+                chatImagePaths.contains(previewPath) -> chatImagePaths
+                else -> listOf(previewPath)
             }
         }
+        val previewIndex = remember(previewPath, previewModels) {
+            previewPath?.let { previewModels.indexOf(it) }?.takeIf { it >= 0 } ?: 0
+        }
+        FullscreenImageViewer(
+            models = previewModels,
+            initialIndex = previewIndex,
+            visible = previewPath != null && previewModels.isNotEmpty(),
+            onDismiss = { previewImagePath = null },
+            onOpenFailed = { failed ->
+                val failedPath = failed as? String ?: previewImagePath
+                previewImagePath = null
+                if (failedPath != null) {
+                    scope.launch {
+                        val result = openChatMedia(context, failedPath, "image/*")
+                        if (!result) snackbarHostState.showSnackbar("无法打开该文件")
+                    }
+                }
+            },
+            scrimColor = colors.scrim
+        )
 
         // ═══ 自研图片选择器（多选，复选框） ═══
         if (showImagePicker) {

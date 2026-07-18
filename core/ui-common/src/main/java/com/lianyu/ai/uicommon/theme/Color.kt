@@ -5,23 +5,29 @@ import androidx.compose.ui.graphics.Color
 // ============================================================
 // Pink Romance Theme - Dark Mode (Primary)
 // ============================================================
+// 层级（由深到浅）：Background → Surface(chrome) → Card(列表/菜单) → Elevated
+// 深色主题必须保证 chrome / 卡片 / 页面底有清晰对比，避免“糊成一片”。
 
 // Background
-val WeChatDarkBackground = Color(0xFF1A1216)
-val WeChatDarkSurface = Color(0xFF241B20)
-val WeChatDarkCard = Color(0xFF2D2228)
-val WeChatDarkDivider = Color(0xFF3D2F36)
+val WeChatDarkBackground = Color(0xFF141014)
+val WeChatDarkSurface = Color(0xFF1E171B)
+val WeChatDarkCard = Color(0xFF2A2126)
+val WeChatDarkElevated = Color(0xFF342A30)
+val WeChatDarkDivider = Color(0xFF46363E)
 
 // Text
-val WeChatDarkTextPrimary = Color(0xFFF5E6EB)
-val WeChatDarkTextSecondary = Color(0xFFB8A0A8)
-val WeChatDarkTextTertiary = Color(0xFF8A727C)
+val WeChatDarkTextPrimary = Color(0xFFF7E9EE)
+val WeChatDarkTextSecondary = Color(0xFFC4A9B2)
+val WeChatDarkTextTertiary = Color(0xFF8F7680)
 
 // Pink accent
 val PinkPrimary = Color(0xFFF4A6B5)
 val PinkLight = Color(0xFFF8C8D8)
 val PinkDark = Color(0xFFD48494)
 val PinkMuted = Color(0xFF6B4A52)
+/** 深色主题选中/强调底：不透明，避免粉透底发脏 */
+val PinkPrimaryContainerDark = Color(0xFF4A2E36)
+val PinkOnPrimaryContainerDark = Color(0xFFFFD9E2)
 
 // ============================================================
 // Pink Romance Theme - Light Mode
@@ -40,23 +46,33 @@ val WeChatLightTextTertiary = Color(0xFFB89AA2)
 // Message Bubble Colors
 // ============================================================
 
-val UserBubbleColor = Color(0xFFF4A6B5)
-val UserBubbleText = Color(0xFF2D1F24)
-
-val AiBubbleDark = Color(0xFF2D2228).copy(alpha = 0.9f)
-val AiBubbleLight = Color(0xFFFFFFFF).copy(alpha = 0.9f)
-val AiBubbleBorderDark = Color(0xFFF4A6B5).copy(alpha = 0.15f)
-val AiBubbleBorderLight = Color(0xFF000000).copy(alpha = 0.06f)
+// 消息气泡必须不透明，避免聊天背景透出
+// 自己气泡与 AI 气泡统一为天蓝色 #87CEFA
+val BubbleSkyBlue = Color(0xFF87CEFA)
+val AiBubbleDark = BubbleSkyBlue
+val AiBubbleLight = BubbleSkyBlue
+val AiBubbleBorderDark = Color(0xFF5BB8F0).copy(alpha = 0.35f)
+val AiBubbleBorderLight = Color(0xFF4AA3D9).copy(alpha = 0.18f)
+val BubbleOnPink = Color(0xFF1A2A33)
 
 // ============================================================
-// Navigation
+// Navigation / Chrome
 // ============================================================
 
-val NavBackgroundDark = Color(0xFF241B20)
+val NavBackgroundDark = WeChatDarkSurface
 val NavBackgroundLight = Color(0xFFFFF0F3)
 val NavSelected = PinkPrimary
-val NavUnselectedDark = Color(0xFF8A727C)
+val NavUnselectedDark = WeChatDarkTextTertiary
 val NavUnselectedLight = Color(0xFFB89AA2)
+
+// 深色主题主界面预设背景（与浅色同 key，运行时按 isDark 切换）
+val DarkBgDefault = WeChatDarkBackground
+val DarkBgWarmPink = Color(0xFF24161C)
+val DarkBgLavender = Color(0xFF1C1724)
+val DarkBgOcean = Color(0xFF141C24)
+val DarkBgForest = Color(0xFF141C16)
+val DarkBgSunset = Color(0xFF241814)
+val DarkBgNight = Color(0xFF101018)
 
 // ============================================================
 // Status Colors

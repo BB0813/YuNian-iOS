@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +61,11 @@ data class ChatBackgroundOption(
     val isCustom: Boolean = false
 )
 
+/**
+ * 背景预设（浅色预览色）。
+ * 深色主题运行时请走 [resolveBackgroundPalette] / [getMainBackgroundByKey] /
+ * [getChatBackgroundByKey]，不要直接拿这里的浅色当页面底。
+ */
 fun chatBackgroundOptions(context: Context): List<ChatBackgroundOption> {
     return listOf(
         ChatBackgroundOption(
@@ -118,6 +124,60 @@ fun chatBackgroundOptions(context: Context): List<ChatBackgroundOption> {
     )
 }
 
+/**
+ * 按主题解析预设背景色板。
+ * 深色主题使用独立深色色标，避免浅色预设在暗色 UI 上发白刺眼。
+ */
+fun resolveBackgroundPalette(key: String, isDark: Boolean): Pair<Color, Brush?> {
+    if (!isDark) {
+        return when (key) {
+            "default" -> Color(0xFFF5F5F5) to null
+            "warm_pink" -> Color(0xFFFFF0F3) to Brush.verticalGradient(
+                listOf(Color(0xFFFFF5F7), Color(0xFFFFF0F3), Color(0xFFFFE8EC))
+            )
+            "lavender" -> Color(0xFFF8F5FF) to Brush.verticalGradient(
+                listOf(Color(0xFFFBF8FF), Color(0xFFF5F0FF), Color(0xFFEDE5F8))
+            )
+            "ocean" -> Color(0xFFF0F5FA) to Brush.verticalGradient(
+                listOf(Color(0xFFF5FAFF), Color(0xFFE8F2FC), Color(0xFFDBEAF5))
+            )
+            "forest" -> Color(0xFFF2F8F2) to Brush.verticalGradient(
+                listOf(Color(0xFFF8FCF8), Color(0xFFEEF5EE), Color(0xFFE3EFE3))
+            )
+            "sunset" -> Color(0xFFFFF5F0) to Brush.verticalGradient(
+                listOf(Color(0xFFFFF8F5), Color(0xFFFFF0E8), Color(0xFFFFE8D8))
+            )
+            "night" -> Color(0xFFF0F0F5) to Brush.verticalGradient(
+                listOf(Color(0xFFF5F5FA), Color(0xFFEEEEF5), Color(0xFFE5E5F0))
+            )
+            else -> Color(0xFFF5F5F5) to null
+        }
+    }
+
+    return when (key) {
+        "default" -> com.lianyu.ai.uicommon.theme.DarkBgDefault to null
+        "warm_pink" -> com.lianyu.ai.uicommon.theme.DarkBgWarmPink to Brush.verticalGradient(
+            listOf(Color(0xFF2A1A20), Color(0xFF24161C), Color(0xFF1C1218))
+        )
+        "lavender" -> com.lianyu.ai.uicommon.theme.DarkBgLavender to Brush.verticalGradient(
+            listOf(Color(0xFF221C2C), Color(0xFF1C1724), Color(0xFF16121C))
+        )
+        "ocean" -> com.lianyu.ai.uicommon.theme.DarkBgOcean to Brush.verticalGradient(
+            listOf(Color(0xFF1A2430), Color(0xFF141C24), Color(0xFF101820))
+        )
+        "forest" -> com.lianyu.ai.uicommon.theme.DarkBgForest to Brush.verticalGradient(
+            listOf(Color(0xFF1A241C), Color(0xFF141C16), Color(0xFF101610))
+        )
+        "sunset" -> com.lianyu.ai.uicommon.theme.DarkBgSunset to Brush.verticalGradient(
+            listOf(Color(0xFF2C1C16), Color(0xFF241814), Color(0xFF1C1410))
+        )
+        "night" -> com.lianyu.ai.uicommon.theme.DarkBgNight to Brush.verticalGradient(
+            listOf(Color(0xFF16161E), Color(0xFF101018), Color(0xFF0C0C12))
+        )
+        else -> com.lianyu.ai.uicommon.theme.DarkBgDefault to null
+    }
+}
+
 private const val CHAT_BG_PREF = "chat_background"
 private const val CUSTOM_BG_PREFIX = "custom_"
 private const val CUSTOM_BG_DIR = "chat_backgrounds"
@@ -143,6 +203,32 @@ fun setChatBackgroundKey(context: Context, key: String) {
 
 fun isCustomBackground(key: String): Boolean {
     return key.startsWith(CUSTOM_BG_PREFIX)
+}
+
+/** 纯色背景 key：color_<ARGB long> */
+private const val COLOR_BG_PREFIX = "color_"
+
+fun isColorBackground(key: String): Boolean {
+    return key.startsWith(COLOR_BG_PREFIX)
+}
+
+fun colorBackgroundKey(color: Color): String {
+    // 与历史 color_<signed long> 格式保持一致，避免已保存背景失效
+    return COLOR_BG_PREFIX + color.value.toLong()
+}
+
+fun parseColorBackground(key: String): Color? {
+    if (!isColorBackground(key)) return null
+    val raw = key.removePrefix(COLOR_BG_PREFIX)
+    return try {
+        Color(raw.toLong())
+    } catch (_: Exception) {
+        try {
+            Color(raw.toULong())
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
 
 fun getCustomBackgroundFile(context: Context, key: String): File? {
@@ -227,6 +313,57 @@ fun saveCustomBackground(context: Context, uri: Uri): String? {
     }
 }
 
+/**
+ * 将裁剪后的 Bitmap 保存为自定义背景，返回 background key。
+ */
+fun saveCustomBackground(context: Context, bitmap: android.graphics.Bitmap): String? {
+    var tempFile: File? = null
+    var finalFile: File? = null
+    return try {
+        val dir = File(context.filesDir, CUSTOM_BG_DIR).canonicalFile
+        if (!dir.exists() && !dir.mkdirs()) return null
+        if (!dir.isDirectory) return null
+
+        val id = UUID.randomUUID().toString()
+        val fileName = "bg_${id}.jpg"
+        val tempFileName = ".tmp_bg_${id}.part"
+        if (!CUSTOM_BG_FILE_REGEX.matches(fileName)) return null
+        if (!CUSTOM_BG_TEMP_FILE_REGEX.matches(tempFileName)) return null
+        tempFile = File(dir, tempFileName).canonicalFile
+        finalFile = File(dir, fileName).canonicalFile
+        if (tempFile.parentFile != dir || finalFile.parentFile != dir) return null
+
+        FileOutputStream(tempFile).use { output ->
+            if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, output)) {
+                return null
+            }
+            output.fd.sync()
+        }
+
+        if (!isReadableImage(tempFile)) {
+            tempFile.delete()
+            return null
+        }
+        if (finalFile.exists()) {
+            tempFile.delete()
+            return null
+        }
+        if (!tempFile.renameTo(finalFile)) {
+            tempFile.delete()
+            return null
+        }
+        CUSTOM_BG_PREFIX + fileName
+    } catch (_: IOException) {
+        tempFile?.delete()
+        finalFile?.delete()
+        null
+    } catch (_: SecurityException) {
+        tempFile?.delete()
+        finalFile?.delete()
+        null
+    }
+}
+
 fun deleteCustomBackground(context: Context, key: String) {
     if (!isCustomBackground(key)) return
     getCustomBackgroundFile(context, key)?.delete()
@@ -245,12 +382,26 @@ fun getChatBackground(context: Context, isDark: Boolean): Pair<Color, Brush?> {
 
 fun getChatBackgroundByKey(context: Context, key: String, isDark: Boolean): Pair<Color, Brush?> {
     if (isCustomBackground(key)) {
-        val fallback = if (isDark) Color(0xFF1A1216) else Color(0xFFF5F5F5)
+        val fallback = if (isDark) com.lianyu.ai.uicommon.theme.DarkBgDefault else Color(0xFFF5F5F5)
         return fallback to null
     }
-    val allOptions = chatBackgroundOptions(context)
-    val option = allOptions.find { it.key == key } ?: allOptions.first()
-    return option.color to option.gradient
+    parseColorBackground(key)?.let { return it to null }
+    return resolveBackgroundPalette(key, isDark)
+}
+
+/**
+ * 解析主界面背景：支持预设 / 纯色 / 自定义图片。
+ * 返回 (底色, 渐变, 自定义图片 key?)。
+ * 深色主题使用独立深色色板，避免浅色预设透出。
+ */
+fun getMainBackgroundByKey(context: Context, key: String, isDark: Boolean): Triple<Color, Brush?, String?> {
+    if (isCustomBackground(key)) {
+        val fallback = if (isDark) com.lianyu.ai.uicommon.theme.DarkBgDefault else Color(0xFFF5F5F5)
+        return Triple(fallback, null, key)
+    }
+    parseColorBackground(key)?.let { return Triple(it, null, null) }
+    val (color, gradient) = resolveBackgroundPalette(key, isDark)
+    return Triple(color, gradient, null)
 }
 
 fun getCustomBackgroundUri(context: Context, key: String): Uri? {
@@ -284,7 +435,13 @@ fun ChatBackgroundPickerDialog(
         }
     }
 
-    val options = chatBackgroundOptions(context)
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val options = remember(isDark) {
+        chatBackgroundOptions(context).map { option ->
+            val (color, gradient) = resolveBackgroundPalette(option.key, isDark)
+            option.copy(color = color, gradient = gradient)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -310,7 +467,7 @@ fun ChatBackgroundPickerDialog(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // 预设背景
+                    // 预设背景（预览色按当前深浅主题解析）
                     options.forEach { option ->
                         val isSelected = option.key == selectedKey
                         BackgroundOptionItem(

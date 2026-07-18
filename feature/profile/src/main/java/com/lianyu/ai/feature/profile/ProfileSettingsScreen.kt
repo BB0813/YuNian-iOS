@@ -3,8 +3,11 @@ package com.lianyu.ai.feature.profile
 import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -29,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -42,11 +46,14 @@ import coil.compose.AsyncImage
 import com.lianyu.ai.feature.profile.R
 import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
 import com.lianyu.ai.uicommon.image.cropper.ImageCropperDialog
+import com.lianyu.ai.uicommon.component.bounceVerticalScroll
 import android.net.Uri
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // ============================================================================
@@ -65,12 +72,22 @@ fun ProfileSettingsScreen(
     val userName by viewModel.userName.collectAsState()
     val userAvatar by viewModel.userAvatar.collectAsState()
     val userSignature by viewModel.userSignature.collectAsState()
+    val userStatus by viewModel.userStatus.collectAsState()
+    val userGender by viewModel.userGender.collectAsState()
+
+    val genderLabel = when (userGender) {
+        "male" -> stringResource(R.string.profile_gender_male)
+        "female" -> stringResource(R.string.profile_gender_female)
+        else -> stringResource(R.string.profile_not_set)
+    }
 
     // --- 编辑对话框状态 ---
     var showNameDialog by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(userName) }
     var showSignatureDialog by remember { mutableStateOf(false) }
     var editSignature by remember { mutableStateOf(userSignature) }
+    var showStatusDialog by remember { mutableStateOf(false) }
+    var editStatus by remember { mutableStateOf(userStatus) }
     var showGenderDialog by remember { mutableStateOf(false) }
     var showRegionDialog by remember { mutableStateOf(false) }
     var editRegion by remember { mutableStateOf("") }
@@ -84,18 +101,24 @@ fun ProfileSettingsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.profile_settings_title)) },
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.profile_settings_title),
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                        textAlign = TextAlign.Center
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = colorScheme.onSurface)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = colorScheme.background,
                     titleContentColor = colorScheme.onSurface
-                ),
-                windowInsets = WindowInsets(0, 0, 0, 0)
+                )
+                // 默认 windowInsets 保留状态栏留白，避免与系统状态栏重合
             )
         },
         containerColor = colorScheme.background
@@ -104,6 +127,7 @@ fun ProfileSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .bounceVerticalScroll(resistance = 0.38f, maxOverscrollDp = 88f)
                 .verticalScroll(rememberScrollState())
         ) {
             // === 头像 — 复用 ProfileSectionRow 原子 ===
@@ -123,7 +147,7 @@ fun ProfileSettingsScreen(
                     modifier = Modifier
                         .size(56.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFE8E8E8))
+                        .background(colorScheme.surfaceVariant)
                         .clickable(
                             interactionSource = avatarInteraction,
                             indication = null,
@@ -142,7 +166,7 @@ fun ProfileSettingsScreen(
                         Icon(
                             Icons.Filled.Person,
                             stringResource(R.string.profile_avatar),
-                            tint = Color(0xFFCCCCCC),
+                            tint = colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(28.dp)
                         )
                     }
@@ -171,8 +195,8 @@ fun ProfileSettingsScreen(
             // === 性别 ===
             ProfileLabelValueRow(
                 label = stringResource(R.string.profile_gender),
-                value = stringResource(R.string.profile_not_set),
-                dimmed = true,
+                value = genderLabel,
+                dimmed = userGender.isBlank(),
                 onClick = { showGenderDialog = true }
             )
             ProfileSectionDivider()
@@ -183,6 +207,15 @@ fun ProfileSettingsScreen(
                 value = editRegion.ifBlank { stringResource(R.string.profile_not_set) },
                 dimmed = editRegion.isBlank(),
                 onClick = { showRegionDialog = true }
+            )
+            ProfileSectionDivider()
+
+            // === 状态 ===
+            ProfileLabelValueRow(
+                label = stringResource(R.string.profile_status),
+                value = userStatus.ifBlank { stringResource(R.string.profile_not_set) },
+                dimmed = userStatus.isBlank(),
+                onClick = { editStatus = userStatus; showStatusDialog = true }
             )
             ProfileSectionDivider()
 
@@ -242,11 +275,33 @@ fun ProfileSettingsScreen(
     }
 
     // ================================================================
-    // 性别选择 — 垂直滚动选择器
+    // 状态编辑对话框
+    // ================================================================
+    if (showStatusDialog) {
+        BottomLineEditDialog(
+            title = stringResource(R.string.profile_status),
+            value = editStatus,
+            onValueChange = { if (it.length <= 16) editStatus = it },
+            placeholder = stringResource(R.string.profile_status),
+            maxLength = 16,
+            onConfirm = {
+                viewModel.updateUserStatus(editStatus.trim())
+                showStatusDialog = false
+            },
+            onDismiss = { showStatusDialog = false }
+        )
+    }
+
+    // ================================================================
+    // 性别选择 — 上下滑动滚轮单选
     // ================================================================
     if (showGenderDialog) {
         GenderPickerDialog(
-            onConfirm = { showGenderDialog = false },
+            initialGender = userGender,
+            onConfirm = { selectedGender ->
+                viewModel.updateUserGender(selectedGender)
+                showGenderDialog = false
+            },
             onDismiss = { showGenderDialog = false }
         )
     }
@@ -472,19 +527,50 @@ private fun BottomLineEditDialog(
 }
 
 // ============================================================================
-// 性别垂直滚动选择器
+// 性别上下滑动滚轮单选
 // ============================================================================
 
 @Composable
 private fun GenderPickerDialog(
-    onConfirm: () -> Unit,
+    initialGender: String,
+    onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val options = listOf(
-        stringResource(R.string.profile_gender_male),
-        stringResource(R.string.profile_gender_female)
+        "male" to stringResource(R.string.profile_gender_male),
+        "female" to stringResource(R.string.profile_gender_female)
     )
-    var selectedIndex by remember { mutableStateOf(0) }
+    val initialIndex = options.indexOfFirst { it.first == initialGender }.let { if (it >= 0) it else 0 }
+    val itemHeight = 48.dp
+    val visibleCount = 3
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val itemHeightPx = with(density) { itemHeight.toPx() }
+
+    val selectedIndex by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val visible = layoutInfo.visibleItemsInfo
+            if (visible.isEmpty()) {
+                listState.firstVisibleItemIndex.coerceIn(0, options.lastIndex)
+            } else {
+                val viewportCenter =
+                    layoutInfo.viewportStartOffset +
+                        (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2
+                visible.minByOrNull { info ->
+                    abs((info.offset + info.size / 2) - viewportCenter)
+                }?.index?.coerceIn(0, options.lastIndex)
+                    ?: listState.firstVisibleItemIndex.coerceIn(0, options.lastIndex)
+            }
+        }
+    }
+
+    // 打开时滚到当前已保存项，保证居中高亮
+    LaunchedEffect(initialIndex) {
+        listState.scrollToItem(initialIndex)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -500,37 +586,51 @@ private fun GenderPickerDialog(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
+                    .height(itemHeight * visibleCount),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
+                // 中间选中高亮带
+                Box(
                     modifier = Modifier
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .fillMaxWidth()
+                        .height(itemHeight)
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AppTheme.colors.success.copy(alpha = 0.12f))
+                )
+
+                LazyColumn(
+                    state = listState,
+                    flingBehavior = flingBehavior,
+                    contentPadding = PaddingValues(vertical = itemHeight),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    options.forEachIndexed { index, label ->
+                    items(options.size, key = { options[it].first }) { index ->
                         val isSelected = index == selectedIndex
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { selectedIndex = index }
-                                .padding(vertical = 14.dp),
+                                .height(itemHeight)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    scope.launch {
+                                        listState.animateScrollToItem(index)
+                                    }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                label,
-                                fontSize = if (isSelected) 18.sp else 16.sp,
+                                options[index].second,
+                                fontSize = if (isSelected) 20.sp else 16.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) AppTheme.colors.success
-                                    else AppTheme.colors.onSurface.copy(alpha = 0.7f)
-                            )
-                        }
-                        if (index < options.size - 1) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.4f)
-                                    .height(0.5.dp)
-                                    .background(AppTheme.colors.onSurfaceVariant.copy(alpha = 0.15f))
+                                color = if (isSelected) {
+                                    AppTheme.colors.success
+                                } else {
+                                    AppTheme.colors.onSurface.copy(alpha = 0.45f)
+                                }
                             )
                         }
                     }
@@ -538,12 +638,25 @@ private fun GenderPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text("确认", color = AppTheme.colors.success)
+            TextButton(
+                onClick = {
+                    // 若仍在惯性滚动，按当前最近项 + 偏移估算最终选中
+                    val index = if (listState.isScrollInProgress) {
+                        val offsetBias = if (listState.firstVisibleItemScrollOffset > itemHeightPx / 2) 1 else 0
+                        (listState.firstVisibleItemIndex + offsetBias).coerceIn(0, options.lastIndex)
+                    } else {
+                        selectedIndex
+                    }
+                    onConfirm(options[index].first)
+                }
+            ) {
+                Text(stringResource(R.string.profile_confirm), color = AppTheme.colors.success)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.profile_cancel))
+            }
         }
     )
 }

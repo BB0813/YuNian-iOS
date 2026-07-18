@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import com.lianyu.ai.uicommon.component.bounceVerticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -96,65 +97,77 @@ fun ProfileScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
+            // 透出 MainScreen 主界面背景层
+            .background(Color.Transparent)
+            // 个人主页使用更宽松的回弹手感
+            .bounceVerticalScroll(resistance = 0.28f, maxOverscrollDp = 128f)
             .verticalScroll(rememberScrollState())
             .padding(top = 48.dp)
     ) {
 
-        // === 头像行 — 复用 ProfileSectionRow 原子 ===
-        ProfileSectionRow(onClick = onProfileSettingsClick) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFE8E8E8)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (userAvatar != null) {
-                    AsyncImage(
-                        model = userAvatar,
-                        contentDescription = stringResource(R.string.profile_avatar),
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+        // === 个人信息卡片（不透明）— 头像 / 昵称 / 签名 ===
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(colorScheme.surface)
+        ) {
+            ProfileSectionRow(onClick = onProfileSettingsClick) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (userAvatar != null) {
+                        AsyncImage(
+                            model = userAvatar,
+                            contentDescription = stringResource(R.string.profile_avatar),
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            Icons.Filled.Person,
+                            stringResource(R.string.profile_avatar),
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        userName,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                        color = colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                } else {
-                    Icon(
-                        Icons.Filled.Person,
-                        stringResource(R.string.profile_avatar),
-                        tint = Color(0xFFCCCCCC),
-                        modifier = Modifier.size(28.dp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        userSignature.ifBlank { "点击编辑个人资料" },
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = if (userSignature.isBlank()) colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
 
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    userName,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
-                    color = colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    userSignature.ifBlank { "点击编辑个人资料" },
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                    color = if (userSignature.isBlank()) colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
                 )
             }
-
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
         }
-        ProfileSectionDivider()
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         Row(
             modifier = Modifier

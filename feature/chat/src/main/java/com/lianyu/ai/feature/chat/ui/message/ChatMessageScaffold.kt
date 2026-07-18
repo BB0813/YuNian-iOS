@@ -20,13 +20,13 @@ internal fun ChatMessageScaffold(
     drawBubble: Boolean = true,
     onClick: (() -> Unit)? = null,
     copyText: String? = null,
-    content: @Composable () -> Unit
+    content: @Composable (menuExpanded: Boolean) -> Unit
 ) {
     val isMine = message.isFromUser
     val time = remember(message.timestamp) { formatChatMessageTime(message.timestamp) }
 
     AppMessageScaffold(
-        frame = { onLongClickFromScaffold ->
+        frame = { menuExpanded, onLongClickFromScaffold ->
             ChatMessageFrame(
                 isMine = isMine,
                 adaptiveSizing = adaptiveSizing,
@@ -50,7 +50,7 @@ internal fun ChatMessageScaffold(
                 isDarkTheme = isDarkTheme,
                 onClick = onClick,
                 onLongClick = onLongClickFromScaffold,
-                content = content
+                content = { content(menuExpanded) }
             )
         },
         menu = { expanded, onDismiss ->
@@ -64,4 +64,3 @@ internal fun ChatMessageScaffold(
         }
     )
 }
-

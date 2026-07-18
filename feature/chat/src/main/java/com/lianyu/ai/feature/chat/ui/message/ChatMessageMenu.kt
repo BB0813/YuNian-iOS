@@ -2,14 +2,16 @@ package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -21,13 +23,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.database.model.ChatMessage
@@ -35,13 +42,10 @@ import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.uicommon.theme.AppTheme
 
 /**
- * 微信风格长按消息菜单 — 横向排列的圆角操作栏。
+ * 消息长按操作菜单。
  *
- * 设计原则：
- * - 单行横向排列，图标在上、文字在下，与微信长按菜单一致
- * - 圆角胶囊容器，背景使用 menuBackground
- * - 撤回操作使用 danger 色，其余使用 menuContent
- * - 操作之间用竖向分隔线区分
+ * 布局：竖直列表；每一行左侧图标、右侧操作名。
+ * 图标 18dp、文字 13sp，严格控制视觉比例。
  */
 @Composable
 fun ChatMessageMenu(
@@ -52,46 +56,90 @@ fun ChatMessageMenu(
     copyText: String? = null
 ) {
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     val menuBg = colors.menuBackground
     val contentColor = colors.menuContent
+    val iconColor = colors.menuIcon
+
+    // 严格控制：图标 18dp、文字 13sp（来自 AppTheme.dimens）
+    val iconSize = dimens.menuIconSize
+    val labelSize = dimens.menuTextFontSize
+    val itemHorizontalPadding = 14.dp
+    val itemVerticalPadding = 11.dp
+    val iconTextGap = 12.dp
+    val menuMinWidth = 148.dp
+    val menuMaxWidth = 176.dp
 
     MaterialTheme(
-        shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(16.dp))
+        shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(12.dp))
     ) {
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = onDismiss,
             modifier = Modifier
-                .background(Color.Transparent)
-                .clip(RoundedCornerShape(16.dp)),
-            offset = DpOffset(x = 0.dp, y = (-8).dp)
+                .widthIn(min = menuMinWidth, max = menuMaxWidth)
+                .clip(RoundedCornerShape(12.dp))
+                .background(menuBg),
+            offset = DpOffset(x = 0.dp, y = (-6).dp)
         ) {
             val actions = buildList {
-                add(MenuAction("引用", Icons.Outlined.FormatQuote, contentColor) { onIntent(ChatIntent.QuoteReply(message)) })
-                if (!message.isFromUser) add(MenuAction("重新生成", Icons.Outlined.Refresh, contentColor) { onIntent(ChatIntent.Regenerate(message)) })
-                if (copyText != null) add(MenuAction("复制", Icons.Outlined.ContentCopy, contentColor) { onIntent(ChatIntent.CopyText(copyText)) })
-                add(MenuAction("撤回", Icons.Outlined.DeleteOutline, colors.danger) { onIntent(ChatIntent.Recall(message)) })
+                add(
+                    MenuAction(
+                        text = "引用",
+                        icon = Icons.Outlined.FormatQuote,
+                        contentColor = contentColor,
+                        iconColor = iconColor
+                    ) { onIntent(ChatIntent.QuoteReply(message)) }
+                )
+                if (!message.isFromUser) {
+                    add(
+                        MenuAction(
+                            text = "重新生成",
+                            icon = Icons.Outlined.Refresh,
+                            contentColor = contentColor,
+                            iconColor = iconColor
+                        ) { onIntent(ChatIntent.Regenerate(message)) }
+                    )
+                }
+                if (copyText != null) {
+                    add(
+                        MenuAction(
+                            text = "复制",
+                            icon = Icons.Outlined.ContentCopy,
+                            contentColor = contentColor,
+                            iconColor = iconColor
+                        ) { onIntent(ChatIntent.CopyText(copyText)) }
+                    )
+                }
+                add(
+                    MenuAction(
+                        text = "撤回",
+                        icon = Icons.Outlined.DeleteOutline,
+                        contentColor = colors.danger,
+                        iconColor = colors.danger
+                    ) { onIntent(ChatIntent.Recall(message)) }
+                )
             }
 
-            Row(
+            Column(
                 modifier = Modifier
-                    .background(menuBg)
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(0.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
             ) {
-                actions.forEachIndexed { index, action ->
-                    ChatMenuItem(action.text, action.icon, action.color) {
+                actions.forEach { action ->
+                    ChatMenuItem(
+                        text = action.text,
+                        icon = action.icon,
+                        contentColor = action.contentColor,
+                        iconColor = action.iconColor,
+                        iconSize = iconSize,
+                        labelSize = labelSize,
+                        horizontalPadding = itemHorizontalPadding,
+                        verticalPadding = itemVerticalPadding,
+                        iconTextGap = iconTextGap
+                    ) {
                         onDismiss()
                         action.onClick()
-                    }
-                    if (index < actions.size - 1) {
-                        Box(
-                            modifier = Modifier
-                                .width(0.5.dp)
-                                .height(32.dp)
-                                .background(colors.outlineVariant.copy(alpha = 0.3f))
-                        )
                     }
                 }
             }
@@ -102,7 +150,8 @@ fun ChatMessageMenu(
 private data class MenuAction(
     val text: String,
     val icon: ImageVector,
-    val color: Color,
+    val contentColor: Color,
+    val iconColor: Color,
     val onClick: () -> Unit
 )
 
@@ -111,29 +160,44 @@ private fun ChatMenuItem(
     text: String,
     icon: ImageVector,
     contentColor: Color,
+    iconColor: Color,
+    iconSize: Dp,
+    labelSize: TextUnit,
+    horizontalPadding: Dp,
+    verticalPadding: Dp,
+    iconTextGap: Dp,
     onClick: () -> Unit
 ) {
-    val typography = AppTheme.typography
+    val interactionSource = remember { MutableInteractionSource() }
 
-    Column(
+    Row(
         modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = text,
-            tint = contentColor,
-            modifier = Modifier.size(20.dp)
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(iconSize)
         )
+        Spacer(modifier = Modifier.width(iconTextGap))
         Text(
             text = text,
-            style = typography.bodyMedium.copy(fontSize = 11.sp),
             color = contentColor,
-            textAlign = TextAlign.Center
+            fontSize = labelSize,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
-

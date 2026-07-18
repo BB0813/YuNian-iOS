@@ -387,7 +387,11 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 com.lianyu.ai.feature.localmodel.LocalModelProviderImpl(app)
             }
             ServiceRegistry.registerSingleton(UserProfileProvider::class.java) {
-                com.lianyu.ai.feature.profile.UserProfileProviderImpl(app)
+                // 必须复用同一 UserRepository 单例，保证聊天页能实时收到资料变更
+                com.lianyu.ai.feature.profile.UserProfileProviderImpl(
+                    app,
+                    ServiceRegistry.getOrThrow(UserRepository::class.java)
+                )
             }
             ServiceRegistry.registerSingleton(CompanionProvider::class.java) {
                 com.lianyu.ai.feature.companion.CompanionProviderImpl(app)

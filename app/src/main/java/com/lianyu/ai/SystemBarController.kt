@@ -7,7 +7,7 @@ import android.os.LocaleList
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
-import com.lianyu.ai.uicommon.theme.WeChatDarkBackground
+import com.lianyu.ai.uicommon.theme.WeChatDarkSurface
 
 
 /**
@@ -60,19 +60,21 @@ object SystemBarController {
             else -> (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
 
-        val navScrim = if (isDark) {
-            Color(0xFF000000).copy(alpha = 0.25f)
+        // 状态栏/导航栏与 chrome（顶栏/底栏 surface）同色，避免深色主题断层。
+        // 浅色状态栏用纯白避免显粉；浅色导航栏保留轻 scrim。
+        val chromeColor = if (isDark) {
+            WeChatDarkSurface
+        } else {
+            Color(0xFFFFFFFF)
+        }
+        val navColor = if (isDark) {
+            WeChatDarkSurface
         } else {
             Color(0xFFFFFFFF).copy(alpha = 0.55f)
         }
 
-        // 状态栏使用不透明纯色，浅色主题用纯白避免显粉；深色主题用背景色保持一致。
-        activity.window.statusBarColor = if (isDark) {
-            WeChatDarkBackground.toArgb()
-        } else {
-            Color(0xFFFFFFFF).toArgb()
-        }
-        activity.window.navigationBarColor = navScrim.toArgb()
+        activity.window.statusBarColor = chromeColor.toArgb()
+        activity.window.navigationBarColor = navColor.toArgb()
         WindowCompat.setDecorFitsSystemWindows(activity.window, false)
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
             isAppearanceLightStatusBars = !isDark

@@ -190,7 +190,8 @@ class ChatGenerationManager private constructor(
             val userMessageId = messageWriter.enqueueChat(
                 ChatMessage(
                     companionId = companionId,
-                    content = imagePath,
+                    // 展示文案用标签；真实路径只放 linkString，避免引用预览泄漏本地路径
+                    content = "[图片]",
                     isFromUser = true,
                     timestamp = System.currentTimeMillis(),
                     type = MessageType.IMAGE,

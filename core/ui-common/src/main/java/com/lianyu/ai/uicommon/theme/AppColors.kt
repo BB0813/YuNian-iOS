@@ -2,6 +2,7 @@ package com.lianyu.ai.uicommon.theme
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 /**
  * App-level semantic color accessors.
@@ -18,11 +19,18 @@ import androidx.compose.ui.graphics.Color
  */
 object AppColors {
     // ── Bubble backgrounds ──────────────────────────────────────────
-    fun primaryBubbleBackground(colorScheme: ColorScheme): Color = colorScheme.primaryContainer
-    fun primaryBubbleContent(colorScheme: ColorScheme): Color = colorScheme.onPrimaryContainer
-    fun secondaryBubbleBackground(colorScheme: ColorScheme): Color = colorScheme.surface
-    fun secondaryBubbleContent(colorScheme: ColorScheme): Color = colorScheme.onSurface
-    fun secondaryBubbleBorder(colorScheme: ColorScheme): Color = colorScheme.outline.copy(alpha = 0.22f)
+    // 自己气泡与 AI 气泡统一：天蓝色 #87CEFA 底 + 深色文字，保证两侧实现一致
+    fun primaryBubbleBackground(colorScheme: ColorScheme): Color =
+        if (isDarkSurface(colorScheme)) AiBubbleDark else AiBubbleLight
+    fun primaryBubbleContent(colorScheme: ColorScheme): Color = BubbleOnPink
+    fun secondaryBubbleBackground(colorScheme: ColorScheme): Color =
+        if (isDarkSurface(colorScheme)) AiBubbleDark else AiBubbleLight
+    fun secondaryBubbleContent(colorScheme: ColorScheme): Color = BubbleOnPink
+    fun secondaryBubbleBorder(colorScheme: ColorScheme): Color =
+        if (isDarkSurface(colorScheme)) AiBubbleBorderDark else AiBubbleBorderLight
+
+    private fun isDarkSurface(colorScheme: ColorScheme): Boolean =
+        colorScheme.surface.luminance() < 0.5f
 
     // ── Metadata (timestamps, captions) ─────────────────────────────
     fun metadataContent(colorScheme: ColorScheme): Color = colorScheme.onSurfaceVariant

@@ -1,6 +1,7 @@
 package com.lianyu.ai.uicommon.image.viewer
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -23,6 +24,7 @@ import com.lianyu.ai.uicommon.image.engine.TransformState
  * - 渲染直接使用外部传入的 [transform]
  * - 手势通过 [latestTransform] 闭包读取最新值，`pointerInput(Unit)` 避免重启
  * - 缩放以焦点为中心（centroid 保持不动）
+ * - 可选单击 / 双击回调（仍不持有业务状态）
  * - 不依赖 cropper 包中的任何类型
  *
  * @param bitmap            要显示的图片
@@ -31,6 +33,8 @@ import com.lianyu.ai.uicommon.image.engine.TransformState
  * @param onTransformRequest 用户手势产生的变换请求（外部负责 clamp 后写回）
  * @param minScale          最小缩放倍数
  * @param maxScale          最大缩放倍数
+ * @param onTap             单击（可选）
+ * @param onDoubleTap       双击，参数为触点 viewport 坐标（可选）
  */
 @Composable
 fun AtomicImageViewer(
@@ -41,13 +45,22 @@ fun AtomicImageViewer(
     minScale: Float = 1f,
     maxScale: Float = 5f,
     modifier: Modifier = Modifier,
+    onTap: (() -> Unit)? = null,
+    onDoubleTap: ((Offset) -> Unit)? = null,
 ) {
     // 渲染始终跟随外部 transform
     // 手势通过 latestTransform() 闭包读取最新值，pointerInput 以 Unit 为 key 保持稳定
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .pointerInput(onTap, onDoubleTap) {
+                if (onTap == null && onDoubleTap == null) return@pointerInput
+                detectTapGestures(
+                    onTap = { onTap?.invoke() },
+                    onDoubleTap = { offset -> onDoubleTap?.invoke(offset) }
+                )
+            }
+            .pointerInput(minScale, maxScale) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     val current = latestTransform()
                     val oldScale = current.scale

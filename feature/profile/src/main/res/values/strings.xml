@@ -9,6 +9,7 @@
     <string name="profile_gender">性别</string>
     <string name="profile_region">地区</string>
     <string name="profile_signature">签名</string>
+    <string name="profile_status">状态</string>
     <string name="profile_gender_male">男</string>
     <string name="profile_gender_female">女</string>
     <string name="profile_not_set">未设置</string>

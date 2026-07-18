@@ -85,16 +85,18 @@ fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colorScheme.background)
-            .windowInsetsPadding(WindowInsets.statusBars)
+            // 列表区域透出 MainScreen 主界面背景层；顶栏单独铺不透明底
+            .background(Color.Transparent)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 顶部标题 + 操作按钮
+            // 不透明顶部导航栏：标题「恋语」+ 两个操作图标
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(colorScheme.surface)
+                    .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 16.dp)
-                    .padding(top = 4.dp)
+                    .padding(top = 4.dp, bottom = 10.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -170,8 +172,6 @@ fun HomeScreen(
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariant
                 )
-
-                Spacer(modifier = Modifier.height(4.dp))
             }
 
             // 内容列表
@@ -535,13 +535,13 @@ fun EmptyHomeState() {
                 modifier = Modifier
                     .size(80.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFE0E0E0)),
+                    .background(colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Outlined.ChatBubbleOutline,
                     contentDescription = null,
-                    tint = Color(0xFF888888),
+                    tint = colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(36.dp)
                 )
             }
