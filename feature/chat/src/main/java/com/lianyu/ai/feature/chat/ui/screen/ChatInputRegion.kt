@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.common.StickerInfo
+import com.lianyu.ai.feature.chat.ui.message.QuoteMediaThumbnail
 import com.lianyu.ai.feature.chat.ui.viewmodel.QuoteReply
 import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.uicommon.component.ChatInputExtensionPanel
@@ -115,28 +116,7 @@ fun ChatInputRegion(
             }
         }
 
-        StickerPanel(
-            isVisible = showStickerPanel,
-            onStickerClick = onStickerClick,
-            onImportClick = onImportStickersClick,
-            onDeleteAllClick = onDeleteAllStickersClick
-        )
-
-        ChatInputExtensionPanel(
-            isVisible = showExtensionPanel,
-            availableApis = availableApis,
-            currentApi = currentApi,
-            onSwitchApi = onSwitchApi,
-            onAlbumClick = onAlbumClick,
-            onCameraClick = onCameraClick,
-            onVideoCallClick = onVideoCallClick,
-            onVoiceCallClick = onVoiceCallClick,
-            onTtsModeClick = onTtsModeClick,
-            onLocationClick = onLocationClick,
-            onVoiceInputClick = onVoiceInputClick,
-            onStickerClick = onStickerPanelClick
-        )
-
+        // 输入框在上，扩展/表情面板在下：点“+”后面板向下展开，输入框随高度升起
         if (isBlocked) {
             Box(
                 modifier = Modifier
@@ -185,6 +165,28 @@ fun ChatInputRegion(
                 }
             }
         }
+
+        StickerPanel(
+            isVisible = showStickerPanel,
+            onStickerClick = onStickerClick,
+            onImportClick = onImportStickersClick,
+            onDeleteAllClick = onDeleteAllStickersClick
+        )
+
+        ChatInputExtensionPanel(
+            isVisible = showExtensionPanel,
+            availableApis = availableApis,
+            currentApi = currentApi,
+            onSwitchApi = onSwitchApi,
+            onAlbumClick = onAlbumClick,
+            onCameraClick = onCameraClick,
+            onVideoCallClick = onVideoCallClick,
+            onVoiceCallClick = onVoiceCallClick,
+            onTtsModeClick = onTtsModeClick,
+            onLocationClick = onLocationClick,
+            onVoiceInputClick = onVoiceInputClick,
+            onStickerClick = onStickerPanelClick
+        )
     }
 }
 
@@ -205,6 +207,13 @@ private fun QuoteReplyPreview(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
+        if (quoteReply.hasMediaThumbnail) {
+            QuoteMediaThumbnail(
+                quote = quoteReply,
+                modifier = Modifier.size(36.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "引用 ${quoteReply.authorName}",

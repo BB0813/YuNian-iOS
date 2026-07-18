@@ -13,6 +13,7 @@ import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.AppTheme
 
 val LocalCompanionAvatarClick = staticCompositionLocalOf<(() -> Unit)?> { null }
+val LocalUserAvatarClick = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 @Composable
 fun ChatMessageAvatar(
@@ -23,9 +24,14 @@ fun ChatMessageAvatar(
     adaptiveSizing: AdaptiveSizing
 ) {
     val companionAvatarClick = LocalCompanionAvatarClick.current
+    val userAvatarClick = LocalUserAvatarClick.current
+    val onAvatarClick = when {
+        isMine -> userAvatarClick
+        else -> companionAvatarClick
+    }
     androidx.compose.foundation.layout.Box(
-        modifier = if (!isMine && companionAvatarClick != null) {
-            Modifier.clickable(onClick = companionAvatarClick)
+        modifier = if (onAvatarClick != null) {
+            Modifier.clickable(onClick = onAvatarClick)
         } else Modifier
     ) {
         AppMessageAvatar(

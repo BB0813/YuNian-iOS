@@ -46,6 +46,8 @@ sealed class MainRoute(val route: String) {
 
     // === 个人中心 ===
     object ProfileSettings : MainRoute("profile_settings")
+    /** 聊天页点击用户头像进入的只读个人主页 */
+    object UserProfileReadonly : MainRoute("user_profile_readonly")
     object Memory : MainRoute("memory")
     object About : MainRoute("about")
     object AgreementView : MainRoute("agreement_view")
@@ -95,6 +97,7 @@ sealed class MainRoute(val route: String) {
             route == "tts_settings" -> TtsSettings
             route == "token_usage" -> TokenUsage
             route == "profile_settings" -> ProfileSettings
+            route == "user_profile_readonly" -> UserProfileReadonly
             route == "memory" -> Memory
             route == "role_manager" -> RoleManager
             route == "theme" -> Theme

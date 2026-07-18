@@ -37,6 +37,10 @@ fun ChatMessageFrame(
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val haptic = LocalHapticFeedback.current
+    // 自己 / AI 共用同一套 appBubbleBackground 实现：
+    // - 颜色 token 一致（亮粉色）
+    // - 仅 side 镜像：自己 End（右箭头），AI Start（左箭头）
+    // - 边框策略一致，避免两侧视觉差异
     val bubbleColor = if (isMine) colors.primaryBubbleBackground else colors.secondaryBubbleBackground
     val bubbleContentPadding = Modifier.padding(
         horizontal = adaptiveSizing.chatBubblePaddingHorizontal,
@@ -46,7 +50,7 @@ fun ChatMessageFrame(
         Modifier
             .appBubbleBackground(
                 color = bubbleColor,
-                borderColor = if (!isMine && !isDarkTheme) colors.secondaryBubbleBorder else null,
+                borderColor = colors.secondaryBubbleBorder,
                 borderWidth = dimens.bubbleBorderWidth,
                 spec = AppBubbleSpec(
                     cornerRadius = adaptiveSizing.cornerRadius,

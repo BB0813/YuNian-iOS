@@ -41,23 +41,30 @@ private val LightColorScheme = lightColorScheme(
 private val DarkColorScheme = darkColorScheme(
     primary = PinkPrimary,
     onPrimary = Color(0xFF2D1F24),
-    primaryContainer = PinkPrimary.copy(alpha = 0.15f),
-    onPrimaryContainer = Color(0xFFF5E6EB),
+    // 深色主题容器色必须不透明，避免粉透底发脏、对比不足
+    primaryContainer = PinkPrimaryContainerDark,
+    onPrimaryContainer = PinkOnPrimaryContainerDark,
     secondary = PinkLight,
-    onSecondary = Color(0xFF2D2C24),
-    secondaryContainer = PinkLight.copy(alpha = 0.1f),
+    onSecondary = Color(0xFF2D1F24),
+    secondaryContainer = WeChatDarkElevated,
     onSecondaryContainer = PinkLight,
     tertiary = PinkDark,
     onTertiary = Color.White,
     background = WeChatDarkBackground,
     onBackground = WeChatDarkTextPrimary,
+    // surface = chrome（顶栏/底栏）；surfaceVariant = 卡片/列表项
     surface = WeChatDarkSurface,
     onSurface = WeChatDarkTextPrimary,
     surfaceVariant = WeChatDarkCard,
     onSurfaceVariant = WeChatDarkTextSecondary,
     outline = WeChatDarkDivider,
+    outlineVariant = WeChatDarkElevated,
     error = ErrorRed,
-    onError = Color.White
+    onError = Color.White,
+    scrim = Color(0xFF000000),
+    inverseSurface = WeChatLightSurface,
+    inverseOnSurface = WeChatLightTextPrimary,
+    inversePrimary = PinkDark
 )
 
 @Composable
@@ -93,13 +100,19 @@ fun LianYuTheme(
                 Color(0xFFFFFFFF).copy(alpha = 0.55f)
             }.toArgb()
 
-            // 状态栏使用不透明纯色，浅色主题用纯白避免显粉；深色主题用背景色保持一致。
+            // 状态栏与顶栏 chrome 同色（surface），避免深色主题顶栏/状态栏断层。
+            // 浅色主题用纯白，避免状态栏显粉。
             window.statusBarColor = if (effectiveDarkTheme) {
-                colorScheme.background.toArgb()
+                colorScheme.surface.toArgb()
             } else {
                 Color(0xFFFFFFFF).toArgb()
             }
-            window.navigationBarColor = navScrim
+            // 导航栏与底栏 chrome 同色，深色不再用半透明黑 scrim 造成发灰断层
+            window.navigationBarColor = if (effectiveDarkTheme) {
+                colorScheme.surface.toArgb()
+            } else {
+                navScrim
+            }
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !effectiveDarkTheme
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !effectiveDarkTheme
             onDispose { }

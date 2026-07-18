@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,7 @@ import com.lianyu.ai.feature.profile.AgreementScreen
 import com.lianyu.ai.feature.profile.ProfileViewModel
 import com.lianyu.ai.feature.profile.RoleSelectionScreen
 import com.lianyu.ai.feature.update.AppUpdateManager
+import com.lianyu.ai.uicommon.component.WindowMainBackground
 import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -113,6 +115,9 @@ class MainActivity : ComponentActivity() {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
+        // 窗口层主背景：主题 windowBackground 兜底 + 运行时用户选择
+        WindowMainBackground.applyFromPrefs(this)
+
         // 用户协议检查
         val activity = this
         setContent {
@@ -128,7 +133,8 @@ class MainActivity : ComponentActivity() {
             val isServiceReady by ServiceRegistry.initialized.collectAsStateWithLifecycle()
 
             LianYuTheme(themeMode = themeMode) {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                // 根 Surface 透明：主背景由 window 层绘制，避免 Compose 根层盖住 windowBackground
+                Surface(modifier = Modifier.fillMaxSize(), color = Color.Transparent) {
                     when {
                         !agreementAccepted -> {
                             AgreementScreen(

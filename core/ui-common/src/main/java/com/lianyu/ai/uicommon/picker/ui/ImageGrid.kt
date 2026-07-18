@@ -68,6 +68,7 @@ internal fun ImageGrid(
     onShowAlbums: () -> Unit,
     onItemClick: (Long) -> Unit,
     onItemPreview: (Int) -> Unit,
+    onToggleSelection: (Long) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     hasSelection: Boolean,
@@ -77,6 +78,11 @@ internal fun ImageGrid(
     val selectionMap by viewModel.selectionMap.collectAsState()
 
     val mediaList by viewModel.mediaList.collectAsState()
+    val selectedItems = remember(selectionMap, mediaList) {
+        selectionMap.entries
+            .sortedBy { it.value }
+            .mapNotNull { entry -> mediaList.firstOrNull { it.id == entry.key } }
+    }
 
     val gridState = rememberLazyGridState()
     val totalCount = mediaList.size
@@ -181,7 +187,11 @@ internal fun ImageGrid(
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(4),
                     state = gridState,
-                    modifier = Modifier.fillMaxSize().padding(end = 6.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 6.dp)
+                        // 底部预留已选缩略图条空间，避免遮挡
+                        .padding(bottom = if (maxSelection > 1 && selectedItems.isNotEmpty()) 84.dp else 0.dp),
                     contentPadding = PaddingValues(horizontal = 1.dp, vertical = 1.dp),
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
                     verticalArrangement = Arrangement.spacedBy(1.dp)
@@ -201,10 +211,31 @@ internal fun ImageGrid(
                             isSelected = isSelected,
                             selectedOrder = order,
                             maxSelection = maxSelection,
-                            onClick = { onItemClick(item.id) },
-                            onRequestPreview = { onItemPreview(mediaList.indexOf(item)) }
+                            // 图片主体：单选确认 / 多选预览
+                            onClick = {
+                                if (maxSelection == 1) {
+                                    onItemClick(item.id)
+                                } else {
+                                    onItemPreview(mediaList.indexOf(item))
+                                }
+                            },
+                            // 复选框：切换选中
+                            onToggleSelection = { onToggleSelection(item.id) }
                         )
                     }
+                }
+
+                // ═══ 底部已选缩略图条（多选） ═══
+                if (maxSelection > 1 && selectedItems.isNotEmpty()) {
+                    SelectionStrip(
+                        items = selectedItems,
+                        selectionMap = selectionMap,
+                        onRemove = onToggleSelection,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                    )
                 }
 
                 // ═══ 右侧滚动条（可拖拽 + 平滑滑块） ═══
@@ -298,7 +329,7 @@ private fun GridPhotoItem(
     selectedOrder: Int?,
     maxSelection: Int,
     onClick: () -> Unit,
-    onRequestPreview: () -> Unit
+    onToggleSelection: () -> Unit
 ) {
     // scale 放入 graphicsLayer — 动画走 GPU 层，绕过重组
     val targetScale by animateFloatAsState(
@@ -350,29 +381,107 @@ private fun GridPhotoItem(
             Box(Modifier.fillMaxSize().background(Accent.copy(alpha = 0.15f)))
         }
 
-        // 角标（多选模式才显示）
+        // 角标（多选模式）：点击切换选中，图片主体进入预览
+        // 外层扩大热区（约 40dp），内层保持 22dp 视觉圆点，避免误触整图选中
         if (maxSelection > 1) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(3.dp)
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(if (isSelected) Accent else Color(0x55000000))
-                    .then(
-                        if (!isSelected) Modifier.border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
-                        else Modifier
-                    )
+                    .size(40.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { onRequestPreview() },
-                contentAlignment = Alignment.Center
+                    ) { onToggleSelection() },
+                contentAlignment = Alignment.TopEnd
             ) {
-                if (isSelected && selectedOrder != null) {
-                    Text("$selectedOrder", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) Accent else Color(0x55000000))
+                        .then(
+                            if (!isSelected) Modifier.border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
+                            else Modifier
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected && selectedOrder != null) {
+                        Text("$selectedOrder", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
+    }
+}
+
+/**
+ * 底部已选缩略图条：按选择顺序展示，点击可取消选中。
+ */
+@Composable
+private fun SelectionStrip(
+    items: List<MediaItem>,
+    selectionMap: Map<Long, Int>,
+    onRemove: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val ctx = LocalContext.current
+    Row(
+        modifier = modifier
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f), Color.Black.copy(alpha = 0.88f))
+                )
+            )
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items.forEach { item ->
+            val order = selectionMap[item.id]
+            val request = remember(item.uri) {
+                ImageRequest.Builder(ctx)
+                    .data(item.uri)
+                    .size(120)
+                    .build()
+            }
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Accent.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onRemove(item.id) }
+            ) {
+                SubcomposeAsyncImage(
+                    model = request,
+                    contentDescription = item.displayName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                if (order != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(3.dp)
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Accent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("$order", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            "已选 ${items.size}",
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }

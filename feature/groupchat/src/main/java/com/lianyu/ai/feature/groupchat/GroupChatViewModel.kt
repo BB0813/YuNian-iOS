@@ -65,7 +65,8 @@ class GroupChatViewModel(
     private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val chatGroupRepository = ChatGroupRepository(database.chatGroupDao())
     private val companionRepository = CompanionRepository(database.companionDao())
-    private val userRepository = UserRepository(getApplication())
+    // 与 Profile / Chat 共用同一 UserRepository 单例，避免 AI 上下文读到过期昵称
+    private val userRepository = ServiceRegistry.getOrThrow(UserRepository::class.java)
     private val aiServiceProvider: AiServiceProvider by lazy {
         ServiceRegistry.get(AiServiceProvider::class.java)
             ?: throw IllegalStateException("AiServiceProvider not registered")
@@ -233,10 +234,17 @@ class GroupChatViewModel(
         }
     }
 
+    private var avatarUnsubscribe: (() -> Unit)? = null
+    private var nicknameUnsubscribe: (() -> Unit)? = null
+
     private fun loadUserProfile() {
         val provider = com.lianyu.ai.domain.ServiceRegistry.get(com.lianyu.ai.domain.UserProfileProvider::class.java)
         _userName.value = provider?.getNickname() ?: "我"
         _userAvatar.value = provider?.getAvatar()
+        avatarUnsubscribe?.invoke()
+        nicknameUnsubscribe?.invoke()
+        avatarUnsubscribe = provider?.observeAvatar { _userAvatar.value = it }
+        nicknameUnsubscribe = provider?.observeNickname { _userName.value = it }
     }
 
     fun loadMoreMessages() {
@@ -1258,6 +1266,10 @@ class GroupChatViewModel(
     }
 
     override fun onCleared() {
+        avatarUnsubscribe?.invoke()
+        avatarUnsubscribe = null
+        nicknameUnsubscribe?.invoke()
+        nicknameUnsubscribe = null
         super.onCleared()
         // [H5 FIX] 不再取消应用级作用域——它生命周期与 Application 一致，取消会影响其他正在运行的任务。
         // AI 请求运行在 applicationScope 中，退出群聊后应继续完成，重新进入即可看到回复。

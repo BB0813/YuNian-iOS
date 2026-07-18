@@ -18,11 +18,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
@@ -95,6 +97,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -114,10 +117,11 @@ import com.lianyu.ai.common.PermissionManager
 import com.lianyu.ai.uicommon.component.ChatInputExtensionPanel
 import com.lianyu.ai.uicommon.component.AppListItemLayout
 import com.lianyu.ai.uicommon.component.StickerPanel
-import com.lianyu.ai.uicommon.component.getChatBackground
+import com.lianyu.ai.uicommon.component.getChatBackgroundByKey
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
+import com.lianyu.ai.uicommon.image.viewer.FullscreenImageViewer
 import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.feature.groupchat.GroupChatViewModel
 import com.lianyu.ai.feature.groupchat.GroupChatViewModelFactory
@@ -157,6 +161,7 @@ fun GroupChatScreen(
     val isRegenerating by viewModel.isRegenerating.collectAsState()
     val listState = rememberLazyListState()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val systemInDarkTheme = isSystemInDarkTheme()
     val themeViewModel: ThemeViewModel = viewModel()
     val themeMode by themeViewModel.themeMode.collectAsState()
@@ -169,6 +174,17 @@ fun GroupChatScreen(
 
     var showExtensionPanel by remember { mutableStateOf(false) }
     var showStickerPanel by remember { mutableStateOf(false) }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
+
+    // 时间正序图片列表：配合 reverseLayout 实现「左滑上一张、右滑下一张」
+    val groupImagePaths = remember(messageMetadata, messageBodies) {
+        messageMetadata.mapNotNull { meta ->
+            val ready = messageBodies[meta.id] as? MessageBodyState.Ready ?: return@mapNotNull null
+            val content = ready.value.content
+            if (!content.startsWith("[图片]")) return@mapNotNull null
+            content.removePrefix("[图片] ").trim().takeIf { it.isNotBlank() }
+        }.distinct()
+    }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -288,24 +304,28 @@ fun GroupChatScreen(
     }
 
     // Background: global > default
-    val defaultBgColor = AppTheme.colors.background
-    var targetBgColor by remember { mutableStateOf(defaultBgColor) }
+    // 与私聊一致：解析 key 直接驱动绘制，仅 default 跟随主题，避免深色模式吞掉用户背景
+    val themeBgColor = AppTheme.colors.background
+    var resolvedBgKey by remember { mutableStateOf("default") }
+    var targetBgColor by remember { mutableStateOf(themeBgColor) }
     var chatBgGradient by remember { mutableStateOf<Brush?>(null) }
     var isCustomBg by remember { mutableStateOf(false) }
     var customBgKey by remember { mutableStateOf("") }
     val customBgPainter = if (isCustomBg && customBgKey.isNotEmpty()) {
         rememberBackgroundBitmap(customBgKey)
     } else null
-    LaunchedEffect(Unit) {
+    val globalBgKey = getChatBackgroundKey(context)
+    LaunchedEffect(globalBgKey, isDarkTheme) {
         withContext(Dispatchers.IO) {
-            val effectiveKey = getChatBackgroundKey(context)
+            val effectiveKey = globalBgKey
             val (color, gradient) = if (isCustomBackground(effectiveKey)) {
                 Color.Transparent to null
             } else {
-                getChatBackground(context, isDarkTheme)
+                getChatBackgroundByKey(context, effectiveKey, isDarkTheme)
             }
             val custom = isCustomBackground(effectiveKey)
             withContext(Dispatchers.Main) {
+                resolvedBgKey = effectiveKey
                 targetBgColor = color
                 chatBgGradient = gradient
                 isCustomBg = custom
@@ -315,7 +335,11 @@ fun GroupChatScreen(
     }
 
     val chatBgColor by animateColorAsState(targetBgColor, tween(300), label = "bgColor")
-    val backgroundColor = if (isDarkTheme) AppTheme.colors.background else chatBgColor
+    val backgroundColor = when {
+        isCustomBg -> Color.Transparent
+        resolvedBgKey == "default" -> themeBgColor
+        else -> chatBgColor
+    }
 
     val glassIntensity = when (perfTier) {
         HardwareInfo.Tier.ULTRA -> 1.0f
@@ -323,6 +347,8 @@ fun GroupChatScreen(
         HardwareInfo.Tier.MEDIUM -> 0.5f
         HardwareInfo.Tier.LOW -> 0.2f
     }
+
+    BackHandler(enabled = previewImagePath == null, onBack = onNavigateBack)
 
     Box(modifier = Modifier.fillMaxSize()) {
         SnackbarHost(
@@ -348,9 +374,12 @@ fun GroupChatScreen(
                 .fillMaxSize()
                 .imePadding()
                 .then(
-                    if (isCustomBg) Modifier.background(Color.Transparent)
-                    else if (!isDarkTheme && chatBgGradient != null) Modifier.background(chatBgGradient!!)
-                    else Modifier.background(backgroundColor)
+                    when {
+                        isCustomBg -> Modifier.background(Color.Transparent)
+                        chatBgGradient != null && resolvedBgKey != "default" ->
+                            Modifier.background(chatBgGradient!!)
+                        else -> Modifier.background(backgroundColor)
+                    }
                 )
         ) {
             // Messages list
@@ -392,7 +421,8 @@ fun GroupChatScreen(
                                 GroupChatBubble(
                                     message = message, companion = companion,
                                     isUser = message.companionId == -1L,
-                                    userAvatar = userAvatar, userName = userName
+                                    userAvatar = userAvatar, userName = userName,
+                                    onImageClick = { path -> previewImagePath = path }
                                 )
                             }
                         }
@@ -418,41 +448,7 @@ fun GroupChatScreen(
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                StickerPanel(
-                    isVisible = showStickerPanel,
-                    onStickerClick = { sticker ->
-                        viewModel.sendUserSticker(sticker)
-                        showStickerPanel = false
-                    },
-                    onImportClick = {
-                        stickerPickerLauncher.launch("application/zip")
-                    },
-                    onDeleteAllClick = {
-                        scope.launch {
-                            val manager = StickerManager.getInstance(context)
-                            val success = manager.deleteAllImportedStickers()
-                            if (success) {
-                                snackbarHostState.showSnackbar("已删除全部表情包")
-                            } else {
-                                snackbarHostState.showSnackbar("删除失败")
-                            }
-                        }
-                    }
-                )
-
-                ChatInputExtensionPanel(
-                    isVisible = showExtensionPanel,
-                    onAlbumClick = { handleAlbumClick() },
-                    onCameraClick = { handleCameraClick() },
-                    onVideoCallClick = {},
-                    onLocationClick = {},
-                    onVoiceInputClick = {},
-                    onStickerClick = {
-                        showExtensionPanel = false
-                        showStickerPanel = !showStickerPanel
-                    }
-                )
-
+                // 输入框在上，扩展/表情面板在下：点“+”后向下展开并顶起输入区
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -468,9 +464,16 @@ fun GroupChatScreen(
                         // 加号按钮
                         IconButton(
                             onClick = {
-                                showExtensionPanel = !showExtensionPanel
+                                val opening = !showExtensionPanel
                                 showStickerPanel = false
                                 showMentionPicker = false
+                                if (opening) {
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus(force = true)
+                                    showExtensionPanel = true
+                                } else {
+                                    showExtensionPanel = false
+                                }
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -637,6 +640,41 @@ fun GroupChatScreen(
                         }
                     }
                 }
+
+                StickerPanel(
+                    isVisible = showStickerPanel,
+                    onStickerClick = { sticker ->
+                        viewModel.sendUserSticker(sticker)
+                        showStickerPanel = false
+                    },
+                    onImportClick = {
+                        stickerPickerLauncher.launch("application/zip")
+                    },
+                    onDeleteAllClick = {
+                        scope.launch {
+                            val manager = StickerManager.getInstance(context)
+                            val success = manager.deleteAllImportedStickers()
+                            if (success) {
+                                snackbarHostState.showSnackbar("已删除全部表情包")
+                            } else {
+                                snackbarHostState.showSnackbar("删除失败")
+                            }
+                        }
+                    }
+                )
+
+                ChatInputExtensionPanel(
+                    isVisible = showExtensionPanel,
+                    onAlbumClick = { handleAlbumClick() },
+                    onCameraClick = { handleCameraClick() },
+                    onVideoCallClick = {},
+                    onLocationClick = {},
+                    onVoiceInputClick = {},
+                    onStickerClick = {
+                        showExtensionPanel = false
+                        showStickerPanel = !showStickerPanel
+                    }
+                )
             }
         }
 
@@ -746,13 +784,34 @@ fun GroupChatScreen(
                 }
             }
         }
+
+        // 全屏图片预览：AtomicImageViewer + 多图左右滑
+        val previewPath = previewImagePath
+        val previewModels = remember(previewPath, groupImagePaths) {
+            when {
+                previewPath == null -> emptyList()
+                groupImagePaths.contains(previewPath) -> groupImagePaths
+                else -> listOf(previewPath)
+            }
+        }
+        val previewIndex = remember(previewPath, previewModels) {
+            previewPath?.let { previewModels.indexOf(it) }?.takeIf { it >= 0 } ?: 0
+        }
+        FullscreenImageViewer(
+            models = previewModels,
+            initialIndex = previewIndex,
+            visible = previewPath != null && previewModels.isNotEmpty(),
+            onDismiss = { previewImagePath = null },
+            scrimColor = Color.Black
+        )
     }
 }
 
 @Composable
 fun GroupImageMessageBubble(
     imagePath: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     // TODO(C3): Use EncryptedFileHelper for transparent decryption of media files
     // val helper = EncryptedFileHelper(context)
@@ -766,7 +825,16 @@ fun GroupImageMessageBubble(
                 .widthIn(max = 200.dp)
                 .heightIn(max = 260.dp)
                 .width(180.dp)
-                .clip(RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(8.dp))
+                .then(
+                    if (onClick != null) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onClick
+                        )
+                    } else Modifier
+                ),
             contentScale = ContentScale.Fit
         )
     } else {
@@ -924,13 +992,15 @@ fun GroupChatBubble(
     companion: com.lianyu.ai.database.model.CompanionEntity?,
     isUser: Boolean,
     userAvatar: String?,
-    userName: String
+    userName: String,
+    onImageClick: (String) -> Unit = {}
 ) {
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = remember(message.timestamp) { dateFormat.format(Date(message.timestamp)) }
 
-    val userBubbleColor = AppTheme.colors.primary
-    val aiBubbleColor = AppTheme.colors.surfaceVariant.copy(alpha = 0.9f)
+    // 气泡不透明，避免聊天背景透出
+    val userBubbleColor = AppTheme.colors.primaryBubbleBackground
+    val aiBubbleColor = AppTheme.colors.secondaryBubbleBackground
 
     AppListItemLayout(
         isStartAligned = !isUser,
@@ -1041,7 +1111,8 @@ fun GroupChatBubble(
                     }
                     isImageMessage && imagePath != null -> {
                         GroupImageMessageBubble(
-                            imagePath = imagePath
+                            imagePath = imagePath,
+                            onClick = { onImageClick(imagePath) }
                         )
                     }
                     else -> {

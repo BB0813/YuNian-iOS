@@ -1,21 +1,33 @@
 package com.lianyu.ai.uicommon.picker.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.view.WindowManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.LocalImageLoader
@@ -38,11 +50,55 @@ fun CustomImagePicker(
 ) {
     val context = LocalContext.current
 
+    // ═══ 权限门控：打开相册前检查存储/媒体权限 ═══
+    val storagePermission = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+    }
+
+    var isPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, storagePermission) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var permissionDeniedOnce by remember { mutableStateOf(false) }
+    var showPermissionRationale by remember { mutableStateOf(false) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            isPermissionGranted = true
+            permissionDeniedOnce = false
+        } else {
+            permissionDeniedOnce = true
+            showPermissionRationale = true
+        }
+    }
+
+    // 进入选择器时自动请求权限（仅当未授权时）
+    LaunchedEffect(Unit) {
+        if (!isPermissionGranted && !permissionDeniedOnce) {
+            permissionLauncher.launch(storagePermission)
+        }
+    }
+
+    // ViewModel 始终创建，但数据仅在权限授予后加载
     val viewModel: PickerViewModel = viewModel(
         factory = PickerViewModelFactory(context.contentResolver)
     )
     val pickerState by viewModel.state.collectAsState()
     val selectionMap by viewModel.selectionMap.collectAsState()
+
+    // 权限就绪后加载相册/图片（覆盖首次授权与已授权两种路径）
+    LaunchedEffect(isPermissionGranted) {
+        if (isPermissionGranted) {
+            viewModel.reload()
+        }
+    }
 
     LaunchedEffect(maxSelection) {
         viewModel.setMaxSelection(maxSelection)
@@ -51,6 +107,47 @@ fun CustomImagePicker(
     var currentPage by remember { mutableStateOf(PickerPage.GRID) }
     var previewInitialIndex by remember { mutableStateOf(0) }
     val hasSelection = selectionMap.isNotEmpty()
+
+    // ═══ 权限说明对话框 ═══
+    if (showPermissionRationale) {
+        AlertDialog(
+            onDismissRequest = { showPermissionRationale = false },
+            title = {
+                Text(
+                    "需要相册权限",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    "需要访问您的相册才能选择图片。请在系统设置中授予存储权限。",
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionRationale = false
+                    val intent = android.content.Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${context.packageName}")
+                    )
+                    context.startActivity(intent)
+                }) {
+                    Text("前往设置")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPermissionRationale = false
+                    onDismiss()
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -129,14 +226,20 @@ fun CustomImagePicker(
                     ImageGrid(
                         viewModel = viewModel,
                         onShowAlbums = { currentPage = PickerPage.ALBUMS },
-                        onItemClick = { index ->
+                        onItemClick = { id ->
                             if (maxSelection == 1) {
-                                onConfirmed(listOf(contentResolverToUri(index)))
+                                // 单选：点图即确认
+                                onConfirmed(listOf(contentResolverToUri(id)))
+                            } else {
+                                // 多选：点图进入预览（由 onItemPreview 处理）
                             }
                         },
                         onItemPreview = { index ->
                             previewInitialIndex = index
                             currentPage = PickerPage.PREVIEW
+                        },
+                        onToggleSelection = { id ->
+                            viewModel.toggleSelection(id)
                         },
                         onConfirm = {
                             val uris = viewModel.selectedIds().map { id ->

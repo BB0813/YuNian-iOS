@@ -29,9 +29,13 @@ fun ChatListItemRenderer(
     isDarkTheme: Boolean,
     onRetryBody: (Long) -> Unit = {},
     onCompanionAvatarClick: () -> Unit = {},
+    onUserAvatarClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    CompositionLocalProvider(LocalCompanionAvatarClick provides onCompanionAvatarClick) {
+    CompositionLocalProvider(
+        LocalCompanionAvatarClick provides onCompanionAvatarClick,
+        LocalUserAvatarClick provides onUserAvatarClick
+    ) {
     Box(modifier = modifier) {
         when (item) {
             is ChatListItem.BodyLoading -> BodyStateItem(isError = false)

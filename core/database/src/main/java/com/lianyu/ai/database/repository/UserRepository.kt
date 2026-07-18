@@ -27,6 +27,15 @@ class UserRepository(context: Context) {
     private val _userSignature = MutableStateFlow(prefs.getString("user_signature", "") ?: "")
     val userSignature: StateFlow<String> = _userSignature
 
+    /**
+     * 用户性别，稳定键：`male` / `female`，空字符串表示未设置。
+     * UI 层负责映射到本地化文案，避免把展示文案写入偏好。
+     */
+    private val _userGender = MutableStateFlow(
+        normalizeGender(prefs.getString("user_gender", "") ?: "")
+    )
+    val userGender: StateFlow<String> = _userGender
+
     fun updateUserName(name: String) {
         prefs.edit { putString("user_name", name) }
         _userName.value = name
@@ -54,5 +63,25 @@ class UserRepository(context: Context) {
     fun updateUserSignature(signature: String) {
         prefs.edit { putString("user_signature", signature) }
         _userSignature.value = signature
+    }
+
+    fun updateUserGender(gender: String) {
+        val normalized = normalizeGender(gender)
+        prefs.edit {
+            if (normalized.isEmpty()) {
+                remove("user_gender")
+            } else {
+                putString("user_gender", normalized)
+            }
+        }
+        _userGender.value = normalized
+    }
+
+    private fun normalizeGender(raw: String): String {
+        return when (raw.trim().lowercase()) {
+            "male", "m", "男", "man", "boy" -> "male"
+            "female", "f", "女", "woman", "girl" -> "female"
+            else -> ""
+        }
     }
 }

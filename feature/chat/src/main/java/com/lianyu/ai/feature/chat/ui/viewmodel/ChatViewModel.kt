@@ -114,6 +114,7 @@ class ChatViewModel(
     val ttsState: StateFlow<ChatTtsState> = generation.ttsState
 
     private var avatarUnsubscribe: (() -> Unit)? = null
+    private var nicknameUnsubscribe: (() -> Unit)? = null
 
     init {
         observeMessageMetadata()
@@ -346,7 +347,9 @@ class ChatViewModel(
         val provider = ServiceRegistry.get(UserProfileProvider::class.java)
         _userName.value = provider?.getNickname() ?: "我"
         _userAvatar.value = provider?.getAvatar()
+        // 持续订阅资料流，避免改头像/昵称后聊天页仍显示旧缓存
         avatarUnsubscribe = provider?.observeAvatar { _userAvatar.value = it }
+        nicknameUnsubscribe = provider?.observeNickname { _userName.value = it }
     }
 
     private fun loadEarlierMessages() {
@@ -542,6 +545,8 @@ class ChatViewModel(
     override fun onCleared() {
         avatarUnsubscribe?.invoke()
         avatarUnsubscribe = null
+        nicknameUnsubscribe?.invoke()
+        nicknameUnsubscribe = null
         contextResolver.clearCache(companionId)
         super.onCleared()
     }

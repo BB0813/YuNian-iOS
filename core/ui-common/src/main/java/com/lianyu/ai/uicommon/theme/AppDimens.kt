@@ -41,8 +41,9 @@ object AppDimens {
     val AttachmentIconTextGap = 8.dp
 
     // ── Context menu ────────────────────────────────────────────────
-    val MenuIconSize = 20.dp
-    val MenuTextFontSize = 14.sp
+    // 竖直菜单：左图标右文字，严格控制尺寸避免失衡
+    val MenuIconSize = 18.dp
+    val MenuTextFontSize = 13.sp
 
     // ── Time divider ────────────────────────────────────────────────
     val TimeDividerVerticalPadding = 8.dp
