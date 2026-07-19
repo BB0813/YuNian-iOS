@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -76,8 +76,8 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     groupViewModel: ChatGroupViewModel = viewModel()
 ) {
-    val chatListState by viewModel.chatListState.collectAsState()
-    val groups by groupViewModel.groups.collectAsState()
+    val chatListState by viewModel.chatListState.collectAsStateWithLifecycle()
+    val groups by groupViewModel.groups.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
     val colorScheme = AppTheme.colors
@@ -153,6 +153,16 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // 顶栏与「全部/群聊/好友」分隔
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(colorScheme.outlineVariant.copy(alpha = 0.55f))
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // 胶囊标签切换
                 HomeTabBar(
                     selectedTab = selectedTab,
@@ -162,9 +172,8 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // 统计信息（放在导航栏下方）
-                val chatCount = when (chatListState) {
-                    is HomeViewModel.UiState.Ready ->
-                        (chatListState as HomeViewModel.UiState.Ready).items.size
+                val chatCount = when (val state = chatListState) {
+                    is HomeViewModel.UiState.Ready -> state.items.size
                     else -> 0
                 }
                 Text(
@@ -179,11 +188,10 @@ fun HomeScreen(
                 HomeTab.ALL, HomeTab.GROUP -> groups
                 HomeTab.FRIEND -> emptyList()
             }
-            val displayChats = when {
-                chatListState is HomeViewModel.UiState.Ready -> {
-                    val items = (chatListState as HomeViewModel.UiState.Ready).items
+            val displayChats = when (val state = chatListState) {
+                is HomeViewModel.UiState.Ready -> {
                     when (selectedTab) {
-                        HomeTab.ALL, HomeTab.FRIEND -> items
+                        HomeTab.ALL, HomeTab.FRIEND -> state.items
                         HomeTab.GROUP -> emptyList()
                     }
                 }
@@ -191,6 +199,12 @@ fun HomeScreen(
             }
 
             when {
+                chatListState is HomeViewModel.UiState.Error -> {
+                    val message = (chatListState as HomeViewModel.UiState.Error).message
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        ErrorHomeState(message = message)
+                    }
+                }
                 chatListState is HomeViewModel.UiState.Loading && groups.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
@@ -216,36 +230,23 @@ fun HomeScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (displayGroups.isNotEmpty()) {
-                        item {
-                            SectionTitle(
-                                title = "群聊"
-                            )
-                        }
-                        itemsIndexed(displayGroups) { _, group ->
-                            GroupListItem(
-                                group = group,
-                                onClick = { onGroupClick(group.id) },
-                                adaptiveSizing = adaptiveSizing
-                            )
-                        }
+                    // 「全部」不分区标题：群聊与好友按列表顺序混排，不严格区分
+                    // 「群聊/好友」页本身已过滤，同样不显示分区标题
+                    itemsIndexed(displayGroups) { _, group ->
+                        GroupListItem(
+                            group = group,
+                            onClick = { onGroupClick(group.id) },
+                            adaptiveSizing = adaptiveSizing
+                        )
                     }
-
-                    if (displayChats.isNotEmpty()) {
-                        item {
-                            SectionTitle(
-                                title = "好友"
-                            )
-                        }
-                        itemsIndexed(displayChats) { _, item ->
-                            ChatListItem(
-                                companion = item.companion,
-                                lastMessage = item.lastMessage,
-                                hasUnread = item.hasUnread,
-                                onClick = { onCompanionClick(item.companion.id) },
-                                adaptiveSizing = adaptiveSizing
-                            )
-                        }
+                    itemsIndexed(displayChats) { _, item ->
+                        ChatListItem(
+                            companion = item.companion,
+                            lastMessage = item.lastMessage,
+                            hasUnread = item.hasUnread,
+                            onClick = { onCompanionClick(item.companion.id) },
+                            adaptiveSizing = adaptiveSizing
+                        )
                     }
                 }
                 }
@@ -260,27 +261,15 @@ fun SectionTitle(
 ) {
     val colorScheme = AppTheme.colors
 
-    Row(
+    Text(
+        text = title,
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 4.dp, bottom = 4.dp, top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .height(14.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(PinkPrimary)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = title,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = colorScheme.onSurfaceVariant
-        )
-    }
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable
@@ -518,6 +507,50 @@ fun ChatListItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+        }
+    }
+}
+
+@Composable
+fun ErrorHomeState(message: String) {
+    val colorScheme = AppTheme.colors
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.ChatBubbleOutline,
+                    contentDescription = null,
+                    tint = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(36.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "会话加载失败",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Medium
+                ),
+                color = colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorScheme.onSurfaceVariant
+            )
         }
     }
 }

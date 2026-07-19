@@ -561,13 +561,14 @@ fun MemoryItemCard(
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val category = memory.toMemoryCategory()
 
+    val cardShape = RoundedCornerShape(12.dp)
     AppListItemLayout(
         isStartAligned = true,
         startSlot = {},
         endSlot = {},
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(cardShape)
             .background(AppTheme.colors.surface),
         onClick = { onEdit(memory) },
         slotGap = AppTheme.dimens.avatarGap

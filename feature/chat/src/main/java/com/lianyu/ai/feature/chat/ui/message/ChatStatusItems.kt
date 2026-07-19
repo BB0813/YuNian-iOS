@@ -129,9 +129,14 @@ fun RegeneratingItem(
 @Composable
 fun ReasoningItem(
     reasoningText: String,
-    adaptiveSizing: AdaptiveSizing
+    adaptiveSizing: AdaptiveSizing,
+    autoCollapse: Boolean = true,
+    isStreaming: Boolean = false
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    // 流式思考中默认展开；完成后按 autoCollapse 决定是否收起
+    var expanded by remember(reasoningText, autoCollapse, isStreaming) {
+        mutableStateOf(if (isStreaming) true else !autoCollapse)
+    }
     val colors = AppTheme.colors
     val typography = AppTheme.typography
 
@@ -147,7 +152,12 @@ fun ReasoningItem(
                 modifier = Modifier.clickable { expanded = !expanded }
             ) {
                 Text(
-                    text = if (expanded) "思考中 ▼" else "已思考 ▶",
+                    text = when {
+                        isStreaming && expanded -> "思考中 ▼"
+                        isStreaming -> "思考中 ▶"
+                        expanded -> "已思考 ▼"
+                        else -> "已思考 ▶"
+                    },
                     style = typography.labelSmall.copy(fontSize = 12.sp),
                     color = colors.metadataContent
                 )

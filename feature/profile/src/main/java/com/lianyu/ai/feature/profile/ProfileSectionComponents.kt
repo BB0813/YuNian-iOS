@@ -33,9 +33,9 @@ import androidx.compose.ui.unit.sp
  * 个人资料页通用行原子。
  *
  * 标准模式：
- * `Row(fillMaxWidth → pressBackground → clickable(indication=null) → padding(20, 14))`
+ * `Row(fillMaxWidth → flat press bg → clickable(indication=null) → padding(20, 14))`
  *
- * 按压/长按使用整行矩形阴影，而不是 Material 圆形涟漪。
+ * 按压使用浅色平面底，不是 Material 圆形涟漪。
  * 页面多行排版时复用此组件，内容通过 [content] 槽位注入。
  */
 @Composable
@@ -45,12 +45,17 @@ internal fun ProfileSectionRow(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val pressColor = AppTheme.colors.onSurface.copy(alpha = 0.06f)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (onClick != null && isPressed) pressColor else Color.Transparent)
+            .background(
+                if (onClick != null && isPressed) {
+                    AppTheme.colors.onSurface.copy(alpha = 0.06f)
+                } else {
+                    Color.Transparent
+                }
+            )
             .then(
                 if (onClick != null) {
                     Modifier.clickable(

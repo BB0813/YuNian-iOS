@@ -117,10 +117,31 @@ object ServiceRegistry {
 
     /**
      * 清空所有注册项与单例缓存。仅在 Application.onTerminate 调用。
+     *
+     * 关闭顺序：先尝试关闭已缓存的单例（[AutoCloseable] / [java.io.Closeable]），
+     * 再清空工厂与缓存，避免进程退出时泄漏原生/网络资源。
+     * 关闭失败会被吞掉，不阻断后续清理。
      */
     fun clear() {
+        closeSingletonsQuietly()
         factories.clear()
         singletonFactories.clear()
         singletons.clear()
+        _initialized.value = false
+    }
+
+    private fun closeSingletonsQuietly() {
+        // 快照后关闭，避免 close 回调间并发改 map
+        val snapshot = singletons.values.toList()
+        for (instance in snapshot) {
+            try {
+                when (instance) {
+                    is AutoCloseable -> instance.close()
+                    is java.io.Closeable -> instance.close()
+                }
+            } catch (_: Exception) {
+                // onTerminate 路径：关闭失败不抛，避免阻断进程清理
+            }
+        }
     }
 }

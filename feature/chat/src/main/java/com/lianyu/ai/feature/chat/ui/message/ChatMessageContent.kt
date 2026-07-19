@@ -3,10 +3,13 @@ package com.lianyu.ai.feature.chat.ui.message
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -43,12 +48,17 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.TextToolbarStatus
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -61,6 +71,7 @@ import com.lianyu.ai.uicommon.theme.AppTheme
 import com.lianyu.ai.uicommon.component.VoiceMessageBubble as VoicePlaybackBubble
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /** 屏蔽系统文字工具栏，避免与自定义长按菜单叠层冲突。 */
@@ -76,79 +87,145 @@ private object DisabledTextToolbar : TextToolbar {
     ) = Unit
 }
 
+private fun fullSelectionRange(text: String): TextRange {
+    if (text.isEmpty()) return TextRange.Zero
+    return TextRange(0, text.length)
+}
+
+private fun selectedSnippet(text: String, selection: TextRange): String {
+    if (selection.collapsed) return ""
+    val start = selection.min.coerceIn(0, text.length)
+    val end = selection.max.coerceIn(0, text.length)
+    if (start >= end) return ""
+    return text.substring(start, end)
+}
+
+/**
+ * 文字消息正文：
+ * - 阅读态：普通 Text，宽度按文本真实测量，无 280dp 最小宽
+ * - 长按目标是文字本身（不是气泡）：进入选区 + 弹出操作菜单
+ * - 选区态：只读 BasicTextField 全选 + 头尾游标；复制取当前选中片段
+ * - 阅读/选区都用 TextMeasurer 锁死同一 contentWidth，避免长按后气泡变宽
+ */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun TextMessageContent(
     quotedContent: QuotedTextContent,
     isMine: Boolean,
     adaptiveSizing: AdaptiveSizing,
     onIntent: (ChatIntent) -> Unit,
-    textSelectable: Boolean = false
+    selectionActive: Boolean = false,
+    onTextLongClick: () -> Unit = {},
+    onSelectedTextChange: (String) -> Unit = {}
 ) {
     val colors = AppTheme.colors
     val typography = AppTheme.typography
     val dimens = AppTheme.dimens
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
     val quoteAuthor = if (isMine) colors.quotePrimaryAuthor else colors.quoteSecondaryAuthor
     val quotePreview = if (isMine) colors.quotePrimaryPreview else colors.quoteSecondaryPreview
-    val bodyColor = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent
+    // 气泡色统一后，正文色也统一走 secondary 标准
+    val bodyColor = colors.secondaryBubbleContent
     val bodyStyle = typography.bodyLarge.copy(
         fontSize = adaptiveSizing.fontSizeBody.sp,
         lineHeight = (adaptiveSizing.fontSizeBody * 1.5).sp,
         color = bodyColor
     )
-    val selectionColors = remember(colors.primary) {
+    // 高对比选区：游标/高亮与气泡正文拉开色差（对比色已确认满意）
+    val selectionColors = remember(isMine) {
+        val handle = if (isMine) Color(0xFFFF6B35) else Color(0xFF2F80ED)
+        val bg = if (isMine) Color(0xFFFF6B35).copy(alpha = 0.34f) else Color(0xFF2F80ED).copy(alpha = 0.30f)
         TextSelectionColors(
-            handleColor = colors.primary,
-            backgroundColor = colors.primary.copy(alpha = 0.28f)
+            handleColor = handle,
+            backgroundColor = bg
         )
     }
     val body = quotedContent.body
-    var selectionValue by remember(body) {
+    var fieldValue by remember(body, selectionActive) {
         mutableStateOf(
             TextFieldValue(
                 text = body,
-                selection = TextRange(0, body.length)
+                selection = if (selectionActive) fullSelectionRange(body) else TextRange.Zero
             )
         )
     }
+    val selectionFocusRequester = remember(body) { FocusRequester() }
 
-    LaunchedEffect(textSelectable, body) {
-        if (textSelectable) {
-            // 长按进入菜单时默认全选，用户可拖动手柄调整
-            selectionValue = TextFieldValue(
-                text = body,
-                selection = TextRange(0, body.length)
-            )
+    LaunchedEffect(selectionActive, body, fieldValue.selection) {
+        if (selectionActive) {
+            onSelectedTextChange(selectedSnippet(body, fieldValue.selection))
+        } else {
+            onSelectedTextChange("")
         }
     }
 
+    LaunchedEffect(selectionActive, body) {
+        if (!selectionActive) return@LaunchedEffect
+        // 等选区态挂载后再抢焦点，头尾游标才能显示
+        delay(16)
+        runCatching { selectionFocusRequester.requestFocus() }
+    }
+
     Column {
-        if (textSelectable) {
-            CompositionLocalProvider(
-                LocalTextSelectionColors provides selectionColors,
-                LocalTextToolbar provides DisabledTextToolbar
-            ) {
-                BasicTextField(
-                    value = selectionValue,
-                    onValueChange = { next ->
-                        // 只允许调整选区，不允许改写正文
-                        selectionValue = TextFieldValue(
-                            text = body,
-                            selection = next.selection
-                        )
-                    },
-                    readOnly = true,
-                    textStyle = bodyStyle,
-                    cursorBrush = SolidColor(Color.Transparent),
-                    modifier = Modifier.fillMaxWidth()
-                )
+        CompositionLocalProvider(
+            LocalTextSelectionColors provides selectionColors,
+            LocalTextToolbar provides DisabledTextToolbar
+        ) {
+            BoxWithConstraints {
+                // 用 TextMeasurer 按真实文本宽度测量，彻底摆脱 TextField 默认 MinWidth(280.dp)
+                val maxWidthPx = with(density) { maxWidth.roundToPx() }.coerceAtLeast(0)
+                val measured = remember(body, bodyStyle, maxWidthPx) {
+                    textMeasurer.measure(
+                        text = AnnotatedString(body),
+                        style = bodyStyle,
+                        constraints = Constraints(maxWidth = maxWidthPx),
+                        softWrap = true,
+                        overflow = TextOverflow.Clip
+                    )
+                }
+                val contentWidth = with(density) {
+                    measured.size.width.toDp().coerceAtMost(maxWidth)
+                }
+
+                if (selectionActive) {
+                    // 选区态：只读 BasicTextField 全选 + 游标；宽度锁死为文本真实宽
+                    BasicTextField(
+                        value = fieldValue,
+                        onValueChange = { next ->
+                            // 正文只读：只接受选区变化
+                            fieldValue = TextFieldValue(text = body, selection = next.selection)
+                        },
+                        readOnly = true,
+                        enabled = true,
+                        textStyle = bodyStyle,
+                        cursorBrush = SolidColor(Color.Transparent),
+                        modifier = Modifier
+                            .width(contentWidth)
+                            .focusRequester(selectionFocusRequester)
+                    )
+                } else {
+                    // 阅读态：普通 Text + 文字级长按（对象是文字，不是气泡）
+                    Text(
+                        text = body,
+                        style = bodyStyle,
+                        modifier = Modifier
+                            .width(contentWidth)
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    haptic.performHapticFeedback(
+                                        androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress
+                                    )
+                                    onTextLongClick()
+                                },
+                                indication = null,
+                                interactionSource = null
+                            )
+                    )
+                }
             }
-        } else {
-            Text(
-                text = body,
-                style = bodyStyle,
-                color = bodyColor,
-                softWrap = true
-            )
         }
         quotedContent.quote?.let { quote ->
             Spacer(modifier = Modifier.height(dimens.quoteBottomGap))

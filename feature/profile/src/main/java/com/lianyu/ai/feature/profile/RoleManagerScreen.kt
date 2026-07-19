@@ -21,6 +21,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -461,18 +463,30 @@ private fun RoleManagerCard(
     val colorScheme = AppTheme.colors
     val borderColor = if (isSelected) accentColor else colorScheme.outline.copy(alpha = 0.3f)
     val backgroundColor = if (isSelected) accentColor.copy(alpha = 0.08f) else colorScheme.surfaceVariant
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val shape = RoundedCornerShape(20.dp)
+    val surfaceColor = if (isPressed || isSelected) {
+        backgroundColor.copy(alpha = (backgroundColor.alpha * 0.92f).coerceAtLeast(0.08f))
+    } else {
+        backgroundColor
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(shape)
+            .background(surfaceColor)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(20.dp)
+                shape = shape
             )
-            .background(backgroundColor)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
             .padding(20.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

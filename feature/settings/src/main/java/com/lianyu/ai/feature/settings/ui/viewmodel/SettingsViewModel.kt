@@ -533,9 +533,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            val startTime = System.currentTimeMillis()
-            
-            // 如果用户已经手动填写了模型名，优先尊重用户选择；仅在未填写时自动拉取并兜底选择
+            // 如果用户已经手动填写了模型名，优先尊重用户选择；仅在未填写时自动拉取并兜底选择。
+            // 注意：模型列表拉取不计入「连接延迟」——延迟只度量一次轻量 chat 探测的 RTT。
             var testConfig = currentConfig
             val userModel = currentConfig.model.trim()
 
@@ -607,20 +606,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
             
             // [R17 FIX] runCatching 会吞 CancellationException，这里手动 rethrow
+            // 延迟只覆盖轻量探测 HTTP RTT，不含 fetchModels / 配置准备
+            val probeMessages = listOf(
+                com.lianyu.ai.network.Message("user", "ping")
+            )
+            SecureLog.d("SettingsViewModel", "Probing API RTT: url=${testConfig.baseUrl}, model=${testConfig.model}")
+            val startTime = System.currentTimeMillis()
             val result = runCatching {
                 val aiService = aiService
-
-                val testMessages = listOf(
-                    com.lianyu.ai.network.Message("system", "You are a helpful assistant."),
-                    com.lianyu.ai.network.Message("user", "Hi")
-                )
-
-                SecureLog.d("SettingsViewModel", "Calling API with: url=${testConfig.baseUrl}, model=${testConfig.model}")
-
                 if (AiService.usesAnthropicProtocol(testConfig)) {
-                    aiService.callAnthropicForTest(testConfig, testMessages, "Be helpful.")
+                    aiService.callAnthropicForTest(testConfig, probeMessages, "Reply with ok.")
                 } else {
-                    aiService.callOpenAiCompatibleForTest(testConfig, testMessages)
+                    aiService.callOpenAiCompatibleForTest(testConfig, probeMessages)
                 }
             }.also {
                 // [R17 FIX] runCatching 吞 CancellationException，这里重新抛出
@@ -917,6 +914,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onCleared() {
+        // 清理瞬时连接测试状态，避免页面重建后残留旧结果
+        connectionStatusMap.clear()
+        testedConfigsMap.clear()
+        _connectionStatus.value = emptyMap()
+        _testedConfigs.value = emptyMap()
         super.onCleared()
     }
 }

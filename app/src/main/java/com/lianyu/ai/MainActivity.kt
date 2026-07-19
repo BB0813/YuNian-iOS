@@ -13,12 +13,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,7 +30,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.edit
-import com.lianyu.ai.common.AppForegroundTracker
 import com.lianyu.ai.common.BatteryOptimizationHelper
 import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.FrameRateManager
@@ -39,6 +41,7 @@ import com.lianyu.ai.feature.profile.AgreementScreen
 import com.lianyu.ai.feature.profile.ProfileViewModel
 import com.lianyu.ai.feature.profile.RoleSelectionScreen
 import com.lianyu.ai.feature.update.AppUpdateManager
+import com.lianyu.ai.uicommon.component.LianYuToastHost
 import com.lianyu.ai.uicommon.component.WindowMainBackground
 import com.lianyu.ai.uicommon.theme.LianYuTheme
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
@@ -135,46 +138,55 @@ class MainActivity : ComponentActivity() {
             LianYuTheme(themeMode = themeMode) {
                 // 根 Surface 透明：主背景由 window 层绘制，避免 Compose 根层盖住 windowBackground
                 Surface(modifier = Modifier.fillMaxSize(), color = Color.Transparent) {
-                    when {
-                        !agreementAccepted -> {
-                            AgreementScreen(
-                                onAgree = {
-                                    agreementPrefs.edit()
-                                        .putBoolean("agreement_accepted", true)
-                                        .putLong("agreement_time", System.currentTimeMillis())
-                                        .apply()
-                                    activity.recreate()
-                                },
-                                onDisagree = { activity.finishAffinity() }
-                            )
-                        }
-                        showRoleSelection -> {
-                            RoleSelectionScreen(
-                                onRoleSelected = { role ->
-                                    profileViewModel.switchRole(role) {
-                                        showRoleSelection = false
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when {
+                            !agreementAccepted -> {
+                                AgreementScreen(
+                                    onAgree = {
+                                        agreementPrefs.edit()
+                                            .putBoolean("agreement_accepted", true)
+                                            .putLong("agreement_time", System.currentTimeMillis())
+                                            .apply()
+                                        activity.recreate()
+                                    },
+                                    onDisagree = { activity.finishAffinity() }
+                                )
+                            }
+                            showRoleSelection -> {
+                                RoleSelectionScreen(
+                                    onRoleSelected = { role ->
+                                        profileViewModel.switchRole(role) {
+                                            showRoleSelection = false
+                                        }
+                                    },
+                                    onSkip = {
+                                        profileViewModel.switchRole(CompanionRole.GIRLFRIEND) {
+                                            showRoleSelection = false
+                                        }
                                     }
-                                },
-                                onSkip = {
-                                    profileViewModel.switchRole(CompanionRole.GIRLFRIEND) {
-                                        showRoleSelection = false
-                                    }
+                                )
+                            }
+                            !isServiceReady -> {
+                                // 等待跨模块依赖注册中心就绪，避免冷启动后快速进入
+                                // 创建人设等页面时 ServiceRegistry.getOrThrow 抛异常导致闪退。
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                 }
-                            )
-                        }
-                        !isServiceReady -> {
-                            // 等待跨模块依赖注册中心就绪，避免冷启动后快速进入
-                            // 创建人设等页面时 ServiceRegistry.getOrThrow 抛异常导致闪退。
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            }
+                            else -> {
+                                MainScreen(activity)
                             }
                         }
-                        else -> {
-                            MainScreen(activity)
-                        }
+                        // 全局产品 Toast：运营/配置/网络错误统一通道，不污染聊天消息库
+                        LianYuToastHost(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 56.dp)
+                                .zIndex(100f)
+                        )
                     }
                 }
             }
@@ -232,6 +244,7 @@ class MainActivity : ComponentActivity() {
     /**
      * 内存管理控制回路 — 每3秒检查一次内存使用率。
      * 滞环: 触发 85% 后需降到 60% 以下才解除。
+     * CRITICAL(>90%) 时清理 L1 列表/消息缓存；HIGH 仅告警，避免聊天中途闪空。
      */
     private fun startMemoryMonitor() {
         appScope.launch {
@@ -243,11 +256,20 @@ class MainActivity : ComponentActivity() {
                 val ratio = used.toFloat() / maxMem.toFloat()
 
                 if (ratio > 0.90f) {
-                    // 清空缓存 — 通知系统内存压力，由系统自行调度GC
-                    android.util.Log.w("MemoryMonitor", "CRITICAL: ${(ratio * 100).toInt()}% — clearing caches, notifying memory pressure")
+                    android.util.Log.w(
+                        "MemoryMonitor",
+                        "CRITICAL: ${(ratio * 100).toInt()}% — clearing MessageCache/HomeListCache"
+                    )
+                    runCatching {
+                        com.lianyu.ai.database.cache.MessageCache.clearAll()
+                        com.lianyu.ai.database.cache.HomeListCache.clear()
+                    }
                     memoryAlertActive = true
                 } else if (ratio > 0.85f && !memoryAlertActive) {
-                    android.util.Log.w("MemoryMonitor", "HIGH: ${(ratio * 100).toInt()}% — clearing caches")
+                    android.util.Log.w(
+                        "MemoryMonitor",
+                        "HIGH: ${(ratio * 100).toInt()}% — pressure elevated (no cache clear yet)"
+                    )
                     memoryAlertActive = true
                 } else if (ratio < 0.60f && memoryAlertActive) {
                     android.util.Log.i("MemoryMonitor", "RECOVERED: ${(ratio * 100).toInt()}%")
@@ -259,17 +281,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        AppForegroundTracker.isInForeground = true
+        // 前后台由 AppForegroundTracker + ProcessLifecycleOwner 统一维护
         window.decorView.post {
             SystemBarController.applySystemBars(this)
             val savedRate = FrameRateManager.getSavedFrameRate(this)
             FrameRateManager.applyFrameRate(window, savedRate)
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        AppForegroundTracker.isInForeground = false
     }
 
     override fun onDestroy() {

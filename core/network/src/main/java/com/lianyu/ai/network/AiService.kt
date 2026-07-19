@@ -431,15 +431,16 @@ class AiService(context: Context) : AiServiceProvider {
      * 发送消息（非流式，兼容旧接口）
      */
     suspend fun sendMessage(companion: CompanionModel?, history: List<ChatMessage>, stickerProbability: Int = 30, ntpTimeEnabled: Boolean = false): AiResponse {
-        if (companion == null) return AiResponse("抱歉，找不到角色信息。")
+        // 运营错误统一 [TOAST] 前缀：上层只 Toast，禁止当对话内容入库
+        if (companion == null) return AiResponse("[TOAST]系统正在加载伴侣信息，请稍后再试")
 
         return SecureLog.timed("AiService", "sendMessage") {
             withContext(Dispatchers.IO) {
                 val config = resolveConfig()
-                    ?: return@withContext AiResponse("请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。")
+                    ?: return@withContext AiResponse("[TOAST]请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。")
 
                 if (config.model.isBlank()) {
-                    return@withContext AiResponse("模型名未配置，请在「API设置」中重新测试连接以自动选择模型。")
+                    return@withContext AiResponse("[TOAST]模型名未配置，请在「API设置」中重新测试连接以自动选择模型。")
                 }
 
                 val sortedHistory = history.sortedBy { it.timestamp }
@@ -568,10 +569,10 @@ class AiService(context: Context) : AiServiceProvider {
         return SecureLog.timed("AiService", "sendMessageWithCustomSystem") {
             withContext(Dispatchers.IO) {
                 val config = resolveConfig()
-                    ?: return@withContext "请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。"
+                    ?: return@withContext "[TOAST]请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。"
 
                 if (config.model.isBlank()) {
-                    return@withContext "模型名未配置，请在「API设置」中重新测试连接以自动选择模型。"
+                    return@withContext "[TOAST]模型名未配置，请在「API设置」中重新测试连接以自动选择模型。"
                 }
 
                 val sortedHistory = history.sortedBy { it.timestamp }
@@ -627,7 +628,7 @@ class AiService(context: Context) : AiServiceProvider {
 
     private suspend fun callOpenAiCompatibleForGeneration(generationPrompt: String): String {
         val config = resolveConfig()
-            ?: return "请先配置并启用可用的API。"
+            ?: return "[TOAST]请先配置并启用可用的API。"
 
         val messages = listOf(
             Message("system", "你是专业的人设/角色设定生成器。"),
@@ -1104,6 +1105,7 @@ class AiService(context: Context) : AiServiceProvider {
                 error.message?.contains("timeout", ignoreCase = true) == true ||
                 error.message?.contains("timed out", ignoreCase = true) == true
 
+        // 统一运营错误前缀：上层只 Toast，不入库
         if (isTimeout) {
             return "[TOAST]网络连接超时，请检查网络后重试"
         }
@@ -1121,7 +1123,7 @@ class AiService(context: Context) : AiServiceProvider {
             else -> error.message
         }?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName
 
-        return "API调用失败：$message"
+        return "[TOAST]API调用失败：$message"
     }
 
     fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String =
@@ -1149,76 +1151,23 @@ class AiService(context: Context) : AiServiceProvider {
         } else base
     }
 
+    /**
+     * 连接探测：用轻量客户端 + 极小 max_tokens，只验证鉴权与模型可达。
+     * 不走主客户端的 RetryInterceptor / 长 callTimeout，避免把重试与生成耗时算进「延迟」。
+     */
     suspend fun callOpenAiCompatibleForTest(config: ApiConfig, messages: List<Message>): String {
-        val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
-        val url = "${baseUrl.trimEnd('/')}/chat/completions"
-
-        val (startIdx, allKeys) = resolveKeysWithPartnerFallback(config)
-        var lastException: Exception? = null
-
-        val jsonArray = org.json.JSONArray()
-        for (msg in messages) {
-            val msgObj = org.json.JSONObject()
-            msgObj.put("role", msg.role)
-            msgObj.put("content", msg.content)
-            jsonArray.put(msgObj)
+        // maxTokens=1：连通性探测，不是完整对话质量测试
+        val content = callOpenAiCompatibleLight(
+            config = config,
+            messages = messages,
+            temperature = 0.0,
+            maxTokens = 1
+        )
+        if (content.isBlank()) {
+            // 部分模型可能返回空 content 但仍算成功；保持与旧语义兼容
+            return content
         }
-
-        for (i in 0 until allKeys.size) {
-            val keyIndex = (startIdx + i) % allKeys.size
-            val currentKey = allKeys[keyIndex]
-            try {
-                val jsonBody = org.json.JSONObject()
-                jsonBody.put("model", config.model)
-                jsonBody.put("messages", jsonArray)
-                jsonBody.put("stream", false)
-                if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", 0.7)
-                }
-                val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
-                    "max_completion_tokens"
-                } else {
-                    "max_tokens"
-                }
-                jsonBody.put(maxTokensParam, 100)
-
-                val requestBuilder = okhttp3.Request.Builder()
-                    .url(url)
-                    .addHeader("Content-Type", "application/json")
-                addProviderAuthHeaders(requestBuilder, config, currentKey)
-                val request = requestBuilder
-                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val response = executeAdaptive(config, request)
-                val body = response.body?.string() ?: throw Exception("Empty response")
-
-                if (!response.isSuccessful) {
-                    val errorMsg = if (body.trimStart().startsWith("{")) {
-                        runCatching { json.decodeFromString<ChatCompletionResponse>(body).error?.message }.getOrNull()
-                    } else null
-                    throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
-                }
-
-                ensureNotHtml(body, response)
-                val parsed = json.decodeFromString<ChatCompletionResponse>(body)
-                if (parsed.error != null) {
-                    throw Exception(parsed.error.message ?: "API返回错误")
-                }
-
-                var content = parsed.choices?.firstOrNull()?.message?.content
-                    ?: throw Exception("API返回空内容")
-                content = stripThinkingContent(content)
-                return content
-            } catch (e: Exception) {
-                lastException = e
-                markKeyFailed(currentKey)
-                SecureLog.w("AiService", "Test Key #${keyIndex + 1}/${allKeys.size} 失败: ${e.message}")
-                if (i < allKeys.size - 1) continue else throw lastException
-            }
-        }
-
-        throw lastException ?: Exception("所有 API Key 均请求失败")
+        return stripThinkingContent(content)
     }
 
     private suspend fun callOpenAiCompatible(config: ApiConfig, messages: List<Message>): String {
@@ -1351,9 +1300,26 @@ class AiService(context: Context) : AiServiceProvider {
                 val choice = parsed.choices?.firstOrNull()
                 val message = choice?.message
                 val rawContent = message?.content
-                val reasoning = message?.reasoning_content
                 val finishReason = choice?.finish_reason
-                SecureLog.api("RESPONSE", "len=${rawContent?.length ?: 0}, reasoningLen=${reasoning?.length ?: 0}, finish=$finishReason")
+
+                // 架构：优先读配置的响应字段，再回退 reasoning_content / 正文思考标签
+                val fieldReasoning = extractReasoningFromBody(body, message)
+                val (cleanedContent, tagReasoning) = if (!rawContent.isNullOrBlank()) {
+                    ResponsePostProcessor.extractThinkingContent(rawContent)
+                } else {
+                    "" to null
+                }
+                val reasoning = listOfNotNull(fieldReasoning, tagReasoning)
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .joinToString("\n\n")
+                    .ifBlank { null }
+
+                SecureLog.api(
+                    "RESPONSE",
+                    "len=${rawContent?.length ?: 0}, reasoningLen=${reasoning?.length ?: 0}, finish=$finishReason"
+                )
 
                 // 解析 tool_calls
                 val toolCalls = message?.tool_calls?.map { tc ->
@@ -1369,12 +1335,7 @@ class AiService(context: Context) : AiServiceProvider {
                     return Tuple4("", reasoning, toolCalls, finishReason ?: "tool_calls")
                 }
 
-                var content = if (!rawContent.isNullOrBlank()) {
-                    stripThinkingContent(rawContent)
-                } else {
-                    ""
-                }
-
+                val content = cleanedContent
                 if (content.isBlank()) {
                     throw Exception("模型仅返回了思考过程，未生成实际回复，请重试")
                 }
@@ -1396,20 +1357,45 @@ class AiService(context: Context) : AiServiceProvider {
         val first: A, val second: B, val third: C, val fourth: D
     )
 
-    private fun stripThinkingContent(content: String): String {
-        var result = content
-        // XML/HTML 风格思考标签
-        result = result.replace(Regex("""(?is)<think[^>]*>[\s\S]*?</think\s*>"""), "")
-        result = result.replace(Regex("""(?is)<thinking[^>]*>[\s\S]*?</thinking\s*>"""), "")
-        result = result.replace(Regex("""(?is)<thought[^>]*>[\s\S]*?</thought\s*>"""), "")
-        result = result.replace(Regex("""(?is)<reflection[^>]*>[\s\S]*?</reflection\s*>"""), "")
-        // Markdown 风格思考标题（## 思考 / ## Thinking 等）
-        result = result.replace(Regex("""(?im)^#{1,3}\s*(思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought)\s*\n[\s\S]*?(?=\n#{1,3}\s|$)"""), "")
-        // 【思考】/【推理】等方括号包裹的思考块
-        result = result.replace(Regex("""(?is)【(思考|思维|推理|分析)】[\s\S]*?【/(思考|思维|推理|分析)】"""), "")
-        // 行内 [思考] ... [/思考] 格式
-        result = result.replace(Regex("""(?is)\[(思考|思维|推理|分析|thought|thinking)]\s*[\s\S]*?\[/\1]"""), "")
-        return result.trim()
+    private fun stripThinkingContent(content: String): String =
+        ResponsePostProcessor.stripThinkingContent(content)
+
+    /**
+     * 从响应 JSON 提取思考字段。
+     * 顺序：用户配置字段 → message.reasoning_content → 常见别名。
+     */
+    private suspend fun extractReasoningFromBody(
+        body: String,
+        message: Message?
+    ): String? {
+        val configuredField = runCatching { appSettingsStore.getReasoningResponseField() }
+            .getOrNull()
+            ?.trim()
+            .orEmpty()
+        val candidates = linkedSetOf<String>().apply {
+            if (configuredField.isNotBlank()) add(configuredField)
+            add("reasoning_content")
+            add("reasoning")
+            add("thinking")
+            add("thought")
+        }
+
+        // 1) 已反序列化的标准字段
+        message?.reasoning_content?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // 2) 原始 JSON 动态字段（支持自定义 response field）
+        return runCatching {
+            val root = org.json.JSONObject(body)
+            val msgObj = root.optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?: return@runCatching null
+            for (field in candidates) {
+                val value = msgObj.optString(field, "").trim()
+                if (value.isNotBlank()) return@runCatching value
+            }
+            null
+        }.getOrNull()
     }
 
     suspend fun callAnthropicForTest(config: ApiConfig, messages: List<Message>, systemPrompt: String): String {
@@ -1565,7 +1551,7 @@ class AiService(context: Context) : AiServiceProvider {
 
         if (companion == null) {
             SecureLog.e("VISION", "ERROR: companion is null!")
-            return AiResponse("抱歉，找不到角色信息。")
+            return AiResponse("[TOAST]系统正在加载伴侣信息，请稍后再试")
         }
 
         return SecureLog.timed("AiService", "sendMessageWithImage") {
@@ -1575,12 +1561,12 @@ class AiService(context: Context) : AiServiceProvider {
 
                 if (config == null) {
                     SecureLog.e("VISION", "ERROR: config is null!")
-                    return@withContext AiResponse("请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。")
+                    return@withContext AiResponse("[TOAST]请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。")
                 }
 
                 if (config.model.isBlank()) {
                     SecureLog.e("VISION", "ERROR: model is blank!")
-                    return@withContext AiResponse("模型名未配置，请在「API设置」中重新测试连接以自动选择模型。")
+                    return@withContext AiResponse("[TOAST]模型名未配置，请在「API设置」中重新测试连接以自动选择模型。")
                 }
 
                 val isVisionEnabled = try {
@@ -2021,7 +2007,7 @@ class AiService(context: Context) : AiServiceProvider {
         ntpTimeEnabled: Boolean
     ): AiResponse {
         val entity = companion.toCompanionEntity()
-        val messages = history.map { it.toChatMessage() }
+        val messages = sanitizeDomainHistory(history)
         return sendMessage(entity, messages, stickerProbability, ntpTimeEnabled)
     }
 
@@ -2036,8 +2022,15 @@ class AiService(context: Context) : AiServiceProvider {
             return sendMessage(companion, history, stickerProbability, ntpTimeEnabled)
         }
         val entity = companion.toCompanionEntity()
-        val messages = history.map { it.toChatMessage() }
+        val messages = sanitizeDomainHistory(history)
         return sendMessageWithTools(entity, messages, stickerProbability, ntpTimeEnabled, tools)
+    }
+
+    /** 领域历史 → DB 实体：先按对话策略清洗，再映射角色 */
+    private fun sanitizeDomainHistory(history: List<AiChatMessage>): List<ChatMessage> {
+        return com.lianyu.ai.domain.AiDialogueHistoryPolicy
+            .sanitizeForModel(history)
+            .map { it.toChatMessage() }
     }
 
     /**
@@ -2051,14 +2044,14 @@ class AiService(context: Context) : AiServiceProvider {
         ntpTimeEnabled: Boolean,
         tools: List<AiTool>
     ): AiResponse {
-        if (companion == null) return AiResponse("抱歉，找不到角色信息。")
+        if (companion == null) return AiResponse("[TOAST]系统正在加载伴侣信息，请稍后再试")
 
         return SecureLog.timed("AiService", "sendMessageWithTools") {
             withContext(Dispatchers.IO) {
                 val config = resolveConfig()
-                    ?: return@withContext AiResponse("请先配置并启用可用的API。")
+                    ?: return@withContext AiResponse("[TOAST]请先配置并启用可用的API。")
                 if (config.model.isBlank()) {
-                    return@withContext AiResponse("模型名未配置。")
+                    return@withContext AiResponse("[TOAST]模型名未配置。")
                 }
 
                 val sortedHistory = history.sortedBy { it.timestamp }
@@ -2152,16 +2145,27 @@ class AiService(context: Context) : AiServiceProvider {
         systemPrompt = systemPrompt
     )
 
-    private fun AiChatMessage.toChatMessage(): ChatMessage = ChatMessage(
-        companionId = companionId,
-        content = content,
-        isFromUser = isFromUser,
-        timestamp = timestamp,
-        type = when (type) {
-            AiMessageType.TEXT -> MessageType.TEXT
-            AiMessageType.IMAGE -> MessageType.IMAGE
+    private fun AiChatMessage.toChatMessage(): ChatMessage {
+        val normalized = com.lianyu.ai.domain.AiDialogueHistoryPolicy.normalizeRole(this)
+        // TOOL 映射为 user 侧内容，避免被当成 assistant 自言自语
+        val fromUser = when (normalized.role) {
+            com.lianyu.ai.domain.AiMessageRole.USER,
+            com.lianyu.ai.domain.AiMessageRole.TOOL -> true
+            com.lianyu.ai.domain.AiMessageRole.ASSISTANT,
+            com.lianyu.ai.domain.AiMessageRole.SYSTEM,
+            null -> normalized.isFromUser
         }
-    )
+        return ChatMessage(
+            companionId = companionId,
+            content = content,
+            isFromUser = fromUser,
+            timestamp = timestamp,
+            type = when (type) {
+                AiMessageType.TEXT -> MessageType.TEXT
+                AiMessageType.IMAGE -> MessageType.IMAGE
+            }
+        )
+    }
 
     override fun shouldProactivelyMessage(
         companion: AiCompanionInfo,

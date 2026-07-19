@@ -1,6 +1,7 @@
 package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -37,15 +38,16 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.uicommon.theme.AppTheme
+import com.lianyu.ai.uicommon.theme.PinkPrimary
 
 /**
  * 消息长按操作菜单。
  *
- * 布局：竖直列表；每一行左侧图标、右侧操作名。
- * 图标 18dp、文字 13sp，严格控制视觉比例。
+ * 不透明玻璃卡片 + 主题色描边；紧凑行距，避免大块空白。
  */
 @Composable
 fun ChatMessageMenu(
@@ -57,30 +59,39 @@ fun ChatMessageMenu(
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val menuBg = colors.menuBackground
+    // 不透明玻璃：surface 实色 + 轻描边，避免半透明糊底
+    val menuBg = colors.surface
     val contentColor = colors.menuContent
     val iconColor = colors.menuIcon
+    val borderColor = PinkPrimary.copy(alpha = 0.22f)
 
-    // 严格控制：图标 18dp、文字 13sp（来自 AppTheme.dimens）
     val iconSize = dimens.menuIconSize
     val labelSize = dimens.menuTextFontSize
-    val itemHorizontalPadding = 14.dp
-    val itemVerticalPadding = 11.dp
-    val iconTextGap = 12.dp
-    val menuMinWidth = 148.dp
-    val menuMaxWidth = 176.dp
+    val itemHorizontalPadding = 12.dp
+    val itemVerticalPadding = 7.dp
+    val iconTextGap = 10.dp
+    val menuMinWidth = 140.dp
+    val menuMaxWidth = 168.dp
+    val menuShape = RoundedCornerShape(14.dp)
 
     MaterialTheme(
-        shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(12.dp))
+        shapes = MaterialTheme.shapes.copy(extraSmall = menuShape)
     ) {
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = onDismiss,
             modifier = Modifier
                 .widthIn(min = menuMinWidth, max = menuMaxWidth)
-                .clip(RoundedCornerShape(12.dp))
-                .background(menuBg),
-            offset = DpOffset(x = 0.dp, y = (-6).dp)
+                .clip(menuShape)
+                .background(menuBg)
+                .border(1.dp, borderColor, menuShape),
+            offset = DpOffset(x = 0.dp, y = (-4).dp),
+            // 不抢焦点，避免正文选区头尾游标因菜单弹层失焦而消失
+            properties = PopupProperties(
+                focusable = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true
+            )
         ) {
             val actions = buildList {
                 add(
@@ -124,7 +135,7 @@ fun ChatMessageMenu(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp)
+                    .padding(vertical = 2.dp)
             ) {
                 actions.forEach { action ->
                     ChatMenuItem(
@@ -194,7 +205,7 @@ private fun ChatMenuItem(
             text = text,
             color = contentColor,
             fontSize = labelSize,
-            lineHeight = 18.sp,
+            lineHeight = 16.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

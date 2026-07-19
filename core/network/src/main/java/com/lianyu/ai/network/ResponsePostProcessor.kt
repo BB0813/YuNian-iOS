@@ -6,25 +6,53 @@ package com.lianyu.ai.network
  */
 object ResponsePostProcessor {
 
+    private val THINK_BLOCK_PATTERNS = listOf(
+        // XML/HTML 风格思考标签
+        Regex("""(?is)<think[^>]*>([\s\S]*?)</think\s*>"""),
+        Regex("""(?is)<thinking[^>]*>([\s\S]*?)</thinking\s*>"""),
+        Regex("""(?is)<thought[^>]*>([\s\S]*?)</thought\s*>"""),
+        Regex("""(?is)<reflection[^>]*>([\s\S]*?)</reflection\s*>"""),
+        // Markdown 风格思考标题（## 思考 / ## Thinking 等）
+        Regex("""(?im)^#{1,3}\s*(思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought)\s*\n([\s\S]*?)(?=\n#{1,3}\s|$)"""),
+        // 【思考】/【推理】等方括号包裹的思考块
+        Regex("""(?is)【(思考|思维|推理|分析)】([\s\S]*?)【/\1】"""),
+        // 行内 [思考] ... [/思考] 格式
+        Regex("""(?is)\[(思考|思维|推理|分析|thought|thinking)]\s*([\s\S]*?)\[/\1]""")
+    )
+
+    /**
+     * 从模型输出中提取思考过程，并返回清洗后的正文。
+     *
+     * @return Pair(cleanedContent, extractedReasoning)
+     *         extractedReasoning 在未匹配到思考块时为 null。
+     */
+    fun extractThinkingContent(content: String): Pair<String, String?> {
+        if (content.isBlank()) return content to null
+        val extracted = mutableListOf<String>()
+        var result = content
+        for (pattern in THINK_BLOCK_PATTERNS) {
+            result = pattern.replace(result) { match ->
+                val body = match.groupValues
+                    .drop(1)
+                    .lastOrNull { it.isNotBlank() && !it.matches(Regex("思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought|thought|thinking")) }
+                    ?: match.groupValues.getOrNull(1)
+                    ?: ""
+                val cleanedBody = body.trim()
+                if (cleanedBody.isNotBlank()) {
+                    extracted += cleanedBody
+                }
+                ""
+            }
+        }
+        val reasoning = extracted.joinToString("\n\n").trim().ifBlank { null }
+        return result.trim() to reasoning
+    }
+
     /**
      * 去除模型输出中的思考过程标签内容。
      * 支持 XML/HTML 风格、Markdown 标题、方括号包裹、行内标签等多种格式。
      */
-    fun stripThinkingContent(content: String): String {
-        var result = content
-        // XML/HTML 风格思考标签
-        result = result.replace(Regex("""(?is)<think[^>]*>[\s\S]*?</think\s*>"""), "")
-        result = result.replace(Regex("""(?is)<thinking[^>]*>[\s\S]*?</thinking\s*>"""), "")
-        result = result.replace(Regex("""(?is)<thought[^>]*>[\s\S]*?</thought\s*>"""), "")
-        result = result.replace(Regex("""(?is)<reflection[^>]*>[\s\S]*?</reflection\s*>"""), "")
-        // Markdown 风格思考标题（## 思考 / ## Thinking 等）
-        result = result.replace(Regex("""(?im)^#{1,3}\s*(思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought)\s*\n[\s\S]*?(?=\n#{1,3}\s|$)"""), "")
-        // 【思考】/【推理】等方括号包裹的思考块
-        result = result.replace(Regex("""(?is)【(思考|思维|推理|分析)】[\s\S]*?【/(思考|思维|推理|分析)】"""), "")
-        // 行内 [思考] ... [/思考] 格式
-        result = result.replace(Regex("""(?is)\[(思考|思维|推理|分析|thought|thinking)]\s*[\s\S]*?\[/\1]"""), "")
-        return result.trim()
-    }
+    fun stripThinkingContent(content: String): String = extractThinkingContent(content).first
 
     /**
      * 检查响应体是否为 HTML（非 JSON）并抛出明确错误。

@@ -76,6 +76,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -107,6 +108,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.database.model.GroupMessage
@@ -305,6 +309,7 @@ fun GroupChatScreen(
 
     // Background: global > default
     // 与私聊一致：解析 key 直接驱动绘制，仅 default 跟随主题，避免深色模式吞掉用户背景
+    // SharedPreferences 不会驱动重组：从设置页返回时需在 ON_RESUME 重读全局 key
     val themeBgColor = AppTheme.colors.background
     var resolvedBgKey by remember { mutableStateOf("default") }
     var targetBgColor by remember { mutableStateOf(themeBgColor) }
@@ -314,7 +319,17 @@ fun GroupChatScreen(
     val customBgPainter = if (isCustomBg && customBgKey.isNotEmpty()) {
         rememberBackgroundBitmap(customBgKey)
     } else null
-    val globalBgKey = getChatBackgroundKey(context)
+    var globalBgKey by remember { mutableStateOf(getChatBackgroundKey(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                globalBgKey = getChatBackgroundKey(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(globalBgKey, isDarkTheme) {
         withContext(Dispatchers.IO) {
             val effectiveKey = globalBgKey
@@ -998,8 +1013,8 @@ fun GroupChatBubble(
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = remember(message.timestamp) { dateFormat.format(Date(message.timestamp)) }
 
-    // 气泡不透明，避免聊天背景透出
-    val userBubbleColor = AppTheme.colors.primaryBubbleBackground
+    // 气泡不透明；自己 / AI 统一 AI 标准色
+    val userBubbleColor = AppTheme.colors.secondaryBubbleBackground
     val aiBubbleColor = AppTheme.colors.secondaryBubbleBackground
 
     AppListItemLayout(
@@ -1072,8 +1087,8 @@ fun GroupChatBubble(
                         val th = 8.dp.toPx()
                         val w = size.width
                         val h = size.height
-                        if (isUser) {
-                            drawPath(Path().apply {
+                        val path = if (isUser) {
+                            Path().apply {
                                 moveTo(cr, 0f); lineTo(w - cr - tw, 0f)
                                 quadraticTo(w - tw, 0f, w - tw, cr)
                                 lineTo(w - tw, h - cr - th)
@@ -1081,17 +1096,19 @@ fun GroupChatBubble(
                                 quadraticTo(w - tw * 0.3f, h, w - cr - tw, h)
                                 lineTo(cr, h); quadraticTo(0f, h, 0f, h - cr)
                                 lineTo(0f, cr); quadraticTo(0f, 0f, cr, 0f); close()
-                            }, userBubbleColor)
+                            }
                         } else {
-                            drawPath(Path().apply {
+                            Path().apply {
                                 moveTo(cr + tw, 0f); lineTo(w - cr, 0f)
                                 quadraticTo(w, 0f, w, cr); lineTo(w, h - cr)
                                 quadraticTo(w, h, w - cr, h); lineTo(cr + tw, h)
                                 quadraticTo(tw * 0.3f, h, 0f, h - th * 0.5f)
                                 quadraticTo(tw, h - th * 0.5f, tw, h - cr - th)
                                 lineTo(tw, cr); quadraticTo(tw, 0f, cr + tw, 0f); close()
-                            }, aiBubbleColor)
+                            }
                         }
+                        val base = if (isUser) userBubbleColor else aiBubbleColor
+                        drawPath(path = path, color = base)
                     }
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {

@@ -1,6 +1,7 @@
 package com.lianyu.ai.feature.settings.ui.screen
 
 import com.lianyu.ai.uicommon.theme.AppTheme
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -30,8 +31,6 @@ import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -48,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -106,7 +106,8 @@ fun CheckUpdateScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(cardColor, shape = RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(cardColor)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -146,43 +147,40 @@ fun CheckUpdateScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                shape = RoundedCornerShape(16.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(cardColor)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier.size(72.dp).clip(CircleShape).background(
-                            Brush.radialGradient(
-                                colors = listOf(AppTheme.colors.success.copy(alpha = 0.8f), Color(0xFF05A350).copy(alpha = 0.6f))
-                            )
-                        ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.NewReleases,
-                            contentDescription = null,
-                            tint = AppTheme.colors.staticWhite.copy(alpha = 0.9f),
-                            modifier = Modifier.size(36.dp)
+                Box(
+                    modifier = Modifier.size(72.dp).clip(CircleShape).background(
+                        Brush.radialGradient(
+                            colors = listOf(AppTheme.colors.success.copy(alpha = 0.8f), Color(0xFF05A350).copy(alpha = 0.6f))
                         )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = stringResource(R.string.current_version),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                        color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = "v$currentVersion",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp),
-                        color = AppTheme.colors.onSurface
+                    ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.NewReleases,
+                        contentDescription = null,
+                        tint = AppTheme.colors.staticWhite.copy(alpha = 0.9f),
+                        modifier = Modifier.size(36.dp)
                     )
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.current_version),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = "v$currentVersion",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp),
+                    color = AppTheme.colors.onSurface
+                )
             }
 
             Button(
@@ -217,92 +215,84 @@ fun CheckUpdateScreen(
             when (checkState) {
                 UpdateCheckState.LATEST -> {
                     AnimatedVisibility(visible = true, enter = fadeIn(tween(400)) + scaleIn(tween(400))) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                            shape = RoundedCornerShape(16.dp)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(cardColor)
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            Box(
+                                modifier = Modifier.size(48.dp).clip(CircleShape).background(AppTheme.colors.successContainer),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(AppTheme.colors.successContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.CheckCircle,
-                                        contentDescription = null,
-                                        tint = AppTheme.colors.success,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = stringResource(R.string.latest_version),
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
-                                    color = AppTheme.colors.onSurface
-                                )
-                                Text(
-                                    text = "v$currentVersion",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = AppTheme.colors.success,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = stringResource(R.string.latest_version),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
+                                color = AppTheme.colors.onSurface
+                            )
+                            Text(
+                                text = "v$currentVersion",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
                         }
                     }
                 }
                 UpdateCheckState.ERROR -> {
                     AnimatedVisibility(visible = true, enter = fadeIn(tween(400))) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                            shape = RoundedCornerShape(16.dp)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(cardColor)
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            Box(
+                                modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.3f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.CloudOff,
-                                        contentDescription = null,
-                                        tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(26.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = stringResource(R.string.check_failed),
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
-                                    color = AppTheme.colors.onSurface
-                                )
-                                Text(
-                                    text = stringResource(R.string.check_failed_msg),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
-                                    color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
+                                Icon(
+                                    imageVector = Icons.Filled.CloudOff,
+                                    contentDescription = null,
+                                    tint = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = stringResource(R.string.check_failed),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp),
+                                color = AppTheme.colors.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.check_failed_msg),
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
                         }
                     }
                 }
                 UpdateCheckState.AVAILABLE -> {
                     AnimatedVisibility(visible = true, enter = fadeIn(tween(400)) + scaleIn(tween(400))) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = AppTheme.colors.staticWhite),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                            shape = RoundedCornerShape(16.dp)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(cardColor)
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
                                 Box(
                                     modifier = Modifier.size(48.dp).clip(CircleShape).background(AppTheme.colors.warningContainer.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
@@ -433,7 +423,6 @@ fun CheckUpdateScreen(
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 }

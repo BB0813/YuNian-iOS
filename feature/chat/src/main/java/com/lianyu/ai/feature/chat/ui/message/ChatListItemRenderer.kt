@@ -36,7 +36,8 @@ fun ChatListItemRenderer(
         LocalCompanionAvatarClick provides onCompanionAvatarClick,
         LocalUserAvatarClick provides onUserAvatarClick
     ) {
-    Box(modifier = modifier) {
+    // 列表项必须占满行宽，AppListItemLayout 才能正确扣掉头像列
+    Box(modifier = modifier.fillMaxWidth()) {
         when (item) {
             is ChatListItem.BodyLoading -> BodyStateItem(isError = false)
             is ChatListItem.BodyError -> BodyStateItem(

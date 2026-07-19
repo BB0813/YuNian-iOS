@@ -72,9 +72,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -98,6 +98,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.chat.R
@@ -136,6 +140,7 @@ import com.lianyu.ai.uicommon.component.getChatBackgroundByKey
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
 import com.lianyu.ai.uicommon.component.isCustomBackground
 import com.lianyu.ai.uicommon.component.rememberBackgroundBitmap
+import com.lianyu.ai.uicommon.component.resolveEffectiveChatBackgroundKey
 import com.lianyu.ai.network.tts.ChatTtsMode
 import com.lianyu.ai.uicommon.image.viewer.FullscreenImageViewer
 import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
@@ -272,12 +277,12 @@ fun ChatScreen(
         }
     }
 
-    val userAvatar by viewModel.userAvatar.collectAsState()
-    val userName by viewModel.userName.collectAsState()
+    val userAvatar by viewModel.userAvatar.collectAsStateWithLifecycle()
+    val userName by viewModel.userName.collectAsStateWithLifecycle()
     // 不要强制 emptyList：ViewModel 已用 MessageCache 预填首帧
-    val messages by viewModel.messages.collectAsState()
-    val messageMetadata by viewModel.messageMetadata.collectAsState()
-    val messageBodies by viewModel.messageBodies.collectAsState()
+    val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val messageMetadata by viewModel.messageMetadata.collectAsStateWithLifecycle()
+    val messageBodies by viewModel.messageBodies.collectAsStateWithLifecycle()
     val chatItems = remember(messageMetadata, messageBodies) {
         toChatListItems(messageMetadata, messageBodies)
     }
@@ -292,26 +297,28 @@ fun ChatScreen(
     val visibleMessagesReady = messageMetadata.lastOrNull()?.let { latest ->
         messageBodies[latest.id] is MessageBodyState.Ready
     } == true
-    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
-    val hasMoreMessages by viewModel.hasMoreMessages.collectAsState()
-    val companionData by viewModel.companionData.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val isTyping by viewModel.isTyping.collectAsState()
-    val typingText by viewModel.typingText.collectAsState()
-    val isRegenerating by viewModel.isRegenerating.collectAsState()
-    val isReasoning by viewModel.isReasoning.collectAsState()
-    val reasoningText by viewModel.reasoningText.collectAsState()
-    val availableApis by viewModel.availableApis.collectAsState()
-    val currentApi by viewModel.currentApi.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsStateWithLifecycle()
+    val hasMoreMessages by viewModel.hasMoreMessages.collectAsStateWithLifecycle()
+    val companionData by viewModel.companionData.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isTyping by viewModel.isTyping.collectAsStateWithLifecycle()
+    val typingText by viewModel.typingText.collectAsStateWithLifecycle()
+    val isRegenerating by viewModel.isRegenerating.collectAsStateWithLifecycle()
+    val isReasoning by viewModel.isReasoning.collectAsStateWithLifecycle()
+    val reasoningText by viewModel.reasoningText.collectAsStateWithLifecycle()
+    val availableApis by viewModel.availableApis.collectAsStateWithLifecycle()
+    val currentApi by viewModel.currentApi.collectAsStateWithLifecycle()
+    val appSettingsStore = remember(context) { com.lianyu.ai.common.AppSettingsStore(context) }
+    val autoCollapseReasoning by appSettingsStore.autoCollapseReasoningFlow.collectAsStateWithLifecycle(initialValue = true)
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
     // 聊天页 TTS 朗读状态
-    val ttsState by viewModel.ttsState.collectAsState()
-    val ttsConfig by viewModel.chatTtsConfig.collectAsState()
+    val ttsState by viewModel.ttsState.collectAsStateWithLifecycle()
+    val ttsConfig by viewModel.chatTtsConfig.collectAsStateWithLifecycle()
 
     val themeViewModel: ThemeViewModel = viewModel()
-    val themeMode by themeViewModel.themeMode.collectAsState()
+    val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
     val isDarkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -324,7 +331,9 @@ fun ChatScreen(
     val appContext = remember(context) { context.applicationContext }
     val settingsStore = remember(appContext) { ChatDetailSettingsStore(appContext) }
     val detailSettingsFlow = remember(settingsStore, companionId) { settingsStore.settingsFlow(companionId) }
-    val detailSettings by detailSettingsFlow.collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
+    val detailSettings by detailSettingsFlow.collectAsStateWithLifecycle(
+        initialValue = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings()
+    )
 
     LaunchedEffect(Unit) {
         viewModel.markAsRead()
@@ -333,19 +342,13 @@ fun ChatScreen(
 
     var pendingNavigationMessageId by remember { mutableStateOf<Long?>(null) }
 
-    // 收集 ViewModel 一次性副作用事件
+    // 收集 ViewModel 一次性副作用：运营/配置错误走产品 Toast，不污染消息库
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
-                is ChatUiEvent.Error -> snackbarHostState.showSnackbar(
-                    message = event.message,
-                    duration = SnackbarDuration.Long
-                )
-                is ChatUiEvent.ContentBlocked -> snackbarHostState.showSnackbar(
-                    message = "内容已拦截: ${event.reason}",
-                    duration = SnackbarDuration.Long
-                )
-                is ChatUiEvent.Info -> snackbarHostState.showSnackbar(event.message)
+                is ChatUiEvent.Error -> com.lianyu.ai.uicommon.component.LianYuToast.error(event.message)
+                is ChatUiEvent.ContentBlocked -> com.lianyu.ai.uicommon.component.LianYuToast.warning("内容已拦截: ${event.reason}")
+                is ChatUiEvent.Info -> com.lianyu.ai.uicommon.component.LianYuToast.info(event.message)
                 is ChatUiEvent.StreamCompleted -> { /* 流式完成，不需要用户感知 */ }
                 is ChatUiEvent.MessageReadyToNavigate -> pendingNavigationMessageId = event.messageId
             }
@@ -517,6 +520,7 @@ fun ChatScreen(
 
     // Background: per-companion > global > default
     // 解析结果直接驱动绘制；仅 default 跟随主题底色，禁止深色模式整页覆盖用户背景
+    // SharedPreferences 不会驱动重组：从设置页返回时需在 ON_RESUME 重读全局 key
     val colors = AppTheme.colors
     val defaultBackground = colors.background
     var resolvedBgKey by remember { mutableStateOf("default") }
@@ -527,14 +531,24 @@ fun ChatScreen(
     val customBgPainter = if (isCustomBg && customBgKey.isNotEmpty()) {
         rememberBackgroundBitmap(customBgKey)
     } else null
-    val globalBgKey = getChatBackgroundKey(context)
+    var globalBgKey by remember { mutableStateOf(getChatBackgroundKey(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                globalBgKey = getChatBackgroundKey(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(detailSettings, isDarkTheme, globalBgKey) {
         withContext(Dispatchers.IO) {
-            val effectiveKey = if (detailSettings.useGlobalBackground || detailSettings.backgroundKey == null) {
-                globalBgKey
-            } else {
-                detailSettings.backgroundKey ?: "default"
-            }
+            val effectiveKey = resolveEffectiveChatBackgroundKey(
+                useGlobalBackground = detailSettings.useGlobalBackground,
+                companionBackgroundKey = detailSettings.backgroundKey,
+                globalBackgroundKey = globalBgKey
+            )
             val (color, gradient) = if (isCustomBackground(effectiveKey)) {
                 Color.Transparent to null
             } else {
@@ -606,7 +620,7 @@ fun ChatScreen(
             }
             .testTag("chat_shell_ready")
     ) {
-        // Snackbar host
+        // 局部 Snackbar：仅保留导入/权限等非运营提示；配置/API 错误走 MainActivity 全局 LianYuToastHost
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
@@ -680,7 +694,10 @@ fun ChatScreen(
                         item(key = "reasoning_indicator") {
                             ReasoningItem(
                                 reasoningText = reasoningText,
-                                adaptiveSizing = adaptiveSizing
+                                adaptiveSizing = adaptiveSizing,
+                                autoCollapse = autoCollapseReasoning,
+                                // loading/typing 期间视为思考流式阶段，默认展开
+                                isStreaming = isLoading || isTyping
                             )
                         }
                     }

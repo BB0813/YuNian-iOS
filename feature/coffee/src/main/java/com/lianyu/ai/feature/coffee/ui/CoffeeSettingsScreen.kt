@@ -232,10 +232,11 @@ fun CoffeeSettingsScreen(
             text = { Text("清除后需重新从 open.lkcoffee.com/mcp 获取 Token 才能下单。确认清除？") },
             confirmButton = {
                 TextButton(onClick = {
-                    showClearTokenDialog = false
+                    // clearToken 在 viewModelScope 中落盘；join 后再 dismiss
                     scope.launch {
-                        viewModel.clearToken()
+                        viewModel.clearToken().join()
                         tokenSavedDays = 0
+                        showClearTokenDialog = false
                     }
                 }) { Text("清除", color = LuckinRed) }
             },

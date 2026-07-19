@@ -26,6 +26,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.fragment.ktx)
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.serialization.json)
 }

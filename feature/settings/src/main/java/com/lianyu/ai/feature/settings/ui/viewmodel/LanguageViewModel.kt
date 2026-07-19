@@ -2,26 +2,29 @@ package com.lianyu.ai.feature.settings.ui.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.lianyu.ai.common.LocaleHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class LanguageViewModel(application: Application) : AndroidViewModel(application) {
-    private val prefs = application.getSharedPreferences("language_prefs", Application.MODE_PRIVATE)
-
-    private val _language = MutableStateFlow("zh-CN")
+    private val _language = MutableStateFlow(LocaleHelper.DEFAULT_LANGUAGE)
     val language: StateFlow<String> = _language
 
     init {
-        _language.value = prefs.getString("language", "zh-CN") ?: "zh-CN"
+        _language.value = LocaleHelper.getSavedLanguage(application)
     }
 
     fun setLanguage(code: String) {
         _language.value = code
-        // [R18 FIX] commit() 同步写磁盘阻塞主线程，改用 apply() 异步写入
-        prefs.edit().putString("language", code).apply()
+        // 必须同步 commit：recreate 会立刻读 prefs，apply() 异步写入会导致语言不生效。
+        LocaleHelper.saveLanguage(getApplication(), code)
     }
 
     fun applyLanguage(activity: android.app.Activity) {
+        val code = _language.value
+        LocaleHelper.saveLanguage(activity, code)
+        LocaleHelper.applyToResources(activity.applicationContext, code)
+        LocaleHelper.applyToResources(activity, code)
         activity.recreate()
     }
 }

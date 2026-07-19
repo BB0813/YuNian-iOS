@@ -19,8 +19,13 @@ internal fun ChatMessageScaffold(
     isDarkTheme: Boolean = true,
     drawBubble: Boolean = true,
     onClick: (() -> Unit)? = null,
+    /**
+     * 是否由气泡外框接管长按。
+     * 文字消息应设为 false：长按目标是正文，而不是气泡容器。
+     */
+    enableFrameLongClick: Boolean = true,
     copyText: String? = null,
-    content: @Composable (menuExpanded: Boolean) -> Unit
+    content: @Composable (menuExpanded: Boolean, openMenu: () -> Unit) -> Unit
 ) {
     val isMine = message.isFromUser
     val time = remember(message.timestamp) { formatChatMessageTime(message.timestamp) }
@@ -49,8 +54,9 @@ internal fun ChatMessageScaffold(
                 drawBubble = drawBubble,
                 isDarkTheme = isDarkTheme,
                 onClick = onClick,
-                onLongClick = onLongClickFromScaffold,
-                content = { content(menuExpanded) }
+                // 文字消息：外框不响应长按，避免“对象是气泡”
+                onLongClick = if (enableFrameLongClick) onLongClickFromScaffold else null,
+                content = { content(menuExpanded, onLongClickFromScaffold) }
             )
         },
         menu = { expanded, onDismiss ->

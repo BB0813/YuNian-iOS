@@ -33,7 +33,7 @@ fun VoiceMessageItem(
         userName = userName,
         onIntent = onIntent,
         adaptiveSizing = adaptiveSizing
-    ) {
+    ) { _, _ ->
         VoiceMessageContent(
             audioPath = voicePath,
             duration = voiceDuration,

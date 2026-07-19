@@ -12,7 +12,6 @@ import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
-import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.MessageType
@@ -66,20 +65,51 @@ class ChatGenerationManager private constructor(
         private val instances = ConcurrentHashMap<Long, ChatGenerationManager>()
         private val questionRegex = Regex("[?？]|吗|呢|什么|怎么|为什么|多少|哪|谁|几|是不是|有没有|能不能|会不会|要不要|好不好")
 
+        /** 离开聊天页后，空闲多久才回收实例（不打断进行中的 AI） */
+        private const val IDLE_DISPOSE_MS = 60_000L
+
+        /**
+         * 获取或创建实例（不改变引用计数）。
+         * UI 层应优先使用 [acquire] / [release]。
+         */
         fun get(application: Application, companionId: Long): ChatGenerationManager =
             instances.getOrPut(companionId) { ChatGenerationManager(application, companionId) }
+
+        /**
+         * 进入聊天页时获取实例并增加引用计数。
+         * 会取消挂起的空闲回收，保证离页后仍在生成的任务可继续。
+         * 若命中已 dispose 的竞态实例，会剔除并重建。
+         */
+        fun acquire(application: Application, companionId: Long): ChatGenerationManager {
+            while (true) {
+                val manager = get(application, companionId)
+                if (manager.tryAcquire()) return manager
+                instances.remove(companionId, manager)
+            }
+        }
+
+        /**
+         * 离开聊天页时减少引用计数。
+         * 引用归零且空闲后延迟回收；生成中不会取消 AI。
+         */
+        fun release(companionId: Long) {
+            instances[companionId]?.onReleased()
+        }
     }
+
+    private val refCount = AtomicInteger(0)
+    @Volatile private var disposed = false
+    private var disposeJob: Job? = null
 
     private val scope = ApplicationScopeProvider.scope
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         ChatDebugLog.log("[ChatGeneration] uncaught: ${throwable.javaClass.simpleName}: ${throwable.message}")
         SecureLog.e("ChatGenerationManager", "Uncaught generation exception", throwable)
     }
-    private val database = AppDatabase.getDatabase(application)
-    private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
+    private val apiConfigRepository = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
     private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
     private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
-    private val companionRepository = CompanionRepository(database.companionDao())
+    private val companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
     private val contextResolver = ChatContextResolver(chatRepository)
     private val chatDetailSettingsStore = ChatDetailSettingsStore(application)
     private val appSettingsStore = AppSettingsStore(application)
@@ -172,6 +202,7 @@ class ChatGenerationManager private constructor(
             val userMessageId = messageWriter.enqueueChat(userMessage)
             broadcastWeChatMessage(userMessageId)
 
+            // 无 API 时仍入队用户消息，但错误只走 UI 事件（Toast），不在此处写假 AI 消息
             if (apiConfigRepository.getActiveEnabledConfig() == null) {
                 _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
             }
@@ -248,6 +279,89 @@ class ChatGenerationManager private constructor(
     }
 
     fun stopTts() = ttsController.stop()
+
+    /** @return false 表示实例已 dispose，调用方应重建 */
+    private fun tryAcquire(): Boolean {
+        synchronized(this) {
+            if (disposed) return false
+            refCount.incrementAndGet()
+            cancelPendingDisposeLocked()
+            return true
+        }
+    }
+
+    private fun onReleased() {
+        val shouldSchedule: Boolean
+        synchronized(this) {
+            if (disposed) return
+            val remaining = refCount.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+            shouldSchedule = remaining == 0
+        }
+        if (shouldSchedule) {
+            scheduleIdleDispose()
+        }
+    }
+
+    private fun cancelPendingDisposeLocked() {
+        disposeJob?.cancel()
+        disposeJob = null
+    }
+
+    /**
+     * 引用归零后延迟回收。生成中 / 队列非空时只重试，不取消进行中的 AI。
+     */
+    private fun scheduleIdleDispose() {
+        synchronized(this) {
+            if (disposed || refCount.get() > 0) return
+            cancelPendingDisposeLocked()
+            disposeJob = scope.launch(Dispatchers.IO + exceptionHandler) {
+                delay(IDLE_DISPOSE_MS)
+                disposeIfIdle()
+            }
+        }
+    }
+
+    private fun isBusy(): Boolean {
+        return activeRequests.get() > 0 ||
+            _isLoading.value ||
+            _isRegenerating.value ||
+            _queueDepth.value > 0 ||
+            turnState.sendMessageJob?.isActive == true ||
+            replacementJob?.isActive == true
+    }
+
+    /**
+     * 仅在无引用且空闲时释放 TTS / 队列消费者，并从全局 map 移除。
+     * 绝不在生成中 dispose，保证离页后 AI 可跑完。
+     */
+    private fun disposeIfIdle() {
+        val shouldReschedule: Boolean
+        synchronized(this) {
+            if (disposed) return
+            if (refCount.get() > 0 || isBusy()) {
+                // 仍在生成：延后再试，不打断
+                shouldReschedule = refCount.get() == 0
+            } else {
+                disposed = true
+                cancelPendingDisposeLocked()
+                runCatching { stopTts() }
+                runCatching { messageQueue.close() }
+                messageConsumerJob?.cancel()
+                messageConsumerJob = null
+                replacementJob?.cancel()
+                replacementJob = null
+                turnState.cancelSendJob()
+                turnState.sendMessageJob = null
+                contextResolver.clearCache(companionId)
+                instances.remove(companionId, this)
+                SecureLog.i("ChatGenerationManager", "Disposed idle manager for companion=$companionId")
+                shouldReschedule = false
+            }
+        }
+        if (shouldReschedule) {
+            scheduleIdleDispose()
+        }
+    }
 
     suspend fun synthesizeForVoiceBar(text: String): String? = ttsController.synthesizeOnly(text)
 
@@ -335,7 +449,8 @@ class ChatGenerationManager private constructor(
                     return
                 }
             }
-            messageWriter.enqueueChat(ChatMessage(companionId = companionId, content = "请先配置API：我 → API设置 → 添加密钥", isFromUser = false, timestamp = System.currentTimeMillis()))
+            // 架构：配置类错误只 Toast，禁止写入消息库污染对话与 AI 上下文
+            _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
             return
         }
 
@@ -379,22 +494,32 @@ class ChatGenerationManager private constructor(
         ntpTimeEnabled: Boolean = false
     ) = scope.launch(Dispatchers.IO + exceptionHandler) {
         val requestStartedAt = System.currentTimeMillis()
+        // 新一轮请求开始时清理上一轮思考气泡，避免串轮
+        _reasoningText.value = ""
+        _isReasoning.value = false
         enterLoading()
+        // 成功路径在消息落地后提前 release；finally 仅兜底失败/提前 return，禁止双重 decrement。
+        var loadingReleased = false
         try {
             val companion = companionRepository.getCompanionById(companionId)
             if (companion == null) {
-                messageWriter.enqueueChat(ChatMessage(companionId = companionId, content = "系统正在加载伴侣信息，请稍后再试", isFromUser = false, timestamp = System.currentTimeMillis()))
+                _events.tryEmit(ChatUiEvent.Error("系统正在加载伴侣信息，请稍后再试"))
                 return@launch
             }
             latestCompanionInfo = companion.toAiCompanionInfo()
 
+            // 发送前清洗历史：剔除运营错误、规范工具角色，防止 AI 自言自语
+            val modelHistory = com.lianyu.ai.domain.AiDialogueHistoryPolicy
+                .sanitizeForModel(history.toAiChatMessages())
+
             val aiResponse = if (imagePath != null) {
                 withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
-                    aiService.sendMessageWithImage(companion.toAiCompanionInfo(), history.toAiChatMessages(), imagePath, stickerProbability, ntpTimeEnabled)
+                    aiService.sendMessageWithImage(companion.toAiCompanionInfo(), modelHistory, imagePath, stickerProbability, ntpTimeEnabled)
                 } ?: throw Exception(application.getString(R.string.api_error_generic))
             } else if (isLocalModelEnabled()) {
                 AiResponse(content = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                    generateWithLocalModel(companion, history, stickerProbability, ntpTimeEnabled)
+                    // 本地模型同样只消费清洗后的历史，避免运营错误/工具污染导致自言自语
+                    generateWithLocalModel(companion, modelHistory, stickerProbability, ntpTimeEnabled)
                 } ?: throw java.util.concurrent.TimeoutException("Local model timeout"))
             } else {
                 val tools = if (shouldEnableToolsFor(content = userContentForMemory, history = history)) {
@@ -403,22 +528,33 @@ class ChatGenerationManager private constructor(
                     emptyList()
                 }
                 runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * 3) {
-                    toolLoopRunner.executeWithToolLoop(companion.toAiCompanionInfo(), history.toAiChatMessages(), stickerProbability, ntpTimeEnabled, tools)
+                    toolLoopRunner.executeWithToolLoop(companion.toAiCompanionInfo(), modelHistory, stickerProbability, ntpTimeEnabled, tools)
                 } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
             }
 
             val aiContent = aiResponse.content
-            if (aiContent.startsWith("[TOAST]")) {
-                _events.tryEmit(ChatUiEvent.Error(aiContent.removePrefix("[TOAST]")))
+            // 运营错误 / [TOAST] 协议：只 Toast，绝不入库
+            val toastMsg = com.lianyu.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
+            if (toastMsg != null) {
+                _events.tryEmit(ChatUiEvent.Error(toastMsg))
+                return@launch
+            }
+            if (aiContent.isBlank() && aiResponse.toolCalls.isNullOrEmpty()) {
+                _events.tryEmit(ChatUiEvent.Error("API返回空内容，请检查模型名是否正确"))
                 return@launch
             }
 
-            responseFinalizer.finalizeResponse(
+            // 1) 分段投递期间保持 loading/typing（模拟真人连发）
+            // 2) 最后一条消息可见后立刻 exitLoading，避免记忆/追问把「对方正在输入」拖住
+            val delivered = responseFinalizer.deliverResponse(
                 aiContent = aiContent,
                 reasoning = aiResponse.reasoningContent,
                 userContentForMemory = userContentForMemory,
                 logMessage = if (batchMessageCount > 1) "AI batch response received (${batchMessageCount} msgs)" else "AI response received"
             )
+            exitLoading()
+            loadingReleased = true
+            responseFinalizer.afterDeliver(delivered)
             SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}")
         } catch (e: CancellationException) {
             val cancelReason = e.message ?: ""
@@ -431,7 +567,9 @@ class ChatGenerationManager private constructor(
             _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
             SecureLog.e("ChatGenerationManager", "AI response failed", e)
         } finally {
-            exitLoading()
+            if (!loadingReleased) {
+                exitLoading()
+            }
         }
     }
 
@@ -465,21 +603,33 @@ class ChatGenerationManager private constructor(
 
     private suspend fun generateWithLocalModel(
         companion: CompanionEntity,
-        history: List<ChatMessage>,
+        history: List<AiChatMessage>,
         stickerProbability: Int,
         ntpTimeEnabled: Boolean = false
     ): String {
+        // history 已由 AiDialogueHistoryPolicy.sanitizeForModel 清洗
         val sortedHistory = history.sortedBy { it.timestamp }
         val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
         val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, 50).take(500)
         val role = userRepository?.selectedRole?.value ?: CompanionRole.GIRLFRIEND
         val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
+        val dialogueContext = sortedHistory
+            .takeLast(12)
+            .joinToString("\n") { msg ->
+                val speaker = if (msg.isFromUser) "用户" else companion.name
+                "$speaker：${msg.content.take(200)}"
+            }
+            .take(1200)
         val systemPrompt = buildString {
             appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
             companion.personality?.take(300)?.takeIf { it.isNotBlank() }?.let { appendLine("性格：$it") }
             companion.speakingStyle?.take(100)?.takeIf { it.isNotBlank() }?.let { appendLine("说话风格：$it") }
             companion.backstory?.take(200)?.takeIf { it.isNotBlank() }?.let { appendLine("背景：$it") }
             if (memoryContext.isNotBlank()) appendLine("\n关于用户的记忆：$memoryContext")
+            if (dialogueContext.isNotBlank()) {
+                appendLine("\n最近对话（仅供参考，不要复读系统错误或自言自语）：")
+                appendLine(dialogueContext)
+            }
             appendLine()
             appendLine("回复规则：")
             appendLine("1. 每次回复1-5句短话，控制在15-50字。")
@@ -510,13 +660,14 @@ class ChatGenerationManager private constructor(
     )
 
     private fun List<ChatMessage>.toAiChatMessages(): List<AiChatMessage> = map { msg ->
-        AiChatMessage(
+        val base = AiChatMessage(
             isFromUser = msg.isFromUser,
             content = msg.content,
             timestamp = msg.timestamp,
             type = if (msg.type == MessageType.IMAGE) AiMessageType.IMAGE else AiMessageType.TEXT,
             companionId = msg.companionId
         )
+        com.lianyu.ai.domain.AiDialogueHistoryPolicy.normalizeRole(base)
     }
 
 }

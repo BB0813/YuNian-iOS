@@ -50,7 +50,9 @@ class ChatDetailSettingsStore(context: Context) {
     }
 
     fun settingsFlow(companionId: Long): Flow<CompanionChatDetailSettings> =
-        settingsMapFlow.map { it[companionId] ?: CompanionChatDetailSettings() }
+        settingsMapFlow.map { map ->
+            sanitizeSettings(map[companionId] ?: CompanionChatDetailSettings())
+        }
 
     suspend fun getSettings(companionId: Long): CompanionChatDetailSettings =
         settingsFlow(companionId).first()
@@ -58,8 +60,10 @@ class ChatDetailSettingsStore(context: Context) {
     suspend fun updateSettings(companionId: Long, transform: (CompanionChatDetailSettings) -> CompanionChatDetailSettings) {
         dataStore.edit { prefs ->
             val currentMap = prefs[SETTINGS_MAP_KEY]?.let(::decodeSettingsMap)?.toMutableMap() ?: mutableMapOf()
-            val currentSettings = currentMap[companionId] ?: CompanionChatDetailSettings()
-            currentMap[companionId] = transform(currentSettings).copy(updatedAt = System.currentTimeMillis())
+            val currentSettings = sanitizeSettings(currentMap[companionId] ?: CompanionChatDetailSettings())
+            currentMap[companionId] = sanitizeSettings(
+                transform(currentSettings).copy(updatedAt = System.currentTimeMillis())
+            )
             prefs[SETTINGS_MAP_KEY] = json.encodeToString(currentMap)
         }
     }
@@ -78,4 +82,20 @@ class ChatDetailSettingsStore(context: Context) {
 
     private fun decodeSettingsMap(raw: String): Map<Long, CompanionChatDetailSettings> =
         runCatching { json.decodeFromString<Map<Long, CompanionChatDetailSettings>>(raw) }.getOrElse { emptyMap() }
+
+    /**
+     * 清洗历史脏数据：
+     * 旧版取色/背景选择器会在选择「默认」时写入
+     * `useGlobalBackground=false + backgroundKey=default`，
+     * 导致「背景设置 → 聊天背景」全局配置看起来完全不生效。
+     * 将这类状态恢复为跟随全局。
+     */
+    private fun sanitizeSettings(settings: CompanionChatDetailSettings): CompanionChatDetailSettings {
+        val key = settings.backgroundKey?.trim().orEmpty()
+        return if (!settings.useGlobalBackground && (key.isEmpty() || key == "default")) {
+            settings.copy(useGlobalBackground = true, backgroundKey = null)
+        } else {
+            settings
+        }
+    }
 }

@@ -25,7 +25,7 @@ fun StickerMessageItem(
         onIntent = onIntent,
         adaptiveSizing = adaptiveSizing,
         drawBubble = false
-    ) {
+    ) { _, _ ->
         StickerMessageContent(stickerName = item.stickerName)
     }
 }

@@ -73,12 +73,12 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
                 }
                 ChatDebugLog.log("[ToolLoop] ${toolCall.name} executed, resultLen=${result.length}")
 
-                // AiChatMessage 不支持 role=tool，用 user 角色携带 "工具调用结果" 前缀让 AI 理解
+                // 架构：工具结果必须标记 TOOL（序列化为 user 侧），禁止写成 assistant 导致自言自语
                 mutableHistory.add(
-                    AiChatMessage(
-                        isFromUser = false,
-                        content = "[工具调用结果] ${toolCall.name}:\n$result",
-                        timestamp = System.currentTimeMillis()
+                    com.lianyu.ai.domain.AiDialogueHistoryPolicy.toolResultMessage(
+                        toolName = toolCall.name,
+                        result = result,
+                        companionId = companionInfo.id
                     )
                 )
             }

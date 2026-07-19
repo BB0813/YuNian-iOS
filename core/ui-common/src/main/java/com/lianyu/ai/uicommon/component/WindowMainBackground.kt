@@ -105,22 +105,22 @@ object WindowMainBackground {
     private fun presetGradientArgb(key: String, isDark: Boolean): IntArray? {
         if (!isDark) {
             return when (key) {
-                "warm_pink" -> intArrayOf(0xFFFFF5F7.toInt(), 0xFFFFF0F3.toInt(), 0xFFFFE8EC.toInt())
-                "lavender" -> intArrayOf(0xFFFBF8FF.toInt(), 0xFFF5F0FF.toInt(), 0xFFEDE5F8.toInt())
-                "ocean" -> intArrayOf(0xFFF5FAFF.toInt(), 0xFFE8F2FC.toInt(), 0xFFDBEAF5.toInt())
-                "forest" -> intArrayOf(0xFFF8FCF8.toInt(), 0xFFEEF5EE.toInt(), 0xFFE3EFE3.toInt())
-                "sunset" -> intArrayOf(0xFFFFF8F5.toInt(), 0xFFFFF0E8.toInt(), 0xFFFFE8D8.toInt())
-                "night" -> intArrayOf(0xFFF5F5FA.toInt(), 0xFFEEEEF5.toInt(), 0xFFE5E5F0.toInt())
+                "warm_pink" -> intArrayOf(0xFFDEFCF9.toInt(), 0xFFE8F6FC.toInt(), 0xFFCADEFC.toInt())
+                "lavender" -> intArrayOf(0xFFF0ECFC.toInt(), 0xFFE4E0F6.toInt(), 0xFFC3BEF0.toInt())
+                "ocean" -> intArrayOf(0xFFDEFCF9.toInt(), 0xFFCADEFC.toInt(), 0xFFB8D4F8.toInt())
+                "forest" -> intArrayOf(0xFFDEFCF9.toInt(), 0xFFD4F4F0.toInt(), 0xFFC8E8E4.toInt())
+                "sunset" -> intArrayOf(0xFFF4ECFC.toInt(), 0xFFE8DCF8.toInt(), 0xFFCCA8E9.toInt())
+                "night" -> intArrayOf(0xFFEEEAF8.toInt(), 0xFFE0DCF0.toInt(), 0xFFC3BEF0.toInt())
                 else -> null
             }
         }
         // 深色主题独立色标，与 resolveBackgroundPalette 对齐
         return when (key) {
-            "warm_pink" -> intArrayOf(0xFF2A1A20.toInt(), 0xFF24161C.toInt(), 0xFF1C1218.toInt())
-            "lavender" -> intArrayOf(0xFF221C2C.toInt(), 0xFF1C1724.toInt(), 0xFF16121C.toInt())
-            "ocean" -> intArrayOf(0xFF1A2430.toInt(), 0xFF141C24.toInt(), 0xFF101820.toInt())
-            "forest" -> intArrayOf(0xFF1A241C.toInt(), 0xFF141C16.toInt(), 0xFF101610.toInt())
-            "sunset" -> intArrayOf(0xFF2C1C16.toInt(), 0xFF241814.toInt(), 0xFF1C1410.toInt())
+            "warm_pink" -> intArrayOf(0xFF2A2034.toInt(), 0xFF221A2C.toInt(), 0xFF1A1424.toInt())
+            "lavender" -> intArrayOf(0xFF242030.toInt(), 0xFF1C1828.toInt(), 0xFF161220.toInt())
+            "ocean" -> intArrayOf(0xFF1A2430.toInt(), 0xFF141C28.toInt(), 0xFF101820.toInt())
+            "forest" -> intArrayOf(0xFF1A2420.toInt(), 0xFF141C1A.toInt(), 0xFF101614.toInt())
+            "sunset" -> intArrayOf(0xFF2C2030.toInt(), 0xFF241820.toInt(), 0xFF1C1418.toInt())
             "night" -> intArrayOf(0xFF16161E.toInt(), 0xFF101018.toInt(), 0xFF0C0C12.toInt())
             else -> null
         }
@@ -129,13 +129,13 @@ object WindowMainBackground {
     private fun presetSolidArgb(key: String, isDark: Boolean): Int? {
         if (!isDark) {
             return when (key) {
-                "default" -> 0xFFF5F5F5.toInt()
-                "warm_pink" -> 0xFFFFF0F3.toInt()
-                "lavender" -> 0xFFF8F5FF.toInt()
-                "ocean" -> 0xFFF0F5FA.toInt()
-                "forest" -> 0xFFF2F8F2.toInt()
-                "sunset" -> 0xFFFFF5F0.toInt()
-                "night" -> 0xFFF0F0F5.toInt()
+                "default" -> 0xFFDEFCF9.toInt()
+                "warm_pink" -> 0xFFE8F6FC.toInt()
+                "lavender" -> 0xFFE8E4F8.toInt()
+                "ocean" -> 0xFFE0F0FC.toInt()
+                "forest" -> 0xFFE4F8F4.toInt()
+                "sunset" -> 0xFFF0E8FC.toInt()
+                "night" -> 0xFFE8E4F4.toInt()
                 else -> null
             }
         }

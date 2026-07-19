@@ -10,7 +10,6 @@ import com.lianyu.ai.common.MessageBodyState
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerInfo
 import com.lianyu.ai.common.TimeoutBudgets
-import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ChatMessage
@@ -51,13 +50,12 @@ class ChatViewModel(
     private val companionId: Long
 ) : AndroidViewModel(application) {
 
-    private val database = AppDatabase.getDatabase(application)
     private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
     private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
-    private val companionRepository = CompanionRepository(database.companionDao())
-    private val apiConfigRepository = ApiConfigRepository(database.apiConfigDao())
+    private val companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
+    private val apiConfigRepository = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
     private val contextResolver = ChatContextResolver(chatRepository)
-    private val generation = ChatGenerationManager.get(application, companionId)
+    private val generation = ChatGenerationManager.acquire(application, companionId)
     private val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
     private val sttService by lazy { SttService.getInstance(application) }
@@ -183,8 +181,9 @@ class ChatViewModel(
             )
             val rawHistory = contextResolver.getHistoryForAi(companionId)
                 .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
-            val history = rawHistory
-                .map { it.toAiChatMessage() }
+            val history = com.lianyu.ai.domain.AiDialogueHistoryPolicy.sanitizeForModel(
+                rawHistory.map { it.toAiChatMessage() }
+            )
             val tools = if (ChatToolIntent.shouldEnableTools(text, rawHistory.lastOrNull { it.isFromUser }?.content)) {
                 ToolRegistry.all()
             } else {
@@ -197,7 +196,12 @@ class ChatViewModel(
                     aiService.sendMessage(companion.toAiCompanionInfo(), history, 0, false, tools)
                 }
             } ?: return null
-            response.content.takeUnless { it.startsWith("[TOAST]") }?.also { content ->
+            val toastMsg = com.lianyu.ai.domain.AiOperationalMessages.asToastMessage(response.content)
+            if (toastMsg != null) {
+                _events.tryEmit(ChatUiEvent.Error(toastMsg))
+                return@runCatching null
+            }
+            response.content.takeIf { it.isNotBlank() }?.also { content ->
                 messageWriter.enqueueChat(
                     ChatMessage(companionId = companionId, content = content, isFromUser = false, timestamp = System.currentTimeMillis())
                 )
@@ -547,7 +551,11 @@ class ChatViewModel(
         avatarUnsubscribe = null
         nicknameUnsubscribe?.invoke()
         nicknameUnsubscribe = null
+        // 对齐 ChatTtsController 约定：离开聊天页时停止朗读并释放 MediaPlayer
+        generation.stopTts()
         contextResolver.clearCache(companionId)
+        // 释放生成器引用；进行中的 AI 不会被取消，空闲后由 ChatGenerationManager 延迟回收
+        ChatGenerationManager.release(companionId)
         super.onCleared()
     }
 }

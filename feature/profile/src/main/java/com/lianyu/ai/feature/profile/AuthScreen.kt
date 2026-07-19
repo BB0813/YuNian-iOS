@@ -30,17 +30,16 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -50,51 +49,35 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lianyu.ai.feature.profile.BuildConfig
-import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.security.MessageDigest
 
 @Composable
 fun AuthScreen(
-    onLoginSuccess: () -> Unit
+    onLoginSuccess: () -> Unit,
+    viewModel: AuthViewModel = viewModel()
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isLoading = uiState.isLoading
+    val errorMessage = uiState.errorMessage
 
     val isEmailValid = email.matches(Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"))
     val canSubmit = isEmailValid && password.length >= 6
 
-    fun handleLogin() {
-        if (!canSubmit) return
-        isLoading = true
-        errorMessage = null
-        scope.launch {
-            try {
-                val result = loginUser(email, password)
-                if (result.success) {
-                    context.getSharedPreferences("auth_prefs", android.content.Context.MODE_PRIVATE)
-                        .edit()
-                        .putString("auth_token", result.token)
-                        .putString("refresh_token", result.refreshToken)
-                        .putString("user_email", email)
-                        .putString("user_nickname", result.user?.nickname ?: email)
-                        .putString("user_avatar", result.user?.avatar)
-                        .apply()
-                    onLoginSuccess()
-                } else {
-                    errorMessage = result.message
-                }
-            } catch (e: Exception) {
-                errorMessage = e.message ?: "请求失败"
-            } finally {
-                isLoading = false
-            }
+    LaunchedEffect(uiState.loginSucceeded) {
+        if (uiState.loginSucceeded) {
+            viewModel.consumeLoginSuccess()
+            onLoginSuccess()
         }
+    }
+
+    fun handleLogin() {
+        if (!canSubmit || isLoading) return
+        viewModel.login(email, password)
     }
 
     Box(
@@ -150,7 +133,7 @@ fun AuthScreen(
                 Column {
                     OutlinedTextField(
                         value = email,
-                        onValueChange = { email = it; errorMessage = null },
+                        onValueChange = { email = it; viewModel.clearError() },
                         label = { Text(stringResource(R.string.email_label)) },
                         placeholder = { Text(stringResource(R.string.email_placeholder)) },
                         leadingIcon = {
@@ -181,7 +164,7 @@ fun AuthScreen(
 
                     OutlinedTextField(
                         value = password,
-                        onValueChange = { password = it; errorMessage = null },
+                        onValueChange = { password = it; viewModel.clearError() },
                         label = { Text(stringResource(R.string.password_label)) },
                         placeholder = { Text(stringResource(R.string.password_placeholder)) },
                         leadingIcon = {

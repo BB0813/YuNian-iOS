@@ -1,7 +1,10 @@
 package com.lianyu.ai.feature.chat.ui.message
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatListItem
@@ -36,6 +39,9 @@ fun TextMessageItem(
 
     if (quotedContent.body.isBlank()) return
 
+    // 复制源 = 当前游标选区，而不是整段正文 / 整颗气泡
+    var selectedText by remember(quotedContent.body) { mutableStateOf("") }
+
     ChatMessageScaffold(
         message = message,
         companionData = companionData,
@@ -44,14 +50,18 @@ fun TextMessageItem(
         onIntent = onIntent,
         adaptiveSizing = adaptiveSizing,
         isDarkTheme = isDarkTheme,
-        copyText = quotedContent.body
-    ) { menuExpanded ->
+        // 文字消息：长按目标是正文，气泡外框不接管
+        enableFrameLongClick = false,
+        copyText = selectedText.takeIf { it.isNotEmpty() }
+    ) { menuExpanded, openMenu ->
         TextMessageContent(
             quotedContent = quotedContent,
             isMine = isMine,
             adaptiveSizing = adaptiveSizing,
             onIntent = onIntent,
-            textSelectable = menuExpanded
+            selectionActive = menuExpanded,
+            onTextLongClick = openMenu,
+            onSelectedTextChange = { selectedText = it }
         )
     }
 }

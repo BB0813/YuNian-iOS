@@ -55,9 +55,9 @@ fun GradientOrbBackground(modifier: Modifier = Modifier) {
                     )
                 } else {
                     listOf(
-                        Color(0xFFFFF8FA),
-                        Color(0xFFFFF0F3),
-                        Color(0xFFFCE4EC).copy(alpha = 0.3f)
+                        Color(0xFFDEFCF9),
+                        Color(0xFFE8F6FC),
+                        Color(0xFFCADEFC).copy(alpha = 0.35f)
                     )
                 }
             )

@@ -1,5 +1,7 @@
 package com.lianyu.ai.feature.settings.ui.screen
 import com.lianyu.ai.uicommon.theme.AppTheme
+import com.lianyu.ai.uicommon.theme.PetalPrimary
+import com.lianyu.ai.uicommon.theme.PetalPrimaryContainer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -124,13 +126,24 @@ fun ModelSelectionCard(
     modifier: Modifier = Modifier
 ) {
     val cardBackground = AppTheme.colors.surfaceVariant
-    val selectedBorder = if (state.isSelected) PetalPrimary else Color.Transparent
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val shape = RoundedCornerShape(12.dp)
+    val surfaceColor = if (isPressed || state.isSelected) {
+        cardBackground.copy(alpha = 0.85f)
+    } else {
+        cardBackground
+    }
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(cardBackground)
-            .clickable { onSelect() }
+            .clip(shape)
+            .background(surfaceColor)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onSelect
+            )
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -347,12 +360,13 @@ fun VisionModelSettingsCard(
 ) {
     var showVisionModelDropdown by remember { mutableStateOf(false) }
     val cardBg = AppTheme.colors.surfaceVariant
+    val cardShape = RoundedCornerShape(24.dp)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(cardShape)
             .background(cardBg)
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
