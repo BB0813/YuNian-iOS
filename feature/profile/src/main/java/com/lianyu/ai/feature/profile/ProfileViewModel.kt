@@ -65,6 +65,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     val userSignature: StateFlow<String> by lazy { repository.userSignature }
     /** 稳定键：`male` / `female`，空字符串表示未设置。 */
     val userGender: StateFlow<String> by lazy { repository.userGender }
+    val userRegion: StateFlow<String> by lazy { repository.userRegion }
 
     val companionCount: StateFlow<Int> by lazy {
         companionRepository.getAllCompanions()
@@ -115,6 +116,12 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     fun updateUserGender(gender: String) {
         viewModelScope.launch {
             repository.updateUserGender(gender)
+        }
+    }
+
+    fun updateUserRegion(region: String) {
+        viewModelScope.launch {
+            repository.updateUserRegion(region)
         }
     }
 

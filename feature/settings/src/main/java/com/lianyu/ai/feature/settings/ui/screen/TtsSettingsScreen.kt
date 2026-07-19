@@ -88,6 +88,7 @@ import com.lianyu.ai.network.tts.LocalTtsModel
 import com.lianyu.ai.network.tts.LocalTtsModelManager
 import com.lianyu.ai.network.tts.LocalTtsUiState
 import com.lianyu.ai.network.tts.LocalTtsUiStatus
+import com.lianyu.ai.feature.settings.ui.viewmodel.TtsSettingsViewModel
 import com.lianyu.ai.uicommon.theme.PetalPrimary
 import com.lianyu.ai.uicommon.theme.PetalPrimaryContainer
 import com.lianyu.ai.uicommon.theme.PetalOnPrimaryContainer
@@ -96,18 +97,20 @@ import com.lianyu.ai.uicommon.theme.PetalSurface
 import com.lianyu.ai.uicommon.theme.PetalSurfaceContainer
 import com.lianyu.ai.uicommon.theme.PetalGreen
 import com.lianyu.ai.uicommon.theme.PetalError
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 fun TtsSettingsScreen(
     onNavigateBack: () -> Unit,
-    isDarkTheme: Boolean = false
+    isDarkTheme: Boolean = false,
+    settingsViewModel: TtsSettingsViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val ttsService = remember { TtsService.getInstance(context) }
+    val ttsService = remember { settingsViewModel.getTtsService() }
 
     var isVisible by remember { mutableStateOf(false) }
     var ttsEnabled by remember { mutableStateOf(false) }
@@ -217,18 +220,12 @@ fun TtsSettingsScreen(
             localTtsSpeed = localTtsSpeed,
             localTtsSid = localTtsSid
         )
-        
-        TtsConfig.saveToSharedPreferences(context, newConfig)
-        ttsService.updateConfig(newConfig)
-        
-        val prefs = context.getSharedPreferences("tts_settings", Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            putBoolean("tts_enabled", ttsEnabled)
-            putString("tts_provider", selectedProvider.name)
-            putString("tts_voice_${selectedProvider.name}", selectedVoiceId)
-            apply()
-        }
-        ttsService.setProvider(selectedProvider)
+        settingsViewModel.saveSettings(
+            config = newConfig,
+            ttsEnabled = ttsEnabled,
+            provider = selectedProvider,
+            voiceId = selectedVoiceId
+        )
     }
 
     fun saveChatTtsSettings() {
@@ -238,7 +235,7 @@ fun TtsSettingsScreen(
             autoDedup = chatTtsAutoDedup,
             beautify = chatTtsBeautify
         )
-        ChatTtsConfig.saveToSharedPreferences(context, cfg)
+        settingsViewModel.saveChatTtsSettings(cfg)
     }
 
     Scaffold(

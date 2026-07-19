@@ -3,6 +3,7 @@ package com.lianyu.ai.network
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ChatMessage
+import com.lianyu.ai.domain.AiOperationalMessages
 
 /**
  * AutoContextManager — 自适应上下文管理器。
@@ -153,18 +154,23 @@ class AutoContextManager(
     ): List<Message> {
         if (history.isEmpty()) return emptyList()
 
-        // 先过滤空 assistant 消息
+        // 过滤：空 assistant、运营错误文案（曾误入库的配置/网络提示不得回灌模型）
         val filtered = history.filterNot { msg ->
-            !msg.isFromUser && msg.content.replace("\u200B", "").isBlank()
+            val text = msg.content.replace("\u200B", "").trim()
+            text.isBlank() || AiOperationalMessages.isOperationalContent(text)
         }
         if (filtered.isEmpty()) return emptyList()
 
         // 估算全部历史消息的 token 数
+        // 工具结果（[工具调用结果]）映射为 user，禁止当 assistant（否则模型会自言自语）
         val allMessages = filtered.map { msg ->
-            Message(
-                role = if (msg.isFromUser) "user" else "assistant",
-                content = formatMessageContent(msg)
-            )
+            val content = formatMessageContent(msg)
+            val role = when {
+                content.startsWith("[工具调用结果]") -> "user"
+                msg.isFromUser -> "user"
+                else -> "assistant"
+            }
+            Message(role = role, content = content)
         }
         val totalTokens = TokenEstimator.estimate(allMessages)
 

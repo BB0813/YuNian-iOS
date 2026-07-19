@@ -75,8 +75,20 @@ class AiResponseFinalizer(
     private val questionRegex: Regex,
 ) {
     /**
-     * Process and save an AI response: reasoning display, sticker processing, DB commit,
-     * WeChat broadcast. Returns the message ID for the saved response.
+     * 消息落地结果：UI 可见消息与后处理所需上下文分离。
+     * loading/typing 只覆盖「网络等待 + 分段投递」，不覆盖记忆/追问/TTS。
+     */
+    data class DeliveredResponse(
+        val messageId: Long,
+        val aiContent: String,
+        val segments: List<String>,
+        val userContentForMemory: String?,
+        val allowFollowUpMessage: Boolean
+    )
+
+    /**
+     * 兼容入口：先落地消息，再做后处理。
+     * 新调用方应拆成 [deliverResponse] + [afterDeliver]，以便在消息可见后立刻结束 typing。
      */
     suspend fun finalizeResponse(
         aiContent: String,
@@ -84,24 +96,39 @@ class AiResponseFinalizer(
         userContentForMemory: String? = null,
         logMessage: String = "AI response received"
     ): Long {
-        if (!reasoning.isNullOrBlank() && appSettingsStore.getShowReasoning()) {
+        val delivered = deliverResponse(
+            aiContent = aiContent,
+            reasoning = reasoning,
+            userContentForMemory = userContentForMemory,
+            logMessage = logMessage
+        )
+        afterDeliver(delivered)
+        return delivered.messageId
+    }
+
+    /**
+     * 仅负责：reasoning 展示、表情包、分段入库、微信广播。
+     * 返回后消息已对用户可见，调用方应立即结束 loading/typing。
+     */
+    suspend fun deliverResponse(
+        aiContent: String,
+        reasoning: String?,
+        userContentForMemory: String? = null,
+        logMessage: String = "AI response received"
+    ): DeliveredResponse {
+        val showReasoning = appSettingsStore.getShowReasoning()
+        val autoCollapse = appSettingsStore.getAutoCollapseReasoning()
+        if (!reasoning.isNullOrBlank() && showReasoning) {
             isReasoning.value = true
             reasoningText.value = reasoning
+        } else {
+            // 关闭显示时确保不残留上一轮思考气泡
+            reasoningText.value = ""
+            isReasoning.value = false
         }
 
         val settings = chatDetailSettingsStore.getSettings(companionId)
         val processedText = TextProcessor.processStickerTagsForSplit(aiContent, stickerManager, settings.stickerProbability) { sendStickerMessage(it) }
-
-        // [DISABLED] 关键词拦截 + 贝叶斯分类器均暂停，误拦截率过高。
-        // ContentFilter.checkFull / checkVector / Bayesian 全部跳过。
-        // 保留代码供后续调优后重新启用。
-        val modelKw = ContentFilter.CheckResult(false, ContentFilter.ViolationLevel.NONE, "ContentFilter disabled", emptyList())
-        val modelVec = ContentFilter.CheckResult(false, ContentFilter.ViolationLevel.NONE, "ContentFilter disabled", emptyList())
-        val modelBayesian = SafetyScore(
-            score = 0.0,
-            source = ScoreSource.MODEL_OUTPUT,
-            explanation = "ContentFilter + Bayesian disabled"
-        )
 
         // 分段发送：将AI回复拆分为多条短消息，模拟真人连续发送
         val segments = splitIntoSegments(processedText)
@@ -135,8 +162,6 @@ class AiResponseFinalizer(
             )
             val id = messageWriter.enqueueChat(aiMessage)
             SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id")
-            reasoningText.value = ""
-            isReasoning.value = false
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
             }
@@ -164,8 +189,6 @@ class AiResponseFinalizer(
                 lastId = id
                 SecureLog.d("ChatViewModel", "$logMessage segment ${index + 1}/${segments.size}, length=${segment.length}, id=$id")
             }
-            reasoningText.value = ""
-            isReasoning.value = false
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
             }
@@ -177,6 +200,16 @@ class AiResponseFinalizer(
             lastId
         }
 
+        // 架构：思考过程在消息落地后仍保留展示；自动折叠仅影响 UI 展开态，不立刻清空。
+        // 仅在关闭显示时清理；开启时保留到下一轮请求开始。
+        if (!showReasoning || reasoning.isNullOrBlank()) {
+            reasoningText.value = ""
+            isReasoning.value = false
+        } else if (autoCollapse) {
+            // 保留文本，UI 侧按 autoCollapse 默认收起
+            isReasoning.value = true
+        }
+
         // Broadcast stale sticker message if any
         if (turnState.lastStickerMsgId > 0) {
             broadcastWeChatMessage(turnState.lastStickerMsgId, turnState.lastStickerContent)
@@ -184,13 +217,27 @@ class AiResponseFinalizer(
             turnState.lastStickerContent = ""
         }
 
+        return DeliveredResponse(
+            messageId = aiMessageId,
+            aiContent = aiContent,
+            segments = segments,
+            userContentForMemory = userContentForMemory,
+            allowFollowUpMessage = settings.allowFollowUpMessage
+        )
+    }
+
+    /**
+     * 消息可见后的后处理：记忆提取、概率追问、自动朗读。
+     * 不得再驱动顶部「对方正在输入」状态。
+     */
+    suspend fun afterDeliver(delivered: DeliveredResponse) {
         // Save memory
-        if (userContentForMemory != null && aiContent.isNotBlank()) {
+        if (delivered.userContentForMemory != null && delivered.aiContent.isNotBlank()) {
             runCatching {
                 withTimeoutOrNull(TimeoutBudgets.CHAT_VM_MEMORY_EXTRACT_MS) {
                     memoryProvider.extractAndSaveFromConversation(
-                        userInput = userContentForMemory,
-                        aiResponse = aiContent,
+                        userInput = delivered.userContentForMemory,
+                        aiResponse = delivered.aiContent,
                         companionId = companionId,
                         groupId = null
                     )
@@ -201,14 +248,12 @@ class AiResponseFinalizer(
         }
 
         // 连续追问：AI回复后按概率触发追问
-        triggerFollowUpIfNeeded(aiContent, settings.allowFollowUpMessage)
+        triggerFollowUpIfNeeded(delivered.aiContent, delivered.allowFollowUpMessage)
 
         // 流式分段朗读：AI 回复落地后，按句子边界逐段入队朗读（仅 READ_ALOUD 模式 + 通话未激活）。
         if (chatTtsController.shouldAutoPlay()) {
-            segments.forEach { chatTtsController.speakText(it) }
+            delivered.segments.forEach { chatTtsController.speakText(it) }
         }
-
-        return aiMessageId
     }
 
     // ── 辅助方法（从 ChatViewModel 迁移）──

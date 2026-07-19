@@ -102,14 +102,15 @@ class CoffeeViewModel(
 
     // ════════════════════════════════════════════════════════════════
     // Token 管理（仅做保存/清除，UI 在独立设置页）
+    // 写入绑定 viewModelScope，避免 composition 离开时取消 DataStore 落盘。
     // ════════════════════════════════════════════════════════════════
 
-    suspend fun saveToken(token: String) {
+    fun saveToken(token: String): kotlinx.coroutines.Job = viewModelScope.launch {
         tokenStore.saveToken(token)
         _uiState.value = _uiState.value.copy(isTokenConfigured = token.isNotBlank())
     }
 
-    suspend fun clearToken() {
+    fun clearToken(): kotlinx.coroutines.Job = viewModelScope.launch {
         tokenStore.clearToken()
         _uiState.value = _uiState.value.copy(isTokenConfigured = false)
     }

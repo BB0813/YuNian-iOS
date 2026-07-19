@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Psychology
@@ -32,11 +33,14 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Token
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,8 +52,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,52 +60,68 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lianyu.ai.common.AppSettingsStore
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lianyu.ai.common.FrameRateManager
+import com.lianyu.ai.uicommon.component.bounceVerticalScroll
 import kotlinx.coroutines.launch
 
 /**
- * 总设置页 — 收纳次要设置项，按功能领域分为 3 组。
+ * 设置页（大类入口）。
  *
- *   1. 外观与对话  — 语言、帧率、思考设置
- *   2. 平台集成    — 微信、QQ机器人
- *   3. 系统与维护  — TTS、Token、更新、权限
+ * 架构：
+ * - 顶部独立栏「设置」
+ * - 单一大型列表网格 + 行分隔符
+ * - 仅展示 5 个大类，子项进入对应子页
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GeneralSettingsScreen(
     onNavigateBack: () -> Unit,
-    onLanguageClick: () -> Unit,
-    onFrameRateClick: () -> Unit,
-    onTtsSettingsClick: () -> Unit,
-    onTokenUsageClick: () -> Unit,
-    onCheckUpdateClick: () -> Unit,
-    onWeChatClick: () -> Unit,
-    onQQBotClick: () -> Unit,
-    onDataBackupClick: () -> Unit,
+    onLanguageClick: () -> Unit = {},
+    onFrameRateClick: () -> Unit = {},
+    onTtsSettingsClick: () -> Unit = {},
+    onTokenUsageClick: () -> Unit = {},
+    onCheckUpdateClick: () -> Unit = {},
+    onWeChatClick: () -> Unit = {},
+    onQQBotClick: () -> Unit = {},
+    onDataBackupClick: () -> Unit = {},
     onOriginOSAdaptionClick: () -> Unit = {},
     onCoffeeClick: () -> Unit = {},
-    onExperimentalFeaturesClick: () -> Unit = {}
+    onExperimentalFeaturesClick: () -> Unit = {},
+    onGeneralCategoryClick: () -> Unit = {},
+    onPermissionsClick: () -> Unit = {},
+    onAboutLianYuClick: () -> Unit = {},
+    onToolsClick: () -> Unit = {}
 ) {
-    val context = LocalContext.current
     val colorScheme = AppTheme.colors
 
     Scaffold(
-        modifier = Modifier.fillMaxSize().background(colorScheme.background).windowInsetsPadding(WindowInsets.statusBars),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
         containerColor = colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.general_settings), fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Text(
+                        stringResource(R.string.general_settings),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back), tint = colorScheme.onSurface)
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.back),
+                            tint = colorScheme.onSurface
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colorScheme.background)
@@ -114,51 +132,361 @@ fun GeneralSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .bounceVerticalScroll(resistance = 0.28f, maxOverscrollDp = 128f)
                 .verticalScroll(rememberScrollState())
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // === 第一组：外观与对话 ===
-            val currentFrameRate = FrameRateManager.getSavedFrameRate(context)
-            SolidMenuGroup(
+            SettingsCategoryList(
                 items = listOf(
-                    MenuItemData(Icons.Filled.Language, stringResource(R.string.language), stringResource(R.string.language_desc), onLanguageClick),
-                    MenuItemData(Icons.Filled.Refresh, stringResource(R.string.framerate), currentFrameRate.label, onFrameRateClick),
-                    MenuItemData(Icons.Filled.Science, stringResource(R.string.experimental_features), stringResource(R.string.experimental_features_desc), onExperimentalFeaturesClick),
-                    ThinkingSettingsEntry()
+                    MenuItemData(
+                        Icons.Filled.Settings,
+                        stringResource(R.string.settings_category_general),
+                        stringResource(R.string.settings_category_general_desc),
+                        onGeneralCategoryClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Science,
+                        stringResource(R.string.experimental_features),
+                        stringResource(R.string.experimental_features_desc),
+                        onExperimentalFeaturesClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Coffee,
+                        stringResource(R.string.settings_category_tools),
+                        stringResource(R.string.settings_category_tools_desc),
+                        onToolsClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Security,
+                        stringResource(R.string.settings_category_permissions),
+                        stringResource(R.string.settings_category_permissions_desc),
+                        onPermissionsClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Info,
+                        stringResource(R.string.settings_category_about),
+                        stringResource(R.string.settings_category_about_desc),
+                        onAboutLianYuClick
+                    )
                 )
             )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // === 第二组：平台集成 ===
-            SolidMenuGroup(
-                items = listOf(
-                    MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.wechat_settings), stringResource(R.string.wechat_settings_desc), onWeChatClick),
-                    MenuItemData(Icons.Filled.ChatBubble, stringResource(R.string.qqbot_settings), stringResource(R.string.qqbot_settings_desc), onQQBotClick),
-                    MenuItemData(Icons.Filled.Coffee, stringResource(R.string.coffee_title), stringResource(R.string.coffee_desc), onCoffeeClick)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // === 第三组：系统与维护 ===
-            SolidMenuGroup(
-                items = listOf(
-                    MenuItemData(Icons.Filled.RecordVoiceOver, stringResource(R.string.tts_settings), stringResource(R.string.tts_settings_desc), onTtsSettingsClick),
-                    MenuItemData(Icons.Filled.Token, stringResource(R.string.token_usage), stringResource(R.string.token_usage_desc), onTokenUsageClick),
-                    MenuItemData(Icons.Filled.SystemUpdate, stringResource(R.string.check_new_version), stringResource(R.string.check_new_version_desc), onCheckUpdateClick),
-                    MenuItemData(Icons.Filled.SaveAlt, stringResource(R.string.data_backup), stringResource(R.string.data_backup_desc), onDataBackupClick),
-                    MenuItemData(Icons.Filled.Tune, stringResource(R.string.originos_adaption), stringResource(R.string.originos_adaption_desc), onOriginOSAdaptionClick)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 权限管理卡片（内嵌在系统与维护组下方）
-            PermissionSettingsCard()
 
             Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+// ============================================================================
+// 通用设置子页
+// ============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GeneralCategoryScreen(
+    onNavigateBack: () -> Unit,
+    onLanguageClick: () -> Unit,
+    onFrameRateClick: () -> Unit,
+    onTtsSettingsClick: () -> Unit,
+    onTokenUsageClick: () -> Unit,
+    onWeChatClick: () -> Unit,
+    onQQBotClick: () -> Unit,
+    onDataBackupClick: () -> Unit,
+    onOriginOSAdaptionClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val colorScheme = AppTheme.colors
+    val currentFrameRate = FrameRateManager.getSavedFrameRate(context)
+
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
+        containerColor = colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.settings_category_general),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.back),
+                            tint = colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = colorScheme.background)
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .bounceVerticalScroll(resistance = 0.28f, maxOverscrollDp = 128f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsCategoryList(
+                items = listOf(
+                    MenuItemData(
+                        Icons.Filled.Language,
+                        stringResource(R.string.language),
+                        stringResource(R.string.language_desc),
+                        onLanguageClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Refresh,
+                        stringResource(R.string.framerate),
+                        currentFrameRate.label,
+                        onFrameRateClick
+                    ),
+                    ThinkingSettingsEntry(),
+                    MenuItemData(
+                        Icons.Filled.RecordVoiceOver,
+                        stringResource(R.string.tts_settings),
+                        stringResource(R.string.tts_settings_desc),
+                        onTtsSettingsClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.SaveAlt,
+                        stringResource(R.string.data_backup),
+                        stringResource(R.string.data_backup_desc),
+                        onDataBackupClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.ChatBubble,
+                        stringResource(R.string.wechat_settings),
+                        stringResource(R.string.wechat_settings_desc),
+                        onWeChatClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.ChatBubble,
+                        stringResource(R.string.qqbot_settings),
+                        stringResource(R.string.qqbot_settings_desc),
+                        onQQBotClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Token,
+                        stringResource(R.string.token_usage),
+                        stringResource(R.string.token_usage_desc),
+                        onTokenUsageClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Tune,
+                        stringResource(R.string.originos_adaption),
+                        stringResource(R.string.originos_adaption_desc),
+                        onOriginOSAdaptionClick
+                    )
+                )
+            )
+            Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+// ============================================================================
+// 工具设置子页
+// ============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ToolsSettingsScreen(
+    onNavigateBack: () -> Unit,
+    onCoffeeClick: () -> Unit
+) {
+    val colorScheme = AppTheme.colors
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
+        containerColor = colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.settings_category_tools),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.back),
+                            tint = colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = colorScheme.background)
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .bounceVerticalScroll(resistance = 0.28f, maxOverscrollDp = 96f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsCategoryList(
+                items = listOf(
+                    MenuItemData(
+                        Icons.Filled.Coffee,
+                        stringResource(R.string.coffee_title),
+                        stringResource(R.string.coffee_desc),
+                        onCoffeeClick
+                    )
+                )
+            )
+            Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+// ============================================================================
+// 权限管理子页
+// ============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PermissionsSettingsScreen(
+    onNavigateBack: () -> Unit
+) {
+    val colorScheme = AppTheme.colors
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
+        containerColor = colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.settings_category_permissions),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.back),
+                            tint = colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = colorScheme.background)
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .bounceVerticalScroll(resistance = 0.28f, maxOverscrollDp = 96f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            PermissionSettingsCard()
+            Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+// ============================================================================
+// 关于恋语子页
+// ============================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AboutLianYuSettingsScreen(
+    onNavigateBack: () -> Unit,
+    onCheckUpdateClick: () -> Unit
+) {
+    val colorScheme = AppTheme.colors
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars),
+        containerColor = colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.settings_category_about),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.back),
+                            tint = colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = colorScheme.background)
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .bounceVerticalScroll(resistance = 0.28f, maxOverscrollDp = 96f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            SettingsCategoryList(
+                items = listOf(
+                    MenuItemData(
+                        Icons.Filled.SystemUpdate,
+                        stringResource(R.string.check_new_version),
+                        stringResource(R.string.check_new_version_desc),
+                        onCheckUpdateClick
+                    )
+                )
+            )
+            Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+// ============================================================================
+// 单一大型列表（行分隔符）
+// ============================================================================
+
+@Composable
+internal fun SettingsCategoryList(items: List<MenuItemData>) {
+    val cs = AppTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(cs.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        items.forEachIndexed { index, item ->
+            SolidMenuItem(
+                icon = item.icon,
+                title = item.title,
+                subtitle = item.subtitle,
+                onClick = item.onClick,
+                showDivider = index < items.lastIndex
+            )
         }
     }
 }
@@ -169,71 +497,141 @@ fun GeneralSettingsScreen(
 
 @Composable
 private fun ThinkingSettingsEntry(): MenuItemData {
-    val context = LocalContext.current
-    val settingsStore = remember { AppSettingsStore(context) }
-    val showReasoning by settingsStore.showReasoningFlow.collectAsState(initial = false)
-    val showDialog = remember { mutableStateOf(false) }
+    // ViewModel 挂在入口（非对话框）上，对话框关闭不会取消 viewModelScope 写入。
+    val viewModel: ThinkingSettingsViewModel = viewModel()
+    val showReasoning by viewModel.showReasoning.collectAsStateWithLifecycle()
+    var showDialog by remember { mutableStateOf(false) }
 
-    if (showDialog.value) {
-        ThinkingSettingsDialog(showDialog, settingsStore)
+    if (showDialog) {
+        ThinkingSettingsDialog(
+            viewModel = viewModel,
+            onDismiss = { showDialog = false }
+        )
     }
 
     return MenuItemData(
         icon = Icons.Filled.Psychology,
         title = stringResource(R.string.thinking_settings),
-        subtitle = if (showReasoning) stringResource(R.string.thinking_enabled) else stringResource(R.string.thinking_disabled),
-        onClick = { showDialog.value = true }
+        subtitle = if (showReasoning) {
+            stringResource(R.string.thinking_enabled)
+        } else {
+            stringResource(R.string.thinking_disabled)
+        },
+        onClick = { showDialog = true }
     )
 }
 
 @Composable
-private fun ThinkingSettingsDialog(showDialog: MutableState<Boolean>, settingsStore: AppSettingsStore) {
+private fun ThinkingSettingsDialog(
+    viewModel: ThinkingSettingsViewModel,
+    onDismiss: () -> Unit
+) {
+    // UI scope 仅负责：调用 ViewModel 保存 → join 等待 → 再 dismiss。
+    // 实际 DataStore 写入在 viewModelScope，不受对话框 composition 取消影响。
     val scope = rememberCoroutineScope()
-    val showReasoning by settingsStore.showReasoningFlow.collectAsState(initial = false)
-    val sendReasoning by settingsStore.sendReasoningFlow.collectAsState(initial = false)
-    val autoCollapse by settingsStore.autoCollapseReasoningFlow.collectAsState(initial = true)
-    val respField by settingsStore.reasoningResponseFieldFlow.collectAsState(initial = "reasoning_content")
-    val reqField by settingsStore.reasoningRequestFieldFlow.collectAsState(initial = "reasoning_content")
+    val showReasoning by viewModel.showReasoning.collectAsStateWithLifecycle()
+    val sendReasoning by viewModel.sendReasoning.collectAsStateWithLifecycle()
+    val autoCollapse by viewModel.autoCollapseReasoning.collectAsStateWithLifecycle()
+    val respField by viewModel.responseField.collectAsStateWithLifecycle()
+    val reqField by viewModel.requestField.collectAsStateWithLifecycle()
 
     var localShow by remember { mutableStateOf(showReasoning) }
     var localSend by remember { mutableStateOf(sendReasoning) }
     var localCollapse by remember { mutableStateOf(autoCollapse) }
     var localResp by remember { mutableStateOf(respField) }
     var localReq by remember { mutableStateOf(reqField) }
+    var isSaving by remember { mutableStateOf(false) }
 
     AlertDialog(
-        onDismissRequest = { showDialog.value = false },
-        title = { Text("思考设置") },
+        onDismissRequest = {
+            if (!isSaving) onDismiss()
+        },
+        title = { Text(stringResource(R.string.thinking_settings)) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("启用思考过程显示"); Switch(checked = localShow, onCheckedChange = { localShow = it })
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("启用思考过程显示")
+                    Switch(
+                        checked = localShow,
+                        onCheckedChange = { localShow = it },
+                        enabled = !isSaving
+                    )
                 }
                 if (localShow) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("思考完成时自动折叠"); Switch(checked = localCollapse, onCheckedChange = { localCollapse = it })
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("思考完成时自动折叠")
+                        Switch(
+                            checked = localCollapse,
+                            onCheckedChange = { localCollapse = it },
+                            enabled = !isSaving
+                        )
                     }
-                    OutlinedTextField(localResp, { localResp = it }, label = { Text("响应字段名") }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                    OutlinedTextField(localReq, { localReq = it }, label = { Text("请求字段名") }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("发送思考内容"); Switch(checked = localSend, onCheckedChange = { localSend = it })
+                    OutlinedTextField(
+                        value = localResp,
+                        onValueChange = { localResp = it },
+                        label = { Text("响应字段名") },
+                        enabled = !isSaving,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    )
+                    OutlinedTextField(
+                        value = localReq,
+                        onValueChange = { localReq = it },
+                        label = { Text("请求字段名") },
+                        enabled = !isSaving,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("发送思考内容")
+                        Switch(
+                            checked = localSend,
+                            onCheckedChange = { localSend = it },
+                            enabled = !isSaving
+                        )
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                scope.launch {
-                    settingsStore.setShowReasoning(localShow)
-                    settingsStore.setAutoCollapseReasoning(localCollapse)
-                    settingsStore.setReasoningResponseField(localResp)
-                    settingsStore.setReasoningRequestField(localReq)
-                    settingsStore.setSendReasoning(localSend)
+            TextButton(
+                enabled = !isSaving,
+                onClick = {
+                    if (isSaving) return@TextButton
+                    isSaving = true
+                    scope.launch {
+                        try {
+                            viewModel.saveThinkingSettings(
+                                showReasoning = localShow,
+                                autoCollapseReasoning = localCollapse,
+                                responseField = localResp,
+                                requestField = localReq,
+                                sendReasoning = localSend
+                            ).join()
+                            onDismiss()
+                        } finally {
+                            isSaving = false
+                        }
+                    }
                 }
-                showDialog.value = false
-            }) { Text("保存") }
+            ) { Text(if (isSaving) "保存中…" else "保存") }
         },
-        dismissButton = { TextButton(onClick = { showDialog.value = false }) { Text("取消") } }
+        dismissButton = {
+            TextButton(
+                enabled = !isSaving,
+                onClick = onDismiss
+            ) { Text("取消") }
+        }
     )
 }
 
@@ -242,7 +640,7 @@ private fun ThinkingSettingsDialog(showDialog: MutableState<Boolean>, settingsSt
 // ============================================================================
 
 @Composable
-private fun PermissionSettingsCard() {
+internal fun PermissionSettingsCard() {
     val context = LocalContext.current
     val colorScheme = AppTheme.colors
 
@@ -258,14 +656,21 @@ private fun PermissionSettingsCard() {
             com.lianyu.ai.common.BatteryOptimizationHelper.openAutoStartSettings(context)
         }
         PermissionDivider()
-        PermissionItem(stringResource(R.string.battery_whitelist), stringResource(R.string.battery_whitelist_desc)) {
-            if (!com.lianyu.ai.common.BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context))
+        PermissionItem(
+            stringResource(R.string.battery_whitelist),
+            stringResource(R.string.battery_whitelist_desc)
+        ) {
+            if (!com.lianyu.ai.common.BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
                 com.lianyu.ai.common.BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
-            else
+            } else {
                 com.lianyu.ai.common.BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
+            }
         }
         PermissionDivider()
-        PermissionItem(stringResource(R.string.notification_permission), stringResource(R.string.notification_permission_desc)) {
+        PermissionItem(
+            stringResource(R.string.notification_permission),
+            stringResource(R.string.notification_permission_desc)
+        ) {
             com.lianyu.ai.common.BatteryOptimizationHelper.openNotificationSettings(context)
         }
     }
@@ -281,18 +686,36 @@ private fun PermissionItem(title: String, subtitle: String, onClick: () -> Unit)
         Icon(Icons.Filled.PowerSettingsNew, title, Modifier.size(24.dp), tint = AppTheme.colors.success)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium, fontSize = 16.sp), color = colorScheme.onSurface)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp), color = colorScheme.onSurfaceVariant)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp
+                ),
+                color = colorScheme.onSurface
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = colorScheme.onSurfaceVariant
+            )
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            null,
+            tint = colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
 @Composable
 private fun PermissionDivider() {
-    Box(Modifier.fillMaxWidth().padding(start = 36.dp).height(0.5.dp).background(AppTheme.colors.outline))
+    HorizontalDivider(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 36.dp),
+        thickness = 0.5.dp,
+        color = AppTheme.colors.outline
+    )
 }
-
-// ============================================================================
-// 权限管理卡片
-// ============================================================================

@@ -2,6 +2,7 @@ package com.lianyu.ai.feature.settings.ui.screen
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +33,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,37 +58,39 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.feature.settings.ui.viewmodel.SettingsViewModel
-import kotlinx.coroutines.delay
-import androidx.compose.ui.platform.LocalContext
-import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.uicommon.component.AppListItemLayout
 import com.lianyu.ai.uicommon.theme.AppTheme
+import kotlinx.coroutines.delay
 
 // ============================================================
-// Petal Color Constants
+// Petal Color Constants — Soft Pastel
 // ============================================================
 
-internal val PetalBackgroundStart = Color(0xFFFBF9F8)
-internal val PetalBackgroundEnd = Color(0xFFFFF0F3)
-internal val PetalPrimary = Color(0xFF894C5C)
-internal val PetalPrimaryContainer = Color(0xFFF4A7B9)
-internal val PetalOnPrimaryContainer = Color(0xFF733949)
+internal val PetalBackgroundStart = Color(0xFFDEFCF9)
+internal val PetalBackgroundEnd = Color(0xFFE8F6FC)
+internal val PetalPrimary = Color(0xFF5A4A80)
+internal val PetalPrimaryContainer = Color(0xFFCCA8E9)
+internal val PetalOnPrimaryContainer = Color(0xFF3A2E52)
 internal val PetalSurface = Color(0xFFFFFFFF)
-internal val PetalSurfaceContainer = Color(0xFFEFEDED)
-internal val PetalSurfaceContainerLow = Color(0xFFF5F3F3)
-internal val PetalSecondaryContainer = Color(0xFFEBDCDF)
-internal val PetalOnSurface = Color(0xFF1B1C1C)
-internal val PetalOnSurfaceVariant = Color(0xFF524346)
-internal val PetalOutlineVariant = Color(0xFFD6C1C5)
+internal val PetalSurfaceContainer = Color(0xFFE8F0F8)
+internal val PetalSurfaceContainerLow = Color(0xFFF0F6FC)
+internal val PetalSecondaryContainer = Color(0xFFCADEFC)
+internal val PetalOnSurface = Color(0xFF2A2440)
+internal val PetalOnSurfaceVariant = Color(0xFF524A66)
+internal val PetalOutlineVariant = Color(0xFFC8D8F0)
 internal val PetalError = Color(0xFFBA1A1A)
 internal val PetalErrorContainer = Color(0xFFFFDAD6)
 internal val PetalGreen = Color(0xFF10A37F)
@@ -440,7 +446,13 @@ private fun PetalApiConfigEditDialog(
                         color = textSecondaryColor
                     )
                 } else if (onFetchModels != null) {
-                    Box(modifier = Modifier.fillMaxWidth()) {
+                    var modelFieldWidthPx by remember { mutableIntStateOf(0) }
+                    val density = LocalDensity.current
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { modelFieldWidthPx = it.width }
+                    ) {
                         OutlinedTextField(
                             value = if (hasModels) selectedModelText else model,
                             onValueChange = { if (!hasModels) model = it },
@@ -472,19 +484,53 @@ private fun PetalApiConfigEditDialog(
                             singleLine = true
                         )
                         if (hasModels && !modelFetchState.isLoading) {
-                            DropdownMenu(
-                                expanded = showModelDropdown,
-                                onDismissRequest = { showModelDropdown = false },
-                                modifier = Modifier.fillMaxWidth(0.8f)
+                            val menuShape = RoundedCornerShape(16.dp)
+                            val menuWidth = with(density) {
+                                if (modelFieldWidthPx > 0) modelFieldWidthPx.toDp() else 0.dp
+                            }
+                            MaterialTheme(
+                                shapes = MaterialTheme.shapes.copy(extraSmall = menuShape)
                             ) {
-                                availableModels.forEach { m ->
-                                    DropdownMenuItem(
-                                        text = { Text(m, color = textPrimaryColor, fontSize = 14.sp) },
-                                        onClick = {
-                                            model = m
-                                            showModelDropdown = false
+                                DropdownMenu(
+                                    expanded = showModelDropdown,
+                                    onDismissRequest = { showModelDropdown = false },
+                                    modifier = Modifier
+                                        .then(
+                                            if (menuWidth > 0.dp) Modifier.width(menuWidth)
+                                            else Modifier.fillMaxWidth()
+                                        )
+                                        .heightIn(max = 280.dp)
+                                        .clip(menuShape)
+                                        .background(cardBackground)
+                                        .border(1.dp, dividerColor.copy(alpha = 0.85f), menuShape)
+                                ) {
+                                    availableModels.forEachIndexed { index, m ->
+                                        val selected = m == model
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = m,
+                                                    color = if (selected) PetalPrimary else textPrimaryColor,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                                )
+                                            },
+                                            onClick = {
+                                                model = m
+                                                showModelDropdown = false
+                                            },
+                                            modifier = Modifier.background(
+                                                if (selected) PetalPrimary.copy(alpha = 0.08f) else Color.Transparent
+                                            )
+                                        )
+                                        if (index < availableModels.lastIndex) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(horizontal = 12.dp),
+                                                thickness = 0.6.dp,
+                                                color = dividerColor.copy(alpha = 0.7f)
+                                            )
                                         }
-                                    )
+                                    }
                                 }
                             }
                         }

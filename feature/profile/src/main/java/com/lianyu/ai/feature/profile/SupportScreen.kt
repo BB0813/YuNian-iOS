@@ -128,7 +128,7 @@ fun SupportScreen(
                     Brush.radialGradient(
                         colors = listOf(
                             Color(0xFFE8547E).copy(alpha = 0.35f),
-                            Color(0xFFF4A6B5).copy(alpha = 0.18f)
+                            Color(0xFFCCA8E9).copy(alpha = 0.18f)
                         )
                     )
                 ),

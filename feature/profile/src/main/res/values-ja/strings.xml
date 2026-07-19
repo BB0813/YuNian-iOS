@@ -20,6 +20,16 @@
     <string name="framerate_desc">画面リフレッシュレート調整</string>
     <string name="settings">設定</string>
     <string name="settings_desc">アップデート、について、権限</string>
+    <string name="general_settings">設定</string>
+    <string name="general_settings_desc">一般、実験機能、ツール、権限、について</string>
+    <string name="settings_category_general">一般</string>
+    <string name="settings_category_general_desc">言語、フレームレート、思考、TTS、バックアップ、連携</string>
+    <string name="settings_category_tools">ツール設定</string>
+    <string name="settings_category_tools_desc">瑞幸コーヒーなどのツール</string>
+    <string name="settings_category_permissions">権限管理</string>
+    <string name="settings_category_permissions_desc">自動起動、電池最適化、通知</string>
+    <string name="settings_category_about">恋語について</string>
+    <string name="settings_category_about_desc">アップデート確認</string>
     <string name="check_new_version">アップデート確認</string>
     <string name="check_new_version_desc">利用可能なアップデートを確認</string>
     <string name="about_app">アプリについて</string>

@@ -115,7 +115,10 @@ class AppSettingsStore(context: Context) {
     suspend fun getReasoningResponseField(): String = reasoningResponseFieldFlow.first()
 
     suspend fun setReasoningResponseField(field: String) {
-        dataStore.edit { prefs -> prefs[REASONING_RESPONSE_FIELD_KEY] = field }
+        dataStore.edit { prefs ->
+            prefs[REASONING_RESPONSE_FIELD_KEY] =
+                field.ifBlank { DEFAULT_REASONING_RESPONSE_FIELD }
+        }
     }
 
     val reasoningRequestFieldFlow: Flow<String> = dataStore.data.map { prefs ->
@@ -125,7 +128,10 @@ class AppSettingsStore(context: Context) {
     suspend fun getReasoningRequestField(): String = reasoningRequestFieldFlow.first()
 
     suspend fun setReasoningRequestField(field: String) {
-        dataStore.edit { prefs -> prefs[REASONING_REQUEST_FIELD_KEY] = field }
+        dataStore.edit { prefs ->
+            prefs[REASONING_REQUEST_FIELD_KEY] =
+                field.ifBlank { DEFAULT_REASONING_REQUEST_FIELD }
+        }
     }
 
     val sendReasoningFlow: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -146,6 +152,28 @@ class AppSettingsStore(context: Context) {
 
     suspend fun setAutoCollapseReasoning(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[AUTO_COLLAPSE_REASONING_KEY] = enabled }
+    }
+
+    /**
+     * 原子保存思考相关设置（单次 edit，避免多字段分次写入半状态）。
+     * 调用方应在稳定作用域（如 ViewModel.viewModelScope）中执行。
+     */
+    suspend fun saveThinkingSettings(
+        showReasoning: Boolean,
+        autoCollapseReasoning: Boolean,
+        responseField: String,
+        requestField: String,
+        sendReasoning: Boolean
+    ) {
+        dataStore.edit { prefs ->
+            prefs[SHOW_REASONING_KEY] = showReasoning
+            prefs[AUTO_COLLAPSE_REASONING_KEY] = autoCollapseReasoning
+            prefs[REASONING_RESPONSE_FIELD_KEY] =
+                responseField.ifBlank { DEFAULT_REASONING_RESPONSE_FIELD }
+            prefs[REASONING_REQUEST_FIELD_KEY] =
+                requestField.ifBlank { DEFAULT_REASONING_REQUEST_FIELD }
+            prefs[SEND_REASONING_KEY] = sendReasoning
+        }
     }
 
     val visionEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->

@@ -30,9 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +43,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.res.stringResource
 import com.lianyu.ai.feature.settings.R
 import com.lianyu.ai.common.FrameRateManager
+import com.lianyu.ai.feature.settings.ui.viewmodel.FrameRateViewModel
 import com.lianyu.ai.uicommon.theme.PinkPrimary
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
 import com.lianyu.ai.uicommon.theme.ThemeMode
@@ -62,7 +61,9 @@ fun FrameRateScreen(
 ) {
     val context = LocalContext.current
     val themeViewModel: ThemeViewModel = viewModel()
+    val frameRateViewModel: FrameRateViewModel = viewModel()
     val themeMode by themeViewModel.themeMode.collectAsState()
+    val selectedRate by frameRateViewModel.frameRate.collectAsState()
     val isDark = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -76,9 +77,6 @@ fun FrameRateScreen(
     val dividerColor = colorScheme.outline
 
     val supportedRates = remember { FrameRateManager.getSupportedFrameRates(context) }
-    var selectedRate by remember {
-        mutableStateOf(FrameRateManager.getSavedFrameRate(context))
-    }
 
     Scaffold(
         contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
@@ -158,8 +156,7 @@ fun FrameRateScreen(
                         textPrimary = textPrimary,
                         textSecondary = textSecondary,
                         onClick = {
-                            selectedRate = rate
-                            FrameRateManager.saveFrameRate(context, rate)
+                            frameRateViewModel.setFrameRate(rate)
                             FrameRateManager.applyFrameRate(activity.window, rate)
                         }
                     )

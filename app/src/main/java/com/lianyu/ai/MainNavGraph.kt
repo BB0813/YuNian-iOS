@@ -40,9 +40,13 @@ import com.lianyu.ai.feature.groupchat.ui.GroupDetailScreen
 import com.lianyu.ai.feature.memory.MemoryScreen
 import com.lianyu.ai.feature.profile.AboutScreen
 import com.lianyu.ai.feature.profile.AgreementViewScreen
+import com.lianyu.ai.feature.profile.AboutLianYuSettingsScreen
+import com.lianyu.ai.feature.profile.GeneralCategoryScreen
 import com.lianyu.ai.feature.profile.GeneralSettingsScreen
 import com.lianyu.ai.feature.profile.HomeScreen
 import com.lianyu.ai.feature.profile.OriginOSAdaptionScreen
+import com.lianyu.ai.feature.profile.PermissionsSettingsScreen
+import com.lianyu.ai.feature.profile.ToolsSettingsScreen
 import com.lianyu.ai.uicommon.component.BackgroundSettingsScreen
 import com.lianyu.ai.feature.profile.ProfileScreen
 import com.lianyu.ai.feature.profile.ProfileSettingsScreen
@@ -263,17 +267,39 @@ internal fun MainNavHost(
         composable(MainRoute.GeneralSettings.route) {
             GeneralSettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onExperimentalFeaturesClick = { navController.navigate(MainRoute.ExperimentalFeatures.route) },
+                onGeneralCategoryClick = { navController.navigate(MainRoute.SettingsGeneralCategory.route) },
+                onToolsClick = { navController.navigate(MainRoute.SettingsTools.route) },
+                onPermissionsClick = { navController.navigate(MainRoute.SettingsPermissions.route) },
+                onAboutLianYuClick = { navController.navigate(MainRoute.SettingsAboutLianYu.route) }
+            )
+        }
+        composable(MainRoute.SettingsGeneralCategory.route) {
+            GeneralCategoryScreen(
+                onNavigateBack = { navController.popBackStack() },
                 onLanguageClick = { navController.navigate(MainRoute.Language.route) },
                 onFrameRateClick = { navController.navigate(MainRoute.FrameRate.route) },
                 onTtsSettingsClick = { navController.navigate(MainRoute.TtsSettings.route) },
                 onTokenUsageClick = { navController.navigate(MainRoute.TokenUsage.route) },
-                onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) },
                 onWeChatClick = { navController.navigate(MainRoute.WeChatSettings.route) },
                 onQQBotClick = { navController.navigate(MainRoute.QQBotSettings.route) },
                 onDataBackupClick = { navController.navigate(MainRoute.DataBackup.route) },
-                onOriginOSAdaptionClick = { navController.navigate(MainRoute.OriginOSAdaption.route) },
-                onCoffeeClick = { navController.navigate(MainRoute.Coffee.route) },
-                onExperimentalFeaturesClick = { navController.navigate(MainRoute.ExperimentalFeatures.route) }
+                onOriginOSAdaptionClick = { navController.navigate(MainRoute.OriginOSAdaption.route) }
+            )
+        }
+        composable(MainRoute.SettingsTools.route) {
+            ToolsSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onCoffeeClick = { navController.navigate(MainRoute.Coffee.route) }
+            )
+        }
+        composable(MainRoute.SettingsPermissions.route) {
+            PermissionsSettingsScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(MainRoute.SettingsAboutLianYu.route) {
+            AboutLianYuSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) }
             )
         }
         composable(MainRoute.WeChatSettings.route) {

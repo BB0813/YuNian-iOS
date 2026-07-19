@@ -43,13 +43,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -59,11 +56,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.lianyu.ai.common.AppSettingsStore
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.feature.settings.R
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
+import com.lianyu.ai.feature.settings.ui.viewmodel.YandereModeViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -71,26 +67,31 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 病娇模式设置页。
+ *
+ * 持久化与 manager 刷新由 [YandereModeViewModel] 的 viewModelScope 承担，
+ * 避免 composition 作用域在离开页面时取消 DataStore 写入。
+ * [yandereModeManager] 参数保留以兼容导航调用方；实际读写走 ViewModel。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun YandereModeScreen(
     onNavigateBack: () -> Unit,
-    yandereModeManager: YandereModeManager
+    yandereModeManager: YandereModeManager,
+    viewModel: YandereModeViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val settingsStore = remember { AppSettingsStore(context) }
     val colorScheme = AppTheme.colors
 
-    val isEnabled by settingsStore.yandereModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
-    val collectUsage by settingsStore.yandereModeUsageStatsFlow.collectAsStateWithLifecycle(initialValue = true)
-    val collectInstalled by settingsStore.yandereModeInstalledAppsFlow.collectAsStateWithLifecycle(initialValue = true)
-    val snapshot by yandereModeManager.cacheSnapshot.collectAsStateWithLifecycle()
-    val isRefreshing by yandereModeManager.isRefreshing.collectAsStateWithLifecycle()
+    val isEnabled by viewModel.isEnabled.collectAsStateWithLifecycle()
+    val collectUsage by viewModel.collectUsage.collectAsStateWithLifecycle()
+    val collectInstalled by viewModel.collectInstalled.collectAsStateWithLifecycle()
+    val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     var permissionCheckTick by remember { mutableIntStateOf(0) }
-    val hasPermission = remember(permissionCheckTick) { yandereModeManager.canAccessUsageStats() }
+    val hasPermission = remember(permissionCheckTick, yandereModeManager) {
+        viewModel.canAccessUsageStats()
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -157,18 +158,7 @@ fun YandereModeScreen(
                         Switch(
                             checked = isEnabled,
                             onCheckedChange = { enabled ->
-                                scope.launch {
-                                    try {
-                                        settingsStore.setYandereModeEnabled(enabled)
-                                        if (enabled) {
-                                            yandereModeManager.start()
-                                        }
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        // 静默降级
-                                    }
-                                }
+                                viewModel.setEnabled(enabled)
                             }
                         )
                     }
@@ -194,10 +184,7 @@ fun YandereModeScreen(
                             subtitle = stringResource(R.string.yandere_mode_usage_stats_desc),
                             checked = collectUsage,
                             onCheckedChange = { enabled ->
-                                scope.launch {
-                                    settingsStore.setYandereModeUsageStats(enabled)
-                                    if (isEnabled) yandereModeManager.requestRefresh(force = true)
-                                }
+                                viewModel.setCollectUsage(enabled)
                             }
                         )
                         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = colorScheme.outline.copy(alpha = 0.3f))
@@ -206,10 +193,7 @@ fun YandereModeScreen(
                             subtitle = stringResource(R.string.yandere_mode_installed_apps_desc),
                             checked = collectInstalled,
                             onCheckedChange = { enabled ->
-                                scope.launch {
-                                    settingsStore.setYandereModeInstalledApps(enabled)
-                                    if (isEnabled) yandereModeManager.requestRefresh(force = true)
-                                }
+                                viewModel.setCollectInstalled(enabled)
                             }
                         )
                     }
@@ -295,7 +279,7 @@ fun YandereModeScreen(
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                TextButton(onClick = { scope.launch { yandereModeManager.requestRefresh(force = true) } }) {
+                                TextButton(onClick = { viewModel.requestRefresh(force = true) }) {
                                     Text(stringResource(R.string.yandere_refresh))
                                 }
                             }

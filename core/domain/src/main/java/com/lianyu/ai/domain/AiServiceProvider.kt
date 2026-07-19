@@ -48,7 +48,14 @@ data class AiChatMessage(
     val content: String,
     val timestamp: Long,
     val type: AiMessageType = AiMessageType.TEXT,
-    val companionId: Long = 0
+    val companionId: Long = 0,
+    /**
+     * 协议角色。null 时由 [isFromUser] 推导（兼容旧调用方）。
+     * 工具结果必须显式设为 [AiMessageRole.TOOL]，禁止伪装成 assistant。
+     */
+    val role: AiMessageRole? = null,
+    /** 工具名（仅 role=TOOL 时有意义） */
+    val toolName: String? = null
 )
 
 interface AiServiceProvider {

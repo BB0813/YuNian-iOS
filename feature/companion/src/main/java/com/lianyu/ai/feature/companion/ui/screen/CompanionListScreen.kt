@@ -4,7 +4,6 @@ import com.lianyu.ai.uicommon.theme.AppTheme
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -16,6 +15,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -191,40 +192,30 @@ fun CompanionCard(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
-    var isPressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.97f else 1f,
         animationSpec = spring(Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
-    val elevation by animateDpAsState(
-        targetValue = if (isPressed) 4.dp else 12.dp,
-        animationSpec = spring(Spring.DampingRatioMediumBouncy),
-        label = "elevation"
-    )
+    val cardShape = RoundedCornerShape(24.dp)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
-            .shadow(elevation, RoundedCornerShape(24.dp))
+            .clip(cardShape)
+            .background(AppTheme.colors.surface)
             .clickable(
+                interactionSource = interactionSource,
+                indication = null,
                 onClick = onClick
             )
     ) {
-        // Card background
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFFE3F2FD).copy(alpha = 0.95f),
-                            Color(0xFFF3E5F5).copy(alpha = 0.85f)
-                        )
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                )
                 .padding(20.dp)
         ) {
             AppListItemLayout(

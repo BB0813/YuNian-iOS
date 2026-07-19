@@ -1,6 +1,7 @@
 package com.lianyu.ai.feature.profile
 
 import com.lianyu.ai.uicommon.theme.AppTheme
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -270,11 +271,13 @@ fun AboutScreen(
 fun AboutCard(
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
+    val shape = RoundedCornerShape(16.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .background(AppTheme.colors.surfaceVariant, shape = RoundedCornerShape(16.dp))
+            .clip(shape)
+            .background(AppTheme.colors.surfaceVariant)
             .padding(20.dp)
     ) {
         content()

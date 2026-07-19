@@ -36,6 +36,10 @@ class UserRepository(context: Context) {
     )
     val userGender: StateFlow<String> = _userGender
 
+    /** 用户地区（自由文本，如「广东·深圳」），空字符串表示未设置。 */
+    private val _userRegion = MutableStateFlow(prefs.getString("user_region", "") ?: "")
+    val userRegion: StateFlow<String> = _userRegion
+
     fun updateUserName(name: String) {
         prefs.edit { putString("user_name", name) }
         _userName.value = name
@@ -75,6 +79,18 @@ class UserRepository(context: Context) {
             }
         }
         _userGender.value = normalized
+    }
+
+    fun updateUserRegion(region: String) {
+        val value = region.trim()
+        prefs.edit {
+            if (value.isEmpty()) {
+                remove("user_region")
+            } else {
+                putString("user_region", value)
+            }
+        }
+        _userRegion.value = value
     }
 
     private fun normalizeGender(raw: String): String {

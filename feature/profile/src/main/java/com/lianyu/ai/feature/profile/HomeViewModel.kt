@@ -19,21 +19,19 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
-    private val companionRepository: CompanionRepository
+    private val companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
     private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
     private val summaryDao = AppDatabase.getDatabase(application).conversationSummaryDao()
 
     sealed class UiState {
         object Loading : UiState()
         data class Ready(val items: List<ChatListItem>) : UiState()
+        data class Error(val message: String) : UiState()
     }
 
     val chatListState: StateFlow<UiState>
 
     init {
-        val database = AppDatabase.getDatabase(application)
-        companionRepository = CompanionRepository(database.companionDao())
-
         val initialState = if (HomeListCache.isWarmed()) {
             buildReady(
                 HomeListCache.snapshotCompanions(),
@@ -49,10 +47,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         ) { companions, summaries ->
             HomeListCache.putCompanions(companions)
             HomeListCache.putChatSummaries(summaries)
-            buildReady(companions, summaries)
+            buildReady(companions, summaries) as UiState
         }
-            .catch {
-                emit(UiState.Ready(emptyList()))
+            .catch { e ->
+                // 不再把异常吞成空列表，避免“假空首页”
+                emit(UiState.Error(e.message?.take(80) ?: "加载会话失败"))
             }
             .stateIn(
                 scope = viewModelScope,

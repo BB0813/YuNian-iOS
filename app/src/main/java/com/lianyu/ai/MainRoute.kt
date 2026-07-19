@@ -38,8 +38,12 @@ sealed class MainRoute(val route: String) {
     object YandereMode : MainRoute("yandere_mode")
     object ExperimentalFeatures : MainRoute("experimental_features")
 
-    // === 总设置 ===
+    // === 设置（大类入口 + 子页） ===
     object GeneralSettings : MainRoute("general_settings")
+    object SettingsGeneralCategory : MainRoute("settings_general_category")
+    object SettingsTools : MainRoute("settings_tools")
+    object SettingsPermissions : MainRoute("settings_permissions")
+    object SettingsAboutLianYu : MainRoute("settings_about_lianyu")
 
     // === 角色管理 ===
     object RoleManager : MainRoute("role_manager")
@@ -110,6 +114,10 @@ sealed class MainRoute(val route: String) {
             route == "yandere_mode" -> YandereMode
             route == "experimental_features" -> ExperimentalFeatures
             route == "general_settings" -> GeneralSettings
+            route == "settings_general_category" -> SettingsGeneralCategory
+            route == "settings_tools" -> SettingsTools
+            route == "settings_permissions" -> SettingsPermissions
+            route == "settings_about_lianyu" -> SettingsAboutLianYu
             route == "team" -> Team
             route == "support" -> Support
             route == "thanks" -> Thanks

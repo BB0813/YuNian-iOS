@@ -20,6 +20,16 @@
     <string name="framerate_desc">화면 주사율 조정</string>
     <string name="settings">설정</string>
     <string name="settings_desc">업데이트, 정보, 권한</string>
+    <string name="general_settings">설정</string>
+    <string name="general_settings_desc">일반, 실험 기능, 도구, 권한, 정보</string>
+    <string name="settings_category_general">일반</string>
+    <string name="settings_category_general_desc">언어, 프레임, 사고, TTS, 백업, 플랫폼</string>
+    <string name="settings_category_tools">도구 설정</string>
+    <string name="settings_category_tools_desc">루이싱 커피 등 도구</string>
+    <string name="settings_category_permissions">권한 관리</string>
+    <string name="settings_category_permissions_desc">자동 시작, 배터리 화이트리스트, 알림</string>
+    <string name="settings_category_about">연어 정보</string>
+    <string name="settings_category_about_desc">새 버전 확인</string>
     <string name="check_new_version">새 버전 확인</string>
     <string name="check_new_version_desc">사용 가능한 업데이트 확인</string>
     <string name="about_app">앱 정보</string>

@@ -63,7 +63,7 @@ fun Modifier.floatAnimation(
 }
 
 fun Modifier.glowPulse(
-    color: Color = Color(0xFFFCE4EC),
+    color: Color = Color(0xFFC3BEF0),
     durationMillis: Int = 2000
 ): Modifier = composed {
     val infiniteTransition = rememberInfiniteTransition(label = "glow")

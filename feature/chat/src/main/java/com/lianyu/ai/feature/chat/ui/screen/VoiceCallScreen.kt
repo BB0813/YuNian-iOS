@@ -47,7 +47,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
@@ -124,7 +124,7 @@ fun VoiceCallScreen(
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
     )
-    val companionData by viewModel.companionData.collectAsState()
+    val companionData by viewModel.companionData.collectAsStateWithLifecycle()
 
     // ── 通话状态 ──
     var callState by remember { mutableStateOf(CallState.DIALING) }

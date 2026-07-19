@@ -74,6 +74,7 @@ fun ProfileSettingsScreen(
     val userSignature by viewModel.userSignature.collectAsState()
     val userStatus by viewModel.userStatus.collectAsState()
     val userGender by viewModel.userGender.collectAsState()
+    val userRegion by viewModel.userRegion.collectAsState()
 
     val genderLabel = when (userGender) {
         "male" -> stringResource(R.string.profile_gender_male)
@@ -90,7 +91,7 @@ fun ProfileSettingsScreen(
     var editStatus by remember { mutableStateOf(userStatus) }
     var showGenderDialog by remember { mutableStateOf(false) }
     var showRegionDialog by remember { mutableStateOf(false) }
-    var editRegion by remember { mutableStateOf("") }
+    var editRegion by remember { mutableStateOf(userRegion) }
     var showAvatarFullscreen by remember { mutableStateOf(false) }
 
     // --- 自研图片选择器 ---
@@ -204,9 +205,12 @@ fun ProfileSettingsScreen(
             // === 地区 ===
             ProfileLabelValueRow(
                 label = stringResource(R.string.profile_region),
-                value = editRegion.ifBlank { stringResource(R.string.profile_not_set) },
-                dimmed = editRegion.isBlank(),
-                onClick = { showRegionDialog = true }
+                value = userRegion.ifBlank { stringResource(R.string.profile_not_set) },
+                dimmed = userRegion.isBlank(),
+                onClick = {
+                    editRegion = userRegion
+                    showRegionDialog = true
+                }
             )
             ProfileSectionDivider()
 
@@ -313,9 +317,13 @@ fun ProfileSettingsScreen(
         BottomLineEditDialog(
             title = stringResource(R.string.profile_region),
             value = editRegion,
-            onValueChange = { editRegion = it },
+            onValueChange = { if (it.length <= 32) editRegion = it },
             placeholder = "如：广东·深圳",
-            onConfirm = { showRegionDialog = false },
+            maxLength = 32,
+            onConfirm = {
+                viewModel.updateUserRegion(editRegion.trim())
+                showRegionDialog = false
+            },
             onDismiss = { showRegionDialog = false }
         )
     }

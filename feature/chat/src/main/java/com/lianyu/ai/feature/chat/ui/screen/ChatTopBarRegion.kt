@@ -12,13 +12,11 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -77,47 +75,60 @@ fun ChatTopBarRegion(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(
-                top = ChatTopBarOverlayDefaults.TopInset,
-                start = adaptiveSizing.listHorizontalPadding,
-                end = adaptiveSizing.listHorizontalPadding
-            ),
+                    top = ChatTopBarOverlayDefaults.TopInset,
+                    start = adaptiveSizing.listHorizontalPadding,
+                    end = adaptiveSizing.listHorizontalPadding
+                ),
             contentAlignment = Alignment.Center
         ) {
+            // 绝对居中：标题叠在整条顶栏几何中心；左右槽等宽，避免返回键把短标题挤偏。
             TopBarSurface {
-            TopBarIconButton(
-                contentDescription = "返回",
-                onClick = onBackClick
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
-                    tint = AppTheme.colors.onSurface,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    ChatTitleSlot(
+                        companionId = companionId,
+                        companionData = companionData,
+                        isLoading = isLoading,
+                        onDetailClick = onDetailClick,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = ChatTopBarOverlayDefaults.ActionSize + 8.dp)
+                    )
 
-            ChatTitleSlot(
-                companionId = companionId,
-                companionData = companionData,
-                isLoading = isLoading,
-                onDetailClick = onDetailClick,
-                modifier = Modifier.weight(1f)
-            )
-        }
+                    TopBarIconButton(
+                        contentDescription = "返回",
+                        onClick = onBackClick,
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = null,
+                            tint = AppTheme.colors.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // 右侧等宽占位，保证标题相对整条 surface 居中，而不是相对「返回键右侧剩余区」居中。
+                    Spacer(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(ChatTopBarOverlayDefaults.ActionSize)
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun TopBarSurface(content: @Composable RowScope.() -> Unit) {
-    Row(
+private fun TopBarSurface(content: @Composable () -> Unit) {
+    Box(
         modifier = Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
             .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.85f))
             .padding(horizontal = 12.dp, vertical = ChatTopBarOverlayDefaults.BarVerticalPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        content = content
+        contentAlignment = Alignment.Center,
+        content = { content() }
     )
 }
 
@@ -125,11 +136,12 @@ private fun TopBarSurface(content: @Composable RowScope.() -> Unit) {
 private fun TopBarIconButton(
     contentDescription: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
     IconButton(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .size(ChatTopBarOverlayDefaults.ActionSize)
             .semantics { this.contentDescription = contentDescription }
     ) {

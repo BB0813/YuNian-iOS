@@ -58,8 +58,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.FrameRateManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -109,14 +109,14 @@ fun AppSettingsScreen(
     val dividerColor = if (isDark) WeChatDarkDivider else WeChatLightDivider
 
     val currentRate = FrameRateManager.getSavedFrameRate(context)
-    val settingsStore = remember { AppSettingsStore(context) }
+    val thinkingViewModel: ThinkingSettingsViewModel = viewModel()
     val scope = rememberCoroutineScope()
 
-    val showReasoning by settingsStore.showReasoningFlow.collectAsState(initial = false)
-    val sendReasoning by settingsStore.sendReasoningFlow.collectAsState(initial = false)
-    val autoCollapse by settingsStore.autoCollapseReasoningFlow.collectAsState(initial = true)
-    val respField by settingsStore.reasoningResponseFieldFlow.collectAsState(initial = "reasoning_content")
-    val reqField by settingsStore.reasoningRequestFieldFlow.collectAsState(initial = "reasoning_content")
+    val showReasoning by thinkingViewModel.showReasoning.collectAsStateWithLifecycle()
+    val sendReasoning by thinkingViewModel.sendReasoning.collectAsStateWithLifecycle()
+    val autoCollapse by thinkingViewModel.autoCollapseReasoning.collectAsStateWithLifecycle()
+    val respField by thinkingViewModel.responseField.collectAsStateWithLifecycle()
+    val reqField by thinkingViewModel.requestField.collectAsStateWithLifecycle()
 
     var showReasoningDialog by remember { mutableStateOf(false) }
     var isVisible by remember { mutableStateOf(false) }
@@ -267,9 +267,12 @@ fun AppSettingsScreen(
         var localCollapse by remember { mutableStateOf(autoCollapse) }
         var localResp by remember { mutableStateOf(respField) }
         var localReq by remember { mutableStateOf(reqField) }
+        var isSaving by remember { mutableStateOf(false) }
 
         AlertDialog(
-            onDismissRequest = { showReasoningDialog = false },
+            onDismissRequest = {
+                if (!isSaving) showReasoningDialog = false
+            },
             title = { Text("思考设置") },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -281,7 +284,8 @@ fun AppSettingsScreen(
                         Text("启用思考过程显示")
                         Switch(
                             checked = localShow,
-                            onCheckedChange = { localShow = it }
+                            onCheckedChange = { localShow = it },
+                            enabled = !isSaving
                         )
                     }
                     if (localShow) {
@@ -293,19 +297,22 @@ fun AppSettingsScreen(
                             Text("思考完成时自动折叠")
                             Switch(
                                 checked = localCollapse,
-                                onCheckedChange = { localCollapse = it }
+                                onCheckedChange = { localCollapse = it },
+                                enabled = !isSaving
                             )
                         }
                         OutlinedTextField(
                             value = localResp,
                             onValueChange = { localResp = it },
                             label = { Text("响应字段名") },
+                            enabled = !isSaving,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                         )
                         OutlinedTextField(
                             value = localReq,
                             onValueChange = { localReq = it },
                             label = { Text("请求字段名") },
+                            enabled = !isSaving,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                         )
                         Row(
@@ -316,28 +323,44 @@ fun AppSettingsScreen(
                             Text("发送思考内容")
                             Switch(
                                 checked = localSend,
-                                onCheckedChange = { localSend = it }
+                                onCheckedChange = { localSend = it },
+                                enabled = !isSaving
                             )
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        settingsStore.setShowReasoning(localShow)
-                        settingsStore.setAutoCollapseReasoning(localCollapse)
-                        settingsStore.setReasoningResponseField(localResp)
-                        settingsStore.setReasoningRequestField(localReq)
-                        settingsStore.setSendReasoning(localSend)
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = {
+                        if (isSaving) return@TextButton
+                        isSaving = true
+                        scope.launch {
+                            try {
+                                // 写入在 viewModelScope；UI 仅 join 等待完成后再关闭
+                                thinkingViewModel.saveThinkingSettings(
+                                    showReasoning = localShow,
+                                    autoCollapseReasoning = localCollapse,
+                                    responseField = localResp,
+                                    requestField = localReq,
+                                    sendReasoning = localSend
+                                ).join()
+                                showReasoningDialog = false
+                            } finally {
+                                isSaving = false
+                            }
+                        }
                     }
-                    showReasoningDialog = false
-                }) {
-                    Text("保存")
+                ) {
+                    Text(if (isSaving) "保存中…" else "保存")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showReasoningDialog = false }) {
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = { showReasoningDialog = false }
+                ) {
                     Text("取消")
                 }
             }

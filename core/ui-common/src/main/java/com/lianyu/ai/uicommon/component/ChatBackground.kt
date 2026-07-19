@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -71,54 +72,54 @@ fun chatBackgroundOptions(context: Context): List<ChatBackgroundOption> {
         ChatBackgroundOption(
             key = "default",
             name = context.getString(R.string.default_white),
-            color = Color(0xFFF5F5F5)
+            color = Color(0xFFDEFCF9)
         ),
         ChatBackgroundOption(
             key = "warm_pink",
             name = context.getString(R.string.warm_pink),
-            color = Color(0xFFFFF0F3),
+            color = Color(0xFFE8F6FC),
             gradient = Brush.verticalGradient(
-                colors = listOf(Color(0xFFFFF5F7), Color(0xFFFFF0F3), Color(0xFFFFE8EC))
+                colors = listOf(Color(0xFFDEFCF9), Color(0xFFE8F6FC), Color(0xFFCADEFC))
             )
         ),
         ChatBackgroundOption(
             key = "lavender",
             name = context.getString(R.string.lavender),
-            color = Color(0xFFF8F5FF),
+            color = Color(0xFFE8E4F8),
             gradient = Brush.verticalGradient(
-                colors = listOf(Color(0xFFFBF8FF), Color(0xFFF5F0FF), Color(0xFFEDE5F8))
+                colors = listOf(Color(0xFFF0ECFC), Color(0xFFE4E0F6), Color(0xFFC3BEF0))
             )
         ),
         ChatBackgroundOption(
             key = "ocean",
             name = context.getString(R.string.ocean),
-            color = Color(0xFFF0F5FA),
+            color = Color(0xFFE0F0FC),
             gradient = Brush.verticalGradient(
-                colors = listOf(Color(0xFFF5FAFF), Color(0xFFE8F2FC), Color(0xFFDBEAF5))
+                colors = listOf(Color(0xFFDEFCF9), Color(0xFFCADEFC), Color(0xFFB8D4F8))
             )
         ),
         ChatBackgroundOption(
             key = "forest",
             name = context.getString(R.string.forest),
-            color = Color(0xFFF2F8F2),
+            color = Color(0xFFE4F8F4),
             gradient = Brush.verticalGradient(
-                colors = listOf(Color(0xFFF8FCF8), Color(0xFFEEF5EE), Color(0xFFE3EFE3))
+                colors = listOf(Color(0xFFDEFCF9), Color(0xFFD4F4F0), Color(0xFFC8E8E4))
             )
         ),
         ChatBackgroundOption(
             key = "sunset",
             name = context.getString(R.string.sunset),
-            color = Color(0xFFFFF5F0),
+            color = Color(0xFFF0E8FC),
             gradient = Brush.verticalGradient(
-                colors = listOf(Color(0xFFFFF8F5), Color(0xFFFFF0E8), Color(0xFFFFE8D8))
+                colors = listOf(Color(0xFFF4ECFC), Color(0xFFE8DCF8), Color(0xFFCCA8E9))
             )
         ),
         ChatBackgroundOption(
             key = "night",
             name = context.getString(R.string.night_sky),
-            color = Color(0xFFF0F0F5),
+            color = Color(0xFFE8E4F4),
             gradient = Brush.verticalGradient(
-                colors = listOf(Color(0xFFF5F5FA), Color(0xFFEEEEF5), Color(0xFFE5E5F0))
+                colors = listOf(Color(0xFFEEEAF8), Color(0xFFE0DCF0), Color(0xFFC3BEF0))
             )
         )
     )
@@ -131,45 +132,45 @@ fun chatBackgroundOptions(context: Context): List<ChatBackgroundOption> {
 fun resolveBackgroundPalette(key: String, isDark: Boolean): Pair<Color, Brush?> {
     if (!isDark) {
         return when (key) {
-            "default" -> Color(0xFFF5F5F5) to null
-            "warm_pink" -> Color(0xFFFFF0F3) to Brush.verticalGradient(
-                listOf(Color(0xFFFFF5F7), Color(0xFFFFF0F3), Color(0xFFFFE8EC))
+            "default" -> Color(0xFFDEFCF9) to null
+            "warm_pink" -> Color(0xFFE8F6FC) to Brush.verticalGradient(
+                listOf(Color(0xFFDEFCF9), Color(0xFFE8F6FC), Color(0xFFCADEFC))
             )
-            "lavender" -> Color(0xFFF8F5FF) to Brush.verticalGradient(
-                listOf(Color(0xFFFBF8FF), Color(0xFFF5F0FF), Color(0xFFEDE5F8))
+            "lavender" -> Color(0xFFE8E4F8) to Brush.verticalGradient(
+                listOf(Color(0xFFF0ECFC), Color(0xFFE4E0F6), Color(0xFFC3BEF0))
             )
-            "ocean" -> Color(0xFFF0F5FA) to Brush.verticalGradient(
-                listOf(Color(0xFFF5FAFF), Color(0xFFE8F2FC), Color(0xFFDBEAF5))
+            "ocean" -> Color(0xFFE0F0FC) to Brush.verticalGradient(
+                listOf(Color(0xFFDEFCF9), Color(0xFFCADEFC), Color(0xFFB8D4F8))
             )
-            "forest" -> Color(0xFFF2F8F2) to Brush.verticalGradient(
-                listOf(Color(0xFFF8FCF8), Color(0xFFEEF5EE), Color(0xFFE3EFE3))
+            "forest" -> Color(0xFFE4F8F4) to Brush.verticalGradient(
+                listOf(Color(0xFFDEFCF9), Color(0xFFD4F4F0), Color(0xFFC8E8E4))
             )
-            "sunset" -> Color(0xFFFFF5F0) to Brush.verticalGradient(
-                listOf(Color(0xFFFFF8F5), Color(0xFFFFF0E8), Color(0xFFFFE8D8))
+            "sunset" -> Color(0xFFF0E8FC) to Brush.verticalGradient(
+                listOf(Color(0xFFF4ECFC), Color(0xFFE8DCF8), Color(0xFFCCA8E9))
             )
-            "night" -> Color(0xFFF0F0F5) to Brush.verticalGradient(
-                listOf(Color(0xFFF5F5FA), Color(0xFFEEEEF5), Color(0xFFE5E5F0))
+            "night" -> Color(0xFFE8E4F4) to Brush.verticalGradient(
+                listOf(Color(0xFFEEEAF8), Color(0xFFE0DCF0), Color(0xFFC3BEF0))
             )
-            else -> Color(0xFFF5F5F5) to null
+            else -> Color(0xFFDEFCF9) to null
         }
     }
 
     return when (key) {
         "default" -> com.lianyu.ai.uicommon.theme.DarkBgDefault to null
         "warm_pink" -> com.lianyu.ai.uicommon.theme.DarkBgWarmPink to Brush.verticalGradient(
-            listOf(Color(0xFF2A1A20), Color(0xFF24161C), Color(0xFF1C1218))
+            listOf(Color(0xFF2A2034), Color(0xFF221A2C), Color(0xFF1A1424))
         )
         "lavender" -> com.lianyu.ai.uicommon.theme.DarkBgLavender to Brush.verticalGradient(
-            listOf(Color(0xFF221C2C), Color(0xFF1C1724), Color(0xFF16121C))
+            listOf(Color(0xFF242030), Color(0xFF1C1828), Color(0xFF161220))
         )
         "ocean" -> com.lianyu.ai.uicommon.theme.DarkBgOcean to Brush.verticalGradient(
-            listOf(Color(0xFF1A2430), Color(0xFF141C24), Color(0xFF101820))
+            listOf(Color(0xFF1A2430), Color(0xFF141C28), Color(0xFF101820))
         )
         "forest" -> com.lianyu.ai.uicommon.theme.DarkBgForest to Brush.verticalGradient(
-            listOf(Color(0xFF1A241C), Color(0xFF141C16), Color(0xFF101610))
+            listOf(Color(0xFF1A2420), Color(0xFF141C1A), Color(0xFF101614))
         )
         "sunset" -> com.lianyu.ai.uicommon.theme.DarkBgSunset to Brush.verticalGradient(
-            listOf(Color(0xFF2C1C16), Color(0xFF241814), Color(0xFF1C1410))
+            listOf(Color(0xFF2C2030), Color(0xFF241820), Color(0xFF1C1418))
         )
         "night" -> com.lianyu.ai.uicommon.theme.DarkBgNight to Brush.verticalGradient(
             listOf(Color(0xFF16161E), Color(0xFF101018), Color(0xFF0C0C12))
@@ -201,27 +202,86 @@ fun setChatBackgroundKey(context: Context, key: String) {
     }
 }
 
+/**
+ * 解析最终聊天背景 key：
+ * - 使用全局背景时 → 全局 key
+ * - 专属背景未设置 / 空白 → 回退全局
+ * - 否则使用专属 key
+ *
+ * 注意：调用方应在页面 ON_RESUME 时重新读取 [globalBackgroundKey]，
+ * SharedPreferences 本身不会驱动 Compose 重组。
+ */
+fun resolveEffectiveChatBackgroundKey(
+    useGlobalBackground: Boolean,
+    companionBackgroundKey: String?,
+    globalBackgroundKey: String
+): String {
+    if (useGlobalBackground) return globalBackgroundKey
+    val companionKey = companionBackgroundKey?.trim().orEmpty()
+    return companionKey.ifEmpty { globalBackgroundKey }
+}
+
 fun isCustomBackground(key: String): Boolean {
     return key.startsWith(CUSTOM_BG_PREFIX)
 }
 
-/** 纯色背景 key：color_<ARGB long> */
+/**
+ * 纯色背景 key：
+ * - 新格式：`color_AARRGGBB`（8 位大写 hex，稳定可解析）
+ * - 旧格式：`color_<Color.value long>`（兼容历史数据）
+ */
 private const val COLOR_BG_PREFIX = "color_"
+/** 自定义纯色列表持久化键 */
+private const val CUSTOM_SOLID_COLORS_PREF = "custom_solid_colors"
+private val COLOR_ARGB_HEX_REGEX = Regex("^[0-9A-Fa-f]{6,8}$")
+
+/**
+ * 用户保存的自定义纯色背景条目。
+ * [key] 使用 [colorBackgroundKey]，与运行时解析路径兼容。
+ */
+data class CustomSolidColor(
+    val key: String,
+    val color: Color,
+    val name: String
+)
 
 fun isColorBackground(key: String): Boolean {
     return key.startsWith(COLOR_BG_PREFIX)
 }
 
+/**
+ * 生成稳定的纯色背景 key。
+ * 使用 ARGB hex，避免 `Color.value` 打包在部分机型/往返后解析成 #000000。
+ */
 fun colorBackgroundKey(color: Color): String {
-    // 与历史 color_<signed long> 格式保持一致，避免已保存背景失效
-    return COLOR_BG_PREFIX + color.value.toLong()
+    val argb = color.toArgb()
+    return COLOR_BG_PREFIX + String.format("%08X", argb)
 }
 
 fun parseColorBackground(key: String): Color? {
     if (!isColorBackground(key)) return null
-    val raw = key.removePrefix(COLOR_BG_PREFIX)
+    val raw = key.removePrefix(COLOR_BG_PREFIX).trim()
+    if (raw.isEmpty()) return null
+
+    // 新格式：6/8 位 hex（RRGGBB / AARRGGBB）
+    if (COLOR_ARGB_HEX_REGEX.matches(raw)) {
+        return try {
+            val normalized = if (raw.length == 6) "FF$raw" else raw
+            Color(normalized.toLong(16).toInt())
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // 旧格式：十进制 long（Color.value 打包 或 历史 ARGB unsigned）
     return try {
-        Color(raw.toLong())
+        val n = raw.toLong()
+        when {
+            // 明确的 32-bit ARGB 范围（含 alpha）
+            n in 0L..0xFFFFFFFFL -> Color(n.toInt())
+            // 历史 Color.value 打包（有符号 long）
+            else -> Color(n)
+        }
     } catch (_: Exception) {
         try {
             Color(raw.toULong())
@@ -229,6 +289,132 @@ fun parseColorBackground(key: String): Color? {
             null
         }
     }
+}
+
+/**
+ * 读取已保存的自定义纯色列表（按添加顺序）。
+ * 存储格式：每行 `key|name`，name 可为空。
+ * 读取时会把旧 key 规范成新 ARGB hex key，避免列表显示 #000000。
+ */
+fun listCustomSolidColors(context: Context): List<CustomSolidColor> {
+    val raw = context.getSharedPreferences("chat_prefs", Context.MODE_PRIVATE)
+        .getString(CUSTOM_SOLID_COLORS_PREF, null)
+        ?: return emptyList()
+    if (raw.isBlank()) return emptyList()
+    var migrated = false
+    val items = raw.lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .mapNotNull { line ->
+            val sep = line.indexOf('|')
+            val key = if (sep >= 0) line.substring(0, sep) else line
+            val name = if (sep >= 0) line.substring(sep + 1) else ""
+            val color = parseColorBackground(key) ?: return@mapNotNull null
+            val canonicalKey = colorBackgroundKey(color)
+            if (canonicalKey != key) migrated = true
+            CustomSolidColor(
+                key = canonicalKey,
+                color = color,
+                name = name.ifBlank { "自定义纯色" }
+            )
+        }
+        .distinctBy { it.key }
+        .toList()
+    if (migrated && items.isNotEmpty()) {
+        persistCustomSolidColors(context, items)
+    }
+    return items
+}
+
+private fun persistCustomSolidColors(context: Context, items: List<CustomSolidColor>) {
+    val encoded = items.joinToString("\n") { item ->
+        val safeName = item.name
+            .replace('\n', ' ')
+            .replace('|', '/')
+            .trim()
+        // 落盘一律用规范 ARGB key
+        val key = if (item.key == colorBackgroundKey(item.color)) {
+            item.key
+        } else {
+            colorBackgroundKey(item.color)
+        }
+        "$key|$safeName"
+    }
+    context.getSharedPreferences("chat_prefs", Context.MODE_PRIVATE)
+        .edit()
+        .putString(CUSTOM_SOLID_COLORS_PREF, encoded)
+        .apply()
+}
+
+/**
+ * 新增/按同色更新一条自定义纯色，并返回其 background key。
+ * 同色 key 已存在时更新名称；否则追加到列表末尾。
+ */
+fun saveCustomSolidColor(context: Context, color: Color, name: String): String {
+    val key = colorBackgroundKey(color)
+    val displayName = name.trim().ifBlank { "自定义纯色" }
+    val existing = listCustomSolidColors(context).toMutableList()
+    val idx = existing.indexOfFirst { it.key == key }
+    val entry = CustomSolidColor(key = key, color = color, name = displayName)
+    if (idx >= 0) {
+        existing[idx] = entry
+    } else {
+        existing.add(entry)
+    }
+    persistCustomSolidColors(context, existing)
+    return key
+}
+
+/**
+ * 编辑已有自定义纯色：替换 [oldKey] 对应条目。
+ * 若颜色变化导致 key 变化，会移除旧 key；若新 key 已存在则合并为一条。
+ * 返回最终 background key。
+ */
+fun updateCustomSolidColor(
+    context: Context,
+    oldKey: String,
+    color: Color,
+    name: String
+): String {
+    val newKey = colorBackgroundKey(color)
+    val displayName = name.trim().ifBlank { "自定义纯色" }
+    val existing = listCustomSolidColors(context).toMutableList()
+    val entry = CustomSolidColor(key = newKey, color = color, name = displayName)
+
+    val oldIdx = existing.indexOfFirst { it.key == oldKey }
+    val newIdx = existing.indexOfFirst { it.key == newKey }
+
+    when {
+        oldIdx >= 0 && newKey == oldKey -> {
+            existing[oldIdx] = entry
+        }
+        oldIdx >= 0 && newIdx < 0 -> {
+            existing[oldIdx] = entry
+        }
+        oldIdx >= 0 && newIdx >= 0 && oldIdx != newIdx -> {
+            // 颜色改成了已有色：保留目标位并删旧位
+            existing[newIdx] = entry
+            existing.removeAt(oldIdx)
+        }
+        newIdx >= 0 -> {
+            existing[newIdx] = entry
+        }
+        else -> {
+            existing.add(entry)
+        }
+    }
+    persistCustomSolidColors(context, existing.distinctBy { it.key })
+    return newKey
+}
+
+/** 删除一条自定义纯色（不影响当前是否正在使用，由调用方决定回退）。 */
+fun deleteCustomSolidColor(context: Context, key: String) {
+    if (!isColorBackground(key)) return
+    val canonical = parseColorBackground(key)?.let { colorBackgroundKey(it) } ?: key
+    val next = listCustomSolidColors(context).filterNot {
+        it.key == key || it.key == canonical
+    }
+    persistCustomSolidColors(context, next)
 }
 
 fun getCustomBackgroundFile(context: Context, key: String): File? {
@@ -430,7 +616,8 @@ fun ChatBackgroundPickerDialog(
             key?.let { newKey ->
                 customKeys = customKeys + newKey
                 selectedKey = newKey
-                setChatBackgroundKey(context, newKey)
+                // 选中新图后交给调用方决定写全局还是单聊专属
+                onSelect(newKey)
             }
         }
     }
@@ -477,7 +664,8 @@ fun ChatBackgroundPickerDialog(
                             gradient = option.gradient,
                             onClick = {
                                 selectedKey = option.key
-                                setChatBackgroundKey(context, option.key)
+                                // 仅回调，不写全局 prefs：
+                                // 全局聊天背景由「背景设置」负责；此处供单聊专属背景选择。
                                 onSelect(option.key)
                             }
                         )
@@ -492,7 +680,6 @@ fun ChatBackgroundPickerDialog(
                             isSelected = isSelected,
                             onClick = {
                                 selectedKey = key
-                                setChatBackgroundKey(context, key)
                                 onSelect(key)
                             },
                             onDelete = {
@@ -500,7 +687,6 @@ fun ChatBackgroundPickerDialog(
                                 customKeys = customKeys - key
                                 if (selectedKey == key) {
                                     selectedKey = "default"
-                                    setChatBackgroundKey(context, "default")
                                     onSelect("default")
                                 }
                             }
@@ -673,7 +859,11 @@ private fun AddCustomBackgroundItem(
     }
 }
 
-private fun loadCustomBackgroundKeys(context: Context): List<String> {
+/**
+ * 列出本地已保存的自定义图片背景 key（custom_bg_*.jpg）。
+ * 供背景设置页「图片背景」分区复用。
+ */
+fun listCustomBackgroundKeys(context: Context): List<String> {
     val dir = File(context.filesDir, CUSTOM_BG_DIR)
     if (!dir.exists()) return emptyList()
     return dir.listFiles()
@@ -682,6 +872,11 @@ private fun loadCustomBackgroundKeys(context: Context): List<String> {
         ?.map { it.name }
         ?.filter { CUSTOM_BG_FILE_REGEX.matches(it) }
         ?.map { CUSTOM_BG_PREFIX + it }
+        ?.sorted()
         ?.toList()
         ?: emptyList()
+}
+
+private fun loadCustomBackgroundKeys(context: Context): List<String> {
+    return listCustomBackgroundKeys(context)
 }

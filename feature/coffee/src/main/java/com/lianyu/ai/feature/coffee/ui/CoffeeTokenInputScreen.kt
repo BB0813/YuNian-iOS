@@ -163,8 +163,9 @@ fun CoffeeTokenInputScreen(
                         return@Button
                     }
                     saving = true
+                    // saveToken 在 viewModelScope 中落盘；join 后再返回，避免离开页面取消写入
                     scope.launch {
-                        viewModel.saveToken(token)
+                        viewModel.saveToken(token).join()
                         saving = false
                         snackbarHostState.showSnackbar("Token 已保存")
                         onBack()

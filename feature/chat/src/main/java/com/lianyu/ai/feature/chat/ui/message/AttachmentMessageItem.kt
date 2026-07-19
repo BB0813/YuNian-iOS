@@ -40,7 +40,7 @@ internal fun AttachmentMessageItem(
         adaptiveSizing = adaptiveSizing,
         isDarkTheme = isDarkTheme,
         onClick = { onIntent(ChatIntent.OpenMedia(mediaPath, mimeType)) }
-    ) {
+    ) { _, _ ->
         AttachmentMessageContent(
             icon = icon,
             label = label,

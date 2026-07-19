@@ -44,21 +44,11 @@ open class OpenAiCompatibleProvider : AiProvider {
         return provider == ApiProvider.XIAOMI
     }
 
-    private fun stripThinkingContent(content: String): String {
-        var result = content
-        // XML/HTML 风格思考标签
-        result = result.replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-        result = result.replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
-        result = result.replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
-        result = result.replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
-        // Markdown 风格思考标题
-        result = result.replace(Regex("(?im)^#{1,3}\\s*(思考|思维|推理|分析|Thinking|Reasoning|Analysis|Thought)\\s*\\n[\\s\\S]*?(?=\\n#{1,3}\\s|$)"), "")
-        // 【思考】/【推理】等方括号包裹的思考块
-        result = result.replace(Regex("(?is)【(思考|思维|推理|分析)】[\\s\\S]*?【/(思考|思维|推理|分析)】"), "")
-        // 行内 [思考] ... [/思考] 格式
-        result = result.replace(Regex("(?is)\\[(思考|思维|推理|分析|thought|thinking)]\\s*[\\s\\S]*?\\[/\\1]"), "")
-        return result.trim()
-    }
+    private fun stripThinkingContent(content: String): String =
+        com.lianyu.ai.network.ResponsePostProcessor.stripThinkingContent(content)
+
+    private fun extractThinking(content: String): Pair<String, String?> =
+        com.lianyu.ai.network.ResponsePostProcessor.extractThinkingContent(content)
 
     private fun buildAuthHeader(provider: ApiProvider, key: String): Pair<String, String> {
         return if (prefersApiKeyHeader(provider)) {
@@ -145,9 +135,18 @@ open class OpenAiCompatibleProvider : AiProvider {
                 }
 
                 val message = parsed.choices?.firstOrNull()?.message
-                var content = message?.content ?: throw Exception("API返回空内容")
-                val reasoning = message.reasoning_content
-                content = stripThinkingContent(content)
+                val rawContent = message?.content ?: throw Exception("API返回空内容")
+                val fieldReasoning = message.reasoning_content?.trim()?.takeIf { it.isNotBlank() }
+                val (content, tagReasoning) = extractThinking(rawContent)
+                val reasoning = listOfNotNull(fieldReasoning, tagReasoning)
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .joinToString("\n\n")
+                    .ifBlank { null }
+                if (content.isBlank()) {
+                    throw Exception("模型仅返回了思考过程，未生成实际回复，请重试")
+                }
                 return Pair(content, reasoning)
             } catch (e: Exception) {
                 lastException = e

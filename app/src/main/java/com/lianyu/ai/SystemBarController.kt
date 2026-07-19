@@ -2,8 +2,6 @@ package com.lianyu.ai
 
 import android.app.Activity
 import android.content.res.Configuration
-import android.os.Build
-import android.os.LocaleList
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
@@ -22,24 +20,9 @@ import com.lianyu.ai.uicommon.theme.WeChatDarkSurface
 object SystemBarController {
 
     fun applyBaseContextLocale(base: android.content.Context): android.content.Context {
-        val prefs = base.getSharedPreferences("language_prefs", android.content.Context.MODE_PRIVATE)
-        val savedLanguage = prefs.getString("language", "zh-CN") ?: "zh-CN"
-        val locale = when (savedLanguage) {
-            "zh-CN" -> java.util.Locale.SIMPLIFIED_CHINESE
-            "zh-TW" -> java.util.Locale.TRADITIONAL_CHINESE
-            "en" -> java.util.Locale.ENGLISH
-            "ja" -> java.util.Locale.JAPANESE
-            "ko" -> java.util.Locale.KOREAN
-            else -> java.util.Locale.SIMPLIFIED_CHINESE
-        }
-        java.util.Locale.setDefault(locale)
-        val config = Configuration(base.resources.configuration)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            config.setLocales(LocaleList(locale))
-        } else {
-            @Suppress("DEPRECATION")
-            config.locale = locale
-        }
+        // 先注入语言，再叠加主题 night mode，保证全局 string 资源与系统栏一致。
+        val languageContext = com.lianyu.ai.common.LocaleHelper.applyToContext(base)
+        val config = Configuration(languageContext.resources.configuration)
 
         val themePrefs = base.getSharedPreferences("theme_prefs", android.content.Context.MODE_PRIVATE)
         when (themePrefs.getString("theme_mode", "SYSTEM")) {
@@ -49,7 +32,7 @@ object SystemBarController {
                 (config.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or Configuration.UI_MODE_NIGHT_YES
         }
 
-        return base.createConfigurationContext(config)
+        return languageContext.createConfigurationContext(config)
     }
 
     fun applySystemBars(activity: Activity) {

@@ -31,7 +31,7 @@ fun ImageMessageItem(
         adaptiveSizing = adaptiveSizing,
         drawBubble = false,
         onClick = { onIntent(ChatIntent.OpenMedia(imageFile.absolutePath, "image/*")) }
-    ) {
+    ) { _, _ ->
         ImageMessageContent(
             imageFile = imageFile,
             isMine = isMine,

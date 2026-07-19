@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -215,19 +216,20 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
                 visible = isVisible,
                 enter = fadeIn(tween(500, delayMillis = 160))
             ) {
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colorScheme.surfaceVariant)
+                        .padding(16.dp)
                 ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            stringResource(R.string.backup_notice),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colorScheme.onSurfaceVariant,
-                            lineHeight = 20.sp
-                        )
-                    }
+                    Text(
+                        stringResource(R.string.backup_notice),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colorScheme.onSurfaceVariant,
+                        lineHeight = 20.sp
+                    )
                 }
             }
 
@@ -342,36 +344,38 @@ private fun BackupCard(
     onClick: () -> Unit
 ) {
     val colorScheme = AppTheme.colors
+    val shape = RoundedCornerShape(16.dp)
 
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(shape)
+            .background(colorScheme.surfaceVariant)
+            .padding(20.dp)
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, title, Modifier.size(28.dp), tint = buttonColor)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp), color = colorScheme.onSurface)
-                    Spacer(Modifier.height(4.dp))
-                    Text(description, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = colorScheme.onSurfaceVariant)
-                }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, title, Modifier.size(28.dp), tint = buttonColor)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp), color = colorScheme.onSurface)
+                Spacer(Modifier.height(4.dp))
+                Text(description, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = colorScheme.onSurfaceVariant)
             }
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = onClick,
-                modifier = Modifier.fillMaxWidth().height(44.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
-                enabled = !isLoading
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(Modifier.size(20.dp), color = AppTheme.colors.staticWhite, strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(if (isLoading) "处理中..." else buttonText, color = AppTheme.colors.staticWhite)
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
+            enabled = !isLoading
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(Modifier.size(20.dp), color = AppTheme.colors.staticWhite, strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
             }
+            Text(if (isLoading) "处理中..." else buttonText, color = AppTheme.colors.staticWhite)
         }
     }
 }

@@ -36,9 +36,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,16 +53,20 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.chat.R
-import com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore
-
+import com.lianyu.ai.feature.chat.ui.viewmodel.ChatDetailSettingsViewModel
+import com.lianyu.ai.feature.chat.ui.viewmodel.ChatDetailSettingsViewModelFactory
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModelFactory
 import com.lianyu.ai.uicommon.component.ChatBackgroundPickerDialog
+import com.lianyu.ai.uicommon.component.chatBackgroundOptions
 import com.lianyu.ai.uicommon.component.getChatBackgroundKey
-import com.lianyu.ai.common.AppSettingsStore
+import com.lianyu.ai.uicommon.component.isCustomBackground
+import com.lianyu.ai.uicommon.component.listCustomSolidColors
+import com.lianyu.ai.uicommon.component.parseColorBackground
 import com.lianyu.ai.uicommon.theme.AppTheme
 
 @Composable
@@ -73,22 +75,18 @@ fun ChatDetailScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val appContext = remember(context) { context.applicationContext }
-    val store = remember(appContext) { ChatDetailSettingsStore(appContext) }
-    val settingsFlow = remember(store, companionId) { store.settingsFlow(companionId) }
-    val scope = rememberCoroutineScope()
+    val appContext = remember(context) { context.applicationContext as Application }
+    // 仅用于确认对话框：join 等待 ViewModel 落盘后再 dismiss
+    val dialogScope = rememberCoroutineScope()
     val viewModel: ChatViewModel = viewModel(
-        factory = ChatViewModelFactory(appContext as Application, companionId)
+        factory = ChatViewModelFactory(appContext, companionId)
     )
-    val companionData by viewModel.companionData.collectAsState()
-    val settings by settingsFlow.collectAsState(initial = com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings())
-    val appSettingsStore = remember { AppSettingsStore(context) }
-    var innerThoughtEnabled by remember { mutableStateOf(false) }
-
-    // 读取心理活动开关状态
-    LaunchedEffect(Unit) {
-        innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-    }
+    val settingsViewModel: ChatDetailSettingsViewModel = viewModel(
+        factory = ChatDetailSettingsViewModelFactory(appContext, companionId)
+    )
+    val companionData by viewModel.companionData.collectAsStateWithLifecycle()
+    val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
+    val innerThoughtEnabled by settingsViewModel.innerThoughtEnabled.collectAsStateWithLifecycle()
 
     var showBgPicker by remember { mutableStateOf(false) }
     var showBlockConfirm by remember { mutableStateOf(false) }
@@ -188,7 +186,17 @@ fun ChatDetailScreen(
             // Chat appearance section
             SectionTitle("聊天外观")
             SettingsCard {
-                SettingsRow(title = "当前聊天背景", subtitle = backgroundName(settings.backgroundKey, context)) {
+                val displayBgKey = if (settings.useGlobalBackground) {
+                    getChatBackgroundKey(context)
+                } else {
+                    settings.backgroundKey
+                }
+                val bgSubtitle = if (settings.useGlobalBackground) {
+                    "全局 · ${backgroundName(displayBgKey, context)}"
+                } else {
+                    backgroundName(displayBgKey, context)
+                }
+                SettingsRow(title = "当前聊天背景", subtitle = bgSubtitle) {
                     showBgPicker = true
                 }
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -196,9 +204,7 @@ fun ChatDetailScreen(
                     title = "使用全局背景",
                     checked = settings.useGlobalBackground,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(useGlobalBackground = checked) }
-                        }
+                        settingsViewModel.setUseGlobalBackground(checked)
                     }
                 )
             }
@@ -212,9 +218,7 @@ fun ChatDetailScreen(
                     title = "允许主动发消息",
                     checked = settings.proactiveEnabled,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(proactiveEnabled = checked) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(proactiveEnabled = checked) }
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -226,9 +230,7 @@ fun ChatDetailScreen(
                     title = "允许主动开启新话题",
                     checked = settings.allowNewTopic,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(allowNewTopic = checked) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(allowNewTopic = checked) }
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -236,9 +238,7 @@ fun ChatDetailScreen(
                     title = "允许深夜消息",
                     checked = settings.allowLateNightMessage,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(allowLateNightMessage = checked) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(allowLateNightMessage = checked) }
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -246,9 +246,7 @@ fun ChatDetailScreen(
                     title = "允许连续追问",
                     checked = settings.allowFollowUpMessage,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(allowFollowUpMessage = checked) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(allowFollowUpMessage = checked) }
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -257,10 +255,7 @@ fun ChatDetailScreen(
                     subtitle = "AI回复中包含（脸红）（开心）等内心描写",
                     checked = innerThoughtEnabled,
                     onCheckedChange = { checked ->
-                        innerThoughtEnabled = checked
-                        scope.launch {
-                            appSettingsStore.setInnerThoughtEnabled(checked)
-                        }
+                        settingsViewModel.setInnerThoughtEnabled(checked)
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -269,9 +264,7 @@ fun ChatDetailScreen(
                     subtitle = "通过NTP网络校时获取精确时间，避免设备时钟不准",
                     checked = settings.ntpTimeEnabled,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(ntpTimeEnabled = checked) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(ntpTimeEnabled = checked) }
                     }
                 )
             }
@@ -286,8 +279,8 @@ fun ChatDetailScreen(
                     subtitle = "${settings.stickerProbability}%",
                     value = settings.stickerProbability / 100f,
                     onValueChange = { value ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(stickerProbability = (value * 100).toInt()) }
+                        settingsViewModel.updateSettings {
+                            it.copy(stickerProbability = (value * 100).toInt())
                         }
                     }
                 )
@@ -302,9 +295,7 @@ fun ChatDetailScreen(
                     title = "免打扰",
                     checked = settings.doNotDisturbEnabled,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(doNotDisturbEnabled = checked) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(doNotDisturbEnabled = checked) }
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
@@ -312,11 +303,9 @@ fun ChatDetailScreen(
                     title = "夜间免打扰 (23:00-08:00)",
                     checked = settings.dndStartMinutes == 23 * 60 && settings.dndEndMinutes == 8 * 60,
                     onCheckedChange = { checked ->
-                        scope.launch {
-                            store.updateSettings(companionId) {
-                                if (checked) it.copy(dndStartMinutes = 23 * 60, dndEndMinutes = 8 * 60)
-                                else it.copy(dndStartMinutes = 0, dndEndMinutes = 0)
-                            }
+                        settingsViewModel.updateSettings {
+                            if (checked) it.copy(dndStartMinutes = 23 * 60, dndEndMinutes = 8 * 60)
+                            else it.copy(dndStartMinutes = 0, dndEndMinutes = 0)
                         }
                     }
                 )
@@ -329,9 +318,7 @@ fun ChatDetailScreen(
             SettingsCard {
                 if (settings.blocked) {
                     DangerRow(title = "取消拉黑", color = colors.success) {
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(blocked = false) }
-                        }
+                        settingsViewModel.updateSettings { it.copy(blocked = false) }
                     }
                 } else {
                     DangerRow(title = "拉黑", color = colors.danger) {
@@ -352,17 +339,21 @@ fun ChatDetailScreen(
         }
     }
 
-    // Background picker dialog
+    // Background picker dialog（仅写单聊专属设置，不改全局 chat_prefs）
     if (showBgPicker) {
-        val currentKey = if (settings.useGlobalBackground) getChatBackgroundKey(context) else (settings.backgroundKey ?: "default")
+        val currentKey = if (settings.useGlobalBackground) {
+            getChatBackgroundKey(context)
+        } else {
+            settings.backgroundKey ?: "default"
+        }
         ChatBackgroundPickerDialog(
             currentKey = currentKey,
             onDismiss = { showBgPicker = false },
             onSelect = { key ->
-                scope.launch {
-                    store.updateSettings(companionId) { it.copy(backgroundKey = key, useGlobalBackground = false) }
+                dialogScope.launch {
+                    settingsViewModel.selectBackground(key).join()
+                    showBgPicker = false
                 }
-                showBgPicker = false
             }
         )
     }
@@ -376,10 +367,10 @@ fun ChatDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            store.updateSettings(companionId) { it.copy(blocked = true) }
+                        dialogScope.launch {
+                            settingsViewModel.updateSettings { it.copy(blocked = true) }.join()
+                            showBlockConfirm = false
                         }
-                        showBlockConfirm = false
                     }
                 ) { Text("拉黑", color = colors.danger) }
             },
@@ -398,9 +389,8 @@ fun ChatDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            viewModel.clearChatHistory()
-                        }
+                        // clearChatHistory 已在 ChatViewModel.viewModelScope 中执行
+                        viewModel.clearChatHistory()
                         showClearConfirm = false
                     }
                 ) { Text("清空", color = colors.danger) }
@@ -420,10 +410,10 @@ fun ChatDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            store.resetSettings(companionId)
+                        dialogScope.launch {
+                            settingsViewModel.resetSettings().join()
+                            showResetConfirm = false
                         }
-                        showResetConfirm = false
                     }
                 ) { Text("重置", color = colors.danger) }
             },
@@ -439,10 +429,12 @@ fun ChatDetailScreen(
             currentMinutes = settings.proactiveIntervalMinutes,
             onDismiss = { showIntervalDialog = false },
             onConfirm = { minutes ->
-                scope.launch {
-                    store.updateSettings(companionId) { it.copy(proactiveIntervalMinutes = minutes) }
+                dialogScope.launch {
+                    settingsViewModel.updateSettings {
+                        it.copy(proactiveIntervalMinutes = minutes)
+                    }.join()
+                    showIntervalDialog = false
                 }
-                showIntervalDialog = false
             }
         )
     }
@@ -590,16 +582,12 @@ private fun StatusTag(text: String, color: Color) {
 }
 
 private fun backgroundName(key: String?, context: android.content.Context): String {
-    return when (key) {
-        null, "default" -> "默认白色"
-        "warm_pink" -> "暖粉色"
-        "lavender" -> "薰衣草"
-        "ocean" -> "海洋蓝"
-        "forest" -> "森林绿"
-        "sunset" -> "日落橙"
-        "night" -> "夜空"
-        else -> if (key.startsWith("custom_")) "自定义图片" else "未知"
-    }
+    if (key.isNullOrBlank() || key == "default") return "默认"
+    chatBackgroundOptions(context).firstOrNull { it.key == key }?.let { return it.name }
+    listCustomSolidColors(context).firstOrNull { it.key == key }?.let { return it.name }
+    if (isCustomBackground(key)) return "自定义图片"
+    if (parseColorBackground(key) != null) return "自定义纯色"
+    return "自定义"
 }
 
 private fun intervalLabel(minutes: Int): String {

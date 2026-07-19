@@ -1,8 +1,11 @@
 package com.lianyu.ai.feature.settings.ui.screen
 
 import com.lianyu.ai.uicommon.theme.AppTheme
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,6 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -109,12 +114,25 @@ fun ExperimentalFeaturesScreen(
 @Composable
 private fun ExperimentalFeatureCard(feature: FeatureItem) {
     val colorScheme = AppTheme.colors
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val shape = RoundedCornerShape(16.dp)
+    val surfaceColor = if (isPressed) {
+        colorScheme.surfaceVariant.copy(alpha = 0.85f)
+    } else {
+        colorScheme.surfaceVariant
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(colorScheme.surfaceVariant)
-            .clickable(onClick = feature.onClick)
+            .clip(shape)
+            .background(surfaceColor)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = feature.onClick
+            )
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

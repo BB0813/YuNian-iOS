@@ -202,14 +202,14 @@ fun SettingsScreen(
                 .padding(top = paddingValues.calculateTopPadding())
                 .verticalScroll(rememberScrollState())
         ) {
-            // ====== Petal Soft Top App Bar ======
+            // ====== Top App Bar ======
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.8f))
+                    .background(AppTheme.colors.surfaceVariant)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -252,19 +252,6 @@ fun SettingsScreen(
                         modifier = Modifier.size(22.dp)
                     )
                 }
-            }
-
-            AnimatedVisibility(
-                visible = isVisible,
-                enter = fadeIn(tween(400)) + slideInVertically(tween(400)) { it / 4 }
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_hint),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = textTertiaryColor,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

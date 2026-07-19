@@ -3,6 +3,7 @@ package com.lianyu.ai
 import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
+import com.lianyu.ai.common.AppForegroundTracker
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.common.RomUtils
@@ -14,6 +15,7 @@ import com.lianyu.ai.common.safety.ContentSafetyVerifier
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.DefaultCompanionSeeder
 import com.lianyu.ai.database.SecurityDataSeeder
+import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.GroupMessageRepository
@@ -97,6 +99,8 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         System.setProperty("sun.net.spi.nameservice.domain", ".")
         super.onCreate()
         instance = this
+        // 进程级前后台：尽早绑定，供 Worker / 微信轮询判断
+        AppForegroundTracker.init()
         // Fail-closed: hard cryptographic auth failure must not start business services.
         // Soft risk (root/hook/debug heuristics) still allows offline-first local business.
         if (!SecurityState.canStartLocalBusiness()) {
@@ -338,6 +342,9 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             val database = AppDatabase.getDatabase(app)
             ServiceRegistry.registerSingleton(CompanionRepository::class.java) {
                 CompanionRepository(database.companionDao())
+            }
+            ServiceRegistry.registerSingleton(ApiConfigRepository::class.java) {
+                ApiConfigRepository(database.apiConfigDao(), database.apiProviderPresetDao())
             }
             ServiceRegistry.registerSingleton(ChatRepository::class.java) {
                 ChatRepository(database.messageDao(), database.conversationSummaryDao(), database)

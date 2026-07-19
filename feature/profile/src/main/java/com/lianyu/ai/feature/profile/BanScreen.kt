@@ -311,7 +311,7 @@ fun BanScreen(
                     ContentFilter.ViolationLevel.LOW -> Color(0xFFFFF8E1)
                     ContentFilter.ViolationLevel.MEDIUM -> AppTheme.colors.warningContainer
                     ContentFilter.ViolationLevel.HIGH -> Color(0xFFFFEBEE)
-                    ContentFilter.ViolationLevel.SEVERE -> Color(0xFFFCE4EC)
+                    ContentFilter.ViolationLevel.SEVERE -> Color(0xFFC3BEF0)
                     ContentFilter.ViolationLevel.CRITICAL -> Color(0xFFF3E5F5)
                     ContentFilter.ViolationLevel.EXTREME -> Color(0xFFE0E0E0)
                     else -> AppTheme.colors.staticWhite
