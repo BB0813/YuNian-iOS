@@ -660,11 +660,8 @@ internal fun PermissionSettingsCard() {
             stringResource(R.string.battery_whitelist),
             stringResource(R.string.battery_whitelist_desc)
         ) {
-            if (!com.lianyu.ai.common.BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
-                com.lianyu.ai.common.BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
-            } else {
-                com.lianyu.ai.common.BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
-            }
+            // 未授权：弹窗/多路径；已授权：打开设置页（避免 REQUEST 静默 no-op）
+            com.lianyu.ai.common.BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
         }
         PermissionDivider()
         PermissionItem(

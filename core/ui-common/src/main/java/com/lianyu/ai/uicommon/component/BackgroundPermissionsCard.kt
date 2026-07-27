@@ -61,6 +61,21 @@ fun BackgroundPermissionsCard(
 ) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
+    // 从系统设置返回后重新读取白名单状态，避免副标题/点击分支停留在旧值
+    var batteryStatusTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                batteryStatusTick++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isIgnoringBattery = remember(batteryStatusTick) {
+        BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
+    }
 
     val needsDeepGuide = RomUtils.isOppoOrVivo()
     val cardBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -193,17 +208,14 @@ fun BackgroundPermissionsCard(
                     PermissionActionItem(
                         icon = Icons.Default.PowerSettingsNew,
                         title = "电池优化",
-                        subtitle = if (BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
-                            "已设为不优化"
+                        subtitle = if (isIgnoringBattery) {
+                            "已设为不优化（点击可再次打开设置）"
                         } else {
                             "点击设为“不优化”"
                         },
                         onClick = {
-                            if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
-                                BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
-                            } else {
-                                BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
-                            }
+                            // requestIgnore 内部已处理：未授权弹窗/多路径；已授权打开设置页
+                            BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
                         },
                         textPrimaryColor = textPrimaryColor,
                         textSecondaryColor = textSecondaryColor
