@@ -50,8 +50,14 @@ object OriginOSBatteryOptimizer {
             return openStandardBatterySettings(context) || openAppDetailsSettings(context)
         }
 
-        // 路径0: 标准请求弹窗，在 OriginOS 部分机型仍可正常工作
-        if (openRequestIgnoreBatteryOptimizations(context)) return true
+        val alreadyIgnoring = isIgnoringBatteryOptimizations(context)
+
+        // 路径0: 仅在「尚未加入白名单」时尝试系统确认弹窗。
+        // 已在白名单时，ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 会 resolve 成功但
+        // 静默 no-op（不弹窗、不跳转），导致后续点击“无反应”。
+        if (!alreadyIgnoring && openRequestIgnoreBatteryOptimizations(context)) {
+            return true
+        }
 
         // OriginOS 6+ 优先路径：新版设置/电池管理页面
         if (RomUtils.isOriginOS6OrAbove()) {
@@ -358,9 +364,12 @@ object OriginOSBatteryOptimizer {
 
     /**
      * 尝试直接弹系统“忽略电池优化”请求对话框。
+     *
+     * 注意：已在白名单时不要调用本方法——系统会静默成功且无 UI。
      */
     private fun openRequestIgnoreBatteryOptimizations(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
+        if (isIgnoringBatteryOptimizations(context)) return false
         val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
             data = Uri.parse("package:${context.packageName}")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK

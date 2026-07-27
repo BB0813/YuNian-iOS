@@ -271,11 +271,8 @@ private fun computeAdaptionStates(context: android.content.Context): List<Adapti
                 subtitle = context.getString(R.string.originos_adaption_battery_desc),
                 configured = BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context),
                 action = {
-                    if (!BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
-                        BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
-                    } else {
-                        BatteryOptimizationHelper.openBatteryOptimizationSettings(context)
-                    }
+                    // 未授权弹窗/多路径；已授权打开设置页，避免 REQUEST 静默无反应
+                    BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
                 }
             )
         )

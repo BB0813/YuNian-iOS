@@ -15,15 +15,45 @@ import android.provider.Settings
 object BatteryOptimizationHelper {
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-        return OppoVivoAdaptationHelper.isIgnoringBatteryOptimizations(context)
+        return NativePermissionRequester.isIgnoringBatteryOptimizations(context)
     }
 
+    /**
+     * 请求加入电池优化白名单。
+     *
+     * - 已在白名单：打开设置页，便于用户核对/修改（避免 REQUEST 静默 no-op）
+     * - 标准 Android：弹系统确认框（需 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS）
+     * - OriginOS / IQOO / 华为：系统常拦截弹窗，走多路径设置页兜底
+     */
     fun requestIgnoreBatteryOptimizations(context: Context) {
-        OppoVivoAdaptationHelper.requestIgnoreBatteryOptimizations(context)
+        if (isIgnoringBatteryOptimizations(context)) {
+            openBatteryOptimizationSettings(context)
+            return
+        }
+        if (RomUtils.isVivo || RomUtils.isHuawei) {
+            // OriginOS 等可能静默拦截 REQUEST 弹窗，优先走专用多路径
+            if (!OriginOSBatteryOptimizer.openBatteryOptimizationSettings(context)) {
+                NativePermissionRequester.requestIgnoreBatteryOptimizations(context)
+            }
+            return
+        }
+        NativePermissionRequester.requestIgnoreBatteryOptimizations(context)
     }
 
+    /**
+     * 打开电池优化相关设置页（不弹 REQUEST 确认框）。
+     * 用于已授权后再次点击、或需要用户手动核对白名单状态的场景。
+     */
     fun openBatteryOptimizationSettings(context: Context) {
-        OppoVivoAdaptationHelper.openBatteryOptimizationSettings(context)
+        if (RomUtils.isVivo || RomUtils.isHuawei) {
+            OriginOSBatteryOptimizer.openBatteryOptimizationSettings(context)
+            return
+        }
+        if (RomUtils.isOppo) {
+            OppoVivoAdaptationHelper.openBatteryOptimizationSettings(context)
+            return
+        }
+        NativePermissionRequester.openBatteryOptimizationSettings(context)
     }
 
     /**
