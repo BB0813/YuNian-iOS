@@ -152,11 +152,25 @@ private fun ChatMessage.toChatListItem(): ChatListItem {
                 ?: ChatListItem.ReasoningMessage(this, durationMs)
         stickerName != null -> ChatListItem.StickerMessage(this, stickerName)
         type == MessageType.IMAGE -> ChatListItem.ImageMessage(this)
-        type == MessageType.VOICE || content.startsWith("[语音]") -> ChatListItem.VoiceMessage(this)
+        // 纯用户语音条：content 为「[语音] N"」；AI 语音条消息 content 为正文，仍走 VoiceMessage 双显
+        type == MessageType.VOICE ||
+            type == MessageType.AUDIO ||
+            content.startsWith("[语音]") ||
+            isAssistantVoiceBarMessage() -> ChatListItem.VoiceMessage(this)
         type == MessageType.VIDEO -> ChatListItem.VideoMessage(this)
         type == MessageType.FILE -> ChatListItem.FileMessage(this)
         else -> ChatListItem.TextMessage(this)
     }
+}
+
+/** AI 语音条：type 可能仍是 TEXT 的历史脏数据，或 VOICE + 非 [语音] 正文 */
+internal fun ChatMessage.isAssistantVoiceBarMessage(): Boolean {
+    if (isFromUser) return false
+    if (linkString.isBlank()) return false
+    if (content.startsWith("[语音]")) return false
+    return type == MessageType.VOICE ||
+        type == MessageType.AUDIO ||
+        type == MessageType.TEXT
 }
 
 private fun ChatMessage.toSystemTipOrNull(): ChatListItem.SystemTip? {

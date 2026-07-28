@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lianyu.ai.network.tts.TtsConfig
@@ -308,11 +309,14 @@ fun TtsSettingsScreen(
                                 onProviderSelect = {
                                     selectedProvider = it
                                     selectedVoiceId = ""
+                                    showVoiceDropdown = false
                                     saveSettings()
                                 },
                                 showDropdown = showProviderDropdown,
-                                onDropdownToggle = { showProviderDropdown = it },
-                                isDarkTheme = isDarkTheme,
+                                onDropdownToggle = {
+                                    showProviderDropdown = it
+                                    if (it) showVoiceDropdown = false
+                                },
                                 cardBg = cardBg,
                                 textPrimaryColor = textPrimaryColor,
                                 textSecondaryColor = textSecondaryColor
@@ -326,8 +330,10 @@ fun TtsSettingsScreen(
                                     saveSettings()
                                 },
                                 showDropdown = showVoiceDropdown,
-                                onDropdownToggle = { showVoiceDropdown = it },
-                                isDarkTheme = isDarkTheme,
+                                onDropdownToggle = {
+                                    showVoiceDropdown = it
+                                    if (it) showProviderDropdown = false
+                                },
                                 cardBg = cardBg,
                                 textPrimaryColor = textPrimaryColor,
                                 textSecondaryColor = textSecondaryColor
@@ -620,7 +626,6 @@ private fun ProviderSelectionCard(
     onProviderSelect: (TtsProvider) -> Unit,
     showDropdown: Boolean,
     onDropdownToggle: (Boolean) -> Unit,
-    isDarkTheme: Boolean,
     cardBg: Color,
     textPrimaryColor: Color,
     textSecondaryColor: Color
@@ -638,25 +643,45 @@ private fun ProviderSelectionCard(
             fontWeight = FontWeight.SemiBold,
             color = textPrimaryColor
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "选择合成引擎，不同提供商音色与配置不同",
+            fontSize = 12.sp,
+            color = textSecondaryColor,
+            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+        )
+
         Box(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.5f))
+                    .background(AppTheme.colors.surface)
                     .clickable { onDropdownToggle(!showDropdown) }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = selectedProvider.displayName,
-                    fontSize = 14.sp,
-                    color = textPrimaryColor
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedProvider.displayName,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textPrimaryColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = selectedProvider.description,
+                        fontSize = 12.sp,
+                        color = textSecondaryColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
                 Icon(
-                    imageVector = if (showDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    imageVector = if (showDropdown) Icons.Filled.KeyboardArrowUp
+                    else Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
                     tint = textSecondaryColor,
                     modifier = Modifier.size(20.dp)
@@ -665,31 +690,39 @@ private fun ProviderSelectionCard(
             DropdownMenu(
                 expanded = showDropdown,
                 onDismissRequest = { onDropdownToggle(false) },
-                modifier = Modifier.fillMaxWidth(0.8f)
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .background(AppTheme.colors.surface)
             ) {
                 TtsProvider.entries.forEach { provider ->
                     DropdownMenuItem(
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column {
                                 Text(
                                     text = provider.displayName,
-                                    color = textPrimaryColor,
-                                    fontSize = 14.sp
+                                    fontSize = 14.sp,
+                                    color = textPrimaryColor
                                 )
-                                if (provider == selectedProvider) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = PetalPrimary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                                Text(
+                                    text = provider.description,
+                                    fontSize = 12.sp,
+                                    color = textSecondaryColor
+                                )
                             }
                         },
                         onClick = {
                             onProviderSelect(provider)
                             onDropdownToggle(false)
+                        },
+                        leadingIcon = {
+                            if (provider == selectedProvider) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = PetalGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     )
                 }
@@ -705,12 +738,12 @@ private fun VoiceSelectionCard(
     onVoiceSelect: (String) -> Unit,
     showDropdown: Boolean,
     onDropdownToggle: (Boolean) -> Unit,
-    isDarkTheme: Boolean,
     cardBg: Color,
     textPrimaryColor: Color,
     textSecondaryColor: Color
 ) {
     val selectedVoice = voices.find { it.id == selectedVoiceId }
+    val triggerEnabled = voices.isNotEmpty()
 
     Column(
         modifier = Modifier
@@ -725,60 +758,93 @@ private fun VoiceSelectionCard(
             fontWeight = FontWeight.SemiBold,
             color = textPrimaryColor
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = if (voices.isEmpty()) "当前提供商暂无可用音色" else "从下拉列表选择合成音色",
+            fontSize = 12.sp,
+            color = textSecondaryColor,
+            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+        )
+
         Box(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(AppTheme.colors.surfaceVariant.copy(alpha = 0.5f))
-                    .clickable { onDropdownToggle(!showDropdown) }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .background(
+                        if (triggerEnabled) AppTheme.colors.surface
+                        else AppTheme.colors.surfaceVariant.copy(alpha = 0.55f)
+                    )
+                    .clickable(enabled = triggerEnabled) { onDropdownToggle(!showDropdown) }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = selectedVoice?.let { "${it.name} (${it.gender})" } ?: "请选择音色",
-                    fontSize = 14.sp,
-                    color = if (selectedVoice != null) textPrimaryColor else textSecondaryColor
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedVoice?.let { "${it.name}（${it.gender}）" }
+                            ?: if (voices.isEmpty()) "暂无可用音色" else "请选择音色",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (selectedVoice != null) textPrimaryColor else textSecondaryColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val detail = selectedVoice?.let { voice ->
+                        buildString {
+                            if (voice.language.isNotBlank()) append(voice.language)
+                            if (voice.description.isNotBlank()) {
+                                if (isNotEmpty()) append(" · ")
+                                append(voice.description)
+                            }
+                        }
+                    }.orEmpty()
+                    if (detail.isNotBlank()) {
+                        Text(
+                            text = detail,
+                            fontSize = 12.sp,
+                            color = textSecondaryColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
                 Icon(
-                    imageVector = if (showDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    imageVector = if (showDropdown) Icons.Filled.KeyboardArrowUp
+                    else Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
                     tint = textSecondaryColor,
                     modifier = Modifier.size(20.dp)
                 )
             }
             DropdownMenu(
-                expanded = showDropdown,
+                expanded = showDropdown && triggerEnabled,
                 onDismissRequest = { onDropdownToggle(false) },
-                modifier = Modifier.fillMaxWidth(0.8f)
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .background(AppTheme.colors.surface)
             ) {
                 voices.forEach { voice ->
                     DropdownMenuItem(
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column {
-                                    Text(
-                                        text = "${voice.name} (${voice.gender})",
-                                        color = textPrimaryColor,
-                                        fontSize = 14.sp
-                                    )
-                                    if (voice.description.isNotEmpty()) {
-                                        Text(
-                                            text = voice.description,
-                                            color = textSecondaryColor,
-                                            fontSize = 11.sp
-                                        )
+                            Column {
+                                Text(
+                                    text = "${voice.name}（${voice.gender}）",
+                                    fontSize = 14.sp,
+                                    color = textPrimaryColor
+                                )
+                                val detail = buildString {
+                                    if (voice.language.isNotBlank()) append(voice.language)
+                                    if (voice.description.isNotBlank()) {
+                                        if (isNotEmpty()) append(" · ")
+                                        append(voice.description)
                                     }
                                 }
-                                if (voice.id == selectedVoiceId) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = PetalPrimary,
-                                        modifier = Modifier.size(16.dp)
+                                if (detail.isNotBlank()) {
+                                    Text(
+                                        text = detail,
+                                        fontSize = 12.sp,
+                                        color = textSecondaryColor
                                     )
                                 }
                             }
@@ -786,6 +852,16 @@ private fun VoiceSelectionCard(
                         onClick = {
                             onVoiceSelect(voice.id)
                             onDropdownToggle(false)
+                        },
+                        leadingIcon = {
+                            if (voice.id == selectedVoiceId) {
+                                Icon(
+                                    imageVector = Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = PetalGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     )
                 }
@@ -1284,13 +1360,11 @@ private fun TtsTextField(
 }
 
 /**
- * 聊天页分段队列 TTS 设置卡片。
+ * 聊天页语音条设置卡片。
  *
- * 参考反编译代码的 SettingsActivity：
- * - KEY_VOICE_MODE（静音/语音条/朗读）
- * - key_skip_parentheses（跳过括号内心戏）
- * - KEY_VOICE_AUTO_DEDUP（自动去重）
- * - KEY_VOICE_BEAUTIFY（音频美化）
+ * - 模式：静音 / 语音条（入库后同条显示语音条+文字，架构去重）
+ * - 跳过括号内心戏
+ * - 音频美化（点击播放时可选）
  */
 @Composable
 private fun ChatReadAloudSettingsCard(
@@ -1309,6 +1383,12 @@ private fun ChatReadAloudSettingsCard(
     textPrimaryColor: Color,
     textSecondaryColor: Color
 ) {
+    // autoDedup 保留参数兼容调用方；语音条入库后天然去重，UI 不再展示
+    @Suppress("UNUSED_PARAMETER")
+    val unusedAutoDedup = autoDedup
+    @Suppress("UNUSED_PARAMETER")
+    val unusedOnAutoDedup = onAutoDedupChange
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1318,18 +1398,18 @@ private fun ChatReadAloudSettingsCard(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "聊天页朗读",
+            text = "聊天页语音",
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
             color = textPrimaryColor
         )
         Text(
-            text = "AI 回复落地后按句子边界分段朗读，边合成边播，支持防重复与音频美化",
+            text = "语音条模式会在 AI 回复入库时合成音频，单条消息同时显示语音条和文字；重进聊天不会重复合成",
             fontSize = 12.sp,
             color = textSecondaryColor
         )
 
-        // 朗读模式选择
+        // 语音模式选择
         Box {
             Row(
                 modifier = Modifier
@@ -1343,7 +1423,7 @@ private fun ChatReadAloudSettingsCard(
             ) {
                 Column {
                     Text(
-                        text = "朗读模式",
+                        text = "语音模式",
                         fontSize = 14.sp,
                         color = textPrimaryColor
                     )
@@ -1366,7 +1446,7 @@ private fun ChatReadAloudSettingsCard(
                 onDismissRequest = { onModeDropdownToggle(false) },
                 modifier = Modifier.background(AppTheme.colors.surface)
             ) {
-                ChatTtsMode.entries.forEach { mode ->
+                ChatTtsMode.selectableModes.forEach { mode ->
                     DropdownMenuItem(
                         text = {
                             Column {
@@ -1393,33 +1473,11 @@ private fun ChatReadAloudSettingsCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("跳过括号内心戏", fontSize = 14.sp, color = textPrimaryColor)
-                Text("不朗读 <...> (...) （...） 内的内容", fontSize = 12.sp, color = textSecondaryColor)
+                Text("合成时跳过 <...> (...) （...） 内的内容", fontSize = 12.sp, color = textSecondaryColor)
             }
             Switch(
                 checked = skipParentheses,
                 onCheckedChange = onSkipParenthesesChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = AppTheme.colors.onPrimary,
-                    checkedTrackColor = AppTheme.colors.primaryContainer,
-                    uncheckedThumbColor = AppTheme.colors.outline,
-                    uncheckedTrackColor = AppTheme.colors.surfaceVariant
-                )
-            )
-        }
-
-        // 自动去重
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("自动去重", fontSize = 14.sp, color = textPrimaryColor)
-                Text("不重复朗读已读过的内容", fontSize = 12.sp, color = textSecondaryColor)
-            }
-            Switch(
-                checked = autoDedup,
-                onCheckedChange = onAutoDedupChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = AppTheme.colors.onPrimary,
                     checkedTrackColor = AppTheme.colors.primaryContainer,
@@ -1437,7 +1495,7 @@ private fun ChatReadAloudSettingsCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("音频美化", fontSize = 14.sp, color = textPrimaryColor)
-                Text("使用均衡器预设优化人声（部分设备不支持）", fontSize = 12.sp, color = textSecondaryColor)
+                Text("点击语音条播放时使用均衡器预设（部分设备不支持）", fontSize = 12.sp, color = textSecondaryColor)
             }
             Switch(
                 checked = beautify,

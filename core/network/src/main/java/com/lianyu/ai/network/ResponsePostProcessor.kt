@@ -135,58 +135,195 @@ object ResponsePostProcessor {
     }
 
     /**
-     * 闲聊情绪宣泄且未求方案时，裁掉护理包/方案/推荐附属。
-     * 不硬死「永远 1 动作」：求方案、安全、非情绪闲聊原样返回。
+     * 闲聊情绪宣泄且未求方案时，强制「单次单动作」：
+     * 裁掉护理包/方案/推荐，并只保留第一个完整主焦点句。
+     * 求方案、安全、非情绪闲聊原样返回。
      *
      * 策略（仅 idle emotion）：
      * - 按句扫描，护理/派活/第二动作句一律丢；
-     * - 只保留第一个非护理主焦点（接情绪/追问/表态），附属默认 0；
-     * - 单句塞满护理清单时按逗号再切。
+     * - 只保留第一个非护理主焦点（接情绪/追问/表态），且保留整句完整口语；
+     * - 单句尾部塞护理清单时，从护理标记前截断，不按逗号把前半句切成半截；
+     * - 多动作邮件按句丢后续，不按字数/逗号数无脑截断。
      */
     fun trimIdleEmotionOverDelivery(response: String, lastUserMessage: String): String {
         val raw = response.trim()
         if (raw.isEmpty()) return raw
         if (!AiContextTools.isIdleEmotionVent(lastUserMessage)) return raw
 
-        val parts = raw
-            .split(Regex("""(?<=[。！？!?～…\n])"""))
+        // 先按空行保留模型主动分块，再按句扫描；单动作≠单气泡
+        val blocks = raw
+            .split(Regex("""\n\s*\n"""))
             .map { it.trim() }
             .filter { it.isNotBlank() }
+        val parts = if (blocks.size >= 2) {
+            blocks.flatMap { block ->
+                block.split(Regex("""(?<=[。！？!?～…])"""))
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .ifEmpty { listOf(block) }
+            }
+        } else {
+            raw.split(Regex("""(?<=[。！？!?～…\n])"""))
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+        }
         if (parts.size <= 1) {
-            // 单句但塞满护理清单：按逗号/分号再切一次
-            return trimSinglePackedSentence(raw)
+            // 单句但尾部塞护理/第二动作：从标记处截，保留完整前半意图
+            return enforceSingleActionFocus(trimSinglePackedSentence(raw))
         }
 
         val kept = mutableListOf<String>()
         for (part in parts) {
-            if (isCarePackageClause(part) || isSecondaryActionClause(part)) {
-                // 护理/方案/第二动作：闲聊情绪轮一律丢
+            if (isCarePackageClause(part) || isSecondaryActionClause(part) || hasAdviceDispatch(part)) {
+                // 护理/方案/第二动作：闲聊情绪轮一律丢；已有主焦点则停止，避免后半再粘回来
+                if (kept.isNotEmpty()) break
+                continue
+            }
+            if (looksLikePreachOrLecture(part)) {
+                if (kept.isNotEmpty()) break
                 continue
             }
             if (kept.isEmpty()) {
-                // 只留第一个主焦点；其后即使非护理也不再追加（idle 附属=0）
                 kept += part
+                continue
+            }
+            // 允许同一意图的自然多气泡（短接/追问/语气），不是多意图邮件
+            if (kept.size >= IDLE_MAX_SPOKEN_SEGMENTS) break
+            if (canKeepAsSameIntentBubble(kept, part)) {
+                kept += part
+            } else {
                 break
             }
         }
 
-        val result = kept.joinToString("").trim()
+        val result = kept.joinToString("\n\n").trim()
         if (result.isNotBlank()) {
-            // 主焦点句内部仍可能塞护理清单，再压一次
-            val tightened = trimSinglePackedSentence(result)
-            return if (isCarePackageClause(tightened)) "" else tightened
+            // 各段再压一次尾部护理；保留多段空行，供 MessageSegmenter 拆气泡
+            val tightenedParts = kept.map { enforceSingleActionFocus(trimSinglePackedSentence(it)) }
+                .map { it.trim() }
+                .filter { it.isNotBlank() && !isCarePackageClause(it) }
+            val tightened = tightenedParts.joinToString("\n\n").trim()
+            return tightened
         }
         // 极端：全是护理包。尽量截出非护理前缀；仍不行则返回空（由上层空白兜底）
         val fallback = parts
             .asSequence()
-            .map { trimSinglePackedSentence(it) }
+            .map { enforceSingleActionFocus(trimSinglePackedSentence(it)) }
             .firstOrNull { it.isNotBlank() && !isCarePackageClause(it) }
             .orEmpty()
         return fallback
     }
 
+    /** 闲聊情绪轮：同一意图最多保留几条口语气泡（与分段软上限对齐）。 */
+    private const val IDLE_MAX_SPOKEN_SEGMENTS = 3
+
+    /** 说教/总结腔：第二动作，不与首个接住句并成多气泡。 */
+    private fun looksLikePreachOrLecture(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        val markers = listOf(
+            "固然重要", "革命的本钱", "身体是", "要注意", "你应该", "你必须",
+            "说到底", "归根结底", "总而言之", "综上所述", "我总结", "其实你要",
+        )
+        return markers.any { t.contains(it) }
+    }
+
+    /**
+     * 已有主焦点后，下一段是否仍属同一社交意图的自然连发气泡。
+     * 允许：短句、问句、弱续接；拒绝：长独立陈述/新动作。
+     */
+    private fun canKeepAsSameIntentBubble(kept: List<String>, next: String): Boolean {
+        val n = next.trim()
+        if (n.isEmpty()) return false
+        if (isCarePackageClause(n) || isSecondaryActionClause(n) || hasAdviceDispatch(n)) return false
+        if (looksLikePreachOrLecture(n)) return false
+        val isQuestion = n.contains('？') || n.contains('?') ||
+            n.endsWith("吗") || n.endsWith("吧") || n.endsWith("呢")
+        val coreLen = n.trimEnd('。', '！', '？', '!', '?', '～', '…', '.', ' ').length
+        if (coreLen <= 12) return true
+        if (isQuestion && coreLen <= 36) return true
+        // 首段很短（嗯/咋了）时，允许再跟一条完整口语
+        val firstCore = kept.first().trimEnd('。', '！', '？', '!', '?', '～', '…', '.', ' ')
+        if (firstCore.length <= 8 && coreLen <= 40) return true
+        return false
+    }
+
+    /**
+     * 单次单动作兜底：只在出现护理包/第二动作/明确多动作打包时收束。
+     * 保留完整一句口语（含逗号停顿）；绝不因「逗号多/略超 30 字」切成半截话。
+     */
+    private fun enforceSingleActionFocus(text: String): String {
+        val t = text.trim()
+        if (t.isEmpty()) return t
+        if (containsCarePackageMarker(t) || CARE_DISPATCH_PREFIX.containsMatchIn(t) || isSecondaryActionClause(t)) {
+            return trimSinglePackedSentence(t)
+        }
+        if (!hasExplicitMultiActionPack(t)) return t
+
+        // 多动作邮件：按句保留第一个完整主焦点，不按逗号切碎
+        val sentences = t
+            .split(Regex("""(?<=[。！？!?～…])"""))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (sentences.size <= 1) {
+            // 单句内硬塞多动作：尽量从第二动作标记前截断，保留完整前半
+            return trimAtSecondAction(t)
+        }
+        val first = sentences.firstOrNull { s ->
+            !isCarePackageClause(s) && !isSecondaryActionClause(s)
+        }.orEmpty()
+        return first.ifBlank { "" }
+    }
+
+    /** 明确的多动作打包痕迹（不是自然口语里的逗号停顿）。 */
+    private fun hasExplicitMultiActionPack(text: String): Boolean {
+        val packHints = listOf(
+            "建议你", "我建议", "可以试试", "不如先", "推荐你",
+            "方案", "第一步", "第二步", "首先", "其次", "最后记得",
+            "要不要泡", "要不要听", "要不要睡", "要不要喝", "要不要躺",
+        )
+        val hit = packHints.count { text.contains(it) }
+        if (hit >= 1 && (containsCarePackageMarker(text) || text.length > 48)) return true
+        if (hit >= 2) return true
+        // 两句以上且后句像派活/建议
+        val sentences = text.split(Regex("""(?<=[。！？!?～…])""")).map { it.trim() }.filter { it.isNotBlank() }
+        if (sentences.size >= 2 && sentences.drop(1).any { isCarePackageClause(it) || isSecondaryActionClause(it) || hasAdviceDispatch(it) }) {
+            return true
+        }
+        return false
+    }
+
+    private fun hasAdviceDispatch(text: String): Boolean {
+        val t = text.trim()
+        return t.contains("建议") || t.contains("可以试试") || t.contains("不如") ||
+            t.contains("要不要") || t.startsWith("记得") || t.contains("别忘了")
+    }
+
+    private fun trimAtSecondAction(text: String): String {
+        val markers = listOf(
+            "建议你", "我建议", "可以试试", "不如先", "推荐你",
+            "第一步", "第二步", "首先", "其次",
+            "要不要泡", "要不要听", "要不要睡", "要不要喝", "要不要躺",
+            "另外", "顺便", "还有啊",
+        )
+        var cut = Int.MAX_VALUE
+        for (m in markers) {
+            val i = text.indexOf(m)
+            if (i >= 8 && i < cut) cut = i
+        }
+        val careCut = firstCareMarkerIndex(text)
+        if (careCut >= 8 && careCut < cut) cut = careCut
+        if (cut == Int.MAX_VALUE) return text
+        val head = text.take(cut).trimEnd('，', ',', '；', ';', '、', ' ', '。', '.', '！', '!', '？', '?').trim()
+        if (head.length < 4) return ""
+        return ensureTerminalPunctuation(head)
+    }
+
     private fun trimSinglePackedSentence(text: String): String {
-        if (!containsCarePackageMarker(text) && !CARE_DISPATCH_PREFIX.containsMatchIn(text)) {
+        if (!containsCarePackageMarker(text) &&
+            !CARE_DISPATCH_PREFIX.containsMatchIn(text) &&
+            !isSecondaryActionClause(text)
+        ) {
             return text
         }
         val clauses = text
@@ -197,29 +334,38 @@ object ResponsePostProcessor {
             // 整句都是护理语义则尽量截到第一个护理标记前；前缀过短则丢空
             val cut = firstCareMarkerIndex(text)
             return if (cut > 8) {
-                text.take(cut).trimEnd('，', ',', '；', ';', '、', ' ').trim()
+                ensureTerminalPunctuation(
+                    text.take(cut).trimEnd('，', ',', '；', ';', '、', ' ').trim(),
+                )
             } else {
                 ""
             }
         }
+        // 保留护理标记前的全部口语小句，拼成完整一句；不要只留第一个逗号片段
         val kept = mutableListOf<String>()
         for (c in clauses) {
             if (isCarePackageClause(c) || isSecondaryActionClause(c)) break
             kept += c
-            // idle 单句内也只留 1 个主焦点小句
-            if (kept.size >= 1) break
         }
         if (kept.isEmpty()) {
             val cut = firstCareMarkerIndex(text)
             return if (cut > 8) {
-                text.take(cut).trimEnd('，', ',', '；', ';', '、', ' ').trim()
+                ensureTerminalPunctuation(
+                    text.take(cut).trimEnd('，', ',', '；', ';', '、', ' ').trim(),
+                )
             } else {
                 ""
             }
         }
-        val joined = kept.joinToString("，")
+        return ensureTerminalPunctuation(kept.joinToString("，"))
+    }
+
+    private fun ensureTerminalPunctuation(text: String): String {
+        val joined = text.trim()
+        if (joined.isEmpty()) return joined
         val needsEnd = !joined.endsWith("。") && !joined.endsWith("！") &&
-            !joined.endsWith("？") && !joined.endsWith("～") && !joined.endsWith("…")
+            !joined.endsWith("？") && !joined.endsWith("～") && !joined.endsWith("…") &&
+            !joined.endsWith("?") && !joined.endsWith("!")
         return if (needsEnd) "$joined。" else joined
     }
 

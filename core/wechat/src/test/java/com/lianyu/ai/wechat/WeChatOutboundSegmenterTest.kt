@@ -17,10 +17,16 @@ class WeChatOutboundSegmenterTest {
     }
 
     @Test
-    fun splitSimple_sameIntentSentencesMergeUnderSoftTarget() {
-        // 同意图短句在软目标内并成一条，避免句句一条
+    fun splitSimple_completeSentencesBecomeSeparateBubbles() {
+        // 完整句默认分气泡，恢复真人连发；软/硬条数上限再兜底合并
         val parts = WeChatOutboundSegmenter.splitTextSimple("你好。世界！")
-        assertEquals(listOf("你好。世界！"), parts)
+        assertEquals(listOf("你好。", "世界！"), parts)
+    }
+
+    @Test
+    fun splitSimple_blankLineParagraphsStaySplit() {
+        val parts = WeChatOutboundSegmenter.splitTextSimple("嗯。\n\n咋了，加班了？")
+        assertEquals(listOf("嗯。", "咋了，加班了？"), parts)
     }
 
     @Test

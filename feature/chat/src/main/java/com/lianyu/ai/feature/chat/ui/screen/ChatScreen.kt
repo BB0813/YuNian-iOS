@@ -849,13 +849,12 @@ fun ChatScreen(
                 },
                 onTtsModeClick = {
                     val nextMode = when (ttsConfig.mode) {
-                        ChatTtsMode.SILENT -> ChatTtsMode.READ_ALOUD
-                        ChatTtsMode.READ_ALOUD -> ChatTtsMode.VOICE_BAR
                         ChatTtsMode.VOICE_BAR -> ChatTtsMode.SILENT
+                        else -> ChatTtsMode.VOICE_BAR
                     }
                     viewModel.setTtsMode(nextMode)
                     showExtensionPanel = false
-                    scope.launch { snackbarHostState.showSnackbar("朗读模式：${nextMode.displayName}") }
+                    scope.launch { snackbarHostState.showSnackbar("语音模式：${nextMode.displayName}") }
                 },
                 onLocationClick = { onIntent(ChatIntent.ShareLocation) },
                 onVoiceInputClick = {

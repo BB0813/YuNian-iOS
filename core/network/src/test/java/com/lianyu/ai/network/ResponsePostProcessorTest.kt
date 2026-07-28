@@ -134,6 +134,66 @@ class ResponsePostProcessorTest {
     }
 
     @Test
+    fun trimIdleEmotion_enforcesSingleActionOnClassicOverDelivery() {
+        // 经典 4 动作过度交付：共情+说教+建议+追问 → 只留首个焦点
+        val raw = "听到你这么说我感到很遗憾。工作固然重要，但身体是革命的本钱。建议你今晚泡个热水澡早点休息。今天是不是项目又遇到难题了？"
+        val cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(raw, "今天好累")
+        assertTrue(cleaned.contains("遗憾") || cleaned.contains("听到"))
+        assertFalse(cleaned.contains("革命的本钱"))
+        assertFalse(cleaned.contains("泡个热水澡") || cleaned.contains("早点休息"))
+        assertFalse(cleaned.contains("项目又遇到"))
+        assertTrue(cleaned.length < 40)
+    }
+
+    @Test
+    fun trimIdleEmotion_keepsShortSingleAction() {
+        val raw = "啧，听这语气，今天又被项目折腾够呛吧？"
+        val cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(raw, "今天好累")
+        assertEquals(raw, cleaned)
+    }
+
+    @Test
+    fun trimIdleEmotion_keepsCompleteSpokenSentenceWithCommas() {
+        // 完整口语可含多个逗号停顿；单意图时不应被切成半截
+        val raw = "啧，听这语气，今天又被项目折腾够呛了吧，整个人都蔫了？"
+        val cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(raw, "今天好累")
+        assertEquals(raw, cleaned)
+        assertTrue(cleaned.contains("折腾够呛"))
+        assertTrue(cleaned.contains("蔫了"))
+    }
+
+    @Test
+    fun trimIdleEmotion_trimsCareTailButKeepsCompleteHead() {
+        val raw = "啧，听这语气，今天又被项目折腾够呛吧？过来靠我肩膀上眯一会儿。"
+        val cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(raw, "今天好累")
+        assertTrue(cleaned.contains("折腾够呛") || cleaned.contains("听这语气"))
+        assertTrue(cleaned.contains("？") || cleaned.contains("。") || cleaned.contains("！"))
+        assertFalse(cleaned.contains("肩膀"))
+        assertFalse(cleaned.contains("眯一会儿"))
+        // 不应只剩「啧」这类残句
+        assertTrue(cleaned.length >= 8)
+    }
+
+    @Test
+    fun trimIdleEmotion_keepsSameIntentMultiBubble() {
+        // 同一意图的自然连发：短接 + 追问，应保留多段供分段器拆气泡
+        val raw = "嗯。\n\n咋了，加班了？"
+        val cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(raw, "今天好累")
+        assertTrue(cleaned.contains("嗯"))
+        assertTrue(cleaned.contains("加班") || cleaned.contains("咋了"))
+        assertTrue(cleaned.contains("\n\n") || cleaned.split(Regex("[。！？]")).filter { it.isNotBlank() }.size >= 2)
+    }
+
+    @Test
+    fun trimIdleEmotion_keepsQuestionAfterShortVent() {
+        val raw = "啧，听这语气。今天又被项目折腾够呛吧？"
+        val cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(raw, "今天好累")
+        assertTrue(cleaned.contains("听这语气"))
+        assertTrue(cleaned.contains("折腾") || cleaned.contains("项目"))
+        assertFalse(cleaned.contains("泡脚"))
+    }
+
+    @Test
     fun applyPersona_trimsIdleCarePackWithUserHistory() {
         val raw = "谁让你熬夜不睡觉的，都是自找的。不过看你这么可怜，过来让我抱抱。把脑壳靠我肩膀上揉五分钟，不许说不。哼，明明心疼你，还要先骂你一句才解气。今晚不许再当夜猫子了，现在先去沙发上人一会儿，我给你捏捏太阳穴。"
         val history = listOf(
