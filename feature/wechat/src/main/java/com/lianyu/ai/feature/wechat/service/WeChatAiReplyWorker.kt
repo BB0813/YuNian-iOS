@@ -7,19 +7,19 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.lianyu.ai.feature.wechat.data.WeChatChatBridge
-import com.lianyu.ai.feature.wechat.data.WeChatMessageRepository
+import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.feature.wechat.data.WeChatTokenStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 后台处理微信消息并触发 AI 回复的 Worker。
+ * 后台 AI 回复兜底 Worker。
  *
- * 当 App 不在前台时，收到微信消息会 enqueue 此 Worker，
- * 在后台完成 AI 生成并发送回复到微信。
+ * 主路径：Inbox 串行队列内直接 Bridge。
+ * 本 Worker：主路径异常 / 进程被杀后，按用户串行重试文本 AI 并经 Outbox 回推微信。
  */
 class WeChatAiReplyWorker(
     context: Context,
@@ -37,29 +37,35 @@ class WeChatAiReplyWorker(
 
             val tokenStore = WeChatTokenStore(applicationContext)
 
-            // 检查自动回复是否开启
             if (!tokenStore.getAutoReply()) {
                 return@withContext Result.success()
             }
 
-            val repository = WeChatServiceLocator.messageRepository(applicationContext)
-            val bridge = WeChatChatBridge(applicationContext, repository)
+            // 确保通道仍在，便于 AI 完成后 Outbox drain
+            runCatching { WeChatChannelKeeper.ensureRunning(applicationContext) }
 
-            try {
-                bridge.handleTextMessage(wechatUserId, messageText)
-            } finally {
-                bridge.close()
+            val bridge = WeChatServiceLocator.chatBridge(applicationContext)
+            bridge.handleTextMessage(wechatUserId, messageText)
+            // 主动 drain，避免仅依赖下一次 poll 间隙
+            runCatching {
+                WeChatServiceLocator.messageRepository(applicationContext).drainOutbox()
             }
 
             Result.success()
         } catch (e: Exception) {
-            android.util.Log.e("WeChatAiReplyWorker", "Error processing message", e)
-            Result.retry()
+            SecureLog.e(TAG, "Error processing message", e)
+            if (runAttemptCount >= MAX_ATTEMPTS) {
+                Result.failure()
+            } else {
+                Result.retry()
+            }
         }
     }
 
     companion object {
+        private const val TAG = "WeChatAiReplyWorker"
         private const val WORK_NAME_PREFIX = "wechat_ai_reply_"
+        private const val MAX_ATTEMPTS = 5
         const val KEY_WECHAT_USER_ID = "wechat_user_id"
         const val KEY_MESSAGE_TEXT = "message_text"
 
@@ -76,6 +82,8 @@ class WeChatAiReplyWorker(
             val workRequest = OneTimeWorkRequestBuilder<WeChatAiReplyWorker>()
                 .setInputData(inputData)
                 .setConstraints(networkConstraints)
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .addTag("wechat_ai_reply")
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
@@ -83,6 +91,8 @@ class WeChatAiReplyWorker(
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 workRequest
             )
+            SecureLog.i(TAG, "enqueued ai reply for user=${wechatUserId.take(6)}***")
         }
     }
 }
+

@@ -6,6 +6,8 @@ import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.lianyu.ai.common.security.DeviceRequestSigner
+import com.lianyu.ai.domain.BuiltinCloudAccessPolicy
+import com.lianyu.ai.domain.ServiceRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -25,6 +27,8 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 object RemoteKeyProvider {
+
+    private const val CLOUD_ACCESS_DENIED = "builtin_cloud_access_denied"
 
     private data class HandshakeBuildResult(
         val body: JSONObject? = null,
@@ -84,6 +88,23 @@ object RemoteKeyProvider {
     private var sessionPrefsCache: SharedPreferences? = null
 
     private val random = SecureRandom()
+
+    /** The bundled SuFlow capacity fails closed until the application binds its security policy. */
+    fun isBuiltinCloudAccessAllowed(): Boolean {
+        val policy = ServiceRegistry.get(BuiltinCloudAccessPolicy::class.java)
+        if (policy == null) {
+            SecureLog.w("RemoteKeyProvider", "Built-in cloud denied: security policy unavailable")
+            return false
+        }
+        if (!policy.isBuiltinCloudAccessAllowed()) {
+            SecureLog.w(
+                "RemoteKeyProvider",
+                "Built-in cloud denied: ${policy.denialReason() ?: "security policy rejected request"}"
+            )
+            return false
+        }
+        return true
+    }
 
     /**
      * Encrypted SuFlow session store (token / session_key / client_id).
@@ -151,6 +172,12 @@ object RemoteKeyProvider {
 
     /** Direct handshake call — used by SettingsViewModel test button */
     fun cloveHandshake(ctx: Context): JSONObject {
+        if (!isBuiltinCloudAccessAllowed()) {
+            return JSONObject().apply {
+                put("ok", false)
+                put("error", CLOUD_ACCESS_DENIED)
+            }
+        }
         val url = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
         val handshake = buildHandshakeBody()
         handshake.error?.let { return it }
@@ -315,6 +342,7 @@ object RemoteKeyProvider {
         val appContext = context.applicationContext
 
         return withContext(Dispatchers.IO) {
+            if (!isBuiltinCloudAccessAllowed()) return@withContext emptyList()
             if (!forceRefresh) {
                 getPartnerSession(appContext)?.takeIf { isCacheValid(appContext) }?.let { session ->
                     cachedKeys = listOf(session.token)
@@ -356,6 +384,7 @@ object RemoteKeyProvider {
     suspend fun ensureSession(context: Context, forceRefresh: Boolean = false): PartnerSession? {
         val appContext = context.applicationContext
         return withContext(Dispatchers.IO) {
+            if (!isBuiltinCloudAccessAllowed()) return@withContext null
             if (!forceRefresh) {
                 getPartnerSession(appContext)?.takeIf { isCacheValid(appContext) }?.let { return@withContext it }
             }

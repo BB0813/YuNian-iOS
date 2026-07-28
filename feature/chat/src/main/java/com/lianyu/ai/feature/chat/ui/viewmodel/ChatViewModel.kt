@@ -106,8 +106,6 @@ class ChatViewModel(
     val isTyping: StateFlow<Boolean> = generation.isTyping
     val typingText: StateFlow<String> = generation.typingText
     val isRegenerating: StateFlow<Boolean> = generation.isRegenerating
-    val reasoningText: StateFlow<String> = generation.reasoningText
-    val isReasoning: StateFlow<Boolean> = generation.isReasoning
     val chatTtsConfig: StateFlow<ChatTtsConfig> = generation.chatTtsConfig
     val ttsState: StateFlow<ChatTtsState> = generation.ttsState
 
@@ -116,6 +114,7 @@ class ChatViewModel(
 
     init {
         observeMessageMetadata()
+        observeCachedMessages()
         observeCompanion()
         observeApiConfigs()
         observeGenerationEvents()
@@ -243,11 +242,16 @@ class ChatViewModel(
                 _hasMoreMessages.value =
                     _messageMetadata.value.size < chatRepository.getMessageCount(companionId)
                 chatRepository.observeRecentMetadata(companionId, ChatConstants.CHAT_PAGE_SIZE).collect { recent ->
-                    val olderIds = _messageMetadata.value
-                        .asSequence()
-                        .filterNot { current -> recent.any { it.id == current.id } }
-                        .toList()
-                    val merged = (olderIds + recent.reversed())
+                    // Room 元数据 + L1 流式临时行（负 id）合并，思考过程复用消息列表链路
+                    val recentIds = recent.mapTo(HashSet(recent.size)) { it.id }
+                    val streamingMeta = chatRepository.getCachedRecent(companionId)
+                        .orEmpty()
+                        .filter { it.id < 0L }
+                        .map { it.toMetadataMessage() }
+                    val olderIds = _messageMetadata.value.filter { current ->
+                        current.id >= 0L && current.id !in recentIds
+                    }
+                    val merged = (olderIds + recent.reversed() + streamingMeta)
                         .distinctBy { it.id }
                         .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
                     // 仅在数据确实变化时才更新 StateFlow，防止内容相同的 List 触发
@@ -257,7 +261,7 @@ class ChatViewModel(
                         seedBodiesFromCache(merged)
                     }
                     _hasMoreMessages.value = !reachedHistoryStart &&
-                        merged.size < chatRepository.getMessageCount(companionId)
+                        merged.count { it.id >= 0L } < chatRepository.getMessageCount(companionId)
                     if (recent.isNotEmpty()) markAsRead()
                 }
             } catch (cancelled: CancellationException) {
@@ -265,6 +269,55 @@ class ChatViewModel(
             } catch (exception: Exception) {
                 SecureLog.e("ChatViewModel", "Message observation failed", exception)
                 _events.tryEmit(ChatUiEvent.Error("消息加载失败"))
+            }
+        }
+    }
+
+    /**
+     * 观察 L1 MessageCache：流式 REASONING 临时消息与终态缓存更新都经此进入列表。
+     * Room metadata Flow 不会感知纯缓存写入，故必须单独订阅。
+     */
+    private fun observeCachedMessages() {
+        viewModelScope.launch {
+            chatRepository.observeCachedRecent(companionId).collect { cached ->
+                val streaming = cached.filter { it.id < 0L }
+                val streamingIds = streaming.mapTo(HashSet()) { it.id }
+                val withoutStaleStreaming = _messageMetadata.value.filterNot {
+                    it.id < 0L && it.id !in streamingIds
+                }
+                val streamingMeta = streaming.map { it.toMetadataMessage() }
+                val mergedMeta = (withoutStaleStreaming + streamingMeta)
+                    .distinctBy { it.id }
+                    .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
+                if (mergedMeta != _messageMetadata.value) {
+                    _messageMetadata.value = mergedMeta
+                }
+                // 正文：流式更新 + 终态缓存命中一并 Ready
+                val bodyUpdates = cached.mapNotNull { msg ->
+                    val existing = _messageBodies.value[msg.id]
+                    if (existing is MessageBodyState.Ready && existing.value == msg) null
+                    else msg.id to MessageBodyState.Ready(msg)
+                }
+                if (bodyUpdates.isNotEmpty()) {
+                    _messageBodies.value = _messageBodies.value + bodyUpdates
+                    // 清理已从缓存移除的流式 id
+                    val staleStreamingBodyIds = _messageBodies.value.keys.filter {
+                        it < 0L && it !in streamingIds
+                    }
+                    if (staleStreamingBodyIds.isNotEmpty()) {
+                        _messageBodies.value = _messageBodies.value - staleStreamingBodyIds.toSet()
+                    }
+                    publishLoadedMessages()
+                } else if (mergedMeta != withoutStaleStreaming) {
+                    // 仅 metadata 变化（例如流式行移除）也同步 messages
+                    val staleStreamingBodyIds = _messageBodies.value.keys.filter {
+                        it < 0L && it !in streamingIds
+                    }
+                    if (staleStreamingBodyIds.isNotEmpty()) {
+                        _messageBodies.value = _messageBodies.value - staleStreamingBodyIds.toSet()
+                    }
+                    publishLoadedMessages()
+                }
             }
         }
     }
@@ -535,7 +588,7 @@ class ChatViewModel(
         companionId = companionId
     )
 
-    /** 从 L1 明文消息推导列表元数据，仅用于首帧渲染。 */
+    /** 从 L1 明文消息推导列表元数据，仅用于首帧渲染 / 流式临时行。 */
     private fun ChatMessage.toMetadataMessage(): Message = Message(
         id = id,
         conversationId = companionId,
@@ -543,7 +596,11 @@ class ChatViewModel(
         isFromUser = isFromUser,
         timestamp = timestamp,
         type = type,
-        fileFormat = fileFormat
+        fileFormat = fileFormat,
+        turnId = turnId,
+        eventIndex = eventIndex,
+        durationMs = durationMs,
+        anchorMessageId = anchorMessageId,
     )
 
     override fun onCleared() {

@@ -14,8 +14,9 @@ import com.lianyu.ai.domain.AiOperationalMessages
  * 2. **预算分配**：总预算 = 上下文窗口 - 输出预留 - 安全余量。
  *    分配优先级：系统提示词（固定）→ 记忆上下文（上限 20%）→ 历史消息（剩余）。
  * 3. **自动压缩**：当历史消息 token 超过分配预算时，自动触发 AI 摘要压缩，
- *    保留最近的消息 + 将旧消息压缩为连贯的叙事摘要。
- *    AI 摘要失败时自动降级为本地正则摘要。
+ *    保留最近的消息 + 将旧消息压缩为「时间/事件/人物/驱动/情绪」叙事摘要。
+ *    AI 摘要失败时自动降级为本地五维叙事摘要。
+ *    HISTORY 摘要默认只进当前请求上下文（内存 LRU），不落库。
  *
  * 线程安全：`build()` 是 suspend 函数，协程自然向上传递，无 runBlocking。
  * `aiSummarizer` 也是 suspend 类型，调用方用 viewModelScope.launch 即可。

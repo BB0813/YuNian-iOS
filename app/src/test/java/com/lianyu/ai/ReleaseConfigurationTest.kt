@@ -83,9 +83,10 @@ class ReleaseConfigurationTest {
             "WeChat boot receiver must be exposed only through the shell entry.",
             wechatManifest.contains("android:name=\"com.lianyu.ai.security.SWechatBootReceiver\"")
         )
-        assertTrue(
-            "WeChat proactive receiver must be exposed only through the shell entry.",
-            wechatManifest.contains("android:name=\"com.lianyu.ai.security.SWechatProactiveMessageReceiver\"")
+        assertFalse(
+            "WeChat proactive BroadcastReceiver must be removed (S6 OutboundPort).",
+            wechatManifest.contains("SWechatProactiveMessageReceiver") ||
+                wechatManifest.contains("SEND_PROACTIVE")
         )
 
         listOf(

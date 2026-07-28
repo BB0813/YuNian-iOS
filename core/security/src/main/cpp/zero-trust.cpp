@@ -177,6 +177,7 @@ static struct {
 
     /** Continuous evaluation thread control */
     std::atomic<int>      eval_running;   /**< 1 if background thread active */
+    std::atomic<int>      initial_eval_complete;
     pthread_t       eval_thread;    /**< Background thread handle */
 } g_zt = {
     .state        = ZT_BREACH,  /* default deny */
@@ -187,7 +188,20 @@ static struct {
     .locked       = 0,
     .keys_wiped   = 0,
     .eval_running = 0,
+    .initial_eval_complete = 0,
 };
+
+static pthread_mutex_t g_zt_initial_eval_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_zt_initial_eval_cond = PTHREAD_COND_INITIALIZER;
+
+static void zt_mark_initial_eval_complete(void)
+{
+    if (g_zt.initial_eval_complete.exchange(1, std::memory_order_acq_rel) == 0) {
+        pthread_mutex_lock(&g_zt_initial_eval_mutex);
+        pthread_cond_broadcast(&g_zt_initial_eval_cond);
+        pthread_mutex_unlock(&g_zt_initial_eval_mutex);
+    }
+}
 
 /* ==================================================================
  * Monotonic Clock Helper
@@ -539,17 +553,17 @@ int zero_trust_run_detection_chain(void)
     }
 
     /* 27. DEX integrity (weight: 3) */
-    if (check_dex_integrity()) {
+    if (check_dex_integrity() == 0) {
         score += 3;
     }
 
     /* 28. SO .text section integrity (weight: 3) */
-    if (check_so_integrity()) {
+    if (check_so_integrity() == 0) {
         score += 3;
     }
 
     /* 29. Resources integrity (weight: 2) */
-    if (check_resources_integrity()) {
+    if (check_resources_integrity() == 0) {
         score += 2;
     }
 
@@ -571,10 +585,12 @@ int zero_trust_run_detection_chain(void)
  * Max theoretical score: ~74 (32 checks × weighted)
  */
 static zt_trust_state_t zt_score_to_state(int score,
-    zt_trust_state_t current_state)
+    zt_trust_state_t current_state, bool has_completed_evaluation)
 {
-    /* BREACH is sticky: once in BREACH, stay there until reset() */
-    if (current_state == ZT_BREACH) {
+    /* An observed breach is sticky. The initial fail-closed BREACH state is
+     * intentionally not sticky so the first completed evaluation can establish
+     * the device's actual trust state. */
+    if (current_state == ZT_BREACH && has_completed_evaluation) {
         return ZT_BREACH;
     }
 
@@ -596,6 +612,7 @@ zt_trust_state_t zero_trust_evaluate(void)
     uint64_t now = zt_now_ms();
     int score = 0;
     zt_trust_state_t old_state, new_state;
+    bool has_completed_evaluation;
 
     /* 1. Run detection chain */
     score = zero_trust_run_detection_chain();
@@ -606,7 +623,8 @@ zt_trust_state_t zero_trust_evaluate(void)
     /* 3. Update state */
     old_state = (zt_trust_state_t)atomic_load_explicit(
         &g_zt.state, std::memory_order_acquire);
-    new_state = zt_score_to_state(score, old_state);
+    has_completed_evaluation = g_zt.last_eval_ms.load(std::memory_order_acquire) != 0;
+    new_state = zt_score_to_state(score, old_state, has_completed_evaluation);
     g_zt.state.store((int)new_state, std::memory_order_release);
 
     /* 4. Update timestamp */
@@ -626,6 +644,7 @@ zt_trust_state_t zero_trust_evaluate(void)
 
             case ZT_SUSPICIOUS:
                 g_zt.degraded.store(1, std::memory_order_release);
+                g_zt.locked.store(0, std::memory_order_release);
                 zero_trust_incident_response(ZT_ACTION_DEGRADE);
                 zero_trust_audit_log("WARNING", 206, /* THREAT_HIGH */
                     "Zero Trust: state=SUSPICIOUS, degrading features");
@@ -641,6 +660,8 @@ zt_trust_state_t zero_trust_evaluate(void)
                 break;
         }
     }
+
+    zt_mark_initial_eval_complete();
 
     return new_state;
 }
@@ -950,6 +971,38 @@ int zero_trust_start_continuous_eval(void)
     return 0;
 }
 
+int zero_trust_wait_for_initial_evaluation(uint32_t timeout_ms)
+{
+    if (g_zt.initial_eval_complete.load(std::memory_order_acquire)) {
+        return 0;
+    }
+
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec += 1;
+        deadline.tv_nsec -= 1000000000L;
+    }
+
+    pthread_mutex_lock(&g_zt_initial_eval_mutex);
+    int result = 0;
+    while (!g_zt.initial_eval_complete.load(std::memory_order_acquire) && result == 0) {
+        result = pthread_cond_timedwait(
+            &g_zt_initial_eval_cond,
+            &g_zt_initial_eval_mutex,
+            &deadline
+        );
+    }
+    pthread_mutex_unlock(&g_zt_initial_eval_mutex);
+
+    if (!g_zt.initial_eval_complete.load(std::memory_order_acquire)) {
+        return -1;
+    }
+    return 0;
+}
+
 void zero_trust_stop_continuous_eval(void)
 {
     int was_running = atomic_exchange_explicit(
@@ -977,20 +1030,11 @@ void zero_trust_init(void)
     g_zt.locked.store(1, std::memory_order_release);
     g_zt.keys_wiped.store(0, std::memory_order_release);
     g_zt.error_count.store(0, std::memory_order_release);
+    g_zt.initial_eval_complete.store(0, std::memory_order_release);
 
-    /* DEFERRED: First evaluation runs on background thread via
-     * zero_trust_start_continuous_eval() to avoid blocking JNI_OnLoad.
-     * The synchronous zero_trust_evaluate() call was removed because it
-     * includes 28 detection checks (IO-heavy check_dex_integrity reads
-     * 140MB APK, check_proxy_port does 6 TCP connects, etc.) that cause
-     * multi-second blocking on the main thread, resulting in ANR/white screen. */
-
-    /* Update JNI references if available */
-    /* (JNI env is stored by the JNI_OnLoad or explicit setter) */
-
-    /* Start continuous background evaluation (100ms interval).
-     * The first evaluation runs immediately on the new thread. */
-    zero_trust_start_continuous_eval();
+    /* Evaluation starts only after APK signature verification succeeds.
+     * Before that, a zero signature result means "not yet verified", not
+     * "verification failed", and the default-deny lock remains in effect. */
 }
 
 void zero_trust_reset(void)
@@ -1006,6 +1050,7 @@ void zero_trust_reset(void)
     g_zt.locked.store(1, std::memory_order_release);
     g_zt.keys_wiped.store(0, std::memory_order_release);
     g_zt.error_count.store(0, std::memory_order_release);
+    g_zt.initial_eval_complete.store(0, std::memory_order_release);
 }
 
 /* ==================================================================

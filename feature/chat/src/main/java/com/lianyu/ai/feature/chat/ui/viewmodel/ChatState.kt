@@ -19,8 +19,6 @@ data class ChatState(
     val isTyping: Boolean = false,
     val typingText: String = "",
     val isRegenerating: Boolean = false,
-    val reasoningText: String = "",
-    val isReasoning: Boolean = false,
     val currentApi: ApiProviderInfo? = null,
     val availableApis: List<ApiProviderInfo> = emptyList(),
     val userName: String = "我",

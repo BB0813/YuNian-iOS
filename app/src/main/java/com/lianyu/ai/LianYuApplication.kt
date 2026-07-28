@@ -26,25 +26,34 @@ import com.lianyu.ai.database.repository.SummaryProvider
 import com.lianyu.ai.database.repository.DiaryProvider
 import com.lianyu.ai.database.repository.UnifiedMemoryRepository
 import com.lianyu.ai.database.repository.UserRepository
+import com.lianyu.ai.database.timeline.RoomTimelineStore
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.CompanionProvider
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.CoffeeOrderProvider
+import com.lianyu.ai.domain.BuiltinCloudAccessPolicy
 import com.lianyu.ai.domain.LocalModelProvider
 import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.domain.UserProfileProvider
+import com.lianyu.ai.domain.timeline.TimelinePayloadCodecRegistry
+import com.lianyu.ai.domain.timeline.TimelineStore
+import com.lianyu.ai.domain.wechat.WeChatDialoguePort
+import com.lianyu.ai.domain.wechat.WeChatIdentityMapPort
+import com.lianyu.ai.domain.wechat.WeChatOutboundPort
+import com.lianyu.ai.wechat.WeChatDialoguePortImpl
+import com.lianyu.ai.wechat.WeChatIdentityMapPortImpl
+import com.lianyu.ai.wechat.WeChatOutboundPortImpl
 
 import com.lianyu.ai.feature.notification.NotificationHelper
 import com.lianyu.ai.push.PushManager
-import com.lianyu.ai.feature.wechat.data.WeChatTokenStore
+import com.lianyu.ai.feature.wechat.service.WeChatChannelKeeper
 import com.lianyu.ai.feature.wechat.service.WeChatNotificationHelper
-import com.lianyu.ai.feature.wechat.service.WeChatPollingService
-import com.lianyu.ai.feature.wechat.service.WeChatPollingWorker
 import com.lianyu.ai.network.AiService
 import com.lianyu.ai.network.NtpTimeProvider
 import com.lianyu.ai.security.G0
+import com.lianyu.ai.security.NativeBridge
 import com.lianyu.ai.security.SecurityState
 import android.content.ComponentCallbacks2
 import com.lianyu.ai.uicommon.component.ChatBackgroundCache
@@ -101,15 +110,6 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         instance = this
         // 进程级前后台：尽早绑定，供 Worker / 微信轮询判断
         AppForegroundTracker.init()
-        // Fail-closed: hard cryptographic auth failure must not start business services.
-        // Soft risk (root/hook/debug heuristics) still allows offline-first local business.
-        if (!SecurityState.canStartLocalBusiness()) {
-            SecureLog.e(
-                "LianYuApplication",
-                "BLOCK business init: ${SecurityState.snapshot().reason ?: "hard auth failed"}"
-            )
-            return
-        }
         initBusiness(this)
     }
 
@@ -169,13 +169,6 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         fun initBusiness(app: Application) {
-            if (!SecurityState.canStartLocalBusiness()) {
-                SecureLog.e(
-                    "LianYuApplication",
-                    "initBusiness refused: ${SecurityState.snapshot().reason ?: "hard auth failed"}"
-                )
-                return
-            }
             SaltStore.init(app)
             SecureLog.init(com.lianyu.ai.BuildConfig.DEBUG)
             applyStoredLanguage(app)
@@ -300,11 +293,8 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             SecureLog.d("LianYuApplication", "ROM: ${RomUtils.getRomDisplayName()} ${RomUtils.romVersion}")
             // 初始化厂商 Push SDK，提升 OPPO / vivo / 小米 / 华为 设备的消息到达率
             runCatching { PushManager.init(app) }
-            val tokenStore = WeChatTokenStore(app)
-            if (runCatching { tokenStore.isLoggedIn() }.getOrDefault(false)) {
-                WeChatPollingService.start(app)
-                WeChatPollingWorker.schedule(app)
-            }
+            // 登录态下统一拉起 FGS 主轮询 + WM 周期/立即兜底
+            runCatching { WeChatChannelKeeper.ensureRunning(app) }
         }
 
         private suspend fun initSecurityData(app: Application) {
@@ -337,6 +327,18 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         }
 
         private fun registerServiceProviders(app: Application) {
+            ServiceRegistry.registerSingleton(BuiltinCloudAccessPolicy::class.java) {
+                object : BuiltinCloudAccessPolicy {
+                    override fun isBuiltinCloudAccessAllowed(): Boolean {
+                        return SecurityState.snapshot().isTrustedForSensitiveOps &&
+                            NativeBridge.zeroTrustIsLocked() == 0
+                    }
+
+                    override fun denialReason(): String? {
+                        return SecurityState.snapshot().reason ?: "zero trust verification incomplete"
+                    }
+                }
+            }
             // ── Repository 单例注册 ──
             // 统一 Repository 获取方式，供 QQ Bot 等跨模块消费者通过 ServiceRegistry 获取。
             val database = AppDatabase.getDatabase(app)
@@ -358,6 +360,11 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                     ServiceRegistry.getOrThrow(GroupMessageRepository::class.java),
                     bgScope
                 )
+            }
+            // 助手时间线：REASONING 等终态事件落库（与 ChatRepository 并存）
+            TimelinePayloadCodecRegistry.registerBuiltins()
+            ServiceRegistry.registerSingleton(TimelineStore::class.java) {
+                RoomTimelineStore(database.messageDao(), database)
             }
             ServiceRegistry.registerSingleton(MemoryRepository::class.java) {
                 MemoryRepository(database.memoryDao(), DeviceIdProvider.getDeviceId(app))
@@ -416,6 +423,18 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             }
             ServiceRegistry.registerSingleton(AiServiceProvider::class.java) {
                 AiService(app)
+            }
+            // S3：微信入站对话端口（app 适配现有 AI，禁止 feature:wechat 内嵌 AI 管线）
+            ServiceRegistry.registerSingleton(WeChatDialoguePort::class.java) {
+                WeChatDialoguePortImpl(app)
+            }
+            // S5：微信用户 ↔ 伴侣映射端口（设置页 / 通道共用）
+            ServiceRegistry.registerSingleton(WeChatIdentityMapPort::class.java) {
+                WeChatIdentityMapPortImpl(app)
+            }
+            // S6：App → 微信出站端口（替代 Broadcast 主路径）
+            ServiceRegistry.registerSingleton(WeChatOutboundPort::class.java) {
+                WeChatOutboundPortImpl(app)
             }
             ServiceRegistry.registerSingleton(YandereModeManager::class.java) {
                 YandereModeManager(app)

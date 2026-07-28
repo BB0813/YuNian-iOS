@@ -23,6 +23,11 @@ import androidx.room.PrimaryKey
             value = ["conversationType", "conversationId", "timestamp", "id"],
             name = "idx_messages_conv",
             orders = [Index.Order.ASC, Index.Order.ASC, Index.Order.DESC, Index.Order.DESC]
+        ),
+        Index(
+            value = ["turnId", "eventIndex", "id"],
+            name = "idx_messages_turn",
+            orders = [Index.Order.ASC, Index.Order.ASC, Index.Order.ASC]
         )
     ]
 )
@@ -49,7 +54,22 @@ data class Message(
     val type: MessageType = MessageType.TEXT,
 
     /** 文件分类 */
-    val fileFormat: FileFormat = FileFormat.TEXT
+    val fileFormat: FileFormat = FileFormat.TEXT,
+
+    /**
+     * 助手回合 id（时间线事件）；普通用户消息为 null。
+     * 与 [eventIndex] 一起保证同一 turn 内稳定顺序。
+     */
+    val turnId: String? = null,
+
+    /** 同一 turn 内事件序号，从 0 起；非时间线消息为 null */
+    val eventIndex: Int? = null,
+
+    /** 思考过程耗时（毫秒）；仅 REASONING 使用 */
+    val durationMs: Long? = null,
+
+    /** 锚定用户消息 id（可选） */
+    val anchorMessageId: Long? = null,
 )
 
 // ── 向后兼容扩展属性（兼容 ChatMessage / GroupMessage API） ──

@@ -23,6 +23,8 @@ class ShellManifestRoutingTest {
 
         assertTrue(manifest.contains("android:name=\"com.lianyu.ai.security.SWechatPollingService\""))
         assertTrue(manifest.contains("android:name=\"com.lianyu.ai.security.SWechatBootReceiver\""))
-        assertTrue(manifest.contains("android:name=\"com.lianyu.ai.security.SWechatProactiveMessageReceiver\""))
+        // S6: proactive sync no longer uses BroadcastReceiver
+        assertTrue(!manifest.contains("SWechatProactiveMessageReceiver"))
+        assertTrue(!manifest.contains("SEND_PROACTIVE"))
     }
 }

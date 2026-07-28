@@ -18,7 +18,11 @@ data class StoredMessage(
         type = metadata.type,
         searchContent = body.searchContent,
         fileFormat = metadata.fileFormat,
-        linkString = body.linkString
+        linkString = body.linkString,
+        turnId = metadata.turnId,
+        eventIndex = metadata.eventIndex,
+        durationMs = metadata.durationMs,
+        anchorMessageId = metadata.anchorMessageId,
     )
 
     fun toGroupMessage(): GroupMessage = GroupMessage(
@@ -41,7 +45,11 @@ data class StoredMessage(
                 isFromUser = message.isFromUser,
                 timestamp = message.timestamp,
                 type = message.type,
-                fileFormat = message.fileFormat
+                fileFormat = message.fileFormat,
+                turnId = message.turnId,
+                eventIndex = message.eventIndex,
+                durationMs = message.durationMs,
+                anchorMessageId = message.anchorMessageId,
             )
             return metadata to MessageBody(message.id, message.content, message.searchContent, message.linkString)
         }

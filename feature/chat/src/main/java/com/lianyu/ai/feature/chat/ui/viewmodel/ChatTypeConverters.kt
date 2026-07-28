@@ -27,5 +27,7 @@ internal fun ChatMessage.toAiChatMessage(): AiChatMessage = AiChatMessage(
     companionId = companionId
 )
 
-internal fun List<ChatMessage>.toAiChatMessages(): List<AiChatMessage> = map { it.toAiChatMessage() }
+internal fun List<ChatMessage>.toAiChatMessages(): List<AiChatMessage> =
+    // 思考过程默认不进模型上下文（与 DefaultModelContextPolicy 一致）
+    filter { it.type != MessageType.REASONING }.map { it.toAiChatMessage() }
 

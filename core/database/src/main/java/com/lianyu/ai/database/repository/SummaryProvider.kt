@@ -3,10 +3,10 @@ package com.lianyu.ai.database.repository
 /**
  * 摘要用途 —— 区分不同场景的摘要需求，共享同一服务但使用不同参数。
  *
- * - [HISTORY]：实时上下文压缩，将旧对话历史压缩为叙事摘要注入当前请求。
- *   200-400 字，第三人称，保留关键事实/约定/情感/关系进展。
- * - [MEMORY]：记忆系统压缩，将 WORKING 记忆聚合为 EPISODIC 摘要。
- *   150 字以内，提取关键话题和新信息。
+ * - [HISTORY]：实时上下文压缩，将旧对话历史整理为叙事摘要注入当前请求。
+ *   按「时间 / 事件 / 人物 / 驱动 / 情绪」组织，不硬限字数。
+ * - [MEMORY]：记忆系统压缩，将 WORKING 记忆聚合为 EPISODIC 叙事摘要。
+ *   同样五维结构，侧重新信息与可沉淀事实，不硬限字数。
  */
 enum class SummaryPurpose {
     HISTORY,
@@ -33,25 +33,25 @@ interface SummaryProvider {
     fun isSummarySupported(): Boolean
 
     /**
-     * 将对话文本压缩为摘要（记忆用途，150 字以内）。
+     * 将对话文本整理为叙事摘要（记忆用途，五维结构，不硬限字数）。
      *
      * 等价于 `summarize(conversationText, memoryContext, SummaryPurpose.MEMORY)`。
      *
      * @param conversationText 已格式化的对话文本（如 "用户: xxx\nAI: yyy\n..."）
      * @param memoryContext    当前已有的记忆上下文（避免重复提取）
-     * @return 压缩后的摘要文本，失败时返回 null（调用方回退到本地摘要）
+     * @return 叙事摘要文本，失败时返回 null（调用方回退到本地摘要）
      */
     suspend fun summarize(conversationText: String, memoryContext: String = ""): String? {
         return summarize(conversationText, memoryContext, SummaryPurpose.MEMORY)
     }
 
     /**
-     * 将对话文本压缩为摘要，按 [purpose] 区分参数和模板。
+     * 将对话文本整理为叙事摘要，按 [purpose] 区分参数和模板。
      *
      * @param conversationText 已格式化的对话文本
      * @param memoryContext    当前已有的记忆上下文（避免重复提取）
-     * @param purpose          摘要用途（HISTORY=200-400字叙事 / MEMORY=150字精简）
-     * @return 压缩后的摘要文本，失败时返回 null（调用方回退到本地摘要）
+     * @param purpose          摘要用途（HISTORY=上下文叙事 / MEMORY=可沉淀叙事）
+     * @return 叙事摘要文本，失败时返回 null（调用方回退到本地摘要）
      */
     suspend fun summarize(
         conversationText: String,

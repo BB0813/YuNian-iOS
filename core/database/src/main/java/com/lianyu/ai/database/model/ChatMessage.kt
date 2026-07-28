@@ -13,7 +13,11 @@ data class ChatMessage(
     val type: MessageType = MessageType.TEXT,
     val searchContent: String = "",
     val fileFormat: FileFormat = FileFormat.TEXT,
-    val linkString: String = ""
+    val linkString: String = "",
+    val turnId: String? = null,
+    val eventIndex: Int? = null,
+    val durationMs: Long? = null,
+    val anchorMessageId: Long? = null,
 ) {
     val role: String get() = if (isFromUser) "user" else "assistant"
     val isFromAssistant: Boolean get() = !isFromUser

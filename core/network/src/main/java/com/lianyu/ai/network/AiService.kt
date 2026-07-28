@@ -3,9 +3,12 @@ package com.lianyu.ai.network
 import android.content.Context
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.BanManager
+import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.DeviceIdProvider
+import com.lianyu.ai.common.EnvAnchorCooldown
+import com.lianyu.ai.common.EnvAnchorStore
 import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerManager
@@ -35,8 +38,17 @@ import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.network.provider.AiProvider
 import com.lianyu.ai.network.provider.ClaudeProvider
 import com.lianyu.ai.network.provider.OpenAiCompatibleProvider
+import com.lianyu.ai.domain.stream.AssistantStreamEvent
+import com.lianyu.ai.domain.timeline.TurnId
+import com.lianyu.ai.network.stream.NonStreamingAssistantStreamAdapter
+import com.lianyu.ai.network.stream.OpenAiSseChunkParser
+import com.lianyu.ai.network.stream.OpenAiSseStreamAdapter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -66,6 +78,7 @@ class AiService(context: Context) : AiServiceProvider {
     private val tokenUsageRepository: TokenUsageRepository
     private val userRepository: UserRepository
     private val appSettingsStore = AppSettingsStore(appContext)
+    private val envAnchorStore = EnvAnchorStore(appContext)
     private val summaryProvider: com.lianyu.ai.database.repository.SummaryProvider? =
         com.lianyu.ai.domain.ServiceRegistry.get(com.lianyu.ai.database.repository.SummaryProvider::class.java)
     private val autoContextManager = AutoContextManager(
@@ -304,6 +317,40 @@ class AiService(context: Context) : AiServiceProvider {
                 .build()
         }
 
+        // SSE 流式读超时更长：chunk 间隔可能 > 默认 readTimeout
+        private val streamingHttpClient: OkHttpClient by lazy {
+            val builder = OkHttpClient.Builder()
+            builder.addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
+            RequestSecurityInterceptor.enforceTls(builder)
+            builder
+                .connectionPool(okhttp3.ConnectionPool(3, 5, TimeUnit.MINUTES))
+                .callTimeout(0, TimeUnit.MILLISECONDS) // 由读超时 + 上层 withTimeout 约束
+                .connectTimeout(TimeoutBudgets.HTTP_CONNECT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(NetworkConstants.STREAMING_READ_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
+                .writeTimeout(TimeoutBudgets.HTTP_WRITE_MS, TimeUnit.MILLISECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+
+        private val partnerStreamingHttpClient: OkHttpClient by lazy {
+            val builder = OkHttpClient.Builder()
+            RequestSecurityInterceptor.enforceTls(builder)
+            builder
+                .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
+                .certificatePinner(CertificatePins.certificatePinner)
+                .connectionPool(okhttp3.ConnectionPool(2, 5, TimeUnit.MINUTES))
+                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .connectTimeout(NetworkConstants.PARTNER_CONNECT_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
+                .readTimeout(NetworkConstants.STREAMING_READ_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+
+        private fun getStreamingClient(config: ApiConfig): OkHttpClient {
+            return if (config.provider == ApiProvider.PARTNER) partnerStreamingHttpClient else streamingHttpClient
+        }
+
         /**
          * Checks if a response body is HTML (non-JSON) and throws a clear error.
          * Some providers (e.g. Xunfei Spark) return HTML error pages on auth failure
@@ -465,12 +512,25 @@ class AiService(context: Context) : AiServiceProvider {
                     if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
                 }.distinct()
                 val role = userRepository.selectedRole.value
-                val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled = false, role = role)
+                val phase = ConversationPhaseDetector.detect(sanitizedHistory)
+                val allowEnvAnchor = resolveAllowEnvAnchor(companion.id, sanitizedHistory)
+                val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(
+                    companion,
+                    memoryContext,
+                    lastUserMessage,
+                    availableStickers,
+                    stickerProbability,
+                    innerThoughtEnabled,
+                    ntpTimeEnabled = ntpTimeEnabled,
+                    role = role,
+                    phase = phase,
+                    allowEnvAnchor = allowEnvAnchor,
+                )
                 val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
                 val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
                 val messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig)
 
-                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, stickerProb=$stickerProbability, stickers=${availableStickers.size}")
+                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, stickerProb=$stickerProbability, stickers=${availableStickers.size}, phase=$phase, allowEnv=$allowEnvAnchor")
 
                 try {
                     val (rawResponse, reasoning) = if (usesAnthropicProtocol(config)) {
@@ -495,6 +555,7 @@ class AiService(context: Context) : AiServiceProvider {
                         return@withContext AiResponse("抱歉，我无法继续这个话题。")
                     }
 
+                    maybeMarkEnvAnchor(companion.id, cleaned)
                     AiResponse(cleaned, reasoning)
                 } catch (e: Exception) {
                     SecureLog.e("AiService", "sendMessage failed", e)
@@ -519,14 +580,40 @@ class AiService(context: Context) : AiServiceProvider {
             val sortedMessages = recentMessages.sortedBy { it.timestamp }
             val lastUserMessage = sortedMessages.lastOrNull { it.isFromUser }?.content ?: ""
             val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
+            val allowEnvAnchor = resolveAllowEnvAnchor(companion.id, sortedMessages)
 
-            val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext, settings)
+            val systemPrompt = buildProactiveSystemPrompt(companion, memoryContext, settings, allowEnvAnchor)
             val contextMessages = AiPromptBuilder.buildProactiveContext(sortedMessages, companion)
+            val envUserHint = if (allowEnvAnchor) {
+                "7. 本条主动最多轻提一次环境（时间/睡/吃/到家），也可完全不提；禁止展开成任务清单"
+            } else {
+                "7. 环境关心冷却中：禁止再提睡/吃/到家/报时/天气；只做话题延续或情绪轻触"
+            }
 
             val messages = listOf(
                 Message("system", systemPrompt),
                 Message("user", contextMessages),
-                Message("user", "以${companion.name}的身份，继续刚才的对话。要求：\n1. 15-50字，像真人聊天一样自然\n2. 直接接上一条话茬，不要重新开场、不要回忆之前说过的话\n3. 如果用户最后一条是问题，直接回答它\n4. 带语气词（呀/呢/啦/嘛/哼/嘿嘿/诶/哇/呜呜/嘤）\n5. 可以撒娇/嘴硬/分享小事/突然温柔/反问\n6. 禁止括号，禁止AI感词汇，禁止说教\n7. 必须结合当前时间和场景（上面已提供），让内容贴合现在这个时间段该做的事和情绪")
+                Message(
+                    "user",
+                    """
+                    以${companion.name}的身份决定是否、以及如何继续刚才的对话。
+                    先做语义判断（看整段上下文，不要只看最后几个字）：
+                    - 若用户此刻明显不想被打扰、对话已自然收束，只输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}，不要硬聊。
+                    - 「晚安/再见/先忙/嗯/好/知道了」等不能单独当作结束标签，要结合前后文理解。
+                    话题选择（性格优先，禁止机械承接）：
+                    - 先判断：上一话题是否已完结？你是否还感兴趣？按角色性格会不会接？
+                    - 未完结且感兴趣：可自然延伸，但不要复读、不要为了承接而追问已答完的内容。
+                    - 已完结或不感兴趣：可轻转、只回情绪/态度，或输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}；不要硬续旧话题。
+                    若决定发消息，要求：
+                    1. 像真人聊天一样自然；软目标约 40–120 字，整轮尽量不超过约 200 字，不要长文
+                    2. 优先 1 条消息，不要拆成很多短句连发
+                    3. 不要重新开场、不要念日程
+                    4. 语气与互动方式严格服从角色性格，不要统一撒娇/催促
+                    5. 禁止括号，禁止AI感词汇，禁止说教
+                    6. 时间只是背景；不要机械报时或按时段派发固定关心任务
+                    $envUserHint
+                    """.trimIndent()
+                )
             )
 
             try {
@@ -535,21 +622,31 @@ class AiService(context: Context) : AiServiceProvider {
                 } else {
                     callOpenAiCompatible(config, messages)
                 }
-                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedMessages)
+                // 先识别「不宜主动」标记，再做人设后处理
+                val semantic = AiPromptBuilder.parseProactiveGenerationResult(rawResponse)
+                    ?: return@withContext null
+                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages)
                 val singleLine = cleaned
                     .replace(Regex("\\r\\n|\\r|\\n+"), "，")
                     .replace(Regex("，{2,}"), "，")
                     .trimStart('，', ',', '.', '。', ' ')
                     .trim()
+                val finalText = AiPromptBuilder.parseProactiveGenerationResult(singleLine)
+                    ?: return@withContext null
 
-                val safetyResult = ContentFilter.checkOutputSafety(singleLine)
+                val safetyResult = ContentFilter.checkOutputSafety(finalText)
                 if (!safetyResult.isSafe) {
                     SecureLog.w("AiService", "Proactive output safety violation: ${safetyResult.level} - ${safetyResult.reason}")
                     // [C4 FIX] AI 生成内容不应累加用户封禁
                     return@withContext null
                 }
 
-                singleLine
+                maybeMarkEnvAnchor(companion.id, finalText)
+                SecureLog.d(
+                    "AiService",
+                    "Proactive generated companion=${companion.id} allowEnv=$allowEnvAnchor envCare=${EnvAnchorCooldown.looksLikeEnvCare(finalText)}",
+                )
+                finalText
             } catch (e: Exception) {
                 SecureLog.w("AiService", "Proactive message failed: ${e.message}")
                 null
@@ -646,17 +743,14 @@ class AiService(context: Context) : AiServiceProvider {
     /**
      * AI 驱动的对话摘要生成（委托给统一 SummaryProvider）。
      *
-     * 将旧对话消息发送给 AI，生成连贯的叙事摘要，保留：
-     * - 关键事实（名字、偏好、约定、承诺）
-     * - 情感时刻和关系动态
-     * - 按时间顺序的叙事连贯性
+     * 将旧对话消息发送给 AI，生成叙事摘要，按：
+     * 时间 / 事件 / 人物 / 驱动 / 情绪 组织，不硬限字数。
      *
      * 用于 AutoContextManager 的上下文压缩，替代旧的正则关键词提取方案。
      * 失败时返回 null，由调用方降级为本地正则摘要。
      *
      * 统一摘要服务：通过 SummaryProvider.summarize(HISTORY) 调用，
-     * 与 UnifiedMemoryRepository 的 MEMORY 摘要共享同一服务和模板体系，
-     * 消除两套独立摘要系统的语义不一致。
+     * 与 UnifiedMemoryRepository 的 MEMORY 摘要共享同一服务和模板体系。
      */
     private suspend fun summarizeWithAi(
         messages: List<ChatMessage>,
@@ -681,7 +775,7 @@ class AiService(context: Context) : AiServiceProvider {
 
         if (conversationText.isBlank()) return null
 
-        // 委托给统一 SummaryProvider（HISTORY 用途：200-400 字叙事摘要）
+        // 委托给统一 SummaryProvider（HISTORY：五维叙事摘要，不硬限字数）
         val provider = summaryProvider
         if (provider != null && provider.isSummarySupported()) {
             return try {
@@ -1025,41 +1119,11 @@ class AiService(context: Context) : AiServiceProvider {
     }
 
     /**
-     * 判断是否需要发送主动消息。不需要时直接返回 false，节省 API 调用。
+     * 主动消息结构门控。语义是否结束对话不在此用关键词硬判，
+     * 见 [AiPromptBuilder.shouldProactivelyMessage] / 生成阶段上下文理解。
      */
     fun shouldProactivelyMessage(companion: CompanionModel, recentMessages: List<ChatMessage>): Boolean {
-        if (recentMessages.isEmpty()) return true
-
-        val lastMessage = recentMessages.last()
-
-        // 最后一条是 AI 发的，不用再发
-        if (!lastMessage.isFromUser) return false
-
-        val lastUserMsg = lastMessage.content
-
-        // 用户明确表示结束对话
-        val goodbyePatterns = listOf(
-            Regex("(晚安|再见|拜拜|bye|先忙了|晚点聊|回头聊|不说了|睡了|先下了|先睡了|去忙了|去睡了)"),
-            Regex("(不用回了|别回了|不用管我|别管我|退下吧|别发了|别说了)"),
-            Regex("^(嗯嗯|嗯|好|好吧|行|ok|OK|哦|噢)\\s*$"),
-            Regex("^(知道了|明白了|懂了|了解了)\\s*$")
-        )
-
-        for (pattern in goodbyePatterns) {
-            if (pattern.containsMatchIn(lastUserMsg)) return false
-        }
-
-        // 用户最后一条消息距离现在不到 3 分钟，不需要主动发
-        val now = System.currentTimeMillis()
-        val timeSinceLastMsg = now - lastMessage.timestamp
-        if (timeSinceLastMsg < 3 * 60 * 1000) return false
-
-        // 用户最后一条消息很短（<3字）且不包含疑问，可能只是不想聊
-        if (lastUserMsg.length < 3 && !lastUserMsg.contains(Regex("[?？吗呢什么怎么为什么多少]"))) {
-            return false
-        }
-
-        return true
+        return AiPromptBuilder.shouldProactivelyMessage(companion, recentMessages)
     }
 
     /**
@@ -1126,29 +1190,71 @@ class AiService(context: Context) : AiServiceProvider {
         return "[TOAST]API调用失败：$message"
     }
 
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String =
-        AiPromptBuilder.buildSystemPromptForLocal(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled, role)
+    fun buildSystemPromptForLocal(
+        companion: CompanionModel,
+        memoryContext: String = "",
+        lastUserMessage: String = "",
+        availableStickers: List<String> = emptyList(),
+        stickerProbability: Int = 30,
+        innerThoughtEnabled: Boolean = false,
+        ntpTimeEnabled: Boolean = false,
+        role: CompanionRole = CompanionRole.GIRLFRIEND,
+        phase: ConversationPhase = ConversationPhase.TOPIC,
+        allowEnvAnchor: Boolean = true,
+    ): String =
+        AiPromptBuilder.buildSystemPromptForLocal(
+            companion,
+            memoryContext,
+            lastUserMessage,
+            availableStickers,
+            stickerProbability,
+            innerThoughtEnabled,
+            ntpTimeEnabled,
+            role,
+            phase,
+            allowEnvAnchor,
+        )
 
-    // [P2-1] buildProactiveSystemPrompt 副本签名与 AiPromptBuilder 不同（含 settings: ProactiveMessageSettings?），
-    // AiPromptBuilder 版用 role 参数。保留此副本避免行为漂移，仅内部调用委托到 AiContextTools/AiPromptBuilder。
-    private fun buildProactiveSystemPrompt(companion: CompanionModel, memoryContext: String = "", settings: ProactiveMessageSettings? = null): String {
-        val role = CompanionRole.GIRLFRIEND  // 主动消息固定 GIRLFRIEND 角色（原副本行为）
-        // 根据自定义设置注入话题策略（AiPromptBuilder 版无此逻辑，此处保留差异）
-        val topicRule = when {
-            settings == null -> ""
-            !settings.allowNewTopic -> "\n=== 话题策略（重要）===\n你必须承接上一条话题继续聊，禁止主动开启全新话题。如果不知道说什么，就围绕用户最近提到的内容延伸或追问。\n"
-            else -> ""
+    /**
+     * 主动消息 system prompt：统一委托 [AiPromptBuilder]。
+     * 话题是否承接由性格/兴趣/完结度决定，settings 仅作软偏好。
+     */
+    private fun buildProactiveSystemPrompt(
+        companion: CompanionModel,
+        memoryContext: String = "",
+        settings: ProactiveMessageSettings? = null,
+        allowEnvAnchor: Boolean = true,
+    ): String {
+        return AiPromptBuilder.buildProactiveSystemPrompt(
+            companion = companion,
+            memoryContext = memoryContext,
+            settings = settings,
+            role = CompanionRole.GIRLFRIEND,
+            allowEnvAnchor = allowEnvAnchor,
+        )
+    }
+
+    /** DataStore 冷却 + 最近 AI 文本扫描，决定本轮是否允许环境锚点。 */
+    private suspend fun resolveAllowEnvAnchor(
+        companionId: Long,
+        history: List<ChatMessage>,
+    ): Boolean {
+        val recentAi = history
+            .asReversed()
+            .asSequence()
+            .filter { !it.isFromUser }
+            .take(ChatConstants.ENV_ANCHOR_RECENT_LOOKBACK)
+            .map { it.content }
+            .toList()
+        return envAnchorStore.allowEnvAnchor(companionId, recentAi)
+    }
+
+    /** 若本轮输出含环境关心，写入 lastEnvAnchorAt。 */
+    private suspend fun maybeMarkEnvAnchor(companionId: Long, text: String) {
+        if (EnvAnchorCooldown.looksLikeEnvCare(text)) {
+            envAnchorStore.markEnvAnchor(companionId)
+            SecureLog.d("AiService", "Marked env anchor companion=$companionId")
         }
-        val followUpHint = if (settings != null && !settings.allowFollowUpMessage) {
-            "\n注意：本次不要追加追问句，说完核心内容即可。\n"
-        } else ""
-        // 委托 AiPromptBuilder 构建主体，再插入 topicRule/followUpHint
-        val base = AiPromptBuilder.buildProactiveSystemPrompt(companion, memoryContext, role = role)
-        // AiPromptBuilder 版已含 persona+memory+timeContext+personaRules，此处需在 memory 后插入策略
-        // 简化：若 topicRule/followUpHint 非空，追加到末尾（语义等价，不影响主流程）
-        return if (topicRule.isNotBlank() || followUpHint.isNotBlank()) {
-            base + "\n" + topicRule + followUpHint
-        } else base
     }
 
     /**
@@ -1181,6 +1287,9 @@ class AiService(context: Context) : AiServiceProvider {
      */
     private suspend fun resolveKeysWithPartnerFallback(config: ApiConfig): Pair<Int, List<String>> {
         val (startIdx, keys) = selectApiKey(config)
+        if (config.provider == ApiProvider.PARTNER && !com.lianyu.ai.common.RemoteKeyProvider.isBuiltinCloudAccessAllowed()) {
+            throw IllegalStateException("内置免费云端服务当前不可用")
+        }
         if (keys.isEmpty() && config.provider == ApiProvider.PARTNER) {
             SecureLog.d("AiService", "PARTNER keys empty, fetching from RemoteKeyProvider...")
             val remoteKeys = com.lianyu.ai.common.RemoteKeyProvider.fetchKeysAsync(appContext, forceRefresh = false)
@@ -1197,6 +1306,127 @@ class AiService(context: Context) : AiServiceProvider {
         // 委托到带工具参数的重载，不传工具（保持向后兼容）
         val result = callOpenAiCompatibleWithTools(config, messages, toolsJson = null)
         return Pair(result.first, result.second)
+    }
+
+    /**
+     * OpenAI 兼容 SSE：按行发射 `data:` 文本（含前缀）。
+     * Key 轮询与非流式一致；成功建立流后不再切换 key。
+     */
+    private fun openAiCompatibleSseLineFlow(
+        config: ApiConfig,
+        messages: List<Message>,
+    ): Flow<String> = flow {
+        val safeTemp = config.temperature.coerceIn(0.1f, 1.5f)
+        val baseUrl = normalizeOpenAiBaseUrl(config.baseUrl)
+        val url = "${baseUrl.trimEnd('/')}/chat/completions"
+        val (startIdx, allKeys) = resolveKeysWithPartnerFallback(config)
+        if (allKeys.isEmpty()) throw Exception("没有可用的 API Key")
+
+        val jsonArray = org.json.JSONArray()
+        for (msg in messages) {
+            val msgObj = org.json.JSONObject()
+            msgObj.put("role", msg.role)
+            msgObj.putOpt("content", msg.content)
+            msg.tool_calls?.let { toolCalls ->
+                val tcArray = org.json.JSONArray()
+                for (tc in toolCalls) {
+                    val tcObj = org.json.JSONObject()
+                    tcObj.put("id", tc.id)
+                    tcObj.put("type", tc.type)
+                    val fnObj = org.json.JSONObject()
+                    fnObj.put("name", tc.function.name)
+                    fnObj.put("arguments", tc.function.arguments)
+                    tcObj.put("function", fnObj)
+                    tcArray.put(tcObj)
+                }
+                msgObj.put("tool_calls", tcArray)
+            }
+            msg.tool_call_id?.let { msgObj.put("tool_call_id", it) }
+            jsonArray.put(msgObj)
+        }
+
+        var lastException: Exception? = null
+        for (i in allKeys.indices) {
+            val keyIndex = (startIdx + i) % allKeys.size
+            val currentKey = allKeys[keyIndex]
+            var call: okhttp3.Call? = null
+            try {
+                val jsonBody = org.json.JSONObject()
+                jsonBody.put("model", config.model)
+                jsonBody.put("messages", jsonArray)
+                jsonBody.put("stream", true)
+                if (!requiresFixedTemperature(config.model)) {
+                    jsonBody.put("temperature", safeTemp.toDouble())
+                }
+                val maxTokens = config.maxTokens ?: 800
+                if (maxTokens > 0) {
+                    val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
+                        "max_completion_tokens"
+                    } else {
+                        "max_tokens"
+                    }
+                    jsonBody.put(maxTokensParam, maxTokens)
+                }
+
+                val requestBuilder = okhttp3.Request.Builder()
+                    .url(url)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "text/event-stream")
+                addProviderAuthHeaders(requestBuilder, config, currentKey)
+                val request = requestBuilder
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val client = getStreamingClient(config)
+                call = client.newCall(request)
+                val response = call.execute()
+                val body = response.body
+                if (body == null) {
+                    response.close()
+                    throw Exception("Empty response")
+                }
+
+                if (!response.isSuccessful) {
+                    val errBody = runCatching { body.string() }.getOrDefault("")
+                    response.close()
+                    val errorMsg = if (errBody.trimStart().startsWith("{")) {
+                        runCatching { json.decodeFromString<ChatCompletionResponse>(errBody).error?.message }.getOrNull()
+                    } else null
+                    throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
+                }
+
+                // 部分网关错误页仍 200
+                val peek = body.source().peek()
+                val firstBytes = peek.readUtf8(minOf(16L, peek.request(16L).let { if (it) 16L else peek.buffer.size }))
+                if (firstBytes.trimStart().startsWith("<!") || firstBytes.trimStart().startsWith("<html", ignoreCase = true)) {
+                    response.close()
+                    throw Exception("服务器返回了网页而非API响应 (HTTP ${response.code})，请检查API密钥/地址是否正确")
+                }
+
+                SecureLog.api("HTTP", "stream code=${response.code}, protocol=${response.protocol}")
+                try {
+                    body.source().use { source ->
+                        while (!source.exhausted()) {
+                            val line = source.readUtf8Line() ?: break
+                            emit(line)
+                        }
+                    }
+                } finally {
+                    response.close()
+                }
+                return@flow
+            } catch (e: CancellationException) {
+                call?.cancel()
+                throw e
+            } catch (e: Exception) {
+                call?.cancel()
+                lastException = e
+                markKeyFailed(currentKey)
+                SecureLog.w("AiService", "Stream Key #${keyIndex + 1}/${allKeys.size} 失败: ${e.message}")
+                if (i < allKeys.size - 1) continue else throw lastException
+            }
+        }
+        throw lastException ?: Exception("所有 API Key 均请求失败")
     }
 
     /**
@@ -1460,8 +1690,10 @@ class AiService(context: Context) : AiServiceProvider {
             throw Exception(response.error.message ?: "API返回错误")
         }
 
-        return response.content?.firstOrNull()?.text
+        val text = response.content?.firstOrNull()?.text
             ?: throw Exception("API返回空内容")
+        // Anthropic 也可能把思考写进 content；统一剥离后再交给人设后处理
+        return stripThinkingContent(text)
     }
 
     suspend fun callGeminiForTest(config: ApiConfig, messages: List<Message>, systemPrompt: String): String {
@@ -1681,10 +1913,23 @@ class AiService(context: Context) : AiServiceProvider {
                     } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
                     if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
                 }.distinct()
-                val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled = false, role = CompanionRole.GIRLFRIEND)
+                val phase = ConversationPhaseDetector.detect(sortedHistory)
+                val allowEnvAnchor = resolveAllowEnvAnchor(companion.id, sortedHistory)
+                val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(
+                    companion,
+                    memoryContext,
+                    lastUserMessage,
+                    availableStickers,
+                    stickerProbability,
+                    innerThoughtEnabled,
+                    ntpTimeEnabled = ntpTimeEnabled,
+                    role = CompanionRole.GIRLFRIEND,
+                    phase = phase,
+                    allowEnvAnchor = allowEnvAnchor,
+                )
                 val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
 
-                SecureLog.api("VISION", "provider=${config.provider}, model=${config.model}, image=$imagePath")
+                SecureLog.api("VISION", "provider=${config.provider}, model=${config.model}, image=$imagePath, phase=$phase, allowEnv=$allowEnvAnchor")
 
                 try {
                     SecureLog.i("VISION", "Starting image encoding: $imagePath")
@@ -1721,6 +1966,7 @@ class AiService(context: Context) : AiServiceProvider {
                         return@withContext AiResponse("抱歉，我无法继续这个话题。")
                     }
 
+                    maybeMarkEnvAnchor(companion.id, cleaned)
                     AiResponse(cleaned)
                 } catch (e: java.net.SocketTimeoutException) {
                     SecureLog.e("AiService", "sendMessageWithImage timeout", e)
@@ -2026,6 +2272,168 @@ class AiService(context: Context) : AiServiceProvider {
         return sendMessageWithTools(entity, messages, stickerProbability, ntpTimeEnabled, tools)
     }
 
+    /**
+     * Slice 6：OpenAI 兼容 SSE → [AssistantStreamEvent]。
+     * Anthropic / 配置缺失等降级为非流式终态事件（同一 collect 契约）。
+     */
+    override fun streamMessage(
+        companion: AiCompanionInfo,
+        history: List<AiChatMessage>,
+        stickerProbability: Int,
+        ntpTimeEnabled: Boolean,
+        turnId: TurnId,
+        startedAtMs: Long,
+    ): Flow<AssistantStreamEvent> = flow {
+        try {
+            val entity = companion.toCompanionEntity()
+            val dbHistory = sanitizeDomainHistory(history)
+            val config = resolveConfig()
+            if (config == null) {
+                emit(
+                    AssistantStreamEvent.TurnFailed(
+                        turnId = turnId,
+                        message = "请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。",
+                    )
+                )
+                return@flow
+            }
+            if (config.model.isBlank()) {
+                emit(
+                    AssistantStreamEvent.TurnFailed(
+                        turnId = turnId,
+                        message = "模型名未配置，请在「API设置」中重新测试连接以自动选择模型。",
+                    )
+                )
+                return@flow
+            }
+
+            // Anthropic 等非 SSE：降级非流式终态
+            if (usesAnthropicProtocol(config)) {
+                val response = sendMessage(companion, history, stickerProbability, ntpTimeEnabled)
+                emitAll(
+                    NonStreamingAssistantStreamAdapter.fromCompleted(
+                        turnId = turnId,
+                        reasoning = response.reasoningContent,
+                        content = response.content,
+                        startedAtMs = startedAtMs,
+                        completedAtMs = System.currentTimeMillis(),
+                    )
+                )
+                return@flow
+            }
+
+            val sortedHistory = dbHistory.sortedBy { it.timestamp }
+            val sanitizedHistory = if (config.provider == ApiProvider.PARTNER) {
+                sortedHistory
+            } else {
+                sortedHistory.map { msg ->
+                    if (msg.isFromUser) {
+                        msg.copy(content = com.lianyu.ai.common.safety.DifferentialPrivacyFilter.sanitize(msg.content))
+                    } else {
+                        msg
+                    }
+                }
+            }
+            val lastUserMessage = sanitizedHistory.lastOrNull { it.isFromUser }?.content ?: ""
+            val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
+            val memoryContext = memoryProvider.getMemoryContext(entity.id, null, lastUserMessage, limit = 50)
+            val stickerManager = StickerManager.getInstance(appContext)
+            val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
+                val displayName = sticker.description?.takeIf {
+                    it.isNotBlank() && !it.startsWith("sticker_") && it.length <= 20
+                } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png")
+                    .takeIf { it.isNotBlank() && it.length <= 20 }
+                if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
+            }.distinct()
+            val role = userRepository.selectedRole.value
+            val phase = ConversationPhaseDetector.detect(sanitizedHistory)
+            val allowEnvAnchor = resolveAllowEnvAnchor(entity.id, sanitizedHistory)
+            val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(
+                entity,
+                memoryContext,
+                lastUserMessage,
+                availableStickers,
+                stickerProbability,
+                innerThoughtEnabled,
+                ntpTimeEnabled = ntpTimeEnabled,
+                role = role,
+                phase = phase,
+                allowEnvAnchor = allowEnvAnchor,
+            )
+            val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, entity)
+            val contextConfig = AutoContextManager.ContextConfig(
+                model = config.model,
+                provider = config.provider,
+                maxOutputTokens = config.maxTokens ?: 4096,
+            )
+            val messages = autoContextManager.build(
+                sanitizedHistory,
+                systemPrompt,
+                memoryContext,
+                lastUserMessage,
+                emptyMap(),
+                contextConfig,
+            )
+
+            SecureLog.api(
+                "STREAM",
+                "provider=${config.provider}, model=${config.model}, messages=${messages.size}, phase=$phase, allowEnv=$allowEnvAnchor",
+            )
+
+            val configuredField = runCatching { appSettingsStore.getReasoningResponseField() }
+                .getOrNull()
+                ?.trim()
+                .orEmpty()
+            val reasoningFields = linkedSetOf<String>().apply {
+                if (configuredField.isNotBlank()) add(configuredField)
+                addAll(OpenAiSseChunkParser.DEFAULT_REASONING_FIELDS)
+            }
+
+            val lineFlow = openAiCompatibleSseLineFlow(config, messages)
+            var contentLen = 0
+            var finalCleaned: String? = null
+            emitAll(
+                OpenAiSseStreamAdapter.fromSseLineFlow(
+                    turnId = turnId,
+                    lines = lineFlow,
+                    startedAtMs = startedAtMs,
+                    reasoningFields = reasoningFields,
+                    completedAtMs = { System.currentTimeMillis() },
+                    postProcessText = { raw ->
+                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(raw, sortedHistory)
+                        contentLen = cleaned.length
+                        val safety = ContentFilter.checkOutputSafety(cleaned)
+                        if (!safety.isSafe) {
+                            SecureLog.w(
+                                "AiService",
+                                "Stream output safety violation: ${safety.level} - ${safety.reason}",
+                            )
+                            finalCleaned = null
+                            "抱歉，我无法继续这个话题。"
+                        } else {
+                            finalCleaned = cleaned
+                            cleaned
+                        }
+                    },
+                )
+            )
+            if (contentLen > 0) {
+                recordTokenUsage(entity.id, messages.size, contentLen)
+            }
+            finalCleaned?.let { maybeMarkEnvAnchor(entity.id, it) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SecureLog.e("AiService", "streamMessage failed", e)
+            emit(
+                AssistantStreamEvent.TurnFailed(
+                    turnId = turnId,
+                    message = formatApiException(e).removePrefix("[TOAST]"),
+                )
+            )
+        }
+    }.flowOn(Dispatchers.IO)
+
     /** 领域历史 → DB 实体：先按对话策略清洗，再映射角色 */
     private fun sanitizeDomainHistory(history: List<AiChatMessage>): List<ChatMessage> {
         return com.lianyu.ai.domain.AiDialogueHistoryPolicy
@@ -2067,12 +2475,25 @@ class AiService(context: Context) : AiServiceProvider {
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
                 val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
                 val role = userRepository.selectedRole.value
-                val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(companion, memoryContext, lastUserMessage, emptyList(), stickerProbability, innerThoughtEnabled, ntpTimeEnabled = false, role = role)
+                val phase = ConversationPhaseDetector.detect(sanitizedHistory)
+                val allowEnvAnchor = resolveAllowEnvAnchor(companion.id, sanitizedHistory)
+                val baseSystemPrompt = AiPromptBuilder.buildSystemPrompt(
+                    companion,
+                    memoryContext,
+                    lastUserMessage,
+                    emptyList(),
+                    stickerProbability,
+                    innerThoughtEnabled,
+                    ntpTimeEnabled = ntpTimeEnabled,
+                    role = role,
+                    phase = phase,
+                    allowEnvAnchor = allowEnvAnchor,
+                )
                 val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
                 val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
                 val messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig)
 
-                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, tools=${tools.size}")
+                SecureLog.api("SEND", "provider=${config.provider}, model=${config.model}, messages=${messages.size}, tools=${tools.size}, phase=$phase, allowEnv=$allowEnvAnchor")
 
                 try {
                     val toolsJson = com.lianyu.ai.domain.ToolRegistry.toolDefinitionsJson()
@@ -2114,6 +2535,7 @@ class AiService(context: Context) : AiServiceProvider {
                         return@withContext AiResponse("抱歉，我无法继续这个话题。")
                     }
 
+                    maybeMarkEnvAnchor(companion.id, cleaned)
                     AiResponse(cleaned, reasoning, null, finishReason)
                 } catch (e: Exception) {
                     SecureLog.e("AiService", "sendMessageWithTools failed", e)

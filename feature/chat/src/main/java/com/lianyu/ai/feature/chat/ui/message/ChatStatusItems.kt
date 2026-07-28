@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lianyu.ai.feature.chat.ui.viewmodel.ReasoningUiProjector
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.uicommon.component.CompanionAvatar
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
@@ -130,20 +131,37 @@ fun RegeneratingItem(
 fun ReasoningItem(
     reasoningText: String,
     adaptiveSizing: AdaptiveSizing,
+    companionData: CompanionModel? = null,
+    userAvatar: String? = null,
+    userName: String = "",
     autoCollapse: Boolean = true,
-    isStreaming: Boolean = false
+    isStreaming: Boolean = false,
+    durationMs: Long? = null,
 ) {
     // 流式思考中默认展开；完成后按 autoCollapse 决定是否收起
-    var expanded by remember(reasoningText, autoCollapse, isStreaming) {
+    var expanded by remember(reasoningText, autoCollapse, isStreaming, durationMs) {
         mutableStateOf(if (isStreaming) true else !autoCollapse)
     }
     val colors = AppTheme.colors
     val typography = AppTheme.typography
+    val collapsed = remember(reasoningText, durationMs) {
+        ReasoningUiProjector.collapsedLabel(durationMs = durationMs, text = reasoningText)
+    }
+    val streaming = ReasoningUiProjector.streamingLabel()
 
     ChatMessageFrame(
         isMine = false,
         adaptiveSizing = adaptiveSizing,
-        avatar = { Spacer(modifier = Modifier.size(adaptiveSizing.avatarSize)) },
+        avatar = {
+            // 与普通 AI 消息一致：思考过程行也显示伴侣头像（含点击）
+            ChatMessageAvatar(
+                isMine = false,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                adaptiveSizing = adaptiveSizing,
+            )
+        },
         timestamp = {}
     ) {
         Column {
@@ -153,10 +171,10 @@ fun ReasoningItem(
             ) {
                 Text(
                     text = when {
-                        isStreaming && expanded -> "思考中 ▼"
-                        isStreaming -> "思考中 ▶"
-                        expanded -> "已思考 ▼"
-                        else -> "已思考 ▶"
+                        isStreaming && expanded -> "$streaming ▼"
+                        isStreaming -> "$streaming ▶"
+                        expanded -> "$collapsed ▼"
+                        else -> "$collapsed ▶"
                     },
                     style = typography.labelSmall.copy(fontSize = 12.sp),
                     color = colors.metadataContent

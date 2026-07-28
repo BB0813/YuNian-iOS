@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.Flow
 interface MessageDao {
 
         @Query(
-                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM messages
+                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM messages
                      WHERE conversationId = :conversationId AND conversationType = :type
                          AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId))
                      ORDER BY timestamp DESC, id DESC LIMIT :limit"""
@@ -32,7 +32,7 @@ interface MessageDao {
         ): Flow<List<Message>>
 
         @Query(
-                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM messages
+                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM messages
                      WHERE conversationId = :conversationId AND conversationType = :type
                          AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId))
                      ORDER BY timestamp DESC, id DESC LIMIT :limit"""
@@ -46,7 +46,7 @@ interface MessageDao {
         ): List<Message>
 
         @Query(
-                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM messages
+                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM messages
                      WHERE conversationId = :conversationId AND conversationType = :type
                          AND (timestamp > :afterTimestamp OR (timestamp = :afterTimestamp AND id > :afterId))
                      ORDER BY timestamp ASC, id ASC LIMIT :limit"""
@@ -60,7 +60,7 @@ interface MessageDao {
         ): Flow<List<Message>>
 
         @Query(
-                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM messages
+                """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM messages
                      WHERE conversationId = :conversationId AND conversationType = :type
                          AND (timestamp > :afterTimestamp OR (timestamp = :afterTimestamp AND id > :afterId))
                      ORDER BY timestamp ASC, id ASC LIMIT :limit"""
@@ -73,16 +73,16 @@ interface MessageDao {
                 limit: Int
         ): List<Message>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT :limit")
         fun getRecentMessageMetadata(conversationId: Long, type: String, limit: Int): Flow<List<Message>>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT :limit")
         suspend fun getRecentMessageMetadataSync(conversationId: Long, type: String, limit: Int): List<Message>
 
         @Query("SELECT * FROM message_bodies WHERE messageId IN (:messageIds)")
         suspend fun getMessageBodies(messageIds: List<Long>): List<MessageBody>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
         suspend fun getArchivedMessageMetadataBefore(
             conversationId: Long,
             type: String,
@@ -91,7 +91,7 @@ interface MessageDao {
             limit: Int
         ): List<Message>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND (timestamp > :afterTimestamp OR (timestamp = :afterTimestamp AND id > :afterId)) ORDER BY timestamp ASC, id ASC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND (timestamp > :afterTimestamp OR (timestamp = :afterTimestamp AND id > :afterId)) ORDER BY timestamp ASC, id ASC LIMIT :limit")
         suspend fun getArchivedMessageMetadataAfter(
             conversationId: Long,
             type: String,
@@ -100,11 +100,11 @@ interface MessageDao {
             limit: Int
         ): List<Message>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE id = :messageId")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE id = :messageId")
         suspend fun getArchivedMessageMetadataById(messageId: Long): Message?
 
                 @Query(
-                        """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat
+                        """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId
                              FROM archived_messages
                              WHERE conversationId = :conversationId AND conversationType = :type
                                  AND EXISTS (
@@ -130,7 +130,7 @@ interface MessageDao {
             searchArchivedMessageMetadataByMatch(conversationId, type, matchQuery, limit)
         } ?: emptyList()
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND fileFormat = :fileFormat ORDER BY timestamp DESC, id DESC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND fileFormat = :fileFormat ORDER BY timestamp DESC, id DESC LIMIT :limit")
         suspend fun getArchivedMessageMetadataByFileFormat(
             conversationId: Long,
             type: String,
@@ -138,7 +138,7 @@ interface MessageDao {
             limit: Int
         ): List<Message>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND fileFormat = :fileFormat AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND fileFormat = :fileFormat AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
         suspend fun getArchivedMessageMetadataByFileFormatBefore(
             conversationId: Long,
             type: String,
@@ -148,17 +148,17 @@ interface MessageDao {
             limit: Int
         ): List<Message>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT 1")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT 1")
         suspend fun getLastArchivedMessageMetadata(conversationId: Long, type: String): Message?
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT :limit")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp DESC, id DESC LIMIT :limit")
         suspend fun getRecentArchivedMessageMetadata(
             conversationId: Long,
             type: String,
             limit: Int
         ): List<Message>
 
-        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp ASC, id ASC")
+        @Query("SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type ORDER BY timestamp ASC, id ASC")
         suspend fun getAllArchivedMessageMetadata(
             conversationId: Long,
             type: String
@@ -437,7 +437,7 @@ interface MessageDao {
     }
 
     @Query(
-        """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat
+        """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId
            FROM messages
            WHERE id IN (
                SELECT id FROM messages
@@ -532,4 +532,52 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM archived_messages WHERE conversationId = :conversationId AND conversationType = :type AND isFromUser = 0")
     suspend fun getArchivedAiMessageCount(conversationId: Long, type: String): Int
+
+    // ── Timeline (Slice 2) ──
+
+    @Query(
+        """SELECT * FROM messages
+           WHERE turnId = :turnId
+           ORDER BY eventIndex ASC, id ASC"""
+    )
+    @Transaction
+    suspend fun getMessagesByTurnId(turnId: String): List<StoredMessage>
+
+    @Query(
+        """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId
+           FROM archived_messages
+           WHERE turnId = :turnId
+           ORDER BY eventIndex ASC, id ASC"""
+    )
+    suspend fun getArchivedMessageMetadataByTurnId(turnId: String): List<Message>
+
+    @Query(
+        """SELECT * FROM messages
+           WHERE conversationId = :conversationId AND conversationType = :conversationType
+             AND type IN (:types)
+           ORDER BY timestamp DESC, id DESC
+           LIMIT :limit"""
+    )
+    @Transaction
+    suspend fun getRecentMessagesByTypes(
+        conversationId: Long,
+        conversationType: String,
+        types: List<com.lianyu.ai.database.model.MessageType>,
+        limit: Int
+    ): List<StoredMessage>
+
+    @Query(
+        """SELECT id, conversationId, conversationType, isFromUser, senderId, timestamp, type, fileFormat, turnId, eventIndex, durationMs, anchorMessageId
+           FROM archived_messages
+           WHERE conversationId = :conversationId AND conversationType = :conversationType
+             AND type IN (:types)
+           ORDER BY timestamp DESC, id DESC
+           LIMIT :limit"""
+    )
+    suspend fun getRecentArchivedMessageMetadataByTypes(
+        conversationId: Long,
+        conversationType: String,
+        types: List<com.lianyu.ai.database.model.MessageType>,
+        limit: Int
+    ): List<Message>
 }

@@ -21,6 +21,8 @@ import com.lianyu.ai.database.dao.MessageDao
 import com.lianyu.ai.database.dao.QuizQuestionDao
 import com.lianyu.ai.database.dao.TokenUsageDao
 import com.lianyu.ai.database.dao.UnifiedMemoryDao
+import com.lianyu.ai.database.dao.WeChatInboxDedupeDao
+import com.lianyu.ai.database.dao.WeChatOutboxDao
 import com.lianyu.ai.database.model.ApiConfig
 import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.ApiProviderPreset
@@ -45,6 +47,8 @@ import com.lianyu.ai.database.model.MessageSearchIndex
 import com.lianyu.ai.database.model.QuizQuestionEntity
 import com.lianyu.ai.database.model.TempMemory
 import com.lianyu.ai.database.model.TokenUsage
+import com.lianyu.ai.database.model.WeChatInboxDedupeEntity
+import com.lianyu.ai.database.model.WeChatOutboxEntity
 import com.lianyu.ai.database.repository.MessageSearchTokenizer
 import java.io.File
 
@@ -66,9 +70,11 @@ import java.io.File
         MessageBody::class,
         ArchivedMessage::class,
         ArchivedMessageBody::class,
-        MessageSearchIndex::class
+        MessageSearchIndex::class,
+        WeChatOutboxEntity::class,
+        WeChatInboxDedupeEntity::class,
     ],
-    version = 34,
+    version = 37,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -85,6 +91,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun diaryDao(): DiaryDao
     abstract fun conversationSummaryDao(): ConversationSummaryDao
     abstract fun messageDao(): MessageDao
+    abstract fun weChatOutboxDao(): WeChatOutboxDao
+    abstract fun weChatInboxDedupeDao(): WeChatInboxDedupeDao
 
     companion object {
         private const val DB_NAME = "lianyu_database"
@@ -1284,6 +1292,152 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v35: 助手时间线元数据列（turnId / eventIndex / durationMs / anchorMessageId）。
+         * MessageType.REASONING 为枚举扩展，无需改表结构。
+         */
+        val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                addColumnIfMissing(db, "messages", "turnId", "TEXT")
+                addColumnIfMissing(db, "messages", "eventIndex", "INTEGER")
+                addColumnIfMissing(db, "messages", "durationMs", "INTEGER")
+                addColumnIfMissing(db, "messages", "anchorMessageId", "INTEGER")
+                addColumnIfMissing(db, "archived_messages", "turnId", "TEXT")
+                addColumnIfMissing(db, "archived_messages", "eventIndex", "INTEGER")
+                addColumnIfMissing(db, "archived_messages", "durationMs", "INTEGER")
+                addColumnIfMissing(db, "archived_messages", "anchorMessageId", "INTEGER")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_messages_turn` ON `messages` (`turnId` ASC, `eventIndex` ASC, `id` ASC)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `idx_archived_messages_turn` ON `archived_messages` (`turnId` ASC, `eventIndex` ASC, `id` ASC)"
+                )
+            }
+        }
+
+        /**
+         * v36: 微信通道 Outbox / Inbox 去重表（S1+S2）。
+         */
+        val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `wechat_outbox` (
+                        `id` TEXT NOT NULL,
+                        `rootId` TEXT NOT NULL,
+                        `companionId` INTEGER NOT NULL,
+                        `wechatUserId` TEXT NOT NULL,
+                        `kind` INTEGER NOT NULL,
+                        `text` TEXT,
+                        `mediaLocalPath` TEXT,
+                        `mediaFileName` TEXT,
+                        `mediaDescription` TEXT,
+                        `segmentIndex` INTEGER NOT NULL,
+                        `segmentCount` INTEGER NOT NULL,
+                        `contextToken` TEXT,
+                        `sourceMessageId` INTEGER,
+                        `status` TEXT NOT NULL,
+                        `retryCount` INTEGER NOT NULL,
+                        `nextAttemptAtMs` INTEGER NOT NULL,
+                        `lastError` TEXT,
+                        `createdAtMs` INTEGER NOT NULL,
+                        `updatedAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_wechat_outbox_status_nextAttemptAtMs` ON `wechat_outbox` (`status`, `nextAttemptAtMs`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_wechat_outbox_wechatUserId_status` ON `wechat_outbox` (`wechatUserId`, `status`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_wechat_outbox_rootId` ON `wechat_outbox` (`rootId`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_wechat_outbox_companionId` ON `wechat_outbox` (`companionId`)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `wechat_inbox_dedupe` (
+                        `dedupeKey` TEXT NOT NULL,
+                        `messageId` INTEGER,
+                        `fromUserId` TEXT NOT NULL,
+                        `processedAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`dedupeKey`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_wechat_inbox_dedupe_processedAtMs` ON `wechat_inbox_dedupe` (`processedAtMs`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_wechat_inbox_dedupe_fromUserId` ON `wechat_inbox_dedupe` (`fromUserId`)",
+                )
+            }
+        }
+
+        /** v37: remove persisted WeChat context tokens from the plaintext Room database. */
+        val MIGRATION_36_37 = object : Migration(36, 37) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.query("PRAGMA secure_delete = ON").use { cursor ->
+                    cursor.moveToFirst()
+                }
+                db.execSQL(
+                    """
+                    CREATE TABLE `wechat_outbox_new` (
+                        `id` TEXT NOT NULL,
+                        `rootId` TEXT NOT NULL,
+                        `companionId` INTEGER NOT NULL,
+                        `wechatUserId` TEXT NOT NULL,
+                        `kind` INTEGER NOT NULL,
+                        `text` TEXT,
+                        `mediaLocalPath` TEXT,
+                        `mediaFileName` TEXT,
+                        `mediaDescription` TEXT,
+                        `segmentIndex` INTEGER NOT NULL,
+                        `segmentCount` INTEGER NOT NULL,
+                        `sourceMessageId` INTEGER,
+                        `status` TEXT NOT NULL,
+                        `retryCount` INTEGER NOT NULL,
+                        `nextAttemptAtMs` INTEGER NOT NULL,
+                        `lastError` TEXT,
+                        `createdAtMs` INTEGER NOT NULL,
+                        `updatedAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `wechat_outbox_new` (
+                        `id`, `rootId`, `companionId`, `wechatUserId`, `kind`, `text`,
+                        `mediaLocalPath`, `mediaFileName`, `mediaDescription`, `segmentIndex`,
+                        `segmentCount`, `sourceMessageId`, `status`, `retryCount`,
+                        `nextAttemptAtMs`, `lastError`, `createdAtMs`, `updatedAtMs`
+                    )
+                    SELECT
+                        `id`, `rootId`, `companionId`, `wechatUserId`, `kind`, `text`,
+                        `mediaLocalPath`, `mediaFileName`, `mediaDescription`, `segmentIndex`,
+                        `segmentCount`, `sourceMessageId`, `status`, `retryCount`,
+                        `nextAttemptAtMs`, `lastError`, `createdAtMs`, `updatedAtMs`
+                    FROM `wechat_outbox`
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE `wechat_outbox`")
+                db.execSQL("ALTER TABLE `wechat_outbox_new` RENAME TO `wechat_outbox`")
+                db.execSQL(
+                    "CREATE INDEX `index_wechat_outbox_status_nextAttemptAtMs` ON `wechat_outbox` (`status`, `nextAttemptAtMs`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX `index_wechat_outbox_wechatUserId_status` ON `wechat_outbox` (`wechatUserId`, `status`)",
+                )
+                db.execSQL("CREATE INDEX `index_wechat_outbox_rootId` ON `wechat_outbox` (`rootId`)")
+                db.execSQL("CREATE INDEX `index_wechat_outbox_companionId` ON `wechat_outbox` (`companionId`)")
+            }
+        }
+
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -1390,7 +1544,10 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_30_31,
             MIGRATION_31_32,
             MIGRATION_32_33,
-            MIGRATION_33_34
+            MIGRATION_33_34,
+            MIGRATION_34_35,
+            MIGRATION_35_36,
+            MIGRATION_36_37,
         )
 
         private var lastBackupTime: Long = 0L

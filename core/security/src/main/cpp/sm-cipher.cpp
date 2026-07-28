@@ -2050,13 +2050,15 @@ int sm2_verify(const uint8_t* msg, size_t msglen,
 /* GF(2^128) multiplication for GHASH — simplified using shift + XOR */
 static void gf128_mul(uint8_t r[16], const uint8_t a[16], const uint8_t b[16]) {
     OBF_BARRIER(1924);
+    uint8_t multiplicand[16];
     uint8_t v[16];
+    memcpy(multiplicand, a, 16);
     memcpy(v, b, 16);
     memset(r, 0, 16);
 
     for (int i = 0; i < 128; i++) {
         int byte = i >> 3, bit = 7 - (i & 7);
-        if (a[byte] & (1 << bit)) {
+        if (multiplicand[byte] & (1 << bit)) {
             for (int j = 0; j < 16; j++) r[j] ^= v[j];
         }
         // v = v >> 1, with reduction if LSB was 1
@@ -2082,6 +2084,50 @@ static void sm4_ctr_crypt(const uint8_t* in, uint8_t* out, size_t len,
     }
 }
 
+static void sm4_gcm_compute_tag(const uint8_t* ciphertext, size_t len,
+                                const uint32_t rk[SM4_ROUNDS],
+                                const uint8_t iv[SM4_GCM_IV_SIZE],
+                                const uint8_t* aad, size_t aadlen,
+                                uint8_t tag[SM4_GCM_TAG_SIZE]) {
+    uint8_t H[16], Y[16], tmp[16];
+    memset(H, 0, 16);
+    sm4_encrypt_block(H, rk, H);
+
+    memset(Y, 0, 16);
+    for (size_t i = 0; i < aadlen; i += 16) {
+        size_t chunk = aadlen - i < 16 ? aadlen - i : 16;
+        memset(tmp, 0, 16);
+        memcpy(tmp, aad + i, chunk);
+        for (int j = 0; j < 16; j++) Y[j] ^= tmp[j];
+        gf128_mul(Y, Y, H);
+    }
+    for (size_t i = 0; i < len; i += 16) {
+        size_t chunk = len - i < 16 ? len - i : 16;
+        memset(tmp, 0, 16);
+        memcpy(tmp, ciphertext + i, chunk);
+        for (int j = 0; j < 16; j++) Y[j] ^= tmp[j];
+        gf128_mul(Y, Y, H);
+    }
+
+    uint8_t final[16] = {0};
+    uint64_t aad_bits = (uint64_t)aadlen * 8;
+    uint64_t ct_bits = (uint64_t)len * 8;
+    for (int j = 7; j >= 0; j--) {
+        final[j] = (uint8_t)(aad_bits & 0xFF); aad_bits >>= 8;
+        final[8+j] = (uint8_t)(ct_bits & 0xFF); ct_bits >>= 8;
+    }
+    for (int j = 0; j < 16; j++) Y[j] ^= final[j];
+    gf128_mul(Y, Y, H);
+
+    uint8_t ctr0[16];
+    memcpy(ctr0, iv, 12);
+    memset(ctr0 + 12, 0, 3);
+    ctr0[15] = 1;
+    uint8_t enc0[16];
+    sm4_encrypt_block(ctr0, rk, enc0);
+    for (int j = 0; j < 16; j++) tag[j] = Y[j] ^ enc0[j];
+}
+
 int sm4_gcm_encrypt(const uint8_t* in, uint8_t* out, size_t len,
                     const uint8_t key[SM4_KEY_SIZE],
                     const uint8_t iv[SM4_GCM_IV_SIZE],
@@ -2099,48 +2145,7 @@ int sm4_gcm_encrypt(const uint8_t* in, uint8_t* out, size_t len,
     // Encrypt payload with CTR
     sm4_ctr_crypt(in, out, len, rk, ctr);
 
-    // Compute GHASH
-    uint8_t H[16], Y[16], tmp[16];
-    memset(H, 0, 16);
-    sm4_encrypt_block(H, rk, H); // H = E_K(0)
-
-    memset(Y, 0, 16);
-    // GHASH AAD
-    for (size_t i = 0; i < aadlen; i += 16) {
-        size_t chunk = aadlen - i < 16 ? aadlen - i : 16;
-        memset(tmp, 0, 16);
-        memcpy(tmp, aad + i, chunk);
-        for (int j = 0; j < 16; j++) Y[j] ^= tmp[j];
-        gf128_mul(Y, Y, H);
-    }
-    // GHASH ciphertext
-    for (size_t i = 0; i < len; i += 16) {
-        size_t chunk = len - i < 16 ? len - i : 16;
-        memset(tmp, 0, 16);
-        memcpy(tmp, out + i, chunk);
-        for (int j = 0; j < 16; j++) Y[j] ^= tmp[j];
-        gf128_mul(Y, Y, H);
-    }
-    // Finalize: len(A) || len(C) in bits
-    uint8_t final[16];
-    memset(final, 0, 16);
-    uint64_t aad_bits = (uint64_t)aadlen * 8;
-    uint64_t ct_bits = (uint64_t)len * 8;
-    for (int j = 7; j >= 0; j--) {
-        final[j] = (uint8_t)(aad_bits & 0xFF); aad_bits >>= 8;
-        final[8+j] = (uint8_t)(ct_bits & 0xFF); ct_bits >>= 8;
-    }
-    for (int j = 0; j < 16; j++) Y[j] ^= final[j];
-    gf128_mul(Y, Y, H);
-
-    // Tag = Y XOR E_K(IV || 0x00000001)
-    uint8_t ctr0[16];
-    memcpy(ctr0, iv, 12);
-    memset(ctr0 + 12, 0, 3);
-    ctr0[15] = 1;
-    uint8_t enc0[16];
-    sm4_encrypt_block(ctr0, rk, enc0);
-    for (int j = 0; j < 16; j++) tag[j] = Y[j] ^ enc0[j];
+    sm4_gcm_compute_tag(out, len, rk, iv, aad, aadlen, tag);
 
     return 0;
 }
@@ -2150,10 +2155,11 @@ int sm4_gcm_decrypt(const uint8_t* in, uint8_t* out, size_t len,
                     const uint8_t iv[SM4_GCM_IV_SIZE],
                     const uint8_t* aad, size_t aadlen,
                     const uint8_t tag[SM4_GCM_TAG_SIZE]) {
-    // Compute expected tag
+    uint32_t rk[SM4_ROUNDS];
+    sm4_key_schedule(key, rk);
+
     uint8_t expected_tag[SM4_GCM_TAG_SIZE];
-    // For tag computation, use ciphertext as "input"
-    sm4_gcm_encrypt(in, out, len, key, iv, aad, aadlen, expected_tag);
+    sm4_gcm_compute_tag(in, len, rk, iv, aad, aadlen, expected_tag);
 
     // Constant-time tag comparison
     uint8_t diff = 0;
@@ -2164,9 +2170,7 @@ int sm4_gcm_decrypt(const uint8_t* in, uint8_t* out, size_t len,
         return -1;
     }
 
-    // Actually decrypt (CTR mode is symmetric)
-    uint32_t rk[SM4_ROUNDS];
-    sm4_key_schedule(key, rk);
+    // CTR mode is symmetric.
     uint8_t ctr[16];
     memcpy(ctr, iv, 12);
     memset(ctr + 12, 0, 3);

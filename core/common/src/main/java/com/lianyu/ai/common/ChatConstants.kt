@@ -301,17 +301,23 @@ object ChatConstants {
     /** 主动消息时间间隙：长阈值（分钟） */
     const val PROACTIVE_GAP_LONG_MINUTES = 60
 
-    /** AI 回复后处理：最大短句数 */
-    const val POST_PROCESS_MAX_SENTENCES = 8
+    /**
+     * AI 回复后处理：最大短句数（硬上限）。
+     * 软偏好约 6–8 句；硬上限封顶防刷屏，由软长度策略共同约束总回复规模。
+     */
+    const val POST_PROCESS_MAX_SENTENCES = 10
 
-    /** AI 回复后处理：长截断阈值（字符） */
-    const val POST_PROCESS_LONG_CUT_THRESHOLD = 150
+    /**
+     * AI 回复后处理：长截断阈值（字符，硬上限）。
+     * 软偏好整轮约 40–180 字；超过此硬阈值才截断，避免无约束长文。
+     */
+    const val POST_PROCESS_LONG_CUT_THRESHOLD = 360
 
     /** AI 回复后处理：长截断候选长度（字符） */
-    const val POST_PROCESS_CUT_CANDIDATE_LENGTH = 120
+    const val POST_PROCESS_CUT_CANDIDATE_LENGTH = 300
 
     /** AI 回复后处理：截断点最小有效位置 */
-    const val POST_PROCESS_CUT_MIN_POSITION = 20
+    const val POST_PROCESS_CUT_MIN_POSITION = 40
 
     /** AI 回复后处理：回声检测用户消息最小长度 */
     const val ECHO_MIN_USER_LENGTH = 4
@@ -355,14 +361,14 @@ object ChatConstants {
     /** 本地模型最小回复长度阈值 */
     const val LOCAL_MIN_RESPONSE_LENGTH = 20
 
-    /** 人格规则默认回复短句数上限 */
-    const val PERSONA_MAX_SENTENCES = 5
+    /** 人格规则默认回复短句数上限（软引导，非硬截断） */
+    const val PERSONA_MAX_SENTENCES = 12
 
-    /** 人格规则默认回复字数下限 */
-    const val PERSONA_MIN_CHARS = 15
+    /** 人格规则默认回复字数下限（软引导，允许更短） */
+    const val PERSONA_MIN_CHARS = 1
 
-    /** 人格规则默认回复字数上限 */
-    const val PERSONA_MAX_CHARS = 50
+    /** 人格规则默认回复字数上限（软引导，需要时可更长） */
+    const val PERSONA_MAX_CHARS = 300
 
     /** 高贴纸概率阈值（%） */
     const val STICKER_PROBABILITY_HIGH = 80
@@ -372,5 +378,30 @@ object ChatConstants {
 
     /** 低贴纸概率阈值（%） */
     const val STICKER_PROBABILITY_LOW = 20
+
+    // ── 对话时序 / 环境注意力 ──
+    /**
+     * 会话重开间隔（毫秒）。
+     * 距上一条消息超过此时长，视为新会话 OPENING（允许一次环境锚点）。
+     */
+    const val CONVERSATION_REOPEN_GAP_MS = 2L * 60L * 60L * 1000L // 2 小时
+
+    /**
+     * 判定「本会话窗口」时，向前回溯的最大消息条数。
+     * 仅用于阶段检测，不替代上下文压缩。
+     */
+    const val CONVERSATION_PHASE_LOOKBACK = 40
+
+    /**
+     * 环境关心（睡/吃/到家/报时类）冷却窗（毫秒）。
+     * 同一 companion 在冷却窗内禁止重复主动环境锚点，避免主动消息「循环 BGM」。
+     * 与 [CONVERSATION_REOPEN_GAP_MS] 对齐：长间隔重开可再轻提一次。
+     */
+    const val ENV_ANCHOR_COOLDOWN_MS = 2L * 60L * 60L * 1000L // 2 小时
+
+    /**
+     * 扫描最近 AI 消息是否已含环境关心时的回溯条数。
+     */
+    const val ENV_ANCHOR_RECENT_LOOKBACK = 8
 }
 

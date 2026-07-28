@@ -227,6 +227,12 @@ int zero_trust_is_write_allowed(zt_module_id_t module);
 int zero_trust_start_continuous_eval(void);
 
 /**
+ * Wait for the first background evaluation to establish the initial state.
+ * Returns 0 on completion and -1 on timeout.
+ */
+int zero_trust_wait_for_initial_evaluation(uint32_t timeout_ms);
+
+/**
  * Stop the continuous evaluation loop.
  * Signals the background thread to exit and joins it.
  */

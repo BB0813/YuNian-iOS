@@ -8,8 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.lianyu.ai.database.AppDatabase
-import com.lianyu.ai.common.wechat.WeChatBroadcast
-import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
+import com.lianyu.ai.domain.wechat.WeChatProactiveSync
 import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.MessageBodyState
 import com.lianyu.ai.common.text.MessageSegmenter
@@ -1067,16 +1066,14 @@ class GroupChatViewModel(
     }
 
     private fun broadcastWeChatMessage(companionId: Long, messageId: Long) {
-        WeChatBroadcastHelper.broadcast(getApplication(), companionId, messageId)
-        Log.d("GroupChatViewModel", "Broadcast WeChat proactive message, companionId=$companionId, messageId=$messageId")
+        WeChatProactiveSync.enqueue(companionId, messageId)
+        Log.d("GroupChatViewModel", "Enqueue WeChat proactive message, companionId=$companionId, messageId=$messageId")
     }
 
     private fun cleanAiReply(raw: String, companionName: String? = null): String {
-        var text = raw
+        var text = com.lianyu.ai.network.ResponsePostProcessor.stripThinkingContent(raw)
         val rolePrefixRegex = Regex("(?m)^\\s*\\[(?:角色\\d+|[^\\[\\]]+?)\\]\\s*")
         text = rolePrefixRegex.replace(text, "")
-        val thinkRegex = Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>")
-        text = thinkRegex.replace(text, "")
         val encRegex = Regex("(?m)^enc:\\S+$")
         text = encRegex.replace(text, "")
 

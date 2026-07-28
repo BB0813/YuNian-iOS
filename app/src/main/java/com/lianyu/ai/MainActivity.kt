@@ -282,6 +282,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // 前后台由 AppForegroundTracker + ProcessLifecycleOwner 统一维护
+        // 回到前台时补拉微信通道（FGS 被系统掐断后的自愈）
+        appScope.launch(Dispatchers.IO) {
+            runCatching {
+                com.lianyu.ai.feature.wechat.service.WeChatChannelKeeper.ensureRunning(applicationContext)
+            }
+        }
         window.decorView.post {
             SystemBarController.applySystemBars(this)
             val savedRate = FrameRateManager.getSavedFrameRate(this)

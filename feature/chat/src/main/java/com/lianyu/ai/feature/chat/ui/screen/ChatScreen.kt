@@ -118,7 +118,6 @@ import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.feature.chat.ui.message.ChatListItemRenderer
-import com.lianyu.ai.feature.chat.ui.message.ReasoningItem
 import com.lianyu.ai.feature.chat.ui.message.RegeneratingItem
 import com.lianyu.ai.feature.chat.ui.message.TypingIndicatorItem
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
@@ -283,8 +282,11 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val messageMetadata by viewModel.messageMetadata.collectAsStateWithLifecycle()
     val messageBodies by viewModel.messageBodies.collectAsStateWithLifecycle()
-    val chatItems = remember(messageMetadata, messageBodies) {
-        toChatListItems(messageMetadata, messageBodies)
+    val appSettingsStore = remember(context) { com.lianyu.ai.common.AppSettingsStore(context) }
+    val showReasoning by appSettingsStore.showReasoningFlow.collectAsStateWithLifecycle(initialValue = false)
+    val autoCollapseReasoning by appSettingsStore.autoCollapseReasoningFlow.collectAsStateWithLifecycle(initialValue = true)
+    val chatItems = remember(messageMetadata, messageBodies, showReasoning) {
+        toChatListItems(messageMetadata, messageBodies, showReasoning = showReasoning)
     }
     // 时间正序图片列表：配合 reverseLayout 实现「左滑上一张、右滑下一张」
     val chatImagePaths = remember(chatItems) {
@@ -304,12 +306,8 @@ fun ChatScreen(
     val isTyping by viewModel.isTyping.collectAsStateWithLifecycle()
     val typingText by viewModel.typingText.collectAsStateWithLifecycle()
     val isRegenerating by viewModel.isRegenerating.collectAsStateWithLifecycle()
-    val isReasoning by viewModel.isReasoning.collectAsStateWithLifecycle()
-    val reasoningText by viewModel.reasoningText.collectAsStateWithLifecycle()
     val availableApis by viewModel.availableApis.collectAsStateWithLifecycle()
     val currentApi by viewModel.currentApi.collectAsStateWithLifecycle()
-    val appSettingsStore = remember(context) { com.lianyu.ai.common.AppSettingsStore(context) }
-    val autoCollapseReasoning by appSettingsStore.autoCollapseReasoningFlow.collectAsStateWithLifecycle(initialValue = true)
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
@@ -358,11 +356,11 @@ fun ChatScreen(
     var initialBottomScrollSettled by remember { mutableStateOf(false) }
 
     // LazyColumn 实际 item 总数（与 LazyColumn 内部 item 声明保持一致）
+    // 思考过程已并入 chatItems（消息链路），不再额外 +1
     val itemCount = chatItems.size +
         (if (isLoadingMore) 1 else 0) +
         (if (isTyping) 1 else 0) +
-        (if (isRegenerating) 1 else 0) +
-        (if (isReasoning && reasoningText.isNotBlank()) 1 else 0)
+        (if (isRegenerating) 1 else 0)
 
     // 列表状态始终存在；空消息列表时不显示转圈，而是正常展示输入栏
     val listState = remember { LazyListState() }
@@ -464,9 +462,12 @@ fun ChatScreen(
         }
     }
 
-    // AI 深度推理时持续滚动到底部（reasoningText 变化但消息数不变）
-    LaunchedEffect(reasoningText) {
-        if (reasoningText.isNotBlank() && wasAtBottom) {
+    // 流式思考过程走消息列表：chatItems 变化时若在底部则贴底
+    val streamingReasoningActive = remember(chatItems) {
+        chatItems.any { it is ChatListItem.ReasoningMessage && it.isStreaming }
+    }
+    LaunchedEffect(streamingReasoningActive, chatItems.lastOrNull()?.stableId) {
+        if (streamingReasoningActive && wasAtBottom) {
             listState.scrollToItem(0)
         }
     }
@@ -690,18 +691,6 @@ fun ChatScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (isReasoning && reasoningText.isNotBlank()) {
-                        item(key = "reasoning_indicator") {
-                            ReasoningItem(
-                                reasoningText = reasoningText,
-                                adaptiveSizing = adaptiveSizing,
-                                autoCollapse = autoCollapseReasoning,
-                                // loading/typing 期间视为思考流式阶段，默认展开
-                                isStreaming = isLoading || isTyping
-                            )
-                        }
-                    }
-
                     if (isRegenerating) {
                         item(key = "regenerating_indicator") {
                             RegeneratingItem(
@@ -737,7 +726,8 @@ fun ChatScreen(
                             isDarkTheme = isDarkTheme,
                             onRetryBody = viewModel::retryMessageBody,
                             onCompanionAvatarClick = { onNavigateToDetail(companionId) },
-                            onUserAvatarClick = onNavigateToUserProfile
+                            onUserAvatarClick = onNavigateToUserProfile,
+                            autoCollapseReasoning = autoCollapseReasoning,
                         )
                     }
 

@@ -22,9 +22,12 @@ data class ProactiveMessageSettings(
     val proactiveMaxIntervalMinutes: Int = 720,
     /** 每日主动消息上限，0 表示不限 */
     val proactiveDailyLimit: Int = 6,
-    /** 是否允许 AI 主动开启新话题（false=必须承接上一话题） */
+    /**
+     * 是否偏好允许开启新话题（软约束）。
+     * false：尽量围绕近期对话延伸，但若话题已完结/角色不感兴趣，仍可自然收束或轻转，禁止硬续。
+     */
     val allowNewTopic: Boolean = true,
-    /** 是否允许在主动消息后追问 */
+    /** 是否偏好允许追问（软约束）。false：尽量少连环追问，仍服从角色性格。 */
     val allowFollowUpMessage: Boolean = true,
     /** 免打扰开关 */
     val doNotDisturbEnabled: Boolean = false,

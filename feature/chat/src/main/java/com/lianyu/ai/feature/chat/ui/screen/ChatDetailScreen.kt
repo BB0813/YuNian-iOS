@@ -228,6 +228,7 @@ fun ChatDetailScreen(
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
                 SettingsToggleRow(
                     title = "允许主动开启新话题",
+                    subtitle = "关闭后更倾向延续近期话题；话题已完结时仍可自然收束，不会硬续",
                     checked = settings.allowNewTopic,
                     onCheckedChange = { checked ->
                         settingsViewModel.updateSettings { it.copy(allowNewTopic = checked) }
@@ -244,6 +245,7 @@ fun ChatDetailScreen(
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
                 SettingsToggleRow(
                     title = "允许连续追问",
+                    subtitle = "关闭后尽量少连环追问，仍服从角色性格",
                     checked = settings.allowFollowUpMessage,
                     onCheckedChange = { checked ->
                         settingsViewModel.updateSettings { it.copy(allowFollowUpMessage = checked) }

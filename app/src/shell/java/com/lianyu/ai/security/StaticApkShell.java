@@ -93,11 +93,6 @@ public class StaticApkShell extends Application {
         runSecurityRuntimeInit();
         long runtimeDone = SystemClock.elapsedRealtimeNanos();
         stageLog("onCreate.runtime", runtimeDone - preflightDone);
-        if (!canStartLocalBusiness()) {
-            Log.e(TAG, "BLOCK business init: hard auth failed");
-            persistBusinessBlocked(businessStarted);
-            return;
-        }
         if (realApplication != null) {
             long wmStarted = SystemClock.elapsedRealtimeNanos();
             initializeWorkManager();

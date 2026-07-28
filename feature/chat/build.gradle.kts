@@ -47,4 +47,7 @@ dependencies {
     // sherpa-onnx: 离线语音识别引擎 (v1.13.3)
     // compileOnly: library 模块不能打包 AAR，运行时由 app 模块提供
     compileOnly(files("libs/sherpa-onnx-1.13.3.aar"))
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.core)
 }

@@ -27,6 +27,8 @@ android {
 dependencies {
     api(project(":core:common"))
     api(project(":core:security"))
+    // TimelineStore 端口与事件契约（零 UI 依赖）
+    api(project(":core:domain"))
     api(libs.androidx.room.runtime)
     api(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

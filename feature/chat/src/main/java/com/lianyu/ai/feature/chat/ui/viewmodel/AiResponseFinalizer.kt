@@ -10,18 +10,24 @@ import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.common.safety.SafetyScore
 import com.lianyu.ai.common.safety.ScoreSource
 import com.lianyu.ai.common.text.MessageSegmenter
-import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
+import com.lianyu.ai.domain.wechat.WeChatProactiveSync
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.MemoryProvider
+import com.lianyu.ai.domain.ServiceRegistry
+import com.lianyu.ai.domain.timeline.ConversationRef
+import com.lianyu.ai.domain.timeline.TimelineStore
 import com.lianyu.ai.feature.chat.data.ChatContextResolver
 import com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore
+import com.lianyu.ai.feature.chat.timeline.EventCommitRules
+import com.lianyu.ai.feature.chat.timeline.PendingTurn
+import com.lianyu.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
+import com.lianyu.ai.feature.chat.timeline.TurnCommitCoordinator
 import com.lianyu.ai.feature.chat.voice.ChatTtsController
 import com.lianyu.ai.common.AppSettingsStore
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
@@ -31,10 +37,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * AI 回复落地处理器（从 ChatViewModel 抽取，方案B：独立类 + 委托存根）。
  *
  * 职责链：
- * 1. reasoning 展示
+ * 1. PendingTurn 思考过程投影 + 终态落库（TimelineStore）
  * 2. 表情包标签处理
  * 3. L1+L2 关键词/向量安全检查 → 贝叶斯模型输出校验（fail-closed）
- * 4. 分段发送（模拟真人连续发消息）
+ * 4. 分段发送（模拟真人连续发消息，附 turn 元数据）
  * 5. 微信广播
  * 6. 记忆提取
  * 7. 连续追问（概率触发）
@@ -49,12 +55,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * @param contextResolver 上下文解析（追问用）
  * @param aiService AI 服务（追问调用 generateFollowUpQuestion）
  * @param applicationApiScope 应用级作用域（追问异步发起）
- * @param reasoningText reasoning 文本 StateFlow（引用，非值拷贝）
- * @param isReasoning reasoning 显示开关 StateFlow（引用）
  * @param turnState 单轮状态（表情包互斥、stale sticker）
  * @param chatTtsController TTS 控制器（自动朗读）
  * @param application Application（用于微信广播）
  * @param questionRegex 问句正则（追问触发判断）
+ * @param turnCommit 回合提交协调器；null 时从 ServiceRegistry 懒取
  */
 class AiResponseFinalizer(
     private val companionId: Long,
@@ -67,13 +72,18 @@ class AiResponseFinalizer(
     private val contextResolver: ChatContextResolver,
     private val aiService: AiServiceProvider,
     private val applicationApiScope: CoroutineScope,
-    private val reasoningText: MutableStateFlow<String>,
-    private val isReasoning: MutableStateFlow<Boolean>,
     private val turnState: ChatTurnState,
     private val chatTtsController: ChatTtsController,
     private val application: Application,
     private val questionRegex: Regex,
+    private val turnCommit: TurnCommitCoordinator? = null,
 ) {
+    private val commitCoordinator: TurnCommitCoordinator by lazy {
+        turnCommit ?: TurnCommitCoordinator(
+            timelineStore = ServiceRegistry.getOrThrow(TimelineStore::class.java),
+            messageWriter = messageWriter,
+        )
+    }
     /**
      * 消息落地结果：UI 可见消息与后处理所需上下文分离。
      * loading/typing 只覆盖「网络等待 + 分段投递」，不覆盖记忆/追问/TTS。
@@ -107,28 +117,83 @@ class AiResponseFinalizer(
     }
 
     /**
-     * 仅负责：reasoning 展示、表情包、分段入库、微信广播。
+     * 仅负责：PendingTurn 思考投影/落库、表情包、分段入库、微信广播。
      * 返回后消息已对用户可见，调用方应立即结束 loading/typing。
+     *
+     * @param pendingTurn 本轮内存态；null 时自动创建（兼容旧调用方）
+     * @param reasoningStartedAtMs 思考开始时间；用于 durationMs
      */
     suspend fun deliverResponse(
         aiContent: String,
         reasoning: String?,
         userContentForMemory: String? = null,
-        logMessage: String = "AI response received"
+        logMessage: String = "AI response received",
+        pendingTurn: PendingTurn? = null,
+        reasoningStartedAtMs: Long? = null,
     ): DeliveredResponse {
         val showReasoning = appSettingsStore.getShowReasoning()
-        val autoCollapse = appSettingsStore.getAutoCollapseReasoning()
-        if (!reasoning.isNullOrBlank() && showReasoning) {
-            isReasoning.value = true
-            reasoningText.value = reasoning
-        } else {
-            // 关闭显示时确保不残留上一轮思考气泡
-            reasoningText.value = ""
-            isReasoning.value = false
+        val turn = pendingTurn ?: PendingTurn.start(
+            conversation = ConversationRef(conversationId = companionId, conversationType = "chat"),
+            startedAtMs = reasoningStartedAtMs ?: System.currentTimeMillis(),
+        )
+        // Slice 5：流适配器可能已 completeReasoning；未完成时再写入缓冲
+        if (EventCommitRules.shouldPersistReasoning(reasoning) && !turn.isReasoningComplete) {
+            turn.replaceReasoningText(reasoning!!.trim())
+        }
+
+        // 非流式/兼容入口：终态前先把思考投影到消息链路（L1），与 SSE 路径一致
+        if (EventCommitRules.shouldProjectReasoningLive(showReasoning, reasoning)) {
+            StreamingReasoningMessagePipeline.upsertStreaming(
+                companionId = companionId,
+                turnId = turn.turnId,
+                text = reasoning!!.trim(),
+                timestamp = reasoningStartedAtMs ?: turn.startedAtMs,
+                eventIndex = turn.streamingReasoningEvent()?.eventIndex,
+                anchorMessageId = turn.anchorMessageId,
+            )
+        } else if (!showReasoning) {
+            StreamingReasoningMessagePipeline.removeStreaming(companionId, turn.turnId)
+        }
+
+        // 终态 REASONING 先落库（eventIndex 先于正文；complete 幂等，commit 仅一次）
+        if (EventCommitRules.shouldPersistReasoning(reasoning) || turn.isReasoningComplete) {
+            val completedAt = System.currentTimeMillis()
+            val duration = EventCommitRules.durationMs(
+                startedAtMs = reasoningStartedAtMs ?: turn.startedAtMs,
+                completedAtMs = completedAt,
+            )
+            turn.completeReasoning(
+                finalText = reasoning?.trim()?.takeIf { it.isNotEmpty() },
+                durationMs = duration,
+                timestamp = completedAt,
+            )
+            val reasoningEvent = turn.takeReasoningEventForCommit()
+            if (reasoningEvent != null) {
+                runCatching {
+                    commitCoordinator.commitReasoning(turn.conversation, reasoningEvent)
+                }.onFailure {
+                    SecureLog.e("ChatViewModel", "REASONING commit failed: ${it.message}")
+                }
+            }
+            // 真实 REASONING 行已写入 MessageCache；移除同 turn 流式临时行，避免双渲染
+            StreamingReasoningMessagePipeline.removeStreaming(companionId, turn.turnId)
         }
 
         val settings = chatDetailSettingsStore.getSettings(companionId)
-        val processedText = TextProcessor.processStickerTagsForSplit(aiContent, stickerManager, settings.stickerProbability) { sendStickerMessage(it) }
+        // 双端兜底：用本轮用户原文再裁一次闲聊护理包（防历史 lastUser 漂移/改写漏检）
+        val deliverySafeText = if (!userContentForMemory.isNullOrBlank()) {
+            com.lianyu.ai.network.ResponsePostProcessor.trimIdleEmotionOverDelivery(
+                aiContent,
+                userContentForMemory,
+            )
+        } else {
+            aiContent
+        }
+        val processedText = TextProcessor.processStickerTagsForSplit(
+            deliverySafeText,
+            stickerManager,
+            settings.stickerProbability,
+        ) { sendStickerMessage(it) }
 
         // 分段发送：将AI回复拆分为多条短消息，模拟真人连续发送
         val segments = splitIntoSegments(processedText)
@@ -154,13 +219,11 @@ class AiResponseFinalizer(
             if (stickerBeforeText) {
                 flushPendingSticker()
             }
-            val aiMessage = ChatMessage(
+            val id = commitCoordinator.commitAssistantText(
                 companionId = companionId,
-                content = safeProcessed,
-                isFromUser = false,
-                timestamp = System.currentTimeMillis()
+                text = safeProcessed,
+                turn = turn,
             )
-            val id = messageWriter.enqueueChat(aiMessage)
             SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id")
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
@@ -179,13 +242,11 @@ class AiResponseFinalizer(
                     delay(800L + kotlin.random.Random.nextLong(1200L))
                 }
                 val safeSegment = segment.ifBlank { "\u200B" }
-                val msg = ChatMessage(
+                val id = commitCoordinator.commitAssistantText(
                     companionId = companionId,
-                    content = safeSegment,
-                    isFromUser = false,
-                    timestamp = System.currentTimeMillis()
+                    text = safeSegment,
+                    turn = turn,
                 )
-                val id = messageWriter.enqueueChat(msg)
                 lastId = id
                 SecureLog.d("ChatViewModel", "$logMessage segment ${index + 1}/${segments.size}, length=${segment.length}, id=$id")
             }
@@ -193,22 +254,18 @@ class AiResponseFinalizer(
                 flushPendingSticker()
             }
             delay(100)
-            // 广播最后一条分段消息
+            // 微信侧一次同步完整回复，保留 App 已展示的分段顺序。
             if (lastId > 0) {
-                broadcastAiMessage(lastId, segments.last().ifBlank { "\u200B" })
+                broadcastAiMessage(lastId, segments.joinToString("\n"))
             }
             lastId
         }
 
-        // 架构：思考过程在消息落地后仍保留展示；自动折叠仅影响 UI 展开态，不立刻清空。
-        // 仅在关闭显示时清理；开启时保留到下一轮请求开始。
+        // 兜底：关闭展示或无思考时清掉流式临时行；正常路径已在 commit 后 remove
         if (!showReasoning || reasoning.isNullOrBlank()) {
-            reasoningText.value = ""
-            isReasoning.value = false
-        } else if (autoCollapse) {
-            // 保留文本，UI 侧按 autoCollapse 默认收起
-            isReasoning.value = true
+            StreamingReasoningMessagePipeline.removeStreaming(companionId, turn.turnId)
         }
+        // autoCollapse 仅影响列表项展开态，不再维护 ephemeral StateFlow
 
         // Broadcast stale sticker message if any
         if (turnState.lastStickerMsgId > 0) {
@@ -216,6 +273,8 @@ class AiResponseFinalizer(
             turnState.lastStickerMsgId = -1
             turnState.lastStickerContent = ""
         }
+
+        turn.releaseIndexer()
 
         return DeliveredResponse(
             messageId = aiMessageId,
@@ -265,8 +324,8 @@ class AiResponseFinalizer(
     }
 
     private fun broadcastWeChatMessage(messageId: Long, finalContent: String? = null) {
-        WeChatBroadcastHelper.broadcast(application, companionId, messageId, finalContent)
-        SecureLog.d("ChatViewModel", "Broadcast WeChat proactive message, companionId=$companionId, messageId=$messageId, hasFinalContent=${!finalContent.isNullOrBlank()}")
+        WeChatProactiveSync.enqueue(companionId, messageId, finalContent)
+        SecureLog.d("ChatViewModel", "Enqueue WeChat proactive message, companionId=$companionId, messageId=$messageId, hasFinalContent=${!finalContent.isNullOrBlank()}")
     }
 
     /**

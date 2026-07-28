@@ -23,6 +23,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 电池优化白名单：ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 必需，否则系统直接 SecurityException -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

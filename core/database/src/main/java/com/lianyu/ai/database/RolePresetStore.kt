@@ -50,6 +50,7 @@ class RolePresetStore(context: Context) {
             role = role,
             name = companion.name,
             age = companion.age,
+            avatarUrl = companion.avatarUrl ?: existingPreset.avatarUrl,
             personality = companion.personality,
             backstory = companion.backstory,
             speakingStyle = companion.speakingStyle,

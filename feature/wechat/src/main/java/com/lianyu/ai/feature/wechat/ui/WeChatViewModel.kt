@@ -6,18 +6,25 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.CompanionEntity
+import com.lianyu.ai.domain.ServiceRegistry
+import com.lianyu.ai.domain.wechat.WeChatChannelHealthSnapshot
+import com.lianyu.ai.domain.wechat.WeChatDeliveryStatus
+import com.lianyu.ai.domain.wechat.WeChatIdentityMapPort
+import com.lianyu.ai.domain.wechat.WeChatUserMapping
 import com.lianyu.ai.feature.wechat.data.A0
 import com.lianyu.ai.feature.wechat.data.WeChatMessageRepository
 import com.lianyu.ai.feature.wechat.data.WeChatTokenStore
-import com.lianyu.ai.feature.wechat.service.WeChatPollingService
-import com.lianyu.ai.feature.wechat.service.WeChatPollingWorker
+import com.lianyu.ai.feature.wechat.service.WeChatChannelKeeper
+import com.lianyu.ai.feature.wechat.service.WeChatChannelRuntime
 import com.lianyu.ai.feature.wechat.service.WeChatServiceLocator
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class WeChatViewModel(
@@ -36,6 +43,9 @@ class WeChatViewModel(
     private val loginManager = WeChatLoginManager(repository)
     private val companionDao = AppDatabase.getDatabase(appContext).companionDao()
 
+    private val identityMapPort: WeChatIdentityMapPort?
+        get() = ServiceRegistry.get(WeChatIdentityMapPort::class.java)
+
     init {
         viewModelScope.launch {
             repository.accountFlow.collect { account ->
@@ -44,10 +54,16 @@ class WeChatViewModel(
                     account = account
                 )
                 if (account != null) {
-                    WeChatPollingService.start(appContext)
+                    WeChatChannelKeeper.ensureRunning(appContext)
                     loadUserMappings()
+                    refreshChannelHealth()
                 } else {
-                    WeChatPollingService.stop(appContext)
+                    WeChatChannelKeeper.stop(appContext)
+                    _uiState.value = _uiState.value.copy(
+                        userMappings = emptyList(),
+                        userCompanionMappings = emptyMap(),
+                        channelHealth = WeChatChannelHealthSnapshot(),
+                    )
                 }
             }
         }
@@ -94,25 +110,86 @@ class WeChatViewModel(
                 _events.emit(WeChatEvent.MessageReceived(message.fromUserId ?: "", text))
             }
         }
+
+        // S5：登录后周期性刷新通道健康（轻量，仅设置页消费）
+        viewModelScope.launch {
+            while (isActive) {
+                if (_uiState.value.isLoggedIn) {
+                    refreshChannelHealth()
+                }
+                delay(HEALTH_REFRESH_MS)
+            }
+        }
     }
 
     private fun loadUserMappings() {
         viewModelScope.launch {
-            val mappings = tokenStore.getAllWechatUserMappings()
-            _uiState.value = _uiState.value.copy(userCompanionMappings = mappings)
+            val port = identityMapPort
+            val list = if (port != null) {
+                port.listMappings()
+            } else {
+                tokenStore.getAllWechatUserMappings()
+                    .filter { it.value > 0 }
+                    .map { (uid, cid) ->
+                        WeChatUserMapping(wechatUserId = uid, companionId = cid)
+                    }
+            }
+            val map = list.associate { it.wechatUserId to it.companionId }
+            _uiState.value = _uiState.value.copy(
+                userMappings = list,
+                userCompanionMappings = map,
+            )
+        }
+    }
+
+    fun refreshChannelHealth() {
+        viewModelScope.launch {
+            val outbox = WeChatServiceLocator.outboxCoordinator(appContext)
+            val open = runCatching { outbox.openCount() }.getOrDefault(0)
+            val pending = runCatching { outbox.countByStatus(WeChatDeliveryStatus.PENDING) }.getOrDefault(0)
+            val failed = runCatching { outbox.countByStatus(WeChatDeliveryStatus.FAILED) }.getOrDefault(0)
+            val sending = runCatching { outbox.countByStatus(WeChatDeliveryStatus.SENDING) }.getOrDefault(0)
+            val recent = runCatching { outbox.recentFailures(5) }.getOrDefault(emptyList())
+            val snapshot = WeChatChannelRuntime.healthSnapshot(
+                openOutboxCount = open,
+                pendingOutboxCount = pending,
+                failedOutboxCount = failed,
+                sendingOutboxCount = sending,
+                recentFailures = recent,
+            )
+            _uiState.value = _uiState.value.copy(channelHealth = snapshot)
         }
     }
 
     fun setUserCompanionMapping(wechatUserId: String, companionId: Long) {
         viewModelScope.launch {
-            tokenStore.setCompanionIdForWechatUser(wechatUserId, companionId)
+            val uid = wechatUserId.trim()
+            if (uid.isBlank() || companionId <= 0) return@launch
+            val port = identityMapPort
+            if (port != null) {
+                runCatching { port.bind(uid, companionId) }
+                    .onFailure {
+                        _events.emit(WeChatEvent.SendFailed(it.message ?: "绑定映射失败"))
+                    }
+            } else {
+                tokenStore.setCompanionIdForWechatUser(uid, companionId)
+            }
             loadUserMappings()
         }
     }
 
+    fun addUserCompanionMapping(wechatUserId: String, companionId: Long) {
+        setUserCompanionMapping(wechatUserId, companionId)
+    }
+
     fun removeUserCompanionMapping(wechatUserId: String) {
         viewModelScope.launch {
-            tokenStore.removeWechatUserMapping(wechatUserId)
+            val port = identityMapPort
+            if (port != null) {
+                port.unbind(wechatUserId)
+            } else {
+                tokenStore.removeWechatUserMapping(wechatUserId)
+            }
             loadUserMappings()
         }
     }
@@ -146,7 +223,7 @@ class WeChatViewModel(
                         )
                         viewModelScope.launch {
                             _events.emit(WeChatEvent.LoginSuccess)
-                            WeChatPollingWorker.schedule(appContext)
+                            WeChatChannelKeeper.ensureRunning(appContext)
                         }
                     },
                     onExpired = {
@@ -230,8 +307,7 @@ class WeChatViewModel(
     fun logout() {
         viewModelScope.launch {
             repository.logout()
-            WeChatPollingService.stop(appContext)
-            WeChatPollingWorker.cancel(appContext)
+            WeChatChannelKeeper.stop(appContext)
             _uiState.value = _uiState.value.copy(isLoggedIn = false, account = null)
             _events.emit(WeChatEvent.LoggedOut)
         }
@@ -256,9 +332,16 @@ data class WeChatUiState(
     val forwardEnabled: Boolean = true,
     val defaultCompanionId: Long? = null,
     val availableCompanions: List<CompanionEntity> = emptyList(),
+    /** 兼容旧 UI：userId → companionId */
     val userCompanionMappings: Map<String, Long> = emptyMap(),
+    /** S5：完整映射列表 */
+    val userMappings: List<WeChatUserMapping> = emptyList(),
+    /** S5：通道健康快照 */
+    val channelHealth: WeChatChannelHealthSnapshot = WeChatChannelHealthSnapshot(),
     val customBotName: String? = null
 )
+
+private const val HEALTH_REFRESH_MS = 5_000L
 
 sealed class WeChatEvent {
     data class MessageReceived(val fromUserId: String, val text: String) : WeChatEvent()

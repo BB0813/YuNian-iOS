@@ -1,6 +1,7 @@
 package com.lianyu.ai.feature.companion.ui.screen
 
 import com.lianyu.ai.uicommon.theme.AppTheme
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,6 +15,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,6 +84,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -97,9 +102,16 @@ import coil.compose.AsyncImage
 import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.feature.companion.ui.viewmodel.CreateCompanionViewModel
+import com.lianyu.ai.uicommon.image.cropper.ImageCropperDialog
+import com.lianyu.ai.uicommon.image.viewer.FullscreenImageViewer
+import com.lianyu.ai.uicommon.picker.ui.CustomImagePicker
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun CreateCompanionScreen(
     companionId: Long? = null,
@@ -125,6 +137,11 @@ fun CreateCompanionScreen(
     var showImportErrorDialog by remember { mutableStateOf(false) }
     var importErrorMessage by remember { mutableStateOf("") }
     var referenceCharacter by remember { mutableStateOf("") }
+    // 自研图片管理器 → 查看器 → 裁剪器
+    var showAvatarPicker by remember { mutableStateOf(false) }
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+    var cropBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var previewAvatarModel by remember { mutableStateOf<Any?>(null) }
     val isGenerating by viewModel.isGenerating.collectAsState()
 
     // 监听 saveCompleted 跳转
@@ -165,12 +182,6 @@ fun CreateCompanionScreen(
 
     fun handleGenerateResult(result: String) {
         if (result.isNotBlank()) rawPrompt = result
-    }
-
-    val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { avatarUri = it.toString() }
     }
 
     val filePicker = rememberLauncherForActivityResult(
@@ -327,7 +338,21 @@ fun CreateCompanionScreen(
                                         )
                                     )
                                 )
-                                .clickable { imagePicker.launch("image/*") },
+                                .combinedClickable(
+                                    onClick = {
+                                        if (avatarUri != null) {
+                                            // 已有头像：打开全屏查看器
+                                            previewAvatarModel = avatarUri
+                                        } else {
+                                            // 无头像：打开自研图片管理器
+                                            showAvatarPicker = true
+                                        }
+                                    },
+                                    onLongClick = {
+                                        // 长按直接更换头像
+                                        showAvatarPicker = true
+                                    }
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             if (avatarUri != null) {
@@ -355,6 +380,16 @@ fun CreateCompanionScreen(
                                     )
                                 }
                             }
+                        }
+
+                        if (avatarUri != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "点击查看 · 长按更换",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                modifier = Modifier.clickable { showAvatarPicker = true }
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -917,6 +952,75 @@ fun CreateCompanionScreen(
             containerColor = colorScheme.surfaceVariant
         )
     }
+
+    // ================================================================
+    // AI 头像：自研图片管理器 → 查看器/裁剪器
+    // ================================================================
+    if (showAvatarPicker) {
+        CustomImagePicker(
+            maxSelection = 1,
+            onConfirmed = { uris ->
+                showAvatarPicker = false
+                if (uris.isNotEmpty()) {
+                    pendingCropUri = uris.first()
+                }
+            },
+            onDismiss = { showAvatarPicker = false }
+        )
+    }
+
+    // 选图后解码，进入裁剪器（裁剪器内嵌 AtomicImageViewer 作为查看/缩放层）
+    LaunchedEffect(pendingCropUri) {
+        val uri = pendingCropUri ?: return@LaunchedEffect
+        cropBitmap = withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (cropBitmap == null) {
+            pendingCropUri = null
+            android.widget.Toast.makeText(context, "图片加载失败", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    if (cropBitmap != null) {
+        ImageCropperDialog(
+            bitmap = cropBitmap!!,
+            cropRatio = 1f,
+            onConfirm = { cropped ->
+                try {
+                    val avatarsDir = File(context.filesDir, "avatars").apply {
+                        if (!exists()) mkdirs()
+                    }
+                    val outFile = File(avatarsDir, "avatar_${UUID.randomUUID()}.jpg")
+                    outFile.outputStream().use { out ->
+                        cropped.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                    }
+                    avatarUri = outFile.absolutePath
+                } catch (_: Exception) {
+                    android.widget.Toast.makeText(context, "头像保存失败", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                cropBitmap = null
+                pendingCropUri = null
+            },
+            onDismiss = {
+                cropBitmap = null
+                pendingCropUri = null
+            }
+        )
+    }
+
+    // 已有头像全屏查看
+    FullscreenImageViewer(
+        models = listOfNotNull(previewAvatarModel),
+        initialIndex = 0,
+        visible = previewAvatarModel != null,
+        onDismiss = { previewAvatarModel = null }
+    )
 }
 
 @Composable
