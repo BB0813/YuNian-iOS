@@ -191,7 +191,13 @@ private fun ChatMessage.quoteDisplayContent(mediaType: QuoteMediaType): String {
         QuoteMediaType.IMAGE -> "[图片]"
         QuoteMediaType.VIDEO -> "[视频]"
         QuoteMediaType.VOICE -> {
-            if (content.startsWith("[语音]")) content else "[语音]"
+            when {
+                content.startsWith("[语音]") -> content
+                // AI 语音条：引用预览用正文摘要，避免只显示「[语音]」
+                !isFromUser && content.isNotBlank() ->
+                    content.replace(Regex("\\s+"), " ").trim().take(MAX_QUOTE_PREVIEW_LENGTH)
+                else -> "[语音]"
+            }
         }
         QuoteMediaType.FILE -> {
             if (content.startsWith("[文件]")) content else "[文件]"

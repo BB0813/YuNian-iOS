@@ -44,7 +44,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 5. 微信广播
  * 6. 记忆提取
  * 7. 连续追问（概率触发）
- * 8. 流式分段朗读（READ_ALOUD 模式）
+ * 8. 语音条入库（VOICE_BAR：合成后写入同条消息 linkString，架构去重）
  *
  * @param companionId 当前伴侣 ID
  * @param chatRepository 消息持久化
@@ -56,7 +56,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * @param aiService AI 服务（追问调用 generateFollowUpQuestion）
  * @param applicationApiScope 应用级作用域（追问异步发起）
  * @param turnState 单轮状态（表情包互斥、stale sticker）
- * @param chatTtsController TTS 控制器（自动朗读）
+ * @param chatTtsController TTS 控制器（语音条合成）
  * @param application Application（用于微信广播）
  * @param questionRegex 问句正则（追问触发判断）
  * @param turnCommit 回合提交协调器；null 时从 ServiceRegistry 懒取
@@ -219,12 +219,15 @@ class AiResponseFinalizer(
             if (stickerBeforeText) {
                 flushPendingSticker()
             }
+            val voiceBar = synthesizeVoiceBarOrNull(safeProcessed)
             val id = commitCoordinator.commitAssistantText(
                 companionId = companionId,
                 text = safeProcessed,
                 turn = turn,
+                audioPath = voiceBar?.path,
+                durationMs = voiceBar?.durationMs,
             )
-            SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id")
+            SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id, voiceBar=${voiceBar != null}")
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
             }
@@ -242,13 +245,19 @@ class AiResponseFinalizer(
                     delay(800L + kotlin.random.Random.nextLong(1200L))
                 }
                 val safeSegment = segment.ifBlank { "\u200B" }
+                val voiceBar = synthesizeVoiceBarOrNull(safeSegment)
                 val id = commitCoordinator.commitAssistantText(
                     companionId = companionId,
                     text = safeSegment,
                     turn = turn,
+                    audioPath = voiceBar?.path,
+                    durationMs = voiceBar?.durationMs,
                 )
                 lastId = id
-                SecureLog.d("ChatViewModel", "$logMessage segment ${index + 1}/${segments.size}, length=${segment.length}, id=$id")
+                SecureLog.d(
+                    "ChatViewModel",
+                    "$logMessage segment ${index + 1}/${segments.size}, length=${segment.length}, id=$id, voiceBar=${voiceBar != null}"
+                )
             }
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
@@ -286,7 +295,8 @@ class AiResponseFinalizer(
     }
 
     /**
-     * 消息可见后的后处理：记忆提取、概率追问、自动朗读。
+     * 消息可见后的后处理：记忆提取、概率追问。
+     * 语音条已在 [deliverResponse] 入库时合成，此处不再自动播放。
      * 不得再驱动顶部「对方正在输入」状态。
      */
     suspend fun afterDeliver(delivered: DeliveredResponse) {
@@ -308,11 +318,17 @@ class AiResponseFinalizer(
 
         // 连续追问：AI回复后按概率触发追问
         triggerFollowUpIfNeeded(delivered.aiContent, delivered.allowFollowUpMessage)
+    }
 
-        // 流式分段朗读：AI 回复落地后，按句子边界逐段入队朗读（仅 READ_ALOUD 模式 + 通话未激活）。
-        if (chatTtsController.shouldAutoPlay()) {
-            delivered.segments.forEach { chatTtsController.speakText(it) }
-        }
+    /**
+     * VOICE_BAR 模式下为单段正文合成持久音频；失败则退回纯文字消息。
+     * 合成结果随 commit 一次写入，重进聊天不会二次合成。
+     */
+    private suspend fun synthesizeVoiceBarOrNull(text: String): com.lianyu.ai.feature.chat.voice.VoiceBarAudio? {
+        if (text.isBlank() || text == "\u200B") return null
+        return runCatching { chatTtsController.synthesizeOnly(text) }
+            .onFailure { SecureLog.w("ChatViewModel", "Voice bar synth failed: ${it.message}") }
+            .getOrNull()
     }
 
     // ── 辅助方法（从 ChatViewModel 迁移）──

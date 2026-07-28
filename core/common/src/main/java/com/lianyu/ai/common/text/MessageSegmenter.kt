@@ -182,12 +182,12 @@ object MessageSegmenter {
     /**
      * 是否把 [next] 续到 [current] 同一气泡。
      *
-     * 优先级：
+     * 优先级（偏真人连发，完整句默认新开气泡）：
      * 1) 独立短回应 → 永不合并
      * 2) 行为切换 → 新开气泡
-     * 3) 当前语义未完成 → 续接
+     * 3) 当前语义未完成（无句末标点）→ 续接
      * 4) 弱续接短尾巴 → 续接
-     * 5) 软目标：当前未达 [SOFT_TARGET_CHARS] 的同意图完整句 → 倾向续接（减少无意义碎气泡）
+     * 5) 当前已是完整句 → 默认新开气泡（恢复分段；条数由软/硬上限兜底合并）
      */
     private fun shouldContinueSameBubble(current: String, next: String): Boolean {
         val currentCore = stripTerminalPunct(current)
@@ -208,15 +208,8 @@ object MessageSegmenter {
             return true
         }
 
-        if (weakContinuation && nextCore.length <= 12) {
-            return true
-        }
-
-        // 软限制：同意图完整句在未达偏好长度时并入同一气泡，避免「句句一条」
-        if (current.length < SOFT_TARGET_CHARS &&
-            current.length + next.length <= HARD_MAX_CHARS &&
-            nextCore.length <= SOFT_TARGET_CHARS
-        ) {
+        // 完整句后只吞极短弱尾巴（「呢」「吧」类），不把两句完整口语并成一条长气泡
+        if (weakContinuation && nextCore.length <= 6) {
             return true
         }
 

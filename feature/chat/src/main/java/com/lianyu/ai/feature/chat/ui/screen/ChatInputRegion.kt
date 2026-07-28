@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -44,12 +42,12 @@ fun ChatInputRegion(
     isBlocked: Boolean,
     isLoading: Boolean,
     quoteReply: QuoteReply?,
-    ttsState: ChatTtsState,
+    @Suppress("UNUSED_PARAMETER") ttsState: ChatTtsState,
     showStickerPanel: Boolean,
     showExtensionPanel: Boolean,
     availableApis: List<ApiProviderInfo>,
     currentApi: ApiProviderInfo?,
-    onStopTtsClick: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onStopTtsClick: () -> Unit,
     onStickerClick: (StickerInfo) -> Unit,
     onImportStickersClick: () -> Unit,
     onDeleteAllStickersClick: () -> Unit,
@@ -78,44 +76,6 @@ fun ChatInputRegion(
             .imePadding()
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
-        if (ttsState == ChatTtsState.SPEAKING) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.primary.copy(alpha = 0.12f))
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(12.dp),
-                        strokeWidth = 2.dp,
-                        color = colors.primary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "AI 正在朗读...",
-                        fontSize = 12.sp,
-                        color = colors.primary
-                    )
-                }
-                IconButton(
-                    onClick = onStopTtsClick,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Stop,
-                        contentDescription = "停止朗读",
-                        tint = colors.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
         // 输入框在上，扩展/表情面板在下：点“+”后面板向下展开，输入框随高度升起
         if (isBlocked) {
             Box(

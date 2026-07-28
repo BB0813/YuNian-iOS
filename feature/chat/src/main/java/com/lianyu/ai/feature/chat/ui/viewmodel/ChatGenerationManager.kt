@@ -268,13 +268,24 @@ class ChatGenerationManager private constructor(
     }
 
     fun setTtsMode(mode: ChatTtsMode) {
-        updateTtsConfig(_chatTtsConfig.value.copy(mode = mode))
+        // 废弃 READ_ALOUD：统一落到 SILENT / VOICE_BAR
+        val normalized = when (mode) {
+            ChatTtsMode.VOICE_BAR -> ChatTtsMode.VOICE_BAR
+            else -> ChatTtsMode.SILENT
+        }
+        updateTtsConfig(_chatTtsConfig.value.copy(mode = normalized))
     }
 
     fun updateTtsConfig(config: ChatTtsConfig) {
-        _chatTtsConfig.value = config
-        ChatTtsConfig.saveToSharedPreferences(application, config)
-        if (config.mode == ChatTtsMode.SILENT) ttsController.stop()
+        val normalized = config.copy(
+            mode = when (config.mode) {
+                ChatTtsMode.VOICE_BAR -> ChatTtsMode.VOICE_BAR
+                else -> ChatTtsMode.SILENT
+            }
+        )
+        _chatTtsConfig.value = normalized
+        ChatTtsConfig.saveToSharedPreferences(application, normalized)
+        if (normalized.mode == ChatTtsMode.SILENT) ttsController.stop()
     }
 
     fun stopTts() = ttsController.stop()
@@ -362,7 +373,8 @@ class ChatGenerationManager private constructor(
         }
     }
 
-    suspend fun synthesizeForVoiceBar(text: String): String? = ttsController.synthesizeOnly(text)
+    suspend fun synthesizeForVoiceBar(text: String): String? =
+        ttsController.synthesizeOnly(text)?.path
 
     private fun replaceActiveGeneration(reason: String, block: suspend () -> Unit) {
         replacementJob?.cancel(CancellationException(reason))
@@ -843,13 +855,13 @@ class ChatGenerationManager private constructor(
             }
             appendLine()
             appendLine("回复规则：")
-            appendLine("1. 长度（软硬结合）：软目标约 40–120 字，安慰/解释可到约 150 字；整轮尽量不超过 200–300 字。闲聊单焦点宁可偏短，勿为凑字再塞动作。")
-            appendLine("2. 活人语气，自然口语化，不要AI腔。")
-            appendLine("3. 每句话用标点结尾（。！？～…）。")
-            appendLine("4. 不要重复同样的话。")
-            appendLine("5. 先回应用户的消息，不要自说自话；前半句先接表层情绪或表层问句。")
-            appendLine("6. 分块（软硬结合）：优先 1 条消息；多意图空行分块，软上限 2–3 条气泡，勿句句拆条。短肯定（嗯、好、行）可单独成句。分块≠多塞动作。")
-            appendLine("7. 交付预算：默认 1 个主焦点（接情绪/追问/表态/答问）；闲聊勿打包共情+方案+推荐；用户要怎么办或安全时才可 +1 附属。")
+            appendLine("1. 单次单动作：每轮只做一个核心社交意图（纯共情/纯反问/纯表态/纯答问；求方案才给一步），完整说完。严禁问好+共情+反问+方案打包，也严禁半截残句。")
+            appendLine("2. 长度服从动作数：闲聊通常一句完整口语即可；解释可稍长。不要为凑字再塞第二个动作；写完自查意图数，不要按 30 字砍成残句。")
+            appendLine("3. 活人语气，自然口语化，不要AI腔。")
+            appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
+            appendLine("5. 不要重复同样的话。")
+            appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
+            appendLine("7. 分块：同一意图可发 1~3 条短气泡（空行分隔）把话说完整；分块≠多塞动作。短肯定（嗯、好、行）单独成句。")
             if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
             RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
             if (stickerProbability > 0) appendLine("12. 表情包：可按语境偶尔使用[名称]格式。")
