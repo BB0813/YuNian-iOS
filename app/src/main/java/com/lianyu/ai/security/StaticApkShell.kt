@@ -12,7 +12,6 @@ import com.lianyu.ai.common.PerformanceTrace
  * Keep both implementations behaviorally aligned on:
  * - native anti-hook / shell blob / memory guard
  * - G0 preflight + runtime init
- * - SecurityState.canStartLocalBusiness() before LianYuApplication.initBusiness
  */
 class StaticApkShell : Application(), androidx.work.Configuration.Provider {
 
@@ -80,12 +79,6 @@ class StaticApkShell : Application(), androidx.work.Configuration.Provider {
         PerformanceTrace.persistReleaseMetrics(this)
         logSecurityPerformance()
 
-        // ── Business init (fail-closed on hard auth failure) ──
-        if (!SecurityState.canStartLocalBusiness()) {
-            val reason = SecurityState.snapshot().reason ?: "hard auth failed"
-            android.util.Log.e("StaticApkShell", "BLOCK business init: $reason")
-            return
-        }
         com.lianyu.ai.LianYuApplication.initBusiness(this)
     }
 

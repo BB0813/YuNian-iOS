@@ -63,15 +63,43 @@ sealed interface ChatListItem {
     ) : ChatListItem {
         override val messageOrNull: ChatMessage? = null
     }
+
+    /**
+     * 思考过程行（特殊聊天记录，非普通气泡）。
+     * 收起文案由 [ReasoningUiProjector.collapsedLabel] →「已思考{n}秒」。
+     * [isStreaming]：L1 临时负 id 消息为 true；Room 终态为 false。
+     */
+    data class ReasoningMessage(
+        val message: ChatMessage,
+        val durationMs: Long? = message.durationMs,
+        val isStreaming: Boolean = message.id < 0L,
+    ) : ChatListItem {
+        override val messageOrNull: ChatMessage = message
+        override val stableId: String = message.stableMessageKey("reasoning")
+        val text: String get() = message.content
+    }
 }
 
 private const val TIME_DIVIDER_INTERVAL_MILLIS = 5 * 60 * 1000L
 
-internal fun List<ChatMessage>.toChatListItems(): List<ChatListItem> {
+internal fun List<ChatMessage>.toChatListItems(
+    showReasoning: Boolean = false,
+): List<ChatListItem> {
     val items = mutableListOf<ChatListItem>()
     var previousVisibleTimestamp: Long? = null
 
     for (message in this) {
+        if (message.type == MessageType.REASONING) {
+            if (!showReasoning) continue
+            val projected = ReasoningUiProjector.project(message) ?: continue
+            val previousTimestamp = previousVisibleTimestamp
+            if (previousTimestamp == null || message.timestamp - previousTimestamp >= TIME_DIVIDER_INTERVAL_MILLIS) {
+                items += ChatListItem.TimeDivider(message.timestamp)
+            }
+            items += projected
+            previousVisibleTimestamp = message.timestamp
+            continue
+        }
         if (message.content.isBlank() && message.type != MessageType.IMAGE) continue
 
         val previousTimestamp = previousVisibleTimestamp
@@ -88,17 +116,26 @@ internal fun List<ChatMessage>.toChatListItems(): List<ChatListItem> {
 
 internal fun toChatListItems(
     metadata: List<Message>,
-    bodies: Map<Long, MessageBodyState<ChatMessage>>
+    bodies: Map<Long, MessageBodyState<ChatMessage>>,
+    showReasoning: Boolean = false,
 ): List<ChatListItem> {
     val items = mutableListOf<ChatListItem>()
     var previousTimestamp: Long? = null
 
     for (messageMetadata in metadata) {
+        if (messageMetadata.type == MessageType.REASONING && !showReasoning) continue
         if (previousTimestamp == null || messageMetadata.timestamp - previousTimestamp >= TIME_DIVIDER_INTERVAL_MILLIS) {
             items += ChatListItem.TimeDivider(messageMetadata.timestamp)
         }
         items += when (val state = bodies[messageMetadata.id]) {
-            is MessageBodyState.Ready -> state.value.toSystemTipOrNull() ?: state.value.toChatListItem()
+            is MessageBodyState.Ready -> {
+                if (state.value.type == MessageType.REASONING) {
+                    ReasoningUiProjector.project(state.value)
+                        ?: state.value.toChatListItem()
+                } else {
+                    state.value.toSystemTipOrNull() ?: state.value.toChatListItem()
+                }
+            }
             is MessageBodyState.Error -> ChatListItem.BodyError(messageMetadata, state.message)
             MessageBodyState.Loading, null -> ChatListItem.BodyLoading(messageMetadata)
         }
@@ -110,6 +147,9 @@ internal fun toChatListItems(
 private fun ChatMessage.toChatListItem(): ChatListItem {
     val stickerName = stickerNameOrNull()
     return when {
+        type == MessageType.REASONING ->
+            ReasoningUiProjector.project(this)
+                ?: ChatListItem.ReasoningMessage(this, durationMs)
         stickerName != null -> ChatListItem.StickerMessage(this, stickerName)
         type == MessageType.IMAGE -> ChatListItem.ImageMessage(this)
         type == MessageType.VOICE || content.startsWith("[语音]") -> ChatListItem.VoiceMessage(this)
@@ -132,7 +172,8 @@ private fun ChatMessage.toSystemTipOrNull(): ChatListItem.SystemTip? {
 }
 
 private fun ChatMessage.stableMessageKey(kind: String): String {
-    return if (id > 0) "message-$id" else "$kind-local-$timestamp-${content.hashCode()}"
+    // 正 id（Room）与负 id（流式 L1 临时行）均用 id 作 key，保证流式 delta 不重建 LazyColumn 项
+    return if (id != 0L) "message-$id" else "$kind-local-$timestamp-${content.hashCode()}"
 }
 
 private fun Message.stableMessageKey(): String = "message-$id"

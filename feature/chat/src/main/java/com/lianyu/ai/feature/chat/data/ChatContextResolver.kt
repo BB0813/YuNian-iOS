@@ -3,6 +3,7 @@ package com.lianyu.ai.feature.chat.data
 import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
+import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.filterDecrypted
 
@@ -67,7 +68,9 @@ class ChatContextResolver(
         }
 
         SecureLog.d("ChatContextResolver", "Fetching AI context for companion=$companionId, limit=$limit")
-        val history = chatRepository.getRecentMessagesSync(companionId, limit).filterDecrypted()
+        val history = chatRepository.getRecentMessagesSync(companionId, limit)
+            .filterDecrypted()
+            .excludeReasoning()
         synchronized(cacheLock) {
             contextCache[companionId] = lastMessageId to history
         }
@@ -77,8 +80,14 @@ class ChatContextResolver(
     /** 获取追问/重生成等辅助流程使用的少量最近历史 */
     suspend fun getShortHistoryForAi(companionId: Long, shortLimit: Int): List<ChatMessage> {
         val effectiveLimit = shortLimit.coerceAtMost(MAX_AI_CONTEXT_FETCH)
-        return chatRepository.getRecentMessagesSync(companionId, effectiveLimit).filterDecrypted()
+        return chatRepository.getRecentMessagesSync(companionId, effectiveLimit)
+            .filterDecrypted()
+            .excludeReasoning()
     }
+
+    /** 思考过程默认不进模型上下文（与 DefaultModelContextPolicy 一致） */
+    private fun List<ChatMessage>.excludeReasoning(): List<ChatMessage> =
+        filter { it.type != MessageType.REASONING }
 
     /** 清空指定 companion 的上下文缓存；退出聊天时调用 */
     fun clearCache(companionId: Long) {

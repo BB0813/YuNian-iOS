@@ -32,24 +32,46 @@ object OppoVivoAdaptationHelper {
 
     /**
      * 打开系统的“忽略电池优化”申请页。
+     *
+     * 缺 [android.Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS] 或厂商拦截时，
+     * 回退到电池优化列表 / OriginOS 专用页 / 应用详情。
      */
     fun requestIgnoreBatteryOptimizations(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (isIgnoringBatteryOptimizations(context)) {
+            openBatteryOptimizationSettings(context)
+            return
+        }
         val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
             data = Uri.parse("package:${context.packageName}")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        safeStartActivity(context, intent)
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            // 常见：未声明 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS → SecurityException
+            // 或 OriginOS 静默拦截后抛 ActivityNotFound / SecurityException
+            openBatteryOptimizationSettings(context)
+        }
     }
 
     /**
      * 打开电池优化设置页（用户手动选择“不优化”）。
+     * vivo / 华为走 OriginOS 多路径；其余走系统列表，失败再回应用详情。
      */
     fun openBatteryOptimizationSettings(context: Context) {
+        if (RomUtils.isVivo || RomUtils.isHuawei) {
+            OriginOSBatteryOptimizer.openBatteryOptimizationSettings(context)
+            return
+        }
         val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        safeStartActivity(context, intent)
+        try {
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            openAppDetailsSettings(context)
+        }
     }
 
     /**

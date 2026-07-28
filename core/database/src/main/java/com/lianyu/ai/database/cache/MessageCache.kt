@@ -57,10 +57,29 @@ object MessageCache {
     /**
      * 写入单聊缓存（覆盖式）。
      * 调用时机：从 L2 加载完成、收到新消息。
+     *
+     * 保留已有负 id 流式临时消息（REASONING 等），避免 Room hydrate 冲掉进行中的流式行。
      */
     fun putChatMessages(companionId: Long, messages: List<ChatMessage>) {
-        chatCache.get(companionId)?.replace(messages)
-            ?: chatCache.put(companionId, SessionCache({ it.id }, messages))
+        val existingStreaming = chatCache.get(companionId)
+            ?.snapshot()
+            .orEmpty()
+            .filter { it.id < 0L }
+        val merged = if (existingStreaming.isEmpty()) {
+            messages
+        } else {
+            val incomingIds = messages.mapTo(HashSet(messages.size)) { it.id }
+            val keepStreaming = existingStreaming.filter { it.id !in incomingIds }
+            if (keepStreaming.isEmpty()) {
+                messages
+            } else {
+                (messages + keepStreaming)
+                    .distinctBy { it.id }
+                    .sortedWith(compareBy<ChatMessage> { it.timestamp }.thenBy { it.id })
+            }
+        }
+        chatCache.get(companionId)?.replace(merged)
+            ?: chatCache.put(companionId, SessionCache({ it.id }, merged))
     }
 
     /**

@@ -96,10 +96,14 @@ class CreateCompanionViewModel(application: Application) : AndroidViewModel(appl
 
     fun deleteCompanion(companion: CompanionEntity) {
         viewModelScope.launch {
+            // 与 CompanionListViewModel 一致：新旧默认 tag 都标记 deleted_by_user，避免重启后重新种子
             if (companion.tags.orEmpty()
                     .split(',')
                     .map { it.trim() }
-                    .any { it == DefaultCompanionSeeder.LEGACY_TAG }
+                    .any {
+                        it == DefaultCompanionSeeder.LEGACY_TAG ||
+                            it == DefaultCompanionSeeder.defaultExperienceCompanionTag
+                    }
             ) {
                 getApplication<Application>()
                     .getSharedPreferences("default_companion", android.content.Context.MODE_PRIVATE)

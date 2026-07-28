@@ -158,11 +158,16 @@ object NativePermissionRequester {
     /**
      * 请求忽略电池优化（直接弹系统对话框）。
      *
-     * [FIX] 2026-06-22: 在 IQOO/OriginOS/Honor 上，系统可能拦截 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-     * 导致 Intent 无法启动。添加 try-catch 兜底，失败时跳转到专用设置页。
+     * 前置：manifest 必须声明 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS，否则会 SecurityException。
+     * [FIX] 2026-06-22: IQOO/OriginOS/Honor 可能拦截弹窗；失败时跳专用设置页。
+     * [FIX] 2026-07-28: 已在白名单时不再重复弹窗，改为打开设置页便于用户核对。
      */
     fun requestIgnoreBatteryOptimizations(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (isIgnoringBatteryOptimizations(context)) {
+            openBatteryOptimizationSettings(context)
+            return
+        }
         val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
             data = Uri.parse("package:${context.packageName}")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -170,8 +175,11 @@ object NativePermissionRequester {
         try {
             context.startActivity(intent)
         } catch (e: Exception) {
-            // OriginOS/IQOO/Honor 等 ROM 可能拦截此 Intent，兜底跳转到专用设置页
-            SecureLog.w("NativePermissionRequester", "requestIgnoreBatteryOptimizations failed: ${e.message}, fallback to settings page")
+            // 未声明权限 / OriginOS 拦截 / Activity 不可用 → 多路径设置页
+            SecureLog.w(
+                "NativePermissionRequester",
+                "requestIgnoreBatteryOptimizations failed: ${e.message}, fallback to settings page",
+            )
             openBatteryOptimizationSettings(context)
         }
     }

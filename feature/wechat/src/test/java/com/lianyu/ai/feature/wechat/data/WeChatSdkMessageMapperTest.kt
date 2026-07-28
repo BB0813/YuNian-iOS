@@ -1,25 +1,28 @@
 package com.lianyu.ai.feature.wechat.data
 
-import com.github.wechat.ilink.sdk.core.model.MessageItem as SdkMessageItem
-import com.github.wechat.ilink.sdk.core.model.WeixinMessage as SdkWeixinMessage
+import com.lianyu.ai.wechat.wire.WireMessageItem
+import com.lianyu.ai.wechat.wire.WireTextItem
+import com.lianyu.ai.wechat.wire.WireWeChatMessage
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class WeChatSdkMessageMapperTest {
 
     @Test
-    fun mapsSdkTextMessageToAppMessageModel() {
-        val sdkMessage = SdkWeixinMessage().apply {
-            message_id = 42L
-            message_type = 1
-            from_user_id = "user@im.wechat"
-            to_user_id = "bot@im.bot"
-            create_time_ms = 123456789L
-            context_token = "context-token"
-            item_list = listOf(SdkMessageItem.text("hello from sdk"))
-        }
+    fun mapsWireTextMessageToAppMessageModel() {
+        val wireMessage = WireWeChatMessage(
+            messageId = 42L,
+            messageType = 1,
+            fromUserId = "user@im.wechat",
+            toUserId = "bot@im.bot",
+            createTimeMs = 123456789L,
+            contextToken = "context-token",
+            itemList = listOf(
+                WireMessageItem(type = 1, textItem = WireTextItem("hello from sdk")),
+            ),
+        )
 
-        val message = WeChatSdkMessageMapper.toAppMessage(sdkMessage)
+        val message = WeChatSdkMessageMapper.toAppMessage(wireMessage)
 
         assertEquals(42L, message.messageId)
         assertEquals(1, message.messageType)

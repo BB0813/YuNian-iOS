@@ -19,6 +19,7 @@ Architecture (Chow-style):
 import sys
 import os
 import argparse
+import zlib
 from hashlib import sha256
 
 # AES S-Box (standard)
@@ -192,23 +193,21 @@ def generate_wb_tables(key_bytes, output_file=sys.stdout):
     out.write('};\n\n')
 
     # ---- Checksums from actual table data ----
-    out.write('/* Anti-DFA checksums (XOR of all T-Box output bytes per round) */\n')
-    out.write('static const uint8_t g_wb_checksum[14] = {\n')
+    out.write('/* Anti-DFA CRC32 checksums for each round of T-Box bytes */\n')
+    out.write('static const uint32_t g_wb_checksum[14] = {\n')
     for r in range(14):
-        cksum = 0
+        round_data = bytearray()
         rk = rks[r + 1]
         for pos in range(16):
-            col = pos >> 2
             row = pos & 3
-            sr_col = (col - row) & 3
             for x in range(256):
                 xored = x ^ rk[pos]
                 sb = SBOX[xored]
                 col_in = [0, 0, 0, 0]
                 col_in[row] = sb
                 mc = mix_columns_column(col_in)
-                cksum ^= mc[0] ^ mc[1] ^ mc[2] ^ mc[3]
-        out.write(f'    0x{cksum:02x},\n')
+                round_data.extend(mc)
+        out.write(f'    0x{zlib.crc32(round_data) & 0xFFFFFFFF:08X},\n')
     out.write('};\n\n')
 
     # ---- Inverse T-Boxes (decrypt) ----
@@ -251,22 +250,20 @@ def generate_wb_tables(key_bytes, output_file=sys.stdout):
 
     # ---- Inverse checksums ----
     out.write('/* Anti-DFA checksums for inverse T-Boxes */\n')
-    out.write('static const uint8_t g_wb_inv_checksum[14] = {\n')
+    out.write('static const uint32_t g_wb_inv_checksum[14] = {\n')
     for r in range(14):
-        cksum = 0
+        round_data = bytearray()
         rk = inv_rks[r]
         for pos in range(16):
-            col = pos >> 2
             row = pos & 3
-            isr_col = (col + row) & 3
             for x in range(256):
                 xored = x ^ rk[pos]
                 isb = INV_SBOX[xored]
                 col_in = [0, 0, 0, 0]
                 col_in[row] = isb
                 imc = inv_mix_columns_column(col_in)
-                cksum ^= imc[0] ^ imc[1] ^ imc[2] ^ imc[3]
-        out.write(f'    0x{cksum:02x},\n')
+                round_data.extend(imc)
+        out.write(f'    0x{zlib.crc32(round_data) & 0xFFFFFFFF:08X},\n')
     out.write('};\n\n')
 
     out.write('/* End of generated tables */\n')

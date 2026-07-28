@@ -30,6 +30,7 @@ fun ChatListItemRenderer(
     onRetryBody: (Long) -> Unit = {},
     onCompanionAvatarClick: () -> Unit = {},
     onUserAvatarClick: () -> Unit = {},
+    autoCollapseReasoning: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     CompositionLocalProvider(
@@ -46,6 +47,16 @@ fun ChatListItemRenderer(
             )
             is ChatListItem.TimeDivider -> TimeDividerItem(item = item)
             is ChatListItem.SystemTip -> SystemTipItem(item = item)
+            is ChatListItem.ReasoningMessage -> ReasoningItem(
+                reasoningText = item.text,
+                adaptiveSizing = adaptiveSizing,
+                companionData = companionData,
+                userAvatar = userAvatar,
+                userName = userName,
+                autoCollapse = autoCollapseReasoning,
+                isStreaming = item.isStreaming,
+                durationMs = item.durationMs,
+            )
             is ChatListItem.TextMessage -> TextMessageItem(
                 item = item,
                 companionData = companionData,

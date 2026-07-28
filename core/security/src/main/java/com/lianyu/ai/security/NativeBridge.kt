@@ -129,6 +129,8 @@ object NativeBridge {
     external fun zeroTrustIsDegraded(): Int
     @JvmStatic
     external fun zeroTrustIsLocked(): Int
+    @JvmStatic
+    external fun zeroTrustIsContinuousEvaluationRunning(): Int
 
     // Phase 2: White-Box AES
     @JvmStatic
@@ -183,6 +185,12 @@ object NativeBridge {
     external fun encryptBody(plaintext: ByteArray): ByteArray?
     @JvmStatic
     external fun decryptBody(ciphertext: ByteArray): ByteArray?
+
+    // Credential envelope (SM4-GCM); AAD binds ciphertext to its logical record.
+    @JvmStatic
+    external fun sealCredential(plaintext: ByteArray, aad: ByteArray): ByteArray?
+    @JvmStatic
+    external fun unsealCredential(ciphertext: ByteArray, aad: ByteArray): ByteArray?
 
     // === Shell hardening: preflight proof token ===
     // Returns a dynamic SM3 token derived from SO integrity state.

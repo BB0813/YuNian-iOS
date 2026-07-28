@@ -560,7 +560,7 @@ extern "C" __attribute__((visibility("default"))) int tp() {
             case 4:
                 break;
             case 999:
-                result = -1;
+                result = 0;
                 break;
             default:
                 state = 0;
@@ -1927,34 +1927,60 @@ static bool secure_random_bytes(uint8_t* buffer, size_t len) {
 static bool derive_sm4_key(uint8_t out[16]) {
     uint8_t zero[16] = {0};
     uint8_t temp[16];
-    if (wb_aes_256_encrypt(zero, temp) != 0) return false;
+    if (wb_aes_256_encrypt_persistent(zero, temp) != 0) {
+        LS_LOGE("credential key derivation failed");
+        return false;
+    }
     memcpy(out, temp, 16);
     secure_zero(temp, sizeof(temp));
     return true;
 }
 
-static jbyteArray native_encrypt_body(JNIEnv* env, jclass, jbyteArray plaintext) {
-    if (!plaintext) return nullptr;
+static jbyteArray native_encrypt_body(JNIEnv* env, jclass, jbyteArray plaintext, jbyteArray aad) {
+    if (!plaintext) {
+        LS_LOGE("credential seal failed: missing plaintext");
+        return nullptr;
+    }
     jsize len = env->GetArrayLength(plaintext);
     jbyte* inBytes = env->GetByteArrayElements(plaintext, nullptr);
-    if (!inBytes) return nullptr;
+    if (!inBytes) {
+        LS_LOGE("credential seal failed: plaintext byte access");
+        return nullptr;
+    }
+    jsize aadLen = aad ? env->GetArrayLength(aad) : 0;
+    jbyte* aadBytes = aad ? env->GetByteArrayElements(aad, nullptr) : nullptr;
+    if (aad && !aadBytes) {
+        LS_LOGE("credential seal failed: aad byte access");
+        env->ReleaseByteArrayElements(plaintext, inBytes, JNI_ABORT);
+        return nullptr;
+    }
     const size_t outLen = static_cast<size_t>(len);
     const size_t totalLen = 12 + outLen + 16;
     jbyteArray out = env->NewByteArray(static_cast<jsize>(totalLen));
     if (!out) {
+        LS_LOGE("credential seal failed: output allocation");
         env->ReleaseByteArrayElements(plaintext, inBytes, JNI_ABORT);
+        if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
         return nullptr;
     }
     jbyte* outBytes = env->GetByteArrayElements(out, nullptr);
     if (!outBytes) {
+        LS_LOGE("credential seal failed: output byte access");
         env->ReleaseByteArrayElements(plaintext, inBytes, JNI_ABORT);
+        if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
         return nullptr;
     }
 
-    uint8_t key[16];
-    if (!derive_sm4_key(key)) goto encrypt_fail;
+    uint8_t key[16] = {};
+    if (!derive_sm4_key(key)) {
+        LS_LOGE("credential seal failed: key derivation");
+        goto encrypt_fail;
+    }
     uint8_t iv[12];
-    if (!secure_random_bytes(iv, sizeof(iv))) goto encrypt_fail;
+    if (!secure_random_bytes(iv, sizeof(iv))) {
+        LS_LOGE("credential seal failed: nonce generation");
+        goto encrypt_fail;
+    }
     uint8_t tag[16];
 
     if (sm4_gcm_encrypt(
@@ -1963,9 +1989,10 @@ static jbyteArray native_encrypt_body(JNIEnv* env, jclass, jbyteArray plaintext)
             outLen,
             key,
             iv,
-            nullptr,
-            0,
+            reinterpret_cast<const uint8_t*>(aadBytes),
+            static_cast<size_t>(aadLen),
             tag) != 0) {
+        LS_LOGE("credential seal failed: SM4-GCM encryption");
         goto encrypt_fail;
     }
 
@@ -1973,17 +2000,19 @@ static jbyteArray native_encrypt_body(JNIEnv* env, jclass, jbyteArray plaintext)
     memcpy(outBytes + 12 + outLen, tag, sizeof(tag));
     secure_zero(key, sizeof(key));
     env->ReleaseByteArrayElements(plaintext, inBytes, JNI_ABORT);
+    if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
     env->ReleaseByteArrayElements(out, outBytes, 0);
     return out;
 
 encrypt_fail:
     secure_zero(key, sizeof(key));
     env->ReleaseByteArrayElements(plaintext, inBytes, JNI_ABORT);
+    if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
     env->ReleaseByteArrayElements(out, outBytes, JNI_ABORT);
     return nullptr;
 }
 
-static jbyteArray native_decrypt_body(JNIEnv* env, jclass, jbyteArray ciphertext) {
+static jbyteArray native_decrypt_body(JNIEnv* env, jclass, jbyteArray ciphertext, jbyteArray aad) {
     if (!ciphertext) return nullptr;
     jsize len = env->GetArrayLength(ciphertext);
     if (len < 28) return nullptr;
@@ -1992,13 +2021,20 @@ static jbyteArray native_decrypt_body(JNIEnv* env, jclass, jbyteArray ciphertext
     if (!out) return nullptr;
     jbyte* inBytes = env->GetByteArrayElements(ciphertext, nullptr);
     if (!inBytes) return nullptr;
-    jbyte* outBytes = env->GetByteArrayElements(out, nullptr);
-    if (!outBytes) {
+    jsize aadLen = aad ? env->GetArrayLength(aad) : 0;
+    jbyte* aadBytes = aad ? env->GetByteArrayElements(aad, nullptr) : nullptr;
+    if (aad && !aadBytes) {
         env->ReleaseByteArrayElements(ciphertext, inBytes, JNI_ABORT);
         return nullptr;
     }
+    jbyte* outBytes = env->GetByteArrayElements(out, nullptr);
+    if (!outBytes) {
+        env->ReleaseByteArrayElements(ciphertext, inBytes, JNI_ABORT);
+        if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
+        return nullptr;
+    }
 
-    uint8_t key[16];
+    uint8_t key[16] = {};
     if (!derive_sm4_key(key)) goto decrypt_fail;
     uint8_t iv[12];
     uint8_t tag[16];
@@ -2011,20 +2047,22 @@ static jbyteArray native_decrypt_body(JNIEnv* env, jclass, jbyteArray ciphertext
             cipherLen,
             key,
             iv,
-            nullptr,
-            0,
+            reinterpret_cast<const uint8_t*>(aadBytes),
+            static_cast<size_t>(aadLen),
             tag) != 0) {
         goto decrypt_fail;
     }
 
     secure_zero(key, sizeof(key));
     env->ReleaseByteArrayElements(ciphertext, inBytes, JNI_ABORT);
+    if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
     env->ReleaseByteArrayElements(out, outBytes, 0);
     return out;
 
 decrypt_fail:
     secure_zero(key, sizeof(key));
     env->ReleaseByteArrayElements(ciphertext, inBytes, JNI_ABORT);
+    if (aadBytes) env->ReleaseByteArrayElements(aad, aadBytes, JNI_ABORT);
     env->ReleaseByteArrayElements(out, outBytes, JNI_ABORT);
     return nullptr;
 }
@@ -2112,7 +2150,7 @@ extern "C" void sm3_hash(const uint8_t* msg, size_t msglen, uint8_t digest[32]);
 // APK integrity cache: avoid re-hashing on every zero-trust evaluation cycle.
 // Cooldown: re-validate every 30 seconds (zero-trust runs every 100ms).
 #define APK_INTEGRITY_COOLDOWN_MS 30000
-static volatile int    g_apk_cache_valid = 0;     // 1 = cache is warm
+static volatile int    g_apk_cache_valid[3] = {0}; // [dex, so, res] cache state
 static volatile int    g_apk_results[3] = {0};     // [dex, so, res] results
 static volatile uint64_t g_apk_last_check_ms = 0;
 static volatile uint8_t  g_computed_digests[3][32];  // [dex, so, arsc] raw SM3 hashes
@@ -2161,7 +2199,7 @@ static void apk_cache_set(int idx, int ok, const uint8_t* digest) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     g_apk_last_check_ms = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
     g_apk_results[idx] = ok;
-    g_apk_cache_valid = 1;
+    g_apk_cache_valid[idx] = 1;
     if (digest) memcpy((void*)g_computed_digests[idx], digest, 32);
 }
 
@@ -2169,7 +2207,7 @@ static int apk_cache_hit(int idx) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     uint64_t now_ms = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
-    if (g_apk_cache_valid && (now_ms - g_apk_last_check_ms) < APK_INTEGRITY_COOLDOWN_MS) {
+    if (g_apk_cache_valid[idx] && (now_ms - g_apk_last_check_ms) < APK_INTEGRITY_COOLDOWN_MS) {
         return g_apk_results[idx];
     }
     return -1;
@@ -2203,7 +2241,7 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
     close(fd);
     if (rn != fsize) { free(apk_data); apk_cache_set(0, 0, NULL); return 0; }
 
-    int ok = 0;
+    int ok = g_apk_digests_obs[32] == 0 ? -1 : 0;
     uint8_t digest[32];
 
     size_t dex_total = 0;
@@ -2245,7 +2283,7 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
                 pos = data_start + comp_size;
             }
             sm3_hash(dex_buf, dex_total, digest);
-            ok = apk_hash_compare(digest, 0);
+            ok = g_apk_digests_obs[32] == 0 ? -1 : apk_hash_compare(digest, 32);
             free(dex_buf);
         }
     }
@@ -2262,11 +2300,14 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
 
 extern "C" {
 extern int zero_trust_init(void);
+extern int zero_trust_start_continuous_eval(void);
+extern int zero_trust_wait_for_initial_evaluation(uint32_t timeout_ms);
 extern int zero_trust_evaluate(void);
 extern int zero_trust_get_state(void);
 extern int zero_trust_get_score(void);
 extern int zero_trust_is_degraded(void);
 extern int zero_trust_is_locked(void);
+extern int zero_trust_is_continuous_eval_running(void);
 extern int wb_aes_256_selftest(void);
 }
 
@@ -2305,7 +2346,7 @@ extern "C" int check_so_integrity(void) {
     sm3_hash(seg_copy, exec_size, digest);
     free(seg_copy);
 
-    int ok = apk_hash_compare(digest, 32);
+    int ok = g_apk_digests_obs[32] == 0 ? -1 : apk_hash_compare(digest, 32);
     apk_cache_set(1, ok, digest);
     LS_LOGE(">>> so:result=%d", ok);
     return ok;
@@ -2331,7 +2372,7 @@ extern "C" int check_resources_integrity(void) {
     uint8_t digest[32];
     sm3_hash(head, sizeof(head), digest);
 
-    int ok = apk_hash_compare(digest, 64);
+    int ok = g_apk_digests_obs[64] == 0 ? -1 : apk_hash_compare(digest, 64);
     apk_cache_set(2, ok, digest);
     LS_LOGE(">>> res:result=%d", ok);
     return ok;
@@ -2436,7 +2477,13 @@ extern "C" {
 
 /* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_verifySignature(
     JNIEnv* env, jobject thiz, jobject context) {
-    return check_apk_signature(env, thiz, context) ? JNI_TRUE : JNI_FALSE;
+    int ok = check_apk_signature(env, thiz, context);
+    g_sig_ok = ok;
+    if (ok) {
+        zero_trust_start_continuous_eval();
+        zero_trust_wait_for_initial_evaluation(1000);
+    }
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 /* RN */ void Java_com_lianyu_ai_security_NativeBridge_injectAuthHeader(
@@ -2558,26 +2605,7 @@ extern "C" {
 
 /* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkBootloader(
     JNIEnv* env, jobject thiz) {
-    // Check ro.bootloader prop for "unknown" or empty
-    char buf[128] = {0};
-    FILE* f = popen("getprop ro.bootloader 2>/dev/null", "r");
-    if (!f) return JNI_FALSE;
-    size_t n = fread(buf, 1, sizeof(buf)-1, f);
-    pclose(f);
-    if (n == 0) return JNI_TRUE;  // No bootloader prop → suspicious
-    // Check for common emulator/generic bootloaders
-    if (strstr(buf, "unknown") || strstr(buf, "generic") ||
-        strstr(buf, "goldfish") || strstr(buf, "ranchu") ||
-        strstr(buf, "qemu")) return JNI_TRUE;
-    // Check verified boot state via ro.boot.verifiedbootstate
-    f = popen("getprop ro.boot.verifiedbootstate 2>/dev/null", "r");
-    if (f) {
-        memset(buf, 0, sizeof(buf));
-        n = fread(buf, 1, sizeof(buf)-1, f);
-        pclose(f);
-        if (n > 0 && strstr(buf, "orange")) return JNI_TRUE;  // Unlocked bootloader
-    }
-    return JNI_FALSE;
+    return check_bootloader() ? JNI_TRUE : JNI_FALSE;
 }
 
 /* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkZygiskModules(
@@ -2877,6 +2905,11 @@ extern "C" {
     return zero_trust_is_locked() ? 1 : 0;
 }
 
+/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning(
+    JNIEnv* env, jobject thiz) {
+    return zero_trust_is_continuous_eval_running();
+}
+
 /* RN */ void Java_com_lianyu_ai_security_NativeBridge_wbAesInit(
     JNIEnv* env, jobject thiz) {
     native_wb_init(env, env->GetObjectClass(thiz));
@@ -2921,12 +2954,22 @@ static const int g_pinned_cert_count =
 
 /* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_encryptBody(
     JNIEnv* env, jobject thiz, jbyteArray plaintext) {
-    return native_encrypt_body(env, env->GetObjectClass(thiz), plaintext);
+    return native_encrypt_body(env, env->GetObjectClass(thiz), plaintext, nullptr);
 }
 
 /* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_decryptBody(
     JNIEnv* env, jobject thiz, jbyteArray ciphertext) {
-    return native_decrypt_body(env, env->GetObjectClass(thiz), ciphertext);
+    return native_decrypt_body(env, env->GetObjectClass(thiz), ciphertext, nullptr);
+}
+
+/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_sealCredential(
+    JNIEnv* env, jobject thiz, jbyteArray plaintext, jbyteArray aad) {
+    return native_encrypt_body(env, env->GetObjectClass(thiz), plaintext, aad);
+}
+
+/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_unsealCredential(
+    JNIEnv* env, jobject thiz, jbyteArray ciphertext, jbyteArray aad) {
+    return native_decrypt_body(env, env->GetObjectClass(thiz), ciphertext, aad);
 }
 
 /* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_getPinnedCert(
@@ -3129,6 +3172,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
             {const_cast<char*>("zeroTrustGetScore"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore},
             {const_cast<char*>("zeroTrustIsDegraded"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded},
             {const_cast<char*>("zeroTrustIsLocked"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked},
+            {const_cast<char*>("zeroTrustIsContinuousEvaluationRunning"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning},
             {const_cast<char*>("wbAesInit"), const_cast<char*>("()V"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesInit},
             {const_cast<char*>("wbAesEncrypt"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesEncrypt},
             {const_cast<char*>("wbAesDecrypt"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesDecrypt},
@@ -3137,6 +3181,10 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
             {const_cast<char*>("checkSoIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkSoIntegrity},
             {const_cast<char*>("checkResourcesIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkResourcesIntegrity},
             {const_cast<char*>("computeIntegrityDigest"), const_cast<char*>("()[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_computeIntegrityDigest},
+            {const_cast<char*>("encryptBody"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_encryptBody},
+            {const_cast<char*>("decryptBody"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_decryptBody},
+            {const_cast<char*>("sealCredential"), const_cast<char*>("([B[B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_sealCredential},
+            {const_cast<char*>("unsealCredential"), const_cast<char*>("([B[B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_unsealCredential},
             {const_cast<char*>("isHeartbeatOk"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isHeartbeatOk},
             {const_cast<char*>("getExpectedCertSha256"), const_cast<char*>("()[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_getExpectedCertSha256},
         };

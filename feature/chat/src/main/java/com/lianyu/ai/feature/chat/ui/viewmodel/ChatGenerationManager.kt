@@ -7,11 +7,13 @@ import com.lianyu.ai.common.BanManager
 import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.CompanionRole
 import com.lianyu.ai.common.ContentFilter
+import com.lianyu.ai.common.EnvAnchorCooldown
+import com.lianyu.ai.common.EnvAnchorStore
 import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.common.StickerManager
 import com.lianyu.ai.common.TimeoutBudgets
-import com.lianyu.ai.common.wechat.WeChatBroadcastHelper
+import com.lianyu.ai.domain.wechat.WeChatProactiveSync
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.model.MessageType
@@ -23,7 +25,6 @@ import com.lianyu.ai.database.repository.UserRepository
 import com.lianyu.ai.domain.AiChatMessage
 import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
-import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.LocalModelProvider
 import com.lianyu.ai.domain.MemoryProvider
@@ -32,9 +33,13 @@ import com.lianyu.ai.domain.ToolRegistry
 import com.lianyu.ai.feature.chat.R
 import com.lianyu.ai.feature.chat.data.ChatContextResolver
 import com.lianyu.ai.feature.chat.data.ChatDetailSettingsStore
+import com.lianyu.ai.feature.chat.timeline.EventCommitRules
+import com.lianyu.ai.feature.chat.timeline.PendingTurnStreamApplier
+import com.lianyu.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
 import com.lianyu.ai.feature.chat.voice.ChatTtsController
 import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.network.ChatTypingState
+import com.lianyu.ai.network.stream.NonStreamingAssistantStreamAdapter
 import com.lianyu.ai.network.tts.ChatTtsConfig
 import com.lianyu.ai.network.tts.ChatTtsMode
 import com.lianyu.ai.network.tts.TtsService
@@ -113,6 +118,7 @@ class ChatGenerationManager private constructor(
     private val contextResolver = ChatContextResolver(chatRepository)
     private val chatDetailSettingsStore = ChatDetailSettingsStore(application)
     private val appSettingsStore = AppSettingsStore(application)
+    private val envAnchorStore by lazy { EnvAnchorStore(application) }
     private val stickerManager by lazy { StickerManager.getInstance(application) }
     private val memoryProvider: MemoryProvider by lazy {
         ServiceRegistry.getOrThrow(MemoryProvider::class.java).also { it.initialize() }
@@ -151,12 +157,6 @@ class ChatGenerationManager private constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _reasoningText = MutableStateFlow("")
-    val reasoningText: StateFlow<String> = _reasoningText.asStateFlow()
-
-    private val _isReasoning = MutableStateFlow(false)
-    val isReasoning: StateFlow<Boolean> = _isReasoning.asStateFlow()
-
     private val _isRegenerating = MutableStateFlow(false)
     val isRegenerating: StateFlow<Boolean> = _isRegenerating.asStateFlow()
 
@@ -169,6 +169,7 @@ class ChatGenerationManager private constructor(
     val pipeline = MessagePipelineRunner { level -> BanManager.recordViolation(application, level) }
 
     private val toolLoopRunner = AiToolLoopRunner(aiService)
+    private val streamApplier = PendingTurnStreamApplier()
     private val responseFinalizer by lazy { AiResponseFinalizer(
         companionId = companionId,
         chatRepository = chatRepository,
@@ -180,8 +181,6 @@ class ChatGenerationManager private constructor(
         contextResolver = contextResolver,
         aiService = aiService,
         applicationApiScope = scope,
-        reasoningText = _reasoningText,
-        isReasoning = _isReasoning,
         turnState = turnState,
         chatTtsController = ttsController,
         application = application,
@@ -384,42 +383,146 @@ class ChatGenerationManager private constructor(
     private fun startMessageConsumer() {
         if (messageConsumerJob?.isActive == true) return
         messageConsumerJob = scope.launch(Dispatchers.IO + exceptionHandler) {
-            val batch = mutableListOf<String>()
+            // 尚未被 AI 成功消费的用户文本；打断重发时保留，成功后才移除
+            val pending = mutableListOf<String>()
+            // true：连发聚合窗口；false：仅因子批次上限拆分后的短间隔
+            var waitForMergeWindow = true
             while (true) {
-                val first = messageQueue.receiveCatching()
-                if (first.isClosed) break
-                if (first.exceptionOrNull() != null) continue
-
-                batch.add(first.getOrThrow())
-                _queueDepth.value = maxOf(0, _queueDepth.value - 1)
-
-                while (true) {
-                    val extra = messageQueue.tryReceive()
-                    if (extra.isClosed || extra.isFailure) break
-                    batch.add(extra.getOrThrow())
+                if (pending.isEmpty()) {
+                    val first = messageQueue.receiveCatching()
+                    if (first.isClosed) break
+                    if (first.exceptionOrNull() != null) continue
+                    pending.add(first.getOrThrow())
                     _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+                    waitForMergeWindow = true
                 }
 
-                val batches = if (batch.size <= ChatConstants.MESSAGE_BATCH_MAX_SIZE) listOf(batch.toList()) else batch.chunked(ChatConstants.MESSAGE_BATCH_MAX_SIZE)
-                for ((batchIndex, subBatch) in batches.withIndex()) {
-                    if (batchIndex > 0) delay(300L)
-                    turnState.sendMessageJob?.takeIf { it.isActive }?.cancel(CancellationException("New message batch started, cancelling stale batch"))
-                    try {
-                        doSendMessage(subBatch)
-                    } catch (cancelled: CancellationException) {
-                        currentCoroutineContext().ensureActive()
-                        ChatDebugLog.log("[ChatGeneration] Child generation cancelled; queue consumer remains active: ${cancelled.message}")
-                    } catch (e: Exception) {
-                        SecureLog.e("ChatGenerationManager", "doSendMessage failed", e)
-                        _events.tryEmit(ChatUiEvent.Error("消息发送失败: ${e.message?.take(50) ?: "未知错误"}"))
-                    }
+                if (waitForMergeWindow) {
+                    // 快速连发：窗口内合并为一次 AI 请求
+                    drainQueueWithTimeout(pending, ChatConstants.MESSAGE_BATCH_WINDOW_MS)
+                } else {
+                    delay(ChatConstants.MESSAGE_BATCH_SPLIT_DELAY_MS)
+                    drainTryReceive(pending)
                 }
-                batch.clear()
+
+                val batchSize = pending.size.coerceAtMost(ChatConstants.MESSAGE_BATCH_MAX_SIZE)
+                if (batchSize <= 0) continue
+                val batch = pending.take(batchSize)
+
+                // 若上一轮 AI 仍在生成/分段投递，先打断再带着合并后的用户消息重发
+                cancelActiveGenerationForMerge()
+
+                try {
+                    val job = startSendMessage(batch)
+                    if (job == null) {
+                        // 校验失败（封禁/无 API/违规等）：丢弃本批，避免死循环
+                        repeat(batchSize) { if (pending.isNotEmpty()) pending.removeAt(0) }
+                        waitForMergeWindow = pending.isEmpty()
+                        continue
+                    }
+
+                    val interrupted = awaitGenerationOrNewMessage(job, pending)
+                    if (interrupted) {
+                        job.cancel(
+                            CancellationException("New message batch started, cancelling stale batch")
+                        )
+                        runCatching { job.join() }
+                        ChatDebugLog.log(
+                            "[ChatGeneration] Interrupted in-flight AI to merge ${pending.size} pending user message(s)"
+                        )
+                        // pending 仍含本批 + 新消息，下一轮窗口合并后重发
+                        waitForMergeWindow = true
+                        continue
+                    }
+
+                    // 生成正常结束：从 pending 移除已消费批次
+                    repeat(batchSize) { if (pending.isNotEmpty()) pending.removeAt(0) }
+                    waitForMergeWindow = false
+                } catch (cancelled: CancellationException) {
+                    currentCoroutineContext().ensureActive()
+                    ChatDebugLog.log(
+                        "[ChatGeneration] Child generation cancelled; queue consumer remains active: ${cancelled.message}"
+                    )
+                    waitForMergeWindow = true
+                } catch (e: Exception) {
+                    SecureLog.e("ChatGenerationManager", "doSendMessage failed", e)
+                    _events.tryEmit(
+                        ChatUiEvent.Error("消息发送失败: ${e.message?.take(50) ?: "未知错误"}")
+                    )
+                    // 失败也移除本批，避免同一内容无限重试
+                    repeat(batchSize) { if (pending.isNotEmpty()) pending.removeAt(0) }
+                    waitForMergeWindow = pending.isEmpty()
+                }
             }
         }
     }
 
-    private suspend fun doSendMessage(batch: List<String>) {
+    /** 非阻塞排空队列中已到达的用户消息 */
+    private fun drainTryReceive(pending: MutableList<String>) {
+        while (pending.size < ChatConstants.MESSAGE_BATCH_MAX_SIZE) {
+            val extra = messageQueue.tryReceive()
+            if (extra.isClosed || extra.isFailure) break
+            pending.add(extra.getOrThrow())
+            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+        }
+    }
+
+    /** 在聚合窗口内轮询接收连发消息 */
+    private suspend fun drainQueueWithTimeout(pending: MutableList<String>, windowMs: Long) {
+        val deadline = System.currentTimeMillis() + windowMs
+        drainTryReceive(pending)
+        while (pending.size < ChatConstants.MESSAGE_BATCH_MAX_SIZE) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0L) break
+            val waitMs = minOf(remaining, ChatConstants.MESSAGE_BATCH_POLL_INTERVAL_MS)
+            val result = withTimeoutOrNull(waitMs) { messageQueue.receiveCatching() } ?: continue
+            if (result.isClosed) return
+            if (result.isFailure) continue
+            pending.add(result.getOrThrow())
+            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+            drainTryReceive(pending)
+        }
+    }
+
+    /**
+     * 等待 AI 完成；若生成过程中又有用户消息入队，则立即返回 true 以便打断合并。
+     */
+    private suspend fun awaitGenerationOrNewMessage(
+        job: Job,
+        pending: MutableList<String>,
+    ): Boolean {
+        while (job.isActive) {
+            val result = withTimeoutOrNull(ChatConstants.MESSAGE_BATCH_POLL_INTERVAL_MS) {
+                messageQueue.receiveCatching()
+            }
+            if (result == null) continue
+            if (result.isClosed) {
+                // 队列关闭后只等当前 AI 收尾
+                job.join()
+                return false
+            }
+            if (result.isFailure) continue
+            pending.add(result.getOrThrow())
+            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+            drainTryReceive(pending)
+            return true
+        }
+        // 让 job 内异常/取消路径走完
+        runCatching { job.join() }
+        return false
+    }
+
+    private fun cancelActiveGenerationForMerge() {
+        val active = turnState.sendMessageJob?.takeIf { it.isActive } ?: return
+        active.cancel(CancellationException("New message batch started, cancelling stale batch"))
+        // 不在此处 join：由调用方在启动新任务前通过 await/join 收敛，避免阻塞过久
+    }
+
+    /**
+     * 校验并启动 AI 回复。成功返回 job；校验失败返回 null（不启动生成）。
+     * 调用方负责：生成中监听新消息并打断合并、成功后消费 pending。
+     */
+    private suspend fun startSendMessage(batch: List<String>): Job? {
         val contentBatch = batch
         val content = if (contentBatch.size == 1) contentBatch[0] else contentBatch.joinToString("\n")
 
@@ -433,7 +536,7 @@ class ChatGenerationManager private constructor(
                 "账号已被封禁，原因：${banInfo.levelName}。第${banInfo.violationCount}次违规。请完成安全答题以解除封禁。"
             }
             _events.tryEmit(ChatUiEvent.Error(banMsg))
-            return
+            return null
         }
 
         if (apiConfigRepository.getActiveEnabledConfig() == null) {
@@ -441,17 +544,17 @@ class ChatGenerationManager private constructor(
                 val inputCheck = runCatching { ContentFilter.checkInput(msg) }.getOrNull()
                 if (inputCheck == null) {
                     _events.tryEmit(ChatUiEvent.Error("安全检查异常"))
-                    return
+                    return null
                 }
                 if (inputCheck.isViolating) {
                     BanManager.recordViolation(application, inputCheck.level)
                     _events.tryEmit(ChatUiEvent.ContentBlocked("内容违规: ${inputCheck.reason}"))
-                    return
+                    return null
                 }
             }
             // 架构：配置类错误只 Toast，禁止写入消息库污染对话与 AI 上下文
             _events.tryEmit(ChatUiEvent.Error("请先配置API：我 → API设置 → 添加密钥"))
-            return
+            return null
         }
 
         val pipelineOk = try {
@@ -462,27 +565,22 @@ class ChatGenerationManager private constructor(
 
         if (pipelineOk != true) {
             _events.tryEmit(ChatUiEvent.ContentBlocked(pipeline.pipelineState.value.error ?: "内容可能违规"))
-            return
+            return null
         }
 
         turnState.reset()
         val fetchedHistory = contextResolver.getHistoryForAi(companionId)
             .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
         val settings = chatDetailSettingsStore.getSettings(companionId)
-        turnState.sendMessageJob = startAiResponse(
+        val job = startAiResponse(
             history = fetchedHistory,
             stickerProbability = settings.stickerProbability,
             userContentForMemory = content,
             batchMessageCount = contentBatch.size,
             ntpTimeEnabled = settings.ntpTimeEnabled
         )
-
-        try {
-            turnState.sendMessageJob?.join()
-        } catch (e: CancellationException) {
-            ChatDebugLog.log("[ChatGeneration] AI job cancelled: ${e.message}")
-            return
-        }
+        turnState.sendMessageJob = job
+        return job
     }
 
     private fun startAiResponse(
@@ -494,9 +592,16 @@ class ChatGenerationManager private constructor(
         ntpTimeEnabled: Boolean = false
     ) = scope.launch(Dispatchers.IO + exceptionHandler) {
         val requestStartedAt = System.currentTimeMillis()
-        // 新一轮请求开始时清理上一轮思考气泡，避免串轮
-        _reasoningText.value = ""
-        _isReasoning.value = false
+        // 新一轮请求开始时清理上一轮流式思考临时消息，避免串轮
+        com.lianyu.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
+            .clearAllStreaming(companionId)
+        val pendingTurn = com.lianyu.ai.feature.chat.timeline.PendingTurn.start(
+            conversation = com.lianyu.ai.domain.timeline.ConversationRef(
+                conversationId = companionId,
+                conversationType = "chat",
+            ),
+            startedAtMs = requestStartedAt,
+        )
         enterLoading()
         // 成功路径在消息落地后提前 release；finally 仅兜底失败/提前 return，禁止双重 decrement。
         var loadingReleased = false
@@ -512,57 +617,140 @@ class ChatGenerationManager private constructor(
             val modelHistory = com.lianyu.ai.domain.AiDialogueHistoryPolicy
                 .sanitizeForModel(history.toAiChatMessages())
 
-            val aiResponse = if (imagePath != null) {
-                withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
-                    aiService.sendMessageWithImage(companion.toAiCompanionInfo(), modelHistory, imagePath, stickerProbability, ntpTimeEnabled)
-                } ?: throw Exception(application.getString(R.string.api_error_generic))
-            } else if (isLocalModelEnabled()) {
-                AiResponse(content = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                    // 本地模型同样只消费清洗后的历史，避免运营错误/工具污染导致自言自语
-                    generateWithLocalModel(companion, modelHistory, stickerProbability, ntpTimeEnabled)
-                } ?: throw java.util.concurrent.TimeoutException("Local model timeout"))
-            } else {
-                val tools = if (shouldEnableToolsFor(content = userContentForMemory, history = history)) {
-                    ToolRegistry.all()
-                } else {
-                    emptyList()
+            // Slice 6：无工具远程路径走真实 SSE；tools / vision / local 降级非流式终态事件
+            val showReasoning = appSettingsStore.getShowReasoning()
+            val useTools = imagePath == null &&
+                !isLocalModelEnabled() &&
+                shouldEnableToolsFor(content = userContentForMemory, history = history)
+            val streamEvents = when {
+                imagePath != null -> {
+                    val aiResponse = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
+                        aiService.sendMessageWithImage(
+                            companion.toAiCompanionInfo(),
+                            modelHistory,
+                            imagePath,
+                            stickerProbability,
+                            ntpTimeEnabled,
+                        )
+                    } ?: throw Exception(application.getString(R.string.api_error_generic))
+                    NonStreamingAssistantStreamAdapter.fromCompleted(
+                        turnId = pendingTurn.turnId,
+                        reasoning = aiResponse.reasoningContent,
+                        content = aiResponse.content,
+                        startedAtMs = requestStartedAt,
+                        completedAtMs = System.currentTimeMillis(),
+                    )
                 }
-                runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * 3) {
-                    toolLoopRunner.executeWithToolLoop(companion.toAiCompanionInfo(), modelHistory, stickerProbability, ntpTimeEnabled, tools)
-                } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
+                isLocalModelEnabled() -> {
+                    val content = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
+                        generateWithLocalModel(companion, modelHistory, stickerProbability, ntpTimeEnabled)
+                    } ?: throw java.util.concurrent.TimeoutException("Local model timeout")
+                    NonStreamingAssistantStreamAdapter.fromCompleted(
+                        turnId = pendingTurn.turnId,
+                        reasoning = null,
+                        content = content,
+                        startedAtMs = requestStartedAt,
+                        completedAtMs = System.currentTimeMillis(),
+                    )
+                }
+                useTools -> {
+                    val tools = ToolRegistry.all()
+                    val aiResponse = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * 3) {
+                        toolLoopRunner.executeWithToolLoop(
+                            companion.toAiCompanionInfo(),
+                            modelHistory,
+                            stickerProbability,
+                            ntpTimeEnabled,
+                            tools,
+                        )
+                    } ?: throw java.util.concurrent.TimeoutException("AI response timeout")
+                    NonStreamingAssistantStreamAdapter.fromCompleted(
+                        turnId = pendingTurn.turnId,
+                        reasoning = aiResponse.reasoningContent,
+                        content = aiResponse.content,
+                        startedAtMs = requestStartedAt,
+                        completedAtMs = System.currentTimeMillis(),
+                    )
+                }
+                else -> {
+                    // 真实 SSE；超时由 OkHttp 读超时 + 上层 job cancel 约束
+                    aiService.streamMessage(
+                        companion = companion.toAiCompanionInfo(),
+                        history = modelHistory,
+                        stickerProbability = stickerProbability,
+                        ntpTimeEnabled = ntpTimeEnabled,
+                        turnId = pendingTurn.turnId,
+                        startedAtMs = requestStartedAt,
+                    )
+                }
             }
 
-            val aiContent = aiResponse.content
-            // 运营错误 / [TOAST] 协议：只 Toast，绝不入库
-            val toastMsg = com.lianyu.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
-            if (toastMsg != null) {
+            val streamResult = streamApplier.apply(
+                events = streamEvents,
+                turn = pendingTurn,
+                projectLive = showReasoning,
+                onReasoningSnapshot = { snapshot ->
+                    // 流式思考走消息链路（L1 MessageCache），不再写 ephemeral StateFlow
+                    if (EventCommitRules.shouldProjectReasoningLive(showReasoning, snapshot)) {
+                        StreamingReasoningMessagePipeline.upsertStreaming(
+                            companionId = companionId,
+                            turnId = pendingTurn.turnId,
+                            text = snapshot,
+                            timestamp = pendingTurn.startedAtMs,
+                            eventIndex = pendingTurn.streamingReasoningEvent()?.eventIndex,
+                            anchorMessageId = pendingTurn.anchorMessageId,
+                        )
+                    }
+                },
+            )
+
+            if (streamResult.failedMessage != null) {
+                StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
+                val toastMsg = com.lianyu.ai.domain.AiOperationalMessages.asToastMessage(
+                    "[TOAST]${streamResult.failedMessage}",
+                ) ?: streamResult.failedMessage
                 _events.tryEmit(ChatUiEvent.Error(toastMsg))
                 return@launch
             }
-            if (aiContent.isBlank() && aiResponse.toolCalls.isNullOrEmpty()) {
+
+            val aiContent = streamResult.assistantText
+            val toastMsg = com.lianyu.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
+            if (toastMsg != null) {
+                StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
+                _events.tryEmit(ChatUiEvent.Error(toastMsg))
+                return@launch
+            }
+            if (aiContent.isBlank()) {
+                StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
                 _events.tryEmit(ChatUiEvent.Error("API返回空内容，请检查模型名是否正确"))
                 return@launch
             }
+
+            val reasoningForCommit = streamResult.reasoningText
 
             // 1) 分段投递期间保持 loading/typing（模拟真人连发）
             // 2) 最后一条消息可见后立刻 exitLoading，避免记忆/追问把「对方正在输入」拖住
             val delivered = responseFinalizer.deliverResponse(
                 aiContent = aiContent,
-                reasoning = aiResponse.reasoningContent,
+                reasoning = reasoningForCommit,
                 userContentForMemory = userContentForMemory,
-                logMessage = if (batchMessageCount > 1) "AI batch response received (${batchMessageCount} msgs)" else "AI response received"
+                logMessage = if (batchMessageCount > 1) "AI batch response received (${batchMessageCount} msgs)" else "AI response received",
+                pendingTurn = pendingTurn,
+                reasoningStartedAtMs = requestStartedAt,
             )
             exitLoading()
             loadingReleased = true
             responseFinalizer.afterDeliver(delivered)
             SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}")
         } catch (e: CancellationException) {
+            StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
             val cancelReason = e.message ?: ""
             if (!cancelReason.contains("batch started") && !cancelReason.contains("stale")) {
                 _events.tryEmit(ChatUiEvent.Error("回复被打断，请重试"))
             }
             throw e
         } catch (e: Exception) {
+            StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
             val rawMessage = e.message ?: "发送失败"
             _events.tryEmit(ChatUiEvent.Error(rawMessage.removePrefix("[TOAST]")))
             SecureLog.e("ChatGenerationManager", "AI response failed", e)
@@ -593,7 +781,7 @@ class ChatGenerationManager private constructor(
     }
 
     private fun broadcastWeChatMessage(messageId: Long, finalContent: String? = null) {
-        WeChatBroadcastHelper.broadcast(application, companionId, messageId, finalContent)
+        WeChatProactiveSync.enqueue(companionId, messageId, finalContent)
     }
 
     private suspend fun isLocalModelEnabled(): Boolean {
@@ -613,6 +801,14 @@ class ChatGenerationManager private constructor(
         val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, 50).take(500)
         val role = userRepository?.selectedRole?.value ?: CompanionRole.GIRLFRIEND
         val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
+        val recentAiTexts = sortedHistory
+            .asReversed()
+            .asSequence()
+            .filter { !it.isFromUser }
+            .take(ChatConstants.ENV_ANCHOR_RECENT_LOOKBACK)
+            .map { it.content }
+            .toList()
+        val allowEnvAnchor = envAnchorStore.allowEnvAnchor(companion.id, recentAiTexts)
         val dialogueContext = sortedHistory
             .takeLast(12)
             .joinToString("\n") { msg ->
@@ -620,11 +816,26 @@ class ChatGenerationManager private constructor(
                 "$speaker：${msg.content.take(200)}"
             }
             .take(1200)
+        val personality = companion.personality?.take(300).orEmpty()
+        val rawPrompt = companion.rawPrompt?.take(300).orEmpty()
+        val customSystem = companion.systemPrompt?.take(800).orEmpty()
         val systemPrompt = buildString {
             appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
-            companion.personality?.take(300)?.takeIf { it.isNotBlank() }?.let { appendLine("性格：$it") }
+            appendLine()
+            appendLine(com.lianyu.ai.network.AiContextTools.buildDeliveryBudgetPriority(lastUserMessage))
+            personality.takeIf { it.isNotBlank() }?.let { appendLine("性格：$it") }
             companion.speakingStyle?.take(100)?.takeIf { it.isNotBlank() }?.let { appendLine("说话风格：$it") }
             companion.backstory?.take(200)?.takeIf { it.isNotBlank() }?.let { appendLine("背景：$it") }
+            if (rawPrompt.isNotBlank() &&
+                rawPrompt != personality &&
+                !personality.contains(rawPrompt) &&
+                !rawPrompt.contains(personality)
+            ) {
+                appendLine("补充设定：$rawPrompt")
+            }
+            if (customSystem.isNotBlank()) {
+                appendLine("自定义角色指令：$customSystem")
+            }
             if (memoryContext.isNotBlank()) appendLine("\n关于用户的记忆：$memoryContext")
             if (dialogueContext.isNotBlank()) {
                 appendLine("\n最近对话（仅供参考，不要复读系统错误或自言自语）：")
@@ -632,21 +843,68 @@ class ChatGenerationManager private constructor(
             }
             appendLine()
             appendLine("回复规则：")
-            appendLine("1. 每次回复1-5句短话，控制在15-50字。")
+            appendLine("1. 长度（软硬结合）：软目标约 40–120 字，安慰/解释可到约 150 字；整轮尽量不超过 200–300 字。闲聊单焦点宁可偏短，勿为凑字再塞动作。")
             appendLine("2. 活人语气，自然口语化，不要AI腔。")
             appendLine("3. 每句话用标点结尾（。！？～…）。")
             appendLine("4. 不要重复同样的话。")
-            appendLine("5. 先回应用户的消息，不要自说自话。")
-            if (innerThoughtEnabled) appendLine("6. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("6. 禁止使用任何括号。禁止说教。")
-            RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${7 + index}. $line") }
-            if (stickerProbability > 0) appendLine("9. 表情包：可按语境偶尔使用[名称]格式。")
+            appendLine("5. 先回应用户的消息，不要自说自话；前半句先接表层情绪或表层问句。")
+            appendLine("6. 分块（软硬结合）：优先 1 条消息；多意图空行分块，软上限 2–3 条气泡，勿句句拆条。短肯定（嗯、好、行）可单独成句。分块≠多塞动作。")
+            appendLine("7. 交付预算：默认 1 个主焦点（接情绪/追问/表态/答问）；闲聊勿打包共情+方案+推荐；用户要怎么办或安全时才可 +1 附属。")
+            if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
+            RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
+            if (stickerProbability > 0) appendLine("12. 表情包：可按语境偶尔使用[名称]格式。")
             appendLine("\n记住：你不是AI，你是活人。直接回复内容，不要输出思考过程。")
             appendLine()
-            appendLine(com.lianyu.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled))
+            appendLine(com.lianyu.ai.network.AiContextTools.buildConversationTimingRules())
+            appendLine(com.lianyu.ai.network.AiContextTools.buildDeliveryBudgetRules())
+            // 本地路径历史为领域类型，映射为轻量 ChatMessage 供阶段检测
+            val phaseHistory = sortedHistory.map { msg ->
+                com.lianyu.ai.database.model.ChatMessage(
+                    companionId = companion.id,
+                    content = msg.content,
+                    isFromUser = msg.isFromUser,
+                    timestamp = msg.timestamp,
+                )
+            }
+            val phase = com.lianyu.ai.network.ConversationPhaseDetector.detect(phaseHistory)
+            val effectivePhase =
+                if (!allowEnvAnchor && phase == com.lianyu.ai.network.ConversationPhase.OPENING) {
+                    com.lianyu.ai.network.ConversationPhase.TOPIC
+                } else {
+                    phase
+                }
+            appendLine(com.lianyu.ai.network.AiContextTools.buildConversationPhaseSection(effectivePhase))
+            appendLine(com.lianyu.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled, effectivePhase))
+            val cooldown = EnvAnchorCooldown.buildCooldownDirective(allowEnvAnchor)
+            if (cooldown.isNotBlank()) {
+                appendLine()
+                appendLine(cooldown)
+            }
+            appendLine()
+            appendLine(com.lianyu.ai.network.AiContextTools.buildDeliveryBudgetEndCap(lastUserMessage))
         }
         val localProvider = ServiceRegistry.get(LocalModelProvider::class.java)
             ?: throw Exception(application.getString(R.string.api_error_generic))
-        return localProvider.generateResponse(prompt = lastUserMessage.take(2000), context = systemPrompt)
+        val response = localProvider.generateResponse(prompt = lastUserMessage.take(2000), context = systemPrompt)
+        // 本地模型也会输出 <think>/纯文本 CoT；与云端路径统一剥离，禁止思考进气泡
+        // 闲聊情绪轮再裁护理包，与 applyPersonaPostProcessing 对齐
+        val cleaned = com.lianyu.ai.network.ResponsePostProcessor
+            .trimIdleEmotionOverDelivery(
+                com.lianyu.ai.network.ResponsePostProcessor.stripThinkingContent(response),
+                lastUserMessage,
+            )
+            .ifBlank {
+                SecureLog.w(
+                    "ChatGenerationManager",
+                    "Local model returned only thinking/empty after strip, rawLen=${response.length}",
+                )
+                ""
+            }
+        if (EnvAnchorCooldown.looksLikeEnvCare(cleaned)) {
+            envAnchorStore.markEnvAnchor(companion.id)
+            SecureLog.d("ChatGenerationManager", "Marked env anchor companion=${companion.id} (local)")
+        }
+        return cleaned
     }
 
     private fun CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(

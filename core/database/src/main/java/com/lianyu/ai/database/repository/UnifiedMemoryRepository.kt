@@ -494,15 +494,23 @@ class UnifiedMemoryRepository(
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * 对话摘要压缩 —— 将积累的 WORKING 记忆压缩为 EPISODIC 摘要记忆。
+     * 对话摘要压缩 —— 将积累的 WORKING 记忆压缩为 EPISODIC 叙事摘要记忆。
      *
      * 触发条件：WORKING 记忆数 ≥ [threshold]（默认 10 条）
      * 压缩流程：
      * 1. 获取最早的 [compressCount] 条 WORKING 记忆
      * 2. 拼接为对话文本
-     * 3. 调用 [SummaryProvider] 生成 AI 摘要（失败时回退到本地规则摘要）
-     * 4. 将摘要存为 EPISODIC 记忆（importance=0.55, confidence=0.7）
+     * 3. 调用 [SummaryProvider] 生成五维叙事摘要（失败时回退到本地规则摘要）
+     * 4. 将摘要存为 EPISODIC 记忆：
+     *    - content = 完整叙事正文（检索/注入主字段）
+     *    - summary = 同一叙事正文（UI/关键词检索副字段，避免空 summary）
+     *    - tags = conversation-summary
      * 5. 软删除已摘要的 WORKING 记忆
+     *
+     * 存储说明：
+     * - 叙事摘要落在 [MemoryRecord.content] / [MemoryRecord.summary]，类型 EPISODIC
+     * - 不写入 conversation_summary 表（那是首页 lastMessage 预览，不是 AI 叙事）
+     * - HISTORY 用途摘要仅注入当前请求上下文，默认不落库（AutoContextManager 内存 LRU）
      *
      * @param scope          记忆作用域
      * @param sourceId       来源 ID
@@ -529,17 +537,17 @@ class UnifiedMemoryRepository(
         // 3. 获取已有记忆上下文（避免摘要重复提取）
         val memoryContext = buildMemoryContext(scope, sourceId, "", limit = 5)
 
-        // 4. 生成摘要（统一摘要服务，MEMORY 用途：150 字精简摘要）
+        // 4. 生成摘要（统一摘要服务，MEMORY：五维叙事，不硬限字数）
         val summary = if (summaryProvider != null && summaryProvider.isSummarySupported()) {
             summaryProvider.summarize(conversationText, memoryContext, SummaryPurpose.MEMORY)
         } else null
 
-        // 回退到本地规则摘要（截取关键片段）
+        // 回退到本地规则摘要（五维骨架）
         val finalSummary = summary ?: buildLocalSummaryFallback(oldMemories)
 
         if (finalSummary.isBlank()) return false
 
-        // 5. 存为 EPISODIC 摘要记忆
+        // 5. 存为 EPISODIC 叙事摘要记忆（content + summary 双写，保证检索/UI 都能命中）
         addMemory(
             content = finalSummary,
             type = MemoryType.EPISODIC,
@@ -547,6 +555,7 @@ class UnifiedMemoryRepository(
             sourceId = sourceId,
             importance = 0.55f,
             confidence = 0.7f,
+            summary = finalSummary,
             tags = "conversation-summary",
             observedAt = System.currentTimeMillis()
         )
@@ -560,36 +569,51 @@ class UnifiedMemoryRepository(
 
     /**
      * 本地规则摘要回退（当 AI API 不可用时使用）。
-     * 从 WORKING 记忆中提取关键片段。
+     * 按「时间 / 事件 / 人物 / 驱动 / 情绪」骨架组织，不硬截到固定字数。
      */
     private fun buildLocalSummaryFallback(memories: List<MemoryRecord>): String {
         if (memories.isEmpty()) return ""
 
         val userMentions = mutableListOf<String>()
         val aiMentions = mutableListOf<String>()
+        val earliest = memories.minOfOrNull { it.observedAt } ?: 0L
+        val latest = memories.maxOfOrNull { it.observedAt } ?: 0L
 
         memories.forEach { mem ->
             val content = mem.content
-            if (content.startsWith("用户:")) {
-                userMentions.add(content.removePrefix("用户:").trim().take(60))
-            } else if (content.startsWith("AI:")) {
-                aiMentions.add(content.removePrefix("AI:").trim().take(40))
-            } else {
-                userMentions.add(content.take(40))
+            when {
+                content.startsWith("用户:") ->
+                    userMentions.add(content.removePrefix("用户:").trim())
+                content.startsWith("AI:") ->
+                    aiMentions.add(content.removePrefix("AI:").trim())
+                else -> userMentions.add(content.trim())
             }
         }
 
-        val sb = StringBuilder()
-        sb.append("对话摘要（${memories.size}轮）：")
-        if (userMentions.isNotEmpty()) {
-            sb.append("用户提到——")
-            sb.append(userMentions.distinct().take(5).joinToString("；"))
+        val timeSpan = when {
+            earliest <= 0L || latest <= 0L -> "未明确"
+            earliest == latest -> formatTimeAgo(System.currentTimeMillis() - latest)
+            else -> {
+                val spanMin = ((latest - earliest) / 60000L).coerceAtLeast(0)
+                "约${spanMin}分钟跨度，最近 ${formatTimeAgo(System.currentTimeMillis() - latest)}"
+            }
         }
-        if (aiMentions.isNotEmpty()) {
-            sb.append("。AI回应要点——")
-            sb.append(aiMentions.distinct().take(3).joinToString("；"))
-        }
-        return sb.toString().take(200)
+
+        return buildString {
+            appendLine("时间：$timeSpan；覆盖 ${memories.size} 条工作记忆")
+            appendLine(
+                "事件：" + if (userMentions.isNotEmpty()) {
+                    userMentions.distinct().take(6).joinToString("；")
+                } else "未明确"
+            )
+            appendLine("人物：用户与 AI 对话")
+            appendLine(
+                "驱动：" + if (aiMentions.isNotEmpty()) {
+                    aiMentions.distinct().take(4).joinToString("；")
+                } else "未明确"
+            )
+            append("情绪：未明确（本地回退摘要）")
+        }.trim()
     }
 
     // ═══════════════════════════════════════════════════════════

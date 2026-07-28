@@ -32,6 +32,10 @@ void wb_aes_wipe_keys(void);
 int wb_aes_256_encrypt(const uint8_t in[16], uint8_t out[16]);
 int wb_aes_256_decrypt(const uint8_t in[16], uint8_t out[16]);
 
+/* Persistent key derivation keeps integrity/lock checks but is not disabled by
+ * a transient degraded risk score. */
+int wb_aes_256_encrypt_persistent(const uint8_t in[16], uint8_t out[16]);
+
 /* CBC mode */
 int wb_aes_256_cbc_encrypt(const uint8_t* in, uint8_t* out, size_t len, uint8_t iv[16]);
 int wb_aes_256_cbc_decrypt(const uint8_t* in, uint8_t* out, size_t len, uint8_t iv[16]);

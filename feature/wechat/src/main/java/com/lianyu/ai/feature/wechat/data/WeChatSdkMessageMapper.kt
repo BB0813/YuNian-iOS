@@ -1,8 +1,8 @@
 package com.lianyu.ai.feature.wechat.data
 
-import com.github.wechat.ilink.sdk.core.model.CDNMedia as SdkCdnMedia
-import com.github.wechat.ilink.sdk.core.model.MessageItem as SdkMessageItem
-import com.github.wechat.ilink.sdk.core.model.WeixinMessage as SdkWeixinMessage
+import com.lianyu.ai.wechat.wire.WireCdnMedia
+import com.lianyu.ai.wechat.wire.WireMessageItem
+import com.lianyu.ai.wechat.wire.WireWeChatMessage
 import com.lianyu.ai.feature.wechat.data.model.M7
 import com.lianyu.ai.feature.wechat.data.model.M5
 import com.lianyu.ai.feature.wechat.data.model.M3
@@ -13,44 +13,48 @@ import com.lianyu.ai.feature.wechat.data.model.M4
 import com.lianyu.ai.feature.wechat.data.model.M0
 
 object WeChatSdkMessageMapper {
-    fun toAppMessage(message: SdkWeixinMessage): M0 {
+    fun toAppMessage(message: WireWeChatMessage): M0 {
+        return message.toAppMessageInternal()
+    }
+
+    private fun WireWeChatMessage.toAppMessageInternal(): M0 {
         return M0(
-            seq = message.message_id,
-            messageId = message.message_id,
-            fromUserId = message.from_user_id,
-            toUserId = message.to_user_id,
-            createTimeMs = message.create_time_ms,
-            messageType = message.message_type,
-            itemList = message.item_list?.map { it.toAppItem() },
-            contextToken = message.context_token
+            seq = seq,
+            messageId = messageId,
+            fromUserId = fromUserId,
+            toUserId = toUserId,
+            createTimeMs = createTimeMs,
+            messageType = messageType,
+            itemList = itemList?.map { it.toAppItem() },
+            contextToken = contextToken,
         )
     }
 
-    private fun SdkMessageItem.toAppItem(): M1 {
+    private fun WireMessageItem.toAppItem(): M1 {
         return M1(
             type = type,
-            textItem = text_item?.let { M2(text = it.text.orEmpty()) },
-            imageItem = image_item?.let { M3(cdnImg = it.media?.toAppMedia()) },
-            voiceItem = voice_item?.let { M4(cdnVoice = it.media?.toAppMedia()) },
-            fileItem = file_item?.let {
+            textItem = textItem?.let { M2(text = it.text.orEmpty()) },
+            imageItem = imageItem?.let { M3(cdnImg = it.cdnImg?.toAppMedia()) },
+            voiceItem = voiceItem?.let { M4(cdnVoice = it.cdnVoice?.toAppMedia()) },
+            fileItem = fileItem?.let {
                 M5(
-                    cdnFile = it.media?.toAppMedia(),
-                    fileName = it.file_name
+                    cdnFile = it.cdnFile?.toAppMedia(),
+                    fileName = it.fileName,
                 )
             },
-            videoItem = video_item?.let {
+            videoItem = videoItem?.let {
                 M6(
-                    cdnVideo = it.media?.toAppMedia(),
-                    cdnThumb = it.thumb_media?.toAppMedia()
+                    cdnVideo = it.cdnVideo?.toAppMedia(),
+                    cdnThumb = it.cdnThumb?.toAppMedia(),
                 )
-            }
+            },
         )
     }
 
-    private fun SdkCdnMedia.toAppMedia(): M7 {
+    private fun WireCdnMedia.toAppMedia(): M7 {
         return M7(
-            encryptQueryParam = encrypt_query_param,
-            aesKey = aes_key
+            encryptQueryParam = encryptQueryParam,
+            aesKey = aesKey,
         )
     }
 }

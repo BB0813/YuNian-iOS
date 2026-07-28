@@ -1,5 +1,9 @@
 package com.lianyu.ai.domain
 
+import com.lianyu.ai.domain.stream.AssistantStreamEvent
+import com.lianyu.ai.domain.timeline.TurnId
+import kotlinx.coroutines.flow.Flow
+
 /**
  * AI 对话服务提供者接口。
  * 由 core:network 实现，通过 ServiceRegistry 注入到 feature 模块。
@@ -91,6 +95,26 @@ interface AiServiceProvider {
     ): AiResponse
 
     /**
+     * 流式发送（OpenAI 兼容 SSE → [AssistantStreamEvent]）。
+     *
+     * 约束：
+     * - 不写库；feature 侧 collect 后经 PendingTurn 再 commit
+     * - 不支持 tools / vision；调用方应在这些场景走 [sendMessage]
+     * - Anthropic 等非 SSE 协议可由实现降级为终态事件序列
+     *
+     * @param turnId 与 PendingTurn 对齐的回合 id
+     * @param startedAtMs 回合开始（durationMs）
+     */
+    fun streamMessage(
+        companion: AiCompanionInfo,
+        history: List<AiChatMessage>,
+        stickerProbability: Int = 0,
+        ntpTimeEnabled: Boolean = false,
+        turnId: TurnId,
+        startedAtMs: Long = System.currentTimeMillis(),
+    ): Flow<AssistantStreamEvent>
+
+    /**
      * 发送图片消息并调用视觉 AI 模型进行识别。
      *
      * @param companion 伴侣角色信息
@@ -148,8 +172,8 @@ interface AiServiceProvider {
     /**
      * 生成主动消息内容（带自定义设置）。
      *
-     * 设置影响：allowNewTopic=false 时强制承接上一话题；
-     * allowFollowUpMessage 控制是否生成追问。
+     * 话题是否承接由角色性格、兴趣与话题完结度决定；
+     * allowNewTopic / allowFollowUpMessage 仅为软偏好，不再强制硬续旧话题。
      *
      * @param settings 主动消息自定义设置，null 走默认行为
      */

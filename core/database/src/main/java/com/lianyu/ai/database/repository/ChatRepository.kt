@@ -83,7 +83,12 @@ class ChatRepository(
     }
 
     suspend fun hydrateRecent(companionId: Long, limit: Int) {
-        if (MessageCache.getChatMessages(companionId) == null) {
+        val cached = MessageCache.getChatMessages(companionId)
+        // observeChatMessages 可能预建空 SessionCache；仅有流式负 id 时也需从 DB 补齐
+        val needsHydrate = cached == null ||
+            cached.isEmpty() ||
+            cached.all { it.id < 0L }
+        if (needsHydrate) {
             getRecentMessagesSync(companionId, limit)
         }
     }

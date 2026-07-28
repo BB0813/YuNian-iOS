@@ -320,6 +320,8 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:security"))
     implementation(project(":core:ui-common"))
+    // S6：OutboundPort 直接使用 core:wechat 清洗/出站类型（feature:wechat 为 implementation，不传递）
+    implementation(project(":core:wechat"))
 
     // Feature modules
     implementation(project(":feature:companion"))

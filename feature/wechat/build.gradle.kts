@@ -19,6 +19,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     kotlin {
@@ -27,10 +28,14 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:domain"))
     implementation(project(":core:common"))
     implementation(project(":core:database"))
     implementation(project(":core:network"))
     implementation(project(":core:ui-common"))
+    implementation(project(":core:security"))
+    // S0：类型/映射层；运行时仍在 feature 石山，后续切片迁入 core:wechat
+    implementation(project(":core:wechat"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)
@@ -38,16 +43,13 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.security.crypto)
     implementation(libs.zxing.core)
-    implementation(libs.wechat.ilink.sdk) {
-        exclude(group = "ch.qos.logback", module = "logback-classic")
-        exclude(group = "ch.qos.logback", module = "logback-core")
-    }
 
     testImplementation(libs.junit)
 }

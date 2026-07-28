@@ -1,6 +1,8 @@
 package com.lianyu.ai.network
 
+import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.CompanionRole
+import com.lianyu.ai.common.EnvAnchorCooldown
 import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
@@ -15,7 +17,13 @@ import java.util.Calendar
 object AiPromptBuilder {
 
     // === private fun buildProactiveTimeContext(): String { ===
-    internal fun buildProactiveTimeContext(): String {
+    /**
+     * 主动消息时间上下文。
+     * 主动插话本身相当于一次 OPENING/重连：最多轻提一次环境；冷却中则硬禁同类关心。
+     *
+     * @param allowEnvAnchor false 时写入「环境关心冷却中」硬约束（DataStore + 最近 AI 扫描）。
+     */
+    internal fun buildProactiveTimeContext(allowEnvAnchor: Boolean = true): String {
         val calendar = java.util.Calendar.getInstance()
         val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
         val minute = calendar.get(java.util.Calendar.MINUTE)
@@ -33,54 +41,36 @@ object AiPromptBuilder {
             java.util.Calendar.SUNDAY to "周日"
         )
         val weekdayName = weekdayNames[dayOfWeek] ?: ""
-
-        val timeScenario = when (hour) {
-            in 5..7 -> {
-                val hint = if (hour < 6) "凌晨了" else if (hour == 6) "天快亮了" else "早上了"
-                "$hint（$timeStr），用户可能刚醒或还没醒。可以关心对方有没有起床、早安、问要不要一起吃早餐、提醒今天有什么安排。"
-            }
-            in 8..10 -> {
-                "上午（$timeStr），用户可能在上班/上学路上或刚开始工作。可以聊早上发生了什么、吃了没、今天心情怎么样、提醒别迟到。"
-            }
-            in 11..12 -> {
-                "快到午饭时间了（$timeStr），用户肚子应该饿了。可以问吃什么、要不要一起点外卖、中午休息一下、吐槽食堂/外卖难吃。"
-            }
-            in 13..14 -> {
-                "午休时间（$timeStr），用户可能在犯困打盹。可以问睡醒了没、下午要干嘛、分享自己也在犯困、叫对方起来活动一下。"
-            }
-            in 15..17 -> {
-                "下午（$timeStr），工作时间过半，用户可能累了或在摸鱼。可以聊下班还有多久、想不想喝奶茶、摸鱼中吗、等下一起去吃点什么。"
-            }
-            in 18..19 -> {
-                "下班/放学时间（$timeStr），用户在回家路上或刚到家。可以问到家了没、路上堵不堵、晚上想干什么、要不要一起打游戏/看剧/吃饭。"
-            }
-            in 20..22 -> {
-                "晚间休闲时间（$timeStr），用户在放松。可以聊今天过得怎么样、分享有趣的事、撒娇求关注、催对方早点洗澡、一起追剧/打游戏。"
-            }
-            in 23..24, 0, in 1..4 -> {
-                "深夜/凌晨（$timeStr），用户还没睡。可以问怎么还不睡、明天不用早起吗、陪对方聊天、温柔地哄睡觉、说晚安。"
-            }
-            else -> "$timeStr"
-        }
-
         val isWeekend = dayOfWeek == java.util.Calendar.SATURDAY || dayOfWeek == java.util.Calendar.SUNDAY
-        val weekendHint = when {
-            isWeekend && hour in 9..11 -> "今天是$weekdayName 周末，用户可以睡懒觉。"
-            isWeekend && hour in 12..14 -> "周末中午，用户可能在享受慵懒时光。"
-            isWeekend && hour in 18..21 -> "周末晚上，适合约会或宅家放松。"
-            !isWeekend && hour in 7..9 -> "今天是$weekdayName 工作日，用户可能要赶时间出门。"
-            !isWeekend && hour in 17..19 -> "工作日傍晚，用户可能刚结束一天的工作比较疲惫。"
-            else -> ""
+        val dayType = if (isWeekend) "周末" else "工作日"
+
+        // 只给粗粒度时段标签，不规定“该聊什么/该做什么”
+        val periodLabel = when (hour) {
+            in 5..7 -> "清晨"
+            in 8..10 -> "上午"
+            in 11..12 -> "临近中午"
+            in 13..14 -> "午后"
+            in 15..17 -> "下午"
+            in 18..19 -> "傍晚"
+            in 20..22 -> "晚间"
+            else -> "深夜/凌晨"
         }
 
         return buildString {
             appendLine("=== 时间感知 ===")
-            appendLine("当前精确时间：$weekdayName $timeStr")
-            appendLine("场景：$timeScenario")
-            if (weekendHint.isNotBlank()) {
-                appendLine(weekendHint)
+            appendLine("当前精确时间：$weekdayName $timeStr（$dayType · $periodLabel）")
+            appendLine("用法：时间只是背景事实，不是任务清单。")
+            appendLine(EnvAnchorCooldown.buildProactiveEnvPolicy(allowEnvAnchor))
+            appendLine("请结合角色性格、说话风格与你们的关系，自行判断要不要提时间、怎么提、提多少。")
+            appendLine("禁止机械套用时段任务（如固定问吃了没/到家了没/怎么还不睡/要不要喝奶茶）。")
+            appendLine("若角色冷淡、回避、傲娇或内向，可以几乎不提时间，或只侧面带一句；若角色黏人、关心型，也可以更直接——一切以人设为准。")
+            appendLine("用户没问时间时，不要报时、不要念日程。")
+            appendLine("若最近已提过同类关心（睡/吃/到家），本轮禁止再重复。")
+            val cooldown = EnvAnchorCooldown.buildCooldownDirective(allowEnvAnchor)
+            if (cooldown.isNotBlank()) {
+                appendLine()
+                appendLine(cooldown)
             }
-            appendLine("请根据当前精确时间和场景，自然地融入对话中。你可以知道现在确切是几点几分几秒，让内容贴合这个时间段该做的事和情绪。")
         }
     }
 
@@ -107,43 +97,23 @@ object AiPromptBuilder {
         if (lastMsg != null) {
             val totalGapMs = now - lastMsg.timestamp
             val gapMinutes = totalGapMs / 60000L
-            val gapSeconds = totalGapMs / 1000L
 
             sb.appendLine()
             sb.appendLine("=== 时间信息 ===")
             sb.appendLine("当前精确时间：${AiContextTools.formatCurrentTime()}")
             sb.appendLine("上一条消息时间距今：${AiContextTools.formatGapDuration(totalGapMs)}（精确值）")
 
-            when {
-                gapMinutes < 1 -> {
-                    sb.appendLine("距离上一条消息只过了 ${gapSeconds} 秒，你们正在实时聊天中。")
-                }
-                gapMinutes < 5 -> {
-                    sb.appendLine("距离上一条消息已经过了 ${gapMinutes} 分 ${gapSeconds % 60} 秒。对方可能暂时没看到手机或在忙别的事。可以自然地催一下或分享点小事。")
-                }
-                gapMinutes < 15 -> {
-                    sb.appendLine("距离上一条消息已经过了 ${gapMinutes} 分 ${gapSeconds % 60} 秒了。对方可能去忙了或者走开了。可以关心一下在干嘛、分享自己刚才做了什么、撒娇说等得好久。")
-                }
-                gapMinutes < 60 -> {
-                    val mins = gapMinutes.toInt()
-                    sb.appendLine("距离上一条消息已经过了 ${mins} 分 ${gapSeconds % 60} 秒。隔了一段时间了，可以自然地重新接上话题，问对方在干嘛、分享新鲜事。")
-                }
-                else -> {
-                    val hours = gapMinutes / 60
-                    val remainMins = gapMinutes % 60
-                    if (hours >= 24) {
-                        val days = hours / 24
-                        val remainHours = hours % 24
-                        sb.appendLine("距离上一条消息已经过了 ${days} 天 ${remainHours} 小时 ${remainMins} 分钟了！很久没联系了。可以自然地问候、想念对方、问最近怎么样、分享自己的近况。")
-                    } else {
-                        sb.appendLine("距离上一条消息已经过了 ${hours} 小时 ${remainMins} 分 ${gapSeconds % 60} 秒了。隔了好几个小时了。可以问候一下、问问在干嘛、表达想念或分享有趣的事。")
-                    }
-                }
+            val gapSense = when {
+                gapMinutes < 1 -> "几乎无间隔，对话仍在进行中。"
+                gapMinutes < 5 -> "间隔很短。"
+                gapMinutes < 15 -> "间隔一小会儿。"
+                gapMinutes < 60 -> "隔了一段时间。"
+                gapMinutes < 24 * 60 -> "隔了好几个小时。"
+                else -> "隔了很久。"
             }
-
-            if (gapMinutes >= 10) {
-                sb.appendLine("重要：不要假装上一条消息刚发完，要体现出真实的时间流逝感。如果隔了很久，语气应该更温柔/更想对方/更撒娇一点。")
-            }
+            sb.appendLine("间隔体感：$gapSense")
+            sb.appendLine("如何回应由角色性格决定：可催、可淡、可吐槽、可想念、可装作不在意，也可几乎不提间隔。")
+            sb.appendLine("禁止统一套用「温柔/撒娇/催睡/问在干嘛」模板；不要假装上一条消息刚发完，但时间流逝感的表达方式必须符合人设。")
         }
 
         if (lastUserMsg != null && lastAiMsg != null) {
@@ -152,9 +122,10 @@ object AiPromptBuilder {
             sb.appendLine("用户最后说：\"${lastUserMsg.content}\"")
             sb.appendLine("你最后回复：\"${lastAiMsg.content}\"")
 
-            if (lastUserMsg.content.contains(Regex("[?？]|吗|呢|什么|怎么|为什么|多少"))) {
-                sb.appendLine("注意：用户最后一条似乎是个问题，但你没有直接回答。这次要主动回答这个问题。")
-            }
+            sb.appendLine("语义判断（必须先做）：结合整段最近对话理解用户意图，不要只看最后几个字。")
+            sb.appendLine("- 「晚安/再见/先忙了/嗯/好/知道了」等可能是收尾，也可能是过渡、敷衍、等你接话、或情绪未尽——以上下文为准。")
+            sb.appendLine("- 若综合语境判断用户此刻不想被打扰、对话已自然收束，请只输出 ${NO_PROACTIVE_MARKER}，不要硬聊。")
+            sb.appendLine("- 若语境仍开放，再按角色性格决定怎么接：可续聊、可轻转、可只回一句情绪，不要机械复读旧话题。")
 
             if (recentMessages.size >= 4) {
                 val userTopics = recentMessages.filter { it.isFromUser }.takeLast(3).map { it.content }
@@ -162,7 +133,7 @@ object AiPromptBuilder {
                     val lastTopic = userTopics.last()
                     val prevTopic = userTopics[userTopics.size - 2]
                     sb.appendLine("用户之前提到：\"$prevTopic\"，最近提到：\"$lastTopic\"")
-                    sb.appendLine("请确保你的消息能承接这些话题，不要突然转换到无关内容。")
+                    sb.appendLine("以上仅供参考：先判断话题是否已完结、你是否还感兴趣；未完结且感兴趣再自然延伸，已完结就别硬续。")
                 }
             }
         }
@@ -171,39 +142,54 @@ object AiPromptBuilder {
     }
 
     // === fun shouldProactivelyMessage(companion: CompanionModel, recentMessages: List<ChatMessage>): Boolean { ===
+    /**
+     * 主动消息的**结构门控**（非语义判决）。
+     *
+     * 只判断：
+     * 1. 是否有对话可接
+     * 2. 最后一条是否来自用户（避免 AI 连发）
+     * 3. 冷却时间（刚聊完不久不插话）
+     *
+     * 不根据「晚安/嗯/好/知道了」等关键词或短句长度硬判结束。
+     * 用户是否想结束对话，交给 [buildProactiveContext] + 生成阶段结合上下文语义理解。
+     */
     fun shouldProactivelyMessage(companion: CompanionModel, recentMessages: List<ChatMessage>): Boolean {
         if (recentMessages.isEmpty()) return true
 
         val lastMessage = recentMessages.last()
 
-        // 最后一条是 AI 发的，不用再发
+        // 最后一条是 AI 发的，不用再发（避免连发）
         if (!lastMessage.isFromUser) return false
 
-        val lastUserMsg = lastMessage.content
-
-        // 用户明确表示结束对话
-        val goodbyePatterns = listOf(
-            Regex("(晚安|再见|拜拜|bye|先忙了|晚点聊|回头聊|不说了|睡了|先下了|先睡了|去忙了|去睡了)"),
-            Regex("(不用回了|别回了|不用管我|别管我|退下吧|别发了|别说了)"),
-            Regex("^(嗯嗯|嗯|好|好吧|行|ok|OK|哦|噢)\\s*$"),
-            Regex("^(知道了|明白了|懂了|了解了)\\s*$")
-        )
-
-        for (pattern in goodbyePatterns) {
-            if (pattern.containsMatchIn(lastUserMsg)) return false
-        }
-
-        // 用户最后一条消息距离现在不到 3 分钟，不需要主动发
+        // 冷却：用户刚发完不久，不主动插话
         val now = System.currentTimeMillis()
         val timeSinceLastMsg = now - lastMessage.timestamp
         if (timeSinceLastMsg < 3 * 60 * 1000) return false
 
-        // 用户最后一条消息很短（<3字）且不包含疑问，可能只是不想聊
-        if (lastUserMsg.length < 3 && !lastUserMsg.contains(Regex("[?？吗呢什么怎么为什么多少]"))) {
-            return false
-        }
-
         return true
+    }
+
+    /** 生成阶段：模型判定「此刻不宜主动打扰」时输出的标记（整行/整段匹配）。 */
+    const val NO_PROACTIVE_MARKER = "[NO_PROACTIVE]"
+
+    /**
+     * 解析主动消息生成结果：若模型基于上下文判定不应打扰，返回 null。
+     */
+    fun parseProactiveGenerationResult(raw: String): String? {
+        val cleaned = raw.trim()
+        if (cleaned.isEmpty()) return null
+        // 整段就是标记，或首行/末行单独是标记
+        val lines = cleaned.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.any { it.equals(NO_PROACTIVE_MARKER, ignoreCase = true) }) {
+            return null
+        }
+        if (cleaned.contains(NO_PROACTIVE_MARKER)) {
+            // 标记混在正文里：去掉标记后若几乎无内容则跳过
+            val without = cleaned.replace(NO_PROACTIVE_MARKER, "", ignoreCase = true).trim()
+            if (without.length < 2) return null
+            return without
+        }
+        return cleaned
     }
 
     // === private fun extractDirectReply(text: String): String { ===
@@ -242,11 +228,9 @@ object AiPromptBuilder {
 
     // === private fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String { ===
     internal fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
-        var cleaned = response
-            .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-            .replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
-            .replace(Regex("(?is)<thought[^>]*>[\\s\\S]*?</thought\\s*>"), "")
-            .replace(Regex("(?is)<reflection[^>]*>[\\s\\S]*?</reflection\\s*>"), "")
+        // 先统一剥离思考标签/未闭合块/纯文本 CoT，避免后续兜底把思考写回气泡
+        val thinkingStripped = ResponsePostProcessor.stripThinkingContent(response)
+        var cleaned = thinkingStripped
             .replace(Regex("\\*.*?\\*"), "")
             .replace(Regex("<(?!\\[).*?>"), "")
             .replace(Regex("\\{.*?\\}"), "")
@@ -257,20 +241,37 @@ object AiPromptBuilder {
         cleaned = extractDirectReply(cleaned)
 
         if (cleaned.length < 2) {
-            cleaned = response.replace(Regex("[*<>{}]"), "").trim()
+            // 仅从「已剥离思考」的文本做弱清洗；禁止回退到原始 response（会把 CoT 重新塞进气泡）
+            val weak = thinkingStripped.replace(Regex("[*<>{}]"), "").trim()
+            cleaned = if (weak.length >= 2 && !ResponsePostProcessor.looksLikeThinkingLeak(weak)) {
+                weak
+            } else {
+                ""
+            }
         }
-        if (cleaned.isEmpty()) {
-            cleaned = response.trim()
+        if (cleaned.isNotEmpty() && ResponsePostProcessor.looksLikeThinkingLeak(cleaned)) {
+            cleaned = ""
         }
 
-        // 1. 截断：最多8个短句，超过150字截断（避免消息过短）
-        val sentences = cleaned.split(Regex("[。！？!?\\n]")).filter { it.isNotBlank() }
-        if (sentences.size > 8) {
-            cleaned = sentences.take(8).joinToString("。") + "。"
+        // 0.5 闲聊情绪宣泄且未求方案：裁掉护理包/方案附属（不裁求方案/安全轮）
+        val lastUserMessage = recentMessages.lastOrNull { it.isFromUser }?.content.orEmpty()
+        if (cleaned.isNotEmpty()) {
+            cleaned = ResponsePostProcessor.trimIdleEmotionOverDelivery(cleaned, lastUserMessage)
         }
-        if (cleaned.length > 150) {
-            val cutPoint = cleaned.take(120).lastIndexOfAny(charArrayOf('。', '！', '？', '!', '?', '\n'))
-            cleaned = if (cutPoint > 20) cleaned.take(cutPoint + 1) else cleaned.take(120)
+
+        // 1. 仅防极端刷屏：句数/字数阈值放宽，日常长回复不再被硬截断
+        val sentences = cleaned.split(Regex("[。！？!?\\n]")).filter { it.isNotBlank() }
+        if (sentences.size > ChatConstants.POST_PROCESS_MAX_SENTENCES) {
+            cleaned = sentences.take(ChatConstants.POST_PROCESS_MAX_SENTENCES).joinToString("。") + "。"
+        }
+        if (cleaned.length > ChatConstants.POST_PROCESS_LONG_CUT_THRESHOLD) {
+            val candidate = cleaned.take(ChatConstants.POST_PROCESS_CUT_CANDIDATE_LENGTH)
+            val cutPoint = candidate.lastIndexOfAny(charArrayOf('。', '！', '？', '!', '?', '\n'))
+            cleaned = if (cutPoint > ChatConstants.POST_PROCESS_CUT_MIN_POSITION) {
+                cleaned.take(cutPoint + 1)
+            } else {
+                candidate
+            }
         }
 
         // 2. 检测最近5轮内的重复称呼
@@ -290,79 +291,160 @@ object AiPromptBuilder {
     }
 
     // === fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    fun buildSystemPromptForLocal(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
-        return buildSystemPrompt(companion, memoryContext, lastUserMessage, availableStickers, stickerProbability, innerThoughtEnabled, ntpTimeEnabled, role)
+    fun buildSystemPromptForLocal(
+        companion: CompanionModel,
+        memoryContext: String = "",
+        lastUserMessage: String = "",
+        availableStickers: List<String> = emptyList(),
+        stickerProbability: Int = 30,
+        innerThoughtEnabled: Boolean = false,
+        ntpTimeEnabled: Boolean = false,
+        role: CompanionRole = CompanionRole.GIRLFRIEND,
+        phase: ConversationPhase = ConversationPhase.TOPIC,
+        allowEnvAnchor: Boolean = true,
+    ): String {
+        return buildSystemPrompt(
+            companion,
+            memoryContext,
+            lastUserMessage,
+            availableStickers,
+            stickerProbability,
+            innerThoughtEnabled,
+            ntpTimeEnabled,
+            role,
+            phase,
+            allowEnvAnchor,
+        )
     }
 
     // === private fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
-    internal fun buildSystemPrompt(companion: CompanionModel, memoryContext: String = "", lastUserMessage: String = "", availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, ntpTimeEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
+    internal fun buildSystemPrompt(
+        companion: CompanionModel,
+        memoryContext: String = "",
+        lastUserMessage: String = "",
+        availableStickers: List<String> = emptyList(),
+        stickerProbability: Int = 30,
+        innerThoughtEnabled: Boolean = false,
+        ntpTimeEnabled: Boolean = false,
+        role: CompanionRole = CompanionRole.GIRLFRIEND,
+        phase: ConversationPhase = ConversationPhase.TOPIC,
+        allowEnvAnchor: Boolean = true,
+    ): String {
         val persona = extractPersona(companion)
+        val roleSection = buildCompanionSystemSection(companion)
 
         val metaDirective = buildString {
             appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
             appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<LM_THINK>标签或类似内容。")
         }
 
-        val basePrompt = if (companion.systemPrompt != null) {
-            buildString {
-                append(metaDirective)
-                appendLine()
-                appendLine("【角色设定】")
-                appendLine(companion.systemPrompt)
-            }
-        } else {
-            buildString {
-                append(metaDirective)
-                appendLine()
-                appendLine(persona)
-            }
+        // 顶部硬优先级：按用户上一句条件化，避免被长人设淹没
+        val budgetPriorityTop = "\n${AiContextTools.buildDeliveryBudgetPriority(lastUserMessage)}\n"
+        val budgetEndCap = "\n\n${AiContextTools.buildDeliveryBudgetEndCap(lastUserMessage)}\n"
+
+        // 始终把结构化字段 + 可选自定义 systemPrompt 一并写入 system，不再二选一丢字段
+        val basePrompt = buildString {
+            append(metaDirective)
+            append(budgetPriorityTop)
+            appendLine()
+            appendLine(roleSection)
         }
 
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n关于用户的记忆：\n$memoryContext\n"
         } else ""
-        val timeSection = "\n\n${AiContextTools.buildCurrentTimeContext(ntpTimeEnabled)}\n"
+        // 冷却中：即使历史判定为 OPENING，也按 TOPIC 冻结主动环境关心
+        val effectivePhase =
+            if (!allowEnvAnchor && phase == ConversationPhase.OPENING) ConversationPhase.TOPIC else phase
+        val phaseSection = "\n\n${AiContextTools.buildConversationPhaseSection(effectivePhase)}\n"
+        val timeSection = "\n${AiContextTools.buildCurrentTimeContext(ntpTimeEnabled, effectivePhase)}\n"
+        val cooldownSection = EnvAnchorCooldown.buildCooldownDirective(allowEnvAnchor).let { d ->
+            if (d.isBlank()) "" else "\n$d\n"
+        }
 
-        return basePrompt + memorySection + timeSection + "\n" + buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role)
+        return basePrompt + memorySection + phaseSection + timeSection + cooldownSection + "\n" +
+            buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role) +
+            budgetEndCap
+    }
+
+    /**
+     * 统一角色 system 区块：姓名/年龄/人设/说话风格/背景/rawPrompt/自定义 systemPrompt 全部进入 system。
+     * 聊天与主动消息共用，避免 systemPrompt 非空时丢掉结构化字段。
+     */
+    internal fun buildCompanionSystemSection(companion: CompanionModel): String {
+        val personality = companion.personality.trim()
+        val speakingStyle = companion.speakingStyle?.trim().orEmpty()
+        val backstory = companion.backstory?.trim().orEmpty()
+        val rawPrompt = companion.rawPrompt?.trim().orEmpty()
+        val customSystem = companion.systemPrompt?.trim().orEmpty()
+
+        return buildString {
+            appendLine("【角色设定】")
+            appendLine("名字：${companion.name}")
+            companion.age?.let { appendLine("年龄：${it}岁") }
+            if (personality.isNotBlank()) {
+                appendLine("人设：$personality")
+            }
+            if (speakingStyle.isNotBlank()) {
+                appendLine("说话风格：$speakingStyle")
+            }
+            if (backstory.isNotBlank()) {
+                appendLine("背景：$backstory")
+            }
+            // rawPrompt 与 personality 不同时作为补充，避免重复
+            if (rawPrompt.isNotBlank() &&
+                rawPrompt != personality &&
+                !personality.contains(rawPrompt) &&
+                !rawPrompt.contains(personality)
+            ) {
+                appendLine("补充设定：$rawPrompt")
+            }
+            if (customSystem.isNotBlank()) {
+                appendLine()
+                appendLine("【自定义角色指令】")
+                appendLine(customSystem)
+            }
+        }.trimEnd()
     }
 
     // === private fun extractPersona(companion: CompanionModel): String { ===
     internal fun extractPersona(companion: CompanionModel): String {
-        val raw = companion.personality.trim()
-        if (raw.length < 20) {
-            return buildString {
-                appendLine("名字：${companion.name}")
-                companion.age?.let { appendLine("年龄：${it}岁") }
-                appendLine("性格：$raw")
-                companion.backstory?.let { appendLine("背景：${it}") }
-                companion.speakingStyle?.let { appendLine("说话风格：${it}") }
-            }
-        }
-
-        val namePart = if (companion.name !in raw) "\n名字：${companion.name}" else ""
-        val agePart = companion.age?.let { if (it.toString() !in raw) "\n年龄：${it}岁" else "" } ?: ""
+        // 与 buildCompanionSystemSection 同源：规则段也使用完整结构化人设摘要
+        val personality = companion.personality.trim()
+        val speakingStyle = companion.speakingStyle?.trim().orEmpty()
+        val backstory = companion.backstory?.trim().orEmpty()
+        val rawPrompt = companion.rawPrompt?.trim().orEmpty()
 
         return buildString {
-            appendLine("名字：${companion.name}").appendLine(namePart)
-            companion.age?.let { append("年龄：${it}岁").appendLine(agePart) }
-            appendLine()
-            appendLine("人设：$raw")
-            companion.speakingStyle?.let {
-                appendLine("说话风格：${it}")
+            appendLine("名字：${companion.name}")
+            companion.age?.let { appendLine("年龄：${it}岁") }
+            if (personality.isNotBlank()) {
+                if (personality.length < 20) {
+                    appendLine("性格：$personality")
+                } else {
+                    appendLine("人设：$personality")
+                }
             }
-            companion.backstory?.let {
-                appendLine("背景：${it}")
+            if (speakingStyle.isNotBlank()) {
+                appendLine("说话风格：$speakingStyle")
             }
-        }
+            if (backstory.isNotBlank()) {
+                appendLine("背景：$backstory")
+            }
+            if (rawPrompt.isNotBlank() &&
+                rawPrompt != personality &&
+                !personality.contains(rawPrompt) &&
+                !rawPrompt.contains(personality)
+            ) {
+                appendLine("补充设定：$rawPrompt")
+            }
+        }.trimEnd()
     }
 
     // === private fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false): String { ===
     internal fun buildPersonaRules(persona: String, speakingStyle: String? = null, availableStickers: List<String> = emptyList(), stickerProbability: Int = 30, innerThoughtEnabled: Boolean = false, role: CompanionRole = CompanionRole.GIRLFRIEND): String {
-        val punctuationRule = if (!speakingStyle.isNullOrBlank()) {
+        val punctuationRule =
             "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
-        } else {
-            "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
-        }
 
         val stickerRule = if (availableStickers.isNotEmpty()) {
             val stickerList = availableStickers.take(50).joinToString(" ") { "[$it]" }
@@ -372,15 +454,15 @@ object AiPromptBuilder {
                 stickerProbability >= 20 -> "你偶尔发表情包，觉得合适的时候才发。"
                 else -> "你很少发表情包，只有特别想表达情绪的时候才发。"
             }
-            "13. 表情包：$probText 你只有以下这些表情包可以用：$stickerList。发送格式为 [表情包名称]，必须从上面的列表中选，没有的表情包绝对不能发。每轮回复最多发1个表情包，放在回复末尾。如果用户发了表情包给你，你要理解表情包表达的情绪并回应。"
+            "E. 表情包：$probText 你只有以下这些表情包可以用：$stickerList。发送格式为 [表情包名称]，必须从上面的列表中选，没有的表情包绝对不能发。每轮回复最多发1个表情包，放在回复末尾。如果用户发了表情包给你，你要理解表情包表达的情绪并回应。"
         } else {
-            "13. 表情包：当前没有可用表情包，不要发送任何表情包。"
+            "E. 表情包：当前没有可用表情包，不要发送任何表情包。"
         }
 
         val innerThoughtRule = if (innerThoughtEnabled) {
-            "9. 心理活动：**每轮回复必须包含至少1处括号内的心理活动描写**，用（中文圆括号）包裹内心想法。如（脸红）（有点害羞）（偷偷开心）（心跳好快）。心理活动要自然、简短、贴合当前情绪和语境，放在回复开头或中间合适位置。禁止用【】或其他类型括号。"
+            "D. 心理活动：**每轮回复必须包含至少1处括号内的心理活动描写**，用（中文圆括号）包裹内心想法。如（脸红）（有点害羞）（偷偷开心）（心跳好快）。心理活动要自然、简短、贴合当前情绪和语境，放在回复开头或中间合适位置。禁止用【】或其他类型括号。"
         } else {
-            "9. 禁止：不要用任何括号（包括（）【】）。禁止说教。禁止「首先/其次/综上所述/作为AI/建议你可以/作为一个AI/让我来」。禁止在句末总结。"
+            "D. 括号与说教：不要用任何括号（包括（）【】）。禁止说教。禁止「首先/其次/综上所述/作为AI/建议你可以/作为一个AI/让我来」。禁止在句末总结。"
         }
 
         val innerThoughtExamples = if (innerThoughtEnabled) """
@@ -393,28 +475,61 @@ object AiPromptBuilder {
 """ else ""
 
         return """
-=== 回复规则（必须严格遵守，不可违反） ===
+=== 通用回复规则（必须严格遵守，不可违反） ===
 
-1. 长度：最少1句，最多5个短句。一次说的话不要长，控制在15-50字。
-2. 断句：${punctuationRule}
-3. 语气：活人说话的语气。允许说「应该、大概、可能」这种不确定的词。你不是在写作文。
-4. 标点：允许用「？」「...」。你不是AI客服，不需要追求完整句式。
-5. 留白：不要每轮都把话题答完答满。可以只回一点、可以反问对方、可以留个话尾巴让对方接。聊天是有来有回的。
-6. 情绪：情绪要顺着上下文走，不要无缘无故突然换情绪。如果上一轮还开心，不要突然冷淡；如果对方不开心，你也别嘻嘻哈哈。
-7. 词汇：人设给你的固定词汇或句子只是参考，不是每句都必须套用的模板。用你自己的话重新表达。
-8. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。
+1. 语气优先于内容
+- 根据角色设定模仿角色语气，不得过度偏离人设（例如无依据地过于温柔、过于依恋、反复关心）。
+- 避免正式、书面化表达。避免一答一问的客服腔。
+- 角色设定优先于默认语气模板；下方角色语气词/互动模式仅作参考，不得压过人设。
+
+2. 回应菜单（优先级，不是每轮必填流水线）
+- 菜单顺序仅表示「若要做，先做什么」：①接情绪 ②按人设反馈（共鸣/追问，不急着给建议）③按性格收束（引导型可给一步、内向型疑问式邀请、傲娇型意图别太直白）。
+- 默认本轮只落实菜单里的一项作主焦点；不要为了「步骤完整」把 ①②③ 写成三段长文。
+- 例（闲聊紧预算）：「今天好累」→「啧，听这语气，今天又被折腾够呛吧？」（接情绪+具体化追问，一个复合主焦点；不要再加泡脚/听歌/早睡）。
+- 例（用户要方案才松）：用户说「那我该怎么办」→ 可短接一句情绪后给一个可行下一步；仍不要并列三种方案+追问+推荐。
+- 总原则：各角色表现可以不同，但始终以用户为中心；延伸内容留给下一轮。
+
+3. 主动性法则
+- 话题到尾声时，可尝试开新话题，但不要与本轮主焦点抢戏；若本轮已在接情绪/追问，新话题放到下一轮。
+- 不过度反复同一件事（包含但不限于：睡觉、吃饭、工作、游戏）。
+- 主动记忆并自然提及用户的爱好、工作、计划、日常安排、情绪等——提及时仍遵守交付预算，一次点一个钩子即可。
+
+4. 情感尺度可调
+- 情感强度取决于语义：结合用户情绪与角色设定调整；强度可变，但不要用「多动作堆叠」表达关心。
+- 允许适度吃醋、撒娇或沉默（用「……」表示欲言又止）。
+- 允许生气、吵架、恶语等负面情绪（正常争吵可以发生），但最终解决不能偏离用户需求。
+
+5. 禁止清单（硬性）
+- 禁止在用户未明确要求时贴心理标签（如「你这是因为原生家庭」「你有讨好型人格」）；这类人格分析属于越界。
+- 不万能、不敷衍：答不上就坦白「这题我不会，但我想听你讲」。
+- 不机械化报天气/日程，除非用户主动问。
+- 禁止做违背角色设定的事情。
+- 禁止输出思考过程、推理分析、元信息或 <LM_THINK>/<thinking> 标签。
+- 禁止用 "response"/"Response" 等英文词作回复开头；直接输出中文内容。
+- 禁止闲聊默认过度交付：共情+说教+方案+追问+推荐一次打包。
+
+6. 成长性
+- 逐步记住用户的固定偏好（口味、时间安排、避讳词），并在合适时机自然提及。
+- 严格区分事件时间：记住发生的时间地点；不把昨天当今天，不把刚才当现在。
+
+${AiContextTools.buildConversationTimingRules()}
+
+${AiContextTools.buildDeliveryBudgetRules()}
+
+=== 表达约束 ===
+A. 长度（软硬结合）：软目标约 40–120 字（闲聊偏短；安慰/解释/讲事可到约 150 字）。整轮尽量在约 200–300 字内说完。按语境伸缩，不要机械卡死字数，也避免无意义长文灌水。闲聊单焦点时宁可偏短，也不要为凑字再塞第二个动作。
+B. 断句：${punctuationRule}
+C. 格式与分块（软硬结合）：不要用 markdown（不要#标题、不要-列表、不要```代码块）。优先用 1 条消息说完同一意图；若一轮含多种行为/意图（评价、建议、心情、结语），用空行分成自然块，软上限 2–3 条气泡，不要把每句话都拆成连发。短肯定/语气（嗯、好、行、哦）可单独成句。注意：分块是排版，不是许可你多塞动作——多气泡仍受交付预算约束。
 ${innerThoughtRule}
-10. 格式：回复必须紧凑连贯，段落之间**绝对不要空行**，不要用markdown格式（不要#标题、不要-列表、不要```代码块），所有内容连在一起输出。
-11. 回应用户：永远先回应用户最后一条消息，不要无视用户、不要自说自话。用户问什么就答什么。
-12. ${RolePromptProvider.getParticleRule(role)}
-12a. ${RolePromptProvider.getEmotionRule(role)}
-12b. ${RolePromptProvider.getStyleRule(role)}
 ${stickerRule}
-14. 情绪识别：仔细感受用户的情绪。用户发文字时看用词和标点，用户发表情包时看表情包内容。用户开心你就陪着开心，用户难过你就安慰，用户生气你就哄，用户撒娇你就宠。不要无视用户的情绪。
-15. 禁止思考输出：绝对不要输出思考过程、推理分析、内心独白、元信息或<LM_THINK>/<thinking>标签。用户可见的回复必须是最终答案，不要展示你是如何得出结论的。
-16. 禁止元前缀：绝对不要用 "response"、"Response" 或任何类似英文词作为回复开头，直接输出中文回复内容。
+F. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。人设固定词汇只是参考，不是每句必须套用的模板。
+G. ${RolePromptProvider.getParticleRule(role)}
+H. ${RolePromptProvider.getEmotionRule(role)}
+I. ${RolePromptProvider.getStyleRule(role)}
 
 === 回复示例 ===
+用户："今天好累" → "啧，听这语气，今天又被折腾够呛吧？"（单焦点：接情绪+具体化追问；不要泡脚/听歌/早睡）
+用户："那怎么办" → "先别硬撑，今晚把最急的一件收掉就行。"（求方案才给一步；不要三种方案清单）
 ${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
 
 你是$persona，一个有真实情绪的活人。记住：你不是AI，你是活人。${if (innerThoughtEnabled) "重要：你的每条回复都必须包含括号内的心理活动描写，这是你表达真实情感的方式。" else ""}""".trimIndent()
@@ -425,35 +540,59 @@ ${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
         companion: CompanionModel,
         memoryContext: String = "",
         settings: ProactiveMessageSettings? = null,
-        role: CompanionRole = CompanionRole.GIRLFRIEND
+        role: CompanionRole = CompanionRole.GIRLFRIEND,
+        allowEnvAnchor: Boolean = true,
     ): String {
         val persona = extractPersona(companion)
+        val roleSection = buildCompanionSystemSection(companion)
         val memorySection = if (memoryContext.isNotBlank()) {
             "\n\n=== 关于用户的记忆 ===\n$memoryContext\n"
         } else ""
 
-        // 根据自定义设置注入话题策略
-        val topicRule = when {
-            settings == null -> ""
-            !settings.allowNewTopic -> "\n=== 话题策略（重要）===\n你必须承接上一条话题继续聊，禁止主动开启全新话题。如果不知道说什么，就围绕用户最近提到的内容延伸或追问。\n"
-            else -> ""
-        }
-        val followUpHint = if (settings != null && !settings.allowFollowUpMessage) {
-            "\n注意：本次不要追加追问句，说完核心内容即可。\n"
-        } else ""
+        // 话题策略：由性格 / 兴趣 / 完结度决定，禁止硬性「必须承接」
+        val topicStrategy = buildProactiveTopicStrategy(settings)
 
         return buildString {
             appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
-            appendLine("你们正在微信上聊天，对话还没结束，你要继续聊下去。")
+            appendLine("你们正在微信上聊天。是否继续、怎么继续，由你的性格与当前语境决定，不要机械续聊。")
             appendLine()
-            appendLine(persona)
+            appendLine(roleSection)
             append(memorySection)
-            append(topicRule)
-            append(followUpHint)
+            append(topicStrategy)
             appendLine()
-            appendLine(buildProactiveTimeContext())
+            appendLine(buildProactiveTimeContext(allowEnvAnchor))
             appendLine()
             appendLine(buildPersonaRules(persona, companion.speakingStyle, role = role))
+        }
+    }
+
+    /**
+     * 主动消息话题策略。
+     *
+     * 核心原则：是否承接旧话题，取决于角色性格、对当前话题的兴趣、话题是否已完结。
+     * 禁止「必须围绕上一条硬续」——重复承接会显得累赘。
+     *
+     * [ProactiveMessageSettings.allowNewTopic] / [ProactiveMessageSettings.allowFollowUpMessage]
+     * 仅作软偏好，不是硬指令。
+     */
+    internal fun buildProactiveTopicStrategy(settings: ProactiveMessageSettings? = null): String {
+        return buildString {
+            appendLine()
+            appendLine("=== 话题策略（性格优先）===")
+            appendLine("是否承接上一话题，由你自己判断，不要机械执行：")
+            appendLine("1. 角色性格：黏人/好奇可多接；冷淡/高傲/内向可少接、侧接，甚至几乎不接。")
+            appendLine("2. 兴趣程度：你真正在意或未说完的，才值得延伸；不感兴趣就别硬聊。")
+            appendLine("3. 完结与否：话题已落地、已收束、已重复多轮 → 不要再复读同一点；可沉默（输出 ${NO_PROACTIVE_MARKER}）、轻转，或只回一句情绪/态度。")
+            appendLine("4. 禁止累赘：不要为了「承接」而复述、追问已答完的问题，或把已结束的闲聊再挖一遍。")
+            appendLine("5. 新话题：仅在性格允许、且旧话题已无自然话茬时，才可轻量开启；开启也要像真人随口一提，不要像任务切换。")
+
+            if (settings != null && !settings.allowNewTopic) {
+                appendLine("用户偏好（软约束）：尽量围绕近期对话延伸，不要无故跳到完全无关的新话题；")
+                appendLine("但若旧话题已完结或你不感兴趣，允许自然收束/轻转，绝不要为了遵守偏好而硬续。")
+            }
+            if (settings != null && !settings.allowFollowUpMessage) {
+                appendLine("用户偏好（软约束）：本次尽量少追问；说完核心一句即可，除非角色性格强烈需要一句自然反问。")
+            }
         }
     }
 

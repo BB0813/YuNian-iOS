@@ -8,7 +8,6 @@ import com.lianyu.ai.common.StickerManager
 object TextProcessor {
 
     private val ROLE_PREFIX_REGEX = Regex("(?m)^\\s*\\[(?:角色\\d+|[^\\[\\]]+?)\\]\\s*")
-    private val THINK_REGEX = Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>")
     private val ENC_REGEX = Regex("(?m)^enc:\\S+$")
     private val STICKER_REGEX = Regex("\\[([^\\[\\]]+?)\\]")
     private val STICKER_FILE_REGEX = Regex("\\bsticker_\\w+\\.png\\b", RegexOption.IGNORE_CASE)
@@ -105,8 +104,9 @@ object TextProcessor {
      */
     private fun cleanAiResponseText(text: String): String {
         val originalLength = text.length
-        var cleaned = ROLE_PREFIX_REGEX.replace(text, "")
-        cleaned = THINK_REGEX.replace(cleaned, "")
+        // 与网络层统一：闭合/未闭合 think、LM_THINK、纯文本 CoT
+        var cleaned = com.lianyu.ai.network.ResponsePostProcessor.stripThinkingContent(text)
+        cleaned = ROLE_PREFIX_REGEX.replace(cleaned, "")
         cleaned = ENC_REGEX.replace(cleaned, "").trim()
 
         // [P0 FIX] 改进的括号处理：只移除匹配的括号对及其内容，保留孤立字符和外部文本
@@ -155,16 +155,12 @@ object TextProcessor {
         val cleanedLength = result.length
         if (cleanedLength < 2 && originalLength > 5) {
             SecureLog.w("TextProcessor", "Aggressive cleaning detected: $originalLength → $cleanedLength chars, applying conservative cleanup")
-            // 保守清洗：只移除think标签和明显的AI标记
-            result = ROLE_PREFIX_REGEX.replace(text, "")
-            result = THINK_REGEX.replace(result, "")
+            // 保守清洗：只剥离思考 + 角色前缀；禁止把含 CoT 的原文原样回填
+            result = com.lianyu.ai.network.ResponsePostProcessor.stripThinkingContent(text)
+            result = ROLE_PREFIX_REGEX.replace(result, "")
             result = ENC_REGEX.replace(result, "").trim()
-            // 二次尝试：如果仍然太短，只做最小清理
-            if (result.length < 2) {
-                result = text.trim()
-                    .replace(Regex("(?is)<think[^>]*>[\\s\\S]*?</think\\s*>"), "")
-                    .replace(Regex("(?is)<thinking[^>]*>[\\s\\S]*?</thinking\\s*>"), "")
-                    .trim()
+            if (result.length < 2 || com.lianyu.ai.network.ResponsePostProcessor.looksLikeThinkingLeak(result)) {
+                result = ""
             }
         }
 

@@ -8,9 +8,16 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.wechat.ilink.IlinkAccount
+import com.lianyu.ai.wechat.ilink.IlinkSessionStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -28,13 +35,16 @@ data class A0(
     val accountId: String = "default"
 )
 
-class WeChatTokenStore(context: Context) {
+class WeChatTokenStore(context: Context) : IlinkSessionStore {
 
     private val dataStore = context.applicationContext.wechatDataStore
     private val secureStore = WeChatSecureStore(context.applicationContext)
     private val json = Json { ignoreUnknownKeys = true }
+    private val contextTokensMutex = Mutex()
+    private val accountState = MutableStateFlow(readAccount())
 
     companion object {
+        private const val TAG = "WeChatTokenStore"
         private val CURSOR_KEY = stringPreferencesKey("wechat_cursor")
         private val AUTO_REPLY_KEY = booleanPreferencesKey("wechat_auto_reply")
         private val NOTIFY_ENABLED_KEY = booleanPreferencesKey("wechat_notify_enabled")
@@ -46,21 +56,31 @@ class WeChatTokenStore(context: Context) {
 
     // ==================== Account (encrypted) ====================
 
-    val accountFlow: Flow<A0?> = dataStore.data.map {
-        // Read from secure store, not DataStore
-        secureStore.getAccountJson()?.let { json.decodeFromString(it) }
+    val accountFlow: Flow<A0?> = accountState.asStateFlow()
+
+    private fun readAccount(): A0? {
+        val accountJson = secureStore.getAccountJson() ?: return null
+        return runCatching { json.decodeFromString<A0>(accountJson) }
+            .onFailure {
+                secureStore.clearAccount()
+                SecureLog.e(TAG, "Rejected invalid account record", it)
+            }
+            .getOrNull()
     }
 
-    suspend fun getAccount(): A0? =
-        secureStore.getAccountJson()?.let { json.decodeFromString(it) }
+    suspend fun getAccount(): A0? = accountState.value
 
     suspend fun saveAccount(account: A0) {
         secureStore.setAccountJson(json.encodeToString(account))
+        accountState.value = account
     }
 
     suspend fun clearAccount() {
         secureStore.clearAccount()
-        secureStore.clearContextTokens()
+        contextTokensMutex.withLock {
+            secureStore.clearContextTokens()
+        }
+        accountState.value = null
         dataStore.edit { prefs ->
             prefs.remove(CURSOR_KEY)
         }
@@ -196,17 +216,19 @@ class WeChatTokenStore(context: Context) {
         secureStore.setContextTokensJson(json.encodeToString(tokens))
     }
 
-    suspend fun getContextToken(accountId: String, userId: String): String? {
+    override suspend fun getContextToken(accountId: String, userId: String): String? {
         return getContextTokens()["$accountId:$userId"]
     }
 
-    suspend fun saveContextToken(accountId: String, userId: String, token: String) {
-        val current = getContextTokens().toMutableMap()
-        current["$accountId:$userId"] = token
-        saveContextTokens(current)
+    override suspend fun saveContextToken(accountId: String, userId: String, token: String) {
+        contextTokensMutex.withLock {
+            val current = getContextTokens().toMutableMap()
+            current["$accountId:$userId"] = token
+            saveContextTokens(current)
+        }
     }
 
-    suspend fun getContextTokens(accountId: String): Map<String, String> {
+    override suspend fun getContextTokens(accountId: String): Map<String, String> {
         val prefix = "$accountId:"
         return getContextTokens()
             .filterKeys { it.startsWith(prefix) }
@@ -219,9 +241,9 @@ class WeChatTokenStore(context: Context) {
         prefs[CURSOR_KEY] ?: ""
     }
 
-    suspend fun getCursor(): String = cursorFlow.first()
+    override suspend fun getCursor(): String = cursorFlow.first()
 
-    suspend fun saveCursor(cursor: String) {
+    override suspend fun saveCursor(cursor: String) {
         dataStore.edit { prefs ->
             prefs[CURSOR_KEY] = cursor
         }
@@ -230,4 +252,33 @@ class WeChatTokenStore(context: Context) {
     // ==================== Helper ====================
 
     suspend fun isLoggedIn(): Boolean = getAccount() != null
+
+    /** 非挂起登录态检查（Service onDestroy / 同步路径）。 */
+    fun isLoggedInSync(): Boolean = accountState.value != null
+
+    override suspend fun getSessionAccount(): IlinkAccount? = getAccount()?.toIlinkAccount()
+
+    override suspend fun saveSessionAccount(account: IlinkAccount) {
+        saveAccount(account.toA0())
+    }
+
+    override suspend fun clearSessionAccount() {
+        clearAccount()
+    }
+
+    private fun A0.toIlinkAccount(): IlinkAccount = IlinkAccount(
+        botToken = botToken,
+        ilinkBotId = ilinkBotId,
+        ilinkUserId = ilinkUserId,
+        baseUrl = baseUrl,
+        accountId = accountId,
+    )
+
+    private fun IlinkAccount.toA0(): A0 = A0(
+        botToken = botToken,
+        ilinkBotId = ilinkBotId,
+        ilinkUserId = ilinkUserId,
+        baseUrl = baseUrl,
+        accountId = accountId,
+    )
 }
