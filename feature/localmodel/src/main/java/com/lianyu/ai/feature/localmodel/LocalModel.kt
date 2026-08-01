@@ -35,14 +35,6 @@ sealed class LocalModel(
         expectedBytes = 584_417_280L
     )
 
-    data object ShieldGemma2B : LocalModel(
-        id = "shieldgemma_2b",
-        displayName = "ShieldGemma 2B",
-        fileName = "shieldgemma-2b.litertlm",
-        downloadUrl = "",  // 手动部署：放入 models/ 目录
-        sha256 = "",
-        expectedBytes = 0L
-    )
 }
 
 object LocalModelCatalog {
