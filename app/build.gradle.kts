@@ -48,6 +48,13 @@ android {
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
+            // sherpa-onnx / onnxruntime 等可能与其它 native 依赖撞名，取第一份即可
+            pickFirsts += listOf(
+                "lib/**/libonnxruntime.so",
+                "lib/**/libsherpa-onnx-c-api.so",
+                "lib/**/libsherpa-onnx-cxx-api.so",
+                "lib/**/libsherpa-onnx-jni.so",
+            )
         }
     }
 

@@ -24,8 +24,9 @@ import java.util.concurrent.TimeUnit
  * - 预设音色列表 (CosyVoice2 常用音色)
  * - 自定义音色 voice_id (通过 https://voice.gbkgov.cn/ 生成)
  * - 独立 API Key 或复用全局 Key
- * - 自定义 TTS URL（自部署服务）
  * - 速度/增益/采样率调节
+ *
+ * 自定义 OpenAI 兼容端点请使用 [TtsProvider.OPENAI_COMPAT]。
  */
 class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -45,33 +46,15 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
     override suspend fun synthesize(context: Context, text: String, voiceId: String?): String? = withContext(Dispatchers.IO) {
         try {
-            // Determine URL and API key
-            val apiKey: String
-            val finalVoice: String
-            val model: String
-            val url: String
-
-            // Check if using custom TTS endpoint
-            val customUrl = config.customTtsUrl.ifBlank { "" }
-            val actualUseCustom = customUrl.isNotBlank()
-
-            if (actualUseCustom) {
-                url = customUrl
-                apiKey = config.customTtsApiKey.ifBlank { "" }
-                model = config.customTtsModel.ifBlank { "FunAudioLLM/CosyVoice2-0.5B" }
-                finalVoice = config.customTtsVoiceId.ifBlank {
-                    voiceId ?: config.siliconflowCustomVoiceId.ifBlank { "FunAudioLLM/CosyVoice2-0.5B:anna" }
-                }
+            val url = NetworkConstants.SILICONFLOW_TTS_URL
+            val apiKey = if (config.siliconflowUseGlobalKey) {
+                getGlobalApiKey(context) ?: config.siliconflowApiKey
             } else {
-                url = NetworkConstants.SILICONFLOW_TTS_URL
-                // API Key: use dedicated key or global key
-                apiKey = if (config.siliconflowUseGlobalKey) {
-                    getGlobalApiKey(context) ?: config.siliconflowApiKey
-                } else {
-                    config.siliconflowApiKey
-                }
-                model = config.siliconflowTtsModel.ifBlank { "FunAudioLLM/CosyVoice2-0.5B" }
-                finalVoice = voiceId ?: config.siliconflowCustomVoiceId.ifBlank { "FunAudioLLM/CosyVoice2-0.5B:anna" }
+                config.siliconflowApiKey
+            }
+            val model = config.siliconflowTtsModel.ifBlank { "FunAudioLLM/CosyVoice2-0.5B" }
+            val finalVoice = voiceId ?: config.siliconflowCustomVoiceId.ifBlank {
+                "FunAudioLLM/CosyVoice2-0.5B:anna"
             }
 
             if (apiKey.isBlank()) {
@@ -148,8 +131,7 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
     override suspend fun testConnection(): Boolean {
         return try {
-            val hasKey = config.siliconflowApiKey.isNotBlank() || config.siliconflowUseGlobalKey
-            hasKey || config.customTtsUrl.isNotBlank()
+            config.siliconflowApiKey.isNotBlank() || config.siliconflowUseGlobalKey
         } catch (e: Exception) {
             false
         }

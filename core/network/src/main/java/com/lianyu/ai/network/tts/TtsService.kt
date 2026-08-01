@@ -21,8 +21,17 @@ class TtsService(private val context: Context) {
         providers[TtsProvider.MICROSOFT] = MicrosoftTtsProvider()
         providers[TtsProvider.VOLCENGINE] = VolcengineTtsProvider()
         providers[TtsProvider.SILICONFLOW] = SiliconFlowTtsProvider()
+        providers[TtsProvider.MIMO] = MiMoTtsProvider()
+        providers[TtsProvider.OPENAI_COMPAT] = OpenAiCompatibleTtsProvider()
         providers[TtsProvider.SHERPA_LOCAL] = sherpaLocalTts
         providers[TtsProvider.ANDROID] = androidTts
+
+        // 从 prefs 恢复当前 provider，避免进程重启后落回系统 TTS
+        val prefs = context.getSharedPreferences("tts_settings", Context.MODE_PRIVATE)
+        val providerName = prefs.getString("tts_provider", TtsProvider.ANDROID.name)
+        currentProvider = TtsProvider.entries.find { it.name == providerName } ?: TtsProvider.ANDROID
+        providers.values.filterIsInstance<ConfigurableTtsProvider>().forEach { it.updateConfig(currentConfig) }
+        SecureLog.i("TtsService", "Initialized with provider=${currentProvider.displayName}")
     }
 
     /** 本地离线 TTS 模型管理器（下载/校验/启用），供设置页 UI 消费 */
