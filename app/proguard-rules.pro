@@ -148,6 +148,18 @@
     native <methods>;
 }
 
+# ================================================================
+# sherpa-onnx (com.k2fsa.sherpa.onnx) — CRITICAL JNI FIX
+# ================================================================
+# AAR ships an EMPTY proguard.txt (no consumer rules), so R8 was renaming
+# config data classes (EndpointConfig/FeatureConfig/OnlineModelConfig/...),
+# but libsherpa-onnx-jni.so resolves them by HARD-CODED string:
+#   FindClass("com/k2fsa/sherpa/onnx/OnlineModelConfig") + GetFieldID("rule1",...)
+# Class/member renaming breaks the JNI handshake -> UnsatisfiedLinkError /
+# NoSuchFieldError -> voice recognition silently disabled in release builds.
+# Keep ALL sherpa-onnx classes, members, and native signatures intact.
+-keep,includedescriptorclasses class com.k2fsa.sherpa.onnx.** { *; }
+
 # Room: keep annotations and generated metadata, but allow class/interface names to be obfuscated.
 -keep,allowobfuscation class com.lianyu.ai.database.AppDatabase { *; }
 -keep,allowobfuscation @androidx.room.Entity class com.lianyu.ai.database.model.** { *; }
