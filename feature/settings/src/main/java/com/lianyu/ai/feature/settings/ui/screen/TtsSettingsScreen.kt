@@ -147,13 +147,18 @@ fun TtsSettingsScreen(
     var sfSpeed by remember { mutableStateOf(config.siliconflowSpeed) }
     var sfGain by remember { mutableStateOf(config.siliconflowGain) }
     var sfSampleRate by remember { mutableStateOf(config.siliconflowSampleRate) }
-    var sfUseCustomTts by remember { mutableStateOf(config.customTtsUrl.isNotBlank()) }
     var customTtsUrl by remember { mutableStateOf(config.customTtsUrl) }
     var customTtsApiKey by remember { mutableStateOf(config.customTtsApiKey) }
     var customTtsModel by remember { mutableStateOf(config.customTtsModel) }
     var customTtsVoiceId by remember { mutableStateOf(config.customTtsVoiceId) }
+    var customTtsResponseFormat by remember { mutableStateOf(config.customTtsResponseFormat) }
+    var mimoApiKey by remember { mutableStateOf(config.mimoApiKey) }
+    var mimoBaseUrl by remember { mutableStateOf(config.mimoBaseUrl) }
+    var mimoModel by remember { mutableStateOf(config.mimoModel) }
+    var mimoVoiceId by remember { mutableStateOf(config.mimoVoiceId) }
     var showSfModelDropdown by remember { mutableStateOf(false) }
     var showSfRateDropdown by remember { mutableStateOf(false) }
+    var showCustomFormatDropdown by remember { mutableStateOf(false) }
 
     // 本地离线 TTS 状态
     var localTtsSpeed by remember { mutableStateOf(config.localTtsSpeed) }
@@ -175,6 +180,19 @@ fun TtsSettingsScreen(
         ttsEnabled = prefs.getBoolean("tts_enabled", false)
         val providerName = prefs.getString("tts_provider", TtsProvider.ANDROID.name)
         selectedProvider = TtsProvider.entries.find { it.name == providerName } ?: TtsProvider.ANDROID
+        // 旧版把自定义端点挂在 SiliconFlow 开关下：有 URL 且开过开关则迁移到 OPENAI_COMPAT
+        val legacyCustom = prefs.getBoolean("sf_use_custom_tts", false)
+        if (
+            selectedProvider == TtsProvider.SILICONFLOW &&
+            legacyCustom &&
+            customTtsUrl.isNotBlank()
+        ) {
+            selectedProvider = TtsProvider.OPENAI_COMPAT
+            prefs.edit()
+                .putString("tts_provider", TtsProvider.OPENAI_COMPAT.name)
+                .putBoolean("sf_use_custom_tts", false)
+                .apply()
+        }
         selectedVoiceId = prefs.getString("tts_voice_${selectedProvider.name}", "") ?: ""
 
         delay(100)
@@ -214,10 +232,15 @@ fun TtsSettingsScreen(
             siliconflowSpeed = sfSpeed,
             siliconflowGain = sfGain,
             siliconflowSampleRate = sfSampleRate,
-            customTtsUrl = if (sfUseCustomTts) customTtsUrl else "",
+            customTtsUrl = customTtsUrl,
             customTtsApiKey = customTtsApiKey,
             customTtsModel = customTtsModel,
             customTtsVoiceId = customTtsVoiceId,
+            customTtsResponseFormat = customTtsResponseFormat,
+            mimoApiKey = mimoApiKey,
+            mimoBaseUrl = mimoBaseUrl,
+            mimoModel = mimoModel,
+            mimoVoiceId = mimoVoiceId,
             localTtsSpeed = localTtsSpeed,
             localTtsSid = localTtsSid
         )
@@ -433,8 +456,6 @@ fun TtsSettingsScreen(
                                     onSfGainChange = { sfGain = it },
                                     sfSampleRate = sfSampleRate,
                                     onSfSampleRateChange = { sfSampleRate = it },
-                                    sfUseCustomTts = sfUseCustomTts,
-                                    onSfUseCustomTtsChange = { sfUseCustomTts = it },
                                     customTtsUrl = customTtsUrl,
                                     onCustomTtsUrlChange = { customTtsUrl = it },
                                     customTtsApiKey = customTtsApiKey,
@@ -443,10 +464,22 @@ fun TtsSettingsScreen(
                                     onCustomTtsModelChange = { customTtsModel = it },
                                     customTtsVoiceId = customTtsVoiceId,
                                     onCustomTtsVoiceIdChange = { customTtsVoiceId = it },
+                                    customTtsResponseFormat = customTtsResponseFormat,
+                                    onCustomTtsResponseFormatChange = { customTtsResponseFormat = it },
+                                    mimoApiKey = mimoApiKey,
+                                    onMimoApiKeyChange = { mimoApiKey = it },
+                                    mimoBaseUrl = mimoBaseUrl,
+                                    onMimoBaseUrlChange = { mimoBaseUrl = it },
+                                    mimoModel = mimoModel,
+                                    onMimoModelChange = { mimoModel = it },
+                                    mimoVoiceId = mimoVoiceId,
+                                    onMimoVoiceIdChange = { mimoVoiceId = it },
                                     showSfModelDropdown = showSfModelDropdown,
                                     onShowSfModelDropdown = { showSfModelDropdown = it },
                                     showSfRateDropdown = showSfRateDropdown,
                                     onShowSfRateDropdown = { showSfRateDropdown = it },
+                                    showCustomFormatDropdown = showCustomFormatDropdown,
+                                    onShowCustomFormatDropdown = { showCustomFormatDropdown = it },
                                     isDarkTheme = isDarkTheme,
                                     cardBg = cardBg,
                                     textPrimaryColor = textPrimaryColor,
@@ -913,8 +946,6 @@ private fun ApiKeyConfigCard(
     onSfGainChange: (String) -> Unit,
     sfSampleRate: Int,
     onSfSampleRateChange: (Int) -> Unit,
-    sfUseCustomTts: Boolean,
-    onSfUseCustomTtsChange: (Boolean) -> Unit,
     customTtsUrl: String,
     onCustomTtsUrlChange: (String) -> Unit,
     customTtsApiKey: String,
@@ -923,10 +954,22 @@ private fun ApiKeyConfigCard(
     onCustomTtsModelChange: (String) -> Unit,
     customTtsVoiceId: String,
     onCustomTtsVoiceIdChange: (String) -> Unit,
+    customTtsResponseFormat: String,
+    onCustomTtsResponseFormatChange: (String) -> Unit,
+    mimoApiKey: String,
+    onMimoApiKeyChange: (String) -> Unit,
+    mimoBaseUrl: String,
+    onMimoBaseUrlChange: (String) -> Unit,
+    mimoModel: String,
+    onMimoModelChange: (String) -> Unit,
+    mimoVoiceId: String,
+    onMimoVoiceIdChange: (String) -> Unit,
     showSfModelDropdown: Boolean,
     onShowSfModelDropdown: (Boolean) -> Unit,
     showSfRateDropdown: Boolean,
     onShowSfRateDropdown: (Boolean) -> Unit,
+    showCustomFormatDropdown: Boolean,
+    onShowCustomFormatDropdown: (Boolean) -> Unit,
     isDarkTheme: Boolean,
     cardBg: Color,
     textPrimaryColor: Color,
@@ -984,144 +1027,106 @@ private fun ApiKeyConfigCard(
                 TtsTextField(value = volcengineCluster, onValueChange = onVolcengineClusterChange, label = "Cluster (可选)", isDarkTheme = isDarkTheme, dividerColor = dividerColor, textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
             }
             TtsProvider.SILICONFLOW -> {
-                // 提供者切换：默认 vs 自定义
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("使用自定义 TTS 端点", fontSize = 13.sp, color = textPrimaryColor)
-                    Switch(checked = sfUseCustomTts, onCheckedChange = onSfUseCustomTtsChange,
+                    Text("复用全局 SiliconFlow API Key", fontSize = 13.sp, color = textPrimaryColor)
+                    Switch(checked = sfUseGlobalKey, onCheckedChange = onSfUseGlobalKeyChange,
                         colors = SwitchDefaults.colors(checkedTrackColor = PetalPrimary))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                if (sfUseCustomTts) {
-                    // ── 自定义 TTS ──
-                    TtsTextField(value = customTtsUrl, onValueChange = onCustomTtsUrlChange,
-                        label = "自定义 TTS URL", isDarkTheme = isDarkTheme, dividerColor = dividerColor,
-                        textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
+                if (!sfUseGlobalKey) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    TtsTextField(value = customTtsApiKey, onValueChange = onCustomTtsApiKeyChange,
-                        label = "自定义 API Key", isPassword = true, isDarkTheme = isDarkTheme,
+                    TtsTextField(value = sfApiKey, onValueChange = onSfApiKeyChange,
+                        label = "API Key", isPassword = true, isDarkTheme = isDarkTheme,
                         dividerColor = dividerColor, textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TtsTextField(value = customTtsModel, onValueChange = onCustomTtsModelChange,
-                        label = "自定义模型名称", isDarkTheme = isDarkTheme, dividerColor = dividerColor,
-                        textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TtsTextField(value = customTtsVoiceId, onValueChange = onCustomTtsVoiceIdChange,
-                        label = "自定义音色 voice_id", isDarkTheme = isDarkTheme, dividerColor = dividerColor,
-                        textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
-                } else {
-                    // ── 硅基流动 ──
-                    // 复用全局 Key 开关
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("TTS 模型", fontSize = 13.sp, color = textSecondaryColor)
+                Spacer(modifier = Modifier.height(4.dp))
+                Box {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppTheme.colors.surface)
+                            .clickable { onShowSfModelDropdown(!showSfModelDropdown) }
+                            .padding(12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("复用全局 SiliconFlow API Key", fontSize = 13.sp, color = textPrimaryColor)
-                        Switch(checked = sfUseGlobalKey, onCheckedChange = onSfUseGlobalKeyChange,
-                            colors = SwitchDefaults.colors(checkedTrackColor = PetalPrimary))
+                        Text(sfTtsModel.ifBlank { "未选择" }, fontSize = 14.sp, color = textPrimaryColor)
+                        Icon(
+                            if (showSfModelDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null, tint = textSecondaryColor, modifier = Modifier.size(20.dp)
+                        )
                     }
-                    if (!sfUseGlobalKey) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        TtsTextField(value = sfApiKey, onValueChange = onSfApiKeyChange,
-                            label = "API Key", isPassword = true, isDarkTheme = isDarkTheme,
-                            dividerColor = dividerColor, textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
-                    }
-
-                    // 模型选择下拉
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("TTS 模型", fontSize = 13.sp, color = textSecondaryColor)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box {
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(AppTheme.colors.surface)
-                                .clickable { onShowSfModelDropdown(!showSfModelDropdown) }
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(sfTtsModel.ifBlank { "未选择" }, fontSize = 14.sp, color = textPrimaryColor)
-                            Icon(
-                                if (showSfModelDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                                contentDescription = null, tint = textSecondaryColor, modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        DropdownMenu(expanded = showSfModelDropdown, onDismissRequest = { onShowSfModelDropdown(false) }) {
-                            listOf(
-                                "FunAudioLLM/CosyVoice2-0.5B" to "CosyVoice2 (推荐)",
-                                "fnlp/MOSS-TTSD-v0.5" to "MOSS-TTSD"
-                            ).forEach { (value, label) ->
-                                DropdownMenuItem(text = { Text(label) }, onClick = {
-                                    onSfTtsModelChange(value); onShowSfModelDropdown(false)
-                                })
-                            }
+                    DropdownMenu(expanded = showSfModelDropdown, onDismissRequest = { onShowSfModelDropdown(false) }) {
+                        listOf(
+                            "FunAudioLLM/CosyVoice2-0.5B" to "CosyVoice2 (推荐)",
+                            "fnlp/MOSS-TTSD-v0.5" to "MOSS-TTSD"
+                        ).forEach { (value, label) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = {
+                                onSfTtsModelChange(value); onShowSfModelDropdown(false)
+                            })
                         }
                     }
-
-                    // 采样率选择
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("采样率", fontSize = 13.sp, color = textSecondaryColor)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box {
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(AppTheme.colors.surface)
-                                .clickable { onShowSfRateDropdown(!showSfRateDropdown) }
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${sfSampleRate} Hz", fontSize = 14.sp, color = textPrimaryColor)
-                            Icon(
-                                if (showSfRateDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                                contentDescription = null, tint = textSecondaryColor, modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        DropdownMenu(expanded = showSfRateDropdown, onDismissRequest = { onShowSfRateDropdown(false) }) {
-                            listOf(8000, 16000, 22050, 44100).forEach { rate ->
-                                DropdownMenuItem(text = { Text("$rate Hz") }, onClick = {
-                                    onSfSampleRateChange(rate); onShowSfRateDropdown(false)
-                                })
-                            }
-                        }
-                    }
-
-                    // 速度
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("语速: ${sfSpeed}", fontSize = 13.sp, color = textSecondaryColor)
-                    Slider(
-                        value = sfSpeed.toFloatOrNull() ?: 1.0f,
-                        onValueChange = { onSfSpeedChange(String.format("%.1f", it)) },
-                        valueRange = 0.5f..2.0f,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = SliderDefaults.colors(thumbColor = PetalPrimary, activeTrackColor = PetalPrimary)
-                    )
-
-                    // 增益
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("增益: ${sfGain} dB", fontSize = 13.sp, color = textSecondaryColor)
-                    Slider(
-                        value = sfGain.toFloatOrNull() ?: 0f,
-                        onValueChange = { onSfGainChange(String.format("%.0f", it)) },
-                        valueRange = -10f..10f,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = SliderDefaults.colors(thumbColor = PetalPrimary, activeTrackColor = PetalPrimary)
-                    )
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("采样率", fontSize = 13.sp, color = textSecondaryColor)
+                Spacer(modifier = Modifier.height(4.dp))
+                Box {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppTheme.colors.surface)
+                            .clickable { onShowSfRateDropdown(!showSfRateDropdown) }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("${sfSampleRate} Hz", fontSize = 14.sp, color = textPrimaryColor)
+                        Icon(
+                            if (showSfRateDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null, tint = textSecondaryColor, modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    DropdownMenu(expanded = showSfRateDropdown, onDismissRequest = { onShowSfRateDropdown(false) }) {
+                        listOf(8000, 16000, 22050, 44100).forEach { rate ->
+                            DropdownMenuItem(text = { Text("$rate Hz") }, onClick = {
+                                onSfSampleRateChange(rate); onShowSfRateDropdown(false)
+                            })
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("语速: ${sfSpeed}", fontSize = 13.sp, color = textSecondaryColor)
+                Slider(
+                    value = sfSpeed.toFloatOrNull() ?: 1.0f,
+                    onValueChange = { onSfSpeedChange(String.format("%.1f", it)) },
+                    valueRange = 0.5f..2.0f,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = SliderDefaults.colors(thumbColor = PetalPrimary, activeTrackColor = PetalPrimary)
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("增益: ${sfGain} dB", fontSize = 13.sp, color = textSecondaryColor)
+                Slider(
+                    value = sfGain.toFloatOrNull() ?: 0f,
+                    onValueChange = { onSfGainChange(String.format("%.0f", it)) },
+                    valueRange = -10f..10f,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = SliderDefaults.colors(thumbColor = PetalPrimary, activeTrackColor = PetalPrimary)
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
                 TtsTextField(value = sfCustomVoiceId, onValueChange = onSfCustomVoiceIdChange,
                     label = "自定义音色 voice_id (可选)", isDarkTheme = isDarkTheme, dividerColor = dividerColor,
                     textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
 
-                // 音色定制平台链接
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     Text("没有自定义音色？", fontSize = 12.sp, color = textSecondaryColor)
@@ -1133,6 +1138,133 @@ private fun ApiKeyConfigCard(
                         })
                 }
             }
+            TtsProvider.MIMO -> {
+                Text(
+                    text = "MiMo TTS 走 /v1/chat/completions + audio 字段（非 OpenAI speech）",
+                    fontSize = 12.sp,
+                    color = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = mimoBaseUrl,
+                    onValueChange = onMimoBaseUrlChange,
+                    label = "Base URL (https://api.xiaomimimo.com/v1)",
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = mimoApiKey,
+                    onValueChange = onMimoApiKeyChange,
+                    label = "API Key",
+                    isPassword = true,
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = mimoModel,
+                    onValueChange = onMimoModelChange,
+                    label = "模型 (如 mimo-v2.5-tts)",
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = mimoVoiceId,
+                    onValueChange = onMimoVoiceIdChange,
+                    label = "voice (如 mimo_default / Chloe)",
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+            }
+            TtsProvider.OPENAI_COMPAT -> {
+                Text(
+                    text = "兼容 OpenAI Audio Speech：POST /v1/audio/speech\n可填 Base URL（如 https://xxx/v1）或完整 speech 地址",
+                    fontSize = 12.sp,
+                    color = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = customTtsUrl,
+                    onValueChange = onCustomTtsUrlChange,
+                    label = "Base URL / Speech URL",
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = customTtsApiKey,
+                    onValueChange = onCustomTtsApiKeyChange,
+                    label = "API Key",
+                    isPassword = true,
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = customTtsModel,
+                    onValueChange = onCustomTtsModelChange,
+                    label = "模型 (如 tts-1 / tts-1-hd)",
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TtsTextField(
+                    value = customTtsVoiceId,
+                    onValueChange = onCustomTtsVoiceIdChange,
+                    label = "voice (如 alloy / nova)",
+                    isDarkTheme = isDarkTheme,
+                    dividerColor = dividerColor,
+                    textPrimaryColor = textPrimaryColor,
+                    textSecondaryColor = textSecondaryColor
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("response_format", fontSize = 13.sp, color = textSecondaryColor)
+                Spacer(modifier = Modifier.height(4.dp))
+                Box {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppTheme.colors.surface)
+                            .clickable { onShowCustomFormatDropdown(!showCustomFormatDropdown) }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(customTtsResponseFormat.ifBlank { "mp3" }, fontSize = 14.sp, color = textPrimaryColor)
+                        Icon(
+                            if (showCustomFormatDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null, tint = textSecondaryColor, modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showCustomFormatDropdown,
+                        onDismissRequest = { onShowCustomFormatDropdown(false) }
+                    ) {
+                        listOf("mp3", "opus", "aac", "flac", "wav", "pcm").forEach { format ->
+                            DropdownMenuItem(text = { Text(format) }, onClick = {
+                                onCustomTtsResponseFormatChange(format)
+                                onShowCustomFormatDropdown(false)
+                            })
+                        }
+                    }
+                }
+            }
             TtsProvider.ANDROID -> {
                 Text(
                     text = "使用系统内置 TTS 引擎，无需配置 API Key\n建议在系统设置中安装高质量TTS引擎以获得更好效果",
@@ -1142,7 +1274,6 @@ private fun ApiKeyConfigCard(
             }
             TtsProvider.SHERPA_LOCAL -> {
                 // 本地离线 TTS 配置在 ApiKeyConfigCard 外部独立渲染（见 TtsSettingsScreen 主体）
-                // 此分支不会到达，但 when 穷尽性要求覆盖
             }
         }
     }

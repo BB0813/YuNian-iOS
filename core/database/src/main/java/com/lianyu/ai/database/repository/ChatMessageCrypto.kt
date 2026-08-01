@@ -85,8 +85,10 @@ object ChatMessageCrypto {
                 linkString = decrypt(message.linkString, keyProvider)
             )
         } catch (e: Exception) {
+            // 卸载/换签名后 KeyStore 密钥丢失时，回退到明文 searchContent（若有）
+            val fallback = plaintextSearchFallback(message.searchContent, message.content)
             message.copy(
-                content = DECRYPT_FAILED_PLACEHOLDER,
+                content = fallback,
                 linkString = ""
             )
         }
@@ -127,8 +129,9 @@ object ChatMessageCrypto {
                 linkString = decrypt(message.linkString, keyProvider)
             )
         } catch (e: Exception) {
+            val fallback = plaintextSearchFallback(message.searchContent, message.content)
             message.copy(
-                content = DECRYPT_FAILED_PLACEHOLDER,
+                content = fallback,
                 linkString = ""
             )
         }
@@ -168,6 +171,19 @@ object ChatMessageCrypto {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, decryptionKey, GCMParameterSpec(GCM_TAG_LENGTH, iv))
         return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+    }
+
+    /** KeyStore 不可用时，优先用未加密的 searchContent 恢复可读正文 */
+    private fun plaintextSearchFallback(searchContent: String, encryptedContent: String): String {
+        val candidate = searchContent.trim()
+        if (candidate.isNotEmpty() && !candidate.startsWith(PREFIX) && !candidate.startsWith("enc:")) {
+            return candidate
+        }
+        return if (encryptedContent.startsWith(PREFIX) || encryptedContent.startsWith("enc:")) {
+            DECRYPT_FAILED_PLACEHOLDER
+        } else {
+            encryptedContent.ifBlank { DECRYPT_FAILED_PLACEHOLDER }
+        }
     }
 
     // --- KeyStore helpers ---

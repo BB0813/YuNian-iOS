@@ -415,33 +415,132 @@ abstract class AppDatabase : RoomDatabase() {
             db.execSQL("ALTER TABLE `$tableName` ADD COLUMN $columnName $columnDefinition")
         }
 
-        /** 安全移除列 — 通过重建表实现（兼容 minSdk 26 的旧 SQLite） */
-        private fun dropColumnIfExists(
-            db: SupportSQLiteDatabase,
-            tableName: String,
-            columnName: String
-        ) {
-            // 检查列是否存在
-            var exists = false
-            val columns = mutableListOf<String>()
+        /** 列是否存在 */
+        private fun hasColumn(db: SupportSQLiteDatabase, tableName: String, columnName: String): Boolean {
             db.query("PRAGMA table_info(`$tableName`)").use { cursor ->
                 val nameIndex = cursor.getColumnIndexOrThrow("name")
                 while (cursor.moveToNext()) {
-                    val col = cursor.getString(nameIndex)
-                    if (col == columnName) exists = true
-                    columns.add(col)
+                    if (cursor.getString(nameIndex) == columnName) return true
                 }
             }
-            if (!exists) return
+            return false
+        }
 
-            // 重建表：创建新表(无该列) → 复制数据 → 删旧表 → 重命名
-            val keepColumns = columns.filter { it != columnName }
-            val columnList = keepColumns.joinToString(", ") { "`$it`" }
-            val tempTable = "${tableName}_temp"
+        /**
+         * 重建 api_configs 到与实体一致的最终形态（无 skipCertVerify，formatHint NOT NULL）。
+         *
+         * 注意：不可使用 `CREATE TABLE AS SELECT` 删列——会丢失 NOT NULL / PK，导致 Room
+         * Identity hash 校验失败（IllegalStateException: Migration didn't properly handle）。
+         */
+        private fun rebuildApiConfigsToCurrentSchema(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `api_configs_new`")
+            db.execSQL(
+                """
+                CREATE TABLE `api_configs_new` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `provider` TEXT NOT NULL,
+                    `name` TEXT NOT NULL,
+                    `apiKey` TEXT NOT NULL,
+                    `extraApiKeys` TEXT NOT NULL,
+                    `baseUrl` TEXT NOT NULL,
+                    `model` TEXT NOT NULL,
+                    `temperature` REAL NOT NULL,
+                    `maxTokens` INTEGER,
+                    `isEnabled` INTEGER NOT NULL,
+                    `connectionTested` INTEGER NOT NULL,
+                    `connectionTestedAt` INTEGER NOT NULL,
+                    `latencyMs` INTEGER NOT NULL,
+                    `formatHint` TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            val hasFormatHint = hasColumn(db, "api_configs", "formatHint")
+            val hasExtraKeys = hasColumn(db, "api_configs", "extraApiKeys")
+            val formatExpr = if (hasFormatHint) {
+                "COALESCE(NULLIF(`formatHint`, ''), 'openai')"
+            } else {
+                "'openai'"
+            }
+            val extraExpr = if (hasExtraKeys) {
+                "COALESCE(`extraApiKeys`, '')"
+            } else {
+                "''"
+            }
+            db.execSQL(
+                """
+                INSERT INTO `api_configs_new` (
+                    `id`, `provider`, `name`, `apiKey`, `extraApiKeys`, `baseUrl`, `model`,
+                    `temperature`, `maxTokens`, `isEnabled`, `connectionTested`,
+                    `connectionTestedAt`, `latencyMs`, `formatHint`
+                )
+                SELECT
+                    `id`, `provider`, COALESCE(`name`, ''), `apiKey`, $extraExpr, `baseUrl`, `model`,
+                    COALESCE(`temperature`, 0.7), `maxTokens`, COALESCE(`isEnabled`, 1),
+                    COALESCE(`connectionTested`, 0), COALESCE(`connectionTestedAt`, 0),
+                    COALESCE(`latencyMs`, 0), $formatExpr
+                FROM `api_configs`
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE `api_configs`")
+            db.execSQL("ALTER TABLE `api_configs_new` RENAME TO `api_configs`")
+        }
 
-            db.execSQL("CREATE TABLE `$tempTable` AS SELECT $columnList FROM `$tableName`")
-            db.execSQL("DROP TABLE `$tableName`")
-            db.execSQL("ALTER TABLE `$tempTable` RENAME TO `$tableName`")
+        /** 重建 api_provider_presets（去掉 skipCertVerify，保留约束） */
+        private fun rebuildApiProviderPresetsToCurrentSchema(db: SupportSQLiteDatabase) {
+            if (!tableExists(db, "api_provider_presets")) return
+            if (!hasColumn(db, "api_provider_presets", "skipCertVerify")) return
+
+            db.execSQL("DROP TABLE IF EXISTS `api_provider_presets_new`")
+            db.execSQL(
+                """
+                CREATE TABLE `api_provider_presets_new` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `provider` TEXT NOT NULL,
+                    `displayName` TEXT NOT NULL,
+                    `baseUrl` TEXT NOT NULL,
+                    `model` TEXT NOT NULL,
+                    `formatHint` TEXT NOT NULL,
+                    `sortOrder` INTEGER NOT NULL,
+                    `isVisible` INTEGER NOT NULL,
+                    `updatedAt` INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            val hasFormatHint = hasColumn(db, "api_provider_presets", "formatHint")
+            val formatExpr = if (hasFormatHint) {
+                "COALESCE(NULLIF(`formatHint`, ''), 'openai')"
+            } else {
+                "'openai'"
+            }
+            db.execSQL(
+                """
+                INSERT INTO `api_provider_presets_new` (
+                    `id`, `provider`, `displayName`, `baseUrl`, `model`,
+                    `formatHint`, `sortOrder`, `isVisible`, `updatedAt`
+                )
+                SELECT
+                    `id`, `provider`, `displayName`, `baseUrl`, `model`,
+                    $formatExpr,
+                    COALESCE(`sortOrder`, 0),
+                    COALESCE(`isVisible`, 1),
+                    COALESCE(`updatedAt`, 0)
+                FROM `api_provider_presets`
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE `api_provider_presets`")
+            db.execSQL("ALTER TABLE `api_provider_presets_new` RENAME TO `api_provider_presets`")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_api_provider_presets_provider` ON `api_provider_presets` (`provider`)"
+            )
+        }
+
+        private fun tableExists(db: SupportSQLiteDatabase, tableName: String): Boolean {
+            db.query(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                arrayOf(tableName)
+            ).use { cursor ->
+                return cursor.moveToFirst()
+            }
         }
 
         private fun migrateLegacyTo6(db: SupportSQLiteDatabase) {
@@ -1286,9 +1385,9 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_33_34 = object : Migration(33, 34) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // 移除 api_configs 和 api_provider_presets 的 skipCertVerify 列
-                dropColumnIfExists(db, "api_configs", "skipCertVerify")
-                dropColumnIfExists(db, "api_provider_presets", "skipCertVerify")
+                // 移除 skipCertVerify，并以完整 CREATE TABLE 重建，避免 AS SELECT 丢失 NOT NULL
+                rebuildApiConfigsToCurrentSchema(db)
+                rebuildApiProviderPresetsToCurrentSchema(db)
             }
         }
 

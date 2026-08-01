@@ -313,8 +313,17 @@ fun VoiceCallScreen(
         // 互斥保护：通知 ViewModel 通话激活，禁用聊天页 TTS 朗读，避免与通话抢 TtsService/AudioManager
         viewModel.setCallActive(true)
         scope.launch(Dispatchers.IO) {
-            // 初始化语音识别引擎
-            voiceManager.init()
+            // 初始化语音识别引擎（失败不抛到协程外，避免闪退）
+            val ok = voiceManager.init()
+            if (!ok || !voiceManager.isReady) {
+                withContext(Dispatchers.Main) {
+                    callState = CallState.DIALING
+                    viewModel.setCallActive(false)
+                    val msg = voiceManager.lastError ?: "语音识别引擎初始化失败"
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                }
+                return@launch
+            }
 
             // 设置音频模式
             val am = getAudioManager()

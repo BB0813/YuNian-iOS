@@ -25,11 +25,18 @@ data class TtsConfig(
     val siliconflowSpeed: String = "1.0",
     val siliconflowGain: String = "0",
     val siliconflowSampleRate: Int = 44100,
-    // Custom TTS endpoint
+    // Xiaomi MiMo TTS (chat/completions + audio)
+    val mimoApiKey: String = "",
+    val mimoBaseUrl: String = MiMoTtsProvider.defaultBaseUrl(),
+    val mimoModel: String = "mimo-v2.5-tts",
+    val mimoVoiceId: String = "mimo_default",
+    val mimoOutputFormat: String = "wav",
+    // Custom OpenAI-compatible TTS (/v1/audio/speech)
     val customTtsUrl: String = "",
     val customTtsApiKey: String = "",
-    val customTtsModel: String = "",
-    val customTtsVoiceId: String = "",
+    val customTtsModel: String = "tts-1",
+    val customTtsVoiceId: String = "alloy",
+    val customTtsResponseFormat: String = "mp3",
     // Local offline TTS (sherpa-onnx)
     val localTtsSpeed: Float = 1.0f,
     val localTtsSid: Int = 0
@@ -42,9 +49,12 @@ data class TtsConfig(
             TtsProvider.XUNFEI -> xunfeiAppId.isNotBlank() && xunfeiApiKey.isNotBlank() && xunfeiApiSecret.isNotBlank()
             TtsProvider.MICROSOFT -> azureSubscriptionKey.isNotBlank()
             TtsProvider.VOLCENGINE -> volcengineAppId.isNotBlank() && volcengineToken.isNotBlank()
-            TtsProvider.SILICONFLOW -> siliconflowUseGlobalKey
-                || siliconflowApiKey.isNotBlank()
-                || customTtsUrl.isNotBlank()
+            TtsProvider.SILICONFLOW -> siliconflowUseGlobalKey || siliconflowApiKey.isNotBlank()
+            TtsProvider.MIMO ->
+                mimoApiKey.isNotBlank() && MiMoTtsProvider.isAllowedBaseUrl(mimoBaseUrl)
+            TtsProvider.OPENAI_COMPAT ->
+                customTtsApiKey.isNotBlank() &&
+                    OpenAiCompatibleTtsProvider.normalizeSpeechUrl(customTtsUrl) != null
             TtsProvider.SHERPA_LOCAL -> true
         }
     }
@@ -73,10 +83,23 @@ data class TtsConfig(
                 siliconflowSpeed = prefs.getString("sf_speed", "1.0") ?: "1.0",
                 siliconflowGain = prefs.getString("sf_gain", "0") ?: "0",
                 siliconflowSampleRate = prefs.getInt("sf_sample_rate", 44100),
+                mimoApiKey = prefs.getString("mimo_api_key", "") ?: "",
+                mimoBaseUrl = MiMoTtsProvider.normalizeBaseUrl(
+                    prefs.getString("mimo_base_url", MiMoTtsProvider.defaultBaseUrl())
+                        ?: MiMoTtsProvider.defaultBaseUrl()
+                ) ?: MiMoTtsProvider.defaultBaseUrl(),
+                mimoModel = prefs.getString("mimo_model", "mimo-v2.5-tts") ?: "mimo-v2.5-tts",
+                mimoVoiceId = prefs.getString("mimo_voice_id", "mimo_default") ?: "mimo_default",
+                mimoOutputFormat = MiMoTtsProvider.normalizeOutputFormat(
+                    prefs.getString("mimo_output_format", "wav") ?: "wav"
+                ),
                 customTtsUrl = prefs.getString("custom_tts_url", "") ?: "",
                 customTtsApiKey = prefs.getString("custom_tts_api_key", "") ?: "",
-                customTtsModel = prefs.getString("custom_tts_model", "") ?: "",
-                customTtsVoiceId = prefs.getString("custom_tts_voice_id", "") ?: "",
+                customTtsModel = prefs.getString("custom_tts_model", "tts-1") ?: "tts-1",
+                customTtsVoiceId = prefs.getString("custom_tts_voice_id", "alloy") ?: "alloy",
+                customTtsResponseFormat = OpenAiCompatibleTtsProvider.normalizeFormat(
+                    prefs.getString("custom_tts_response_format", "mp3") ?: "mp3"
+                ),
                 localTtsSpeed = prefs.getFloat("local_tts_speed", 1.0f),
                 localTtsSid = prefs.getInt("local_tts_sid", 0)
             )
@@ -105,10 +128,25 @@ data class TtsConfig(
                 putString("sf_speed", config.siliconflowSpeed)
                 putString("sf_gain", config.siliconflowGain)
                 putInt("sf_sample_rate", config.siliconflowSampleRate)
+                putString("mimo_api_key", config.mimoApiKey)
+                putString(
+                    "mimo_base_url",
+                    MiMoTtsProvider.normalizeBaseUrl(config.mimoBaseUrl) ?: MiMoTtsProvider.defaultBaseUrl()
+                )
+                putString("mimo_model", config.mimoModel)
+                putString("mimo_voice_id", config.mimoVoiceId)
+                putString(
+                    "mimo_output_format",
+                    MiMoTtsProvider.normalizeOutputFormat(config.mimoOutputFormat)
+                )
                 putString("custom_tts_url", config.customTtsUrl)
                 putString("custom_tts_api_key", config.customTtsApiKey)
                 putString("custom_tts_model", config.customTtsModel)
                 putString("custom_tts_voice_id", config.customTtsVoiceId)
+                putString(
+                    "custom_tts_response_format",
+                    OpenAiCompatibleTtsProvider.normalizeFormat(config.customTtsResponseFormat)
+                )
                 putFloat("local_tts_speed", config.localTtsSpeed)
                 putInt("local_tts_sid", config.localTtsSid)
                 apply()
