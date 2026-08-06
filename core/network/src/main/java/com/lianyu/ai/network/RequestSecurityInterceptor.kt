@@ -32,7 +32,16 @@ class RequestSecurityInterceptor(
     companion object {
         /**
          * Enforce TLS security on an OkHttpClient builder.
-         * Limits to TLS 1.2+ and strong cipher suites.
+         * Limits to TLS 1.2+ and strong cipher suites for HTTPS.
+         *
+         * NOTE: ConnectionSpec.CLEARTEXT is kept in the spec list on purpose.
+         * If the list contained ONLY a TLS spec, OkHttp would reject every
+         * http:// request with "CLEARTEXT communication to X not enabled by
+         * client" (UnknownServiceException) — even when the platform's
+         * network_security_config.xml permits cleartext. Cleartext policy is
+         * therefore controlled centrally by network_security_config.xml
+         * (base-config cleartextTrafficPermitted), and HTTPS traffic still
+         * enforces TLS 1.2+ with strong cipher suites here.
          */
         fun enforceTls(builder: OkHttpClient.Builder) {
             try {
@@ -52,7 +61,7 @@ class RequestSecurityInterceptor(
                         okhttp3.CipherSuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
                     )
                     .build()
-                builder.connectionSpecs(listOf(tlsSpec))
+                builder.connectionSpecs(listOf(ConnectionSpec.CLEARTEXT, tlsSpec))
             } catch (_: Exception) {
                 // Keep platform defaults if the restricted TLS spec is unavailable.
             }

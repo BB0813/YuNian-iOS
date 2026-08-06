@@ -48,22 +48,40 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
     private val _exportResult = MutableSharedFlow<ByteArray>()
     val exportResult = _exportResult.asSharedFlow()
 
-    private val _importRequest = MutableSharedFlow<Unit>()
-    val importRequest = _importRequest.asSharedFlow()
-
     // --- Actions ---
 
-    fun export(password: String) {
+    fun export(password: String, companionIds: Set<Long>? = null) {
         viewModelScope.launch {
             _uiState.value = UiState.Exporting
             try {
-                val data = exportService.export()
+                val data = exportService.export(companionIds)
                 val jsonBytes = json.encodeToString(BackupData.serializer(), data).toByteArray(Charsets.UTF_8)
                 val encrypted = encrypt(jsonBytes, password)
                 _exportResult.emit(encrypted)
                 _uiState.value = UiState.Success("导出成功")
             } catch (e: Exception) {
                 _uiState.value = UiState.Error("导出失败: ${e.localizedMessage ?: "未知错误"}")
+            }
+        }
+    }
+
+    // --- 导出选择页：联系人统计 ---
+
+    private val _companionStats = MutableStateFlow<List<CompanionExportStat>>(emptyList())
+    val companionStats: StateFlow<List<CompanionExportStat>> = _companionStats.asStateFlow()
+
+    private val _statsLoading = MutableStateFlow(false)
+    val statsLoading: StateFlow<Boolean> = _statsLoading.asStateFlow()
+
+    fun loadCompanionStats() {
+        viewModelScope.launch {
+            _statsLoading.value = true
+            try {
+                _companionStats.value = exportService.getCompanionStats()
+            } catch (e: Exception) {
+                _uiState.value = UiState.Error("加载联系人数据失败: ${e.localizedMessage ?: "未知错误"}")
+            } finally {
+                _statsLoading.value = false
             }
         }
     }
@@ -109,10 +127,6 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.value = UiState.Error(msg)
             }
         }
-    }
-
-    fun requestImport() {
-        _importRequest.tryEmit(Unit)
     }
 
     fun onExportComplete() {

@@ -28,7 +28,7 @@ class LoadTest {
         .build()
 
     private val apiKey = "sk-" + "a".repeat(20)
-    private val baseUrl = "http://156.233.228.31:9876/v1"
+    private val baseUrl = "https://suflow.cloud/v1"
 
     @org.junit.Test
     fun testFetchModelsWith38Users() = runBlocking {

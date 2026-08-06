@@ -21,6 +21,36 @@ object SecurityState {
         BLOCK
     }
 
+    /**
+     * Client risk tiers mirroring the native zero-trust risk model
+     * (zt_risk_level_t in zero-trust.h).  The tier is derived from the
+     * raw threat score using configurable thresholds:
+     *   0 = SAFE (score 0)          → clean device
+     *   1 = LOW  (score 1-2)        → minor flags, features degrade
+     *   2 = MEDIUM (score 3-5)      → suspicious, sensitive ops restricted
+     *   3 = HIGH (score 6-9)        → likely compromised, sensitive ops denied
+     *   4 = CRITICAL (score >= 10)  → definite breach, full lock
+     */
+    enum class RiskLevel(val tier: Int) {
+        SAFE(0), LOW(1), MEDIUM(2), HIGH(3), CRITICAL(4);
+
+        companion object {
+            fun fromTier(tier: Int): RiskLevel = entries.firstOrNull { it.tier == tier } ?: CRITICAL
+        }
+    }
+
+    /**
+     * Risk threshold for sensitive operations — the highest client risk
+     * tier that may still use sensitive paths (cloud access, secret
+     * decrypt, SuFlow session use).
+     *
+     * Tuning:
+     *   SENSITIVE_OPS_MAX_RISK = RiskLevel.SAFE    → score must be 0
+     *   SENSITIVE_OPS_MAX_RISK = RiskLevel.LOW     → score 0-2 allowed
+     *   SENSITIVE_OPS_MAX_RISK = RiskLevel.MEDIUM  → score 0-5 allowed (permissive)
+     */
+    const val SENSITIVE_OPS_MAX_RISK: Int = 1 // RiskLevel.LOW — score 0-2 allowed
+
     data class Snapshot(
         val preflightPassed: Boolean = false,
         val wbAesReady: Boolean = false,
@@ -33,6 +63,8 @@ object SecurityState {
         val tampered: Boolean = false,
         /** True only for cryptographic / payload authentication failures. */
         val hardAuthFailed: Boolean = false,
+        /** Client risk tier (0-4) from the native threshold model. */
+        val riskLevel: Int = RiskLevel.SAFE.tier,
         val reason: String? = null
     ) {
         val isTrustedForSensitiveOps: Boolean
@@ -44,6 +76,7 @@ object SecurityState {
                 resourcesTrusted &&
                 payloadVerified &&
                 kmsReady &&
+                riskLevel <= SENSITIVE_OPS_MAX_RISK &&
                 !tampered &&
                 !hardAuthFailed
 
@@ -51,6 +84,8 @@ object SecurityState {
             get() = when {
                 hardAuthFailed -> Admission.BLOCK
                 isTrustedForSensitiveOps -> Admission.ALLOW_FULL
+                // MEDIUM+ risk: sensitive paths denied, local stays available.
+                riskLevel > SENSITIVE_OPS_MAX_RISK -> Admission.ALLOW_LOCAL
                 else -> Admission.ALLOW_LOCAL
             }
     }
@@ -94,6 +129,24 @@ object SecurityState {
             wbAesReady = previous.wbAesReady || wbAesReady,
             kmsReady = previous.kmsReady || kmsReady
         )
+    }
+
+    /**
+     * Refresh the client risk tier from the native zero-trust threshold
+     * model.  Called after zero-trust evaluation completes so sensitive
+     * gates can decide against the current risk level.
+     */
+    fun updateRiskLevel() {
+        val tier = try {
+            NativeBridge.zeroTrustGetRiskLevel()
+        } catch (t: Throwable) {
+            RiskLevel.CRITICAL.tier // fail closed if native call throws
+        }
+        val newLevel = RiskLevel.fromTier(tier)
+        val previous = current
+        if (previous.riskLevel != newLevel.tier) {
+            current = previous.copy(riskLevel = newLevel.tier)
+        }
     }
 
     /**

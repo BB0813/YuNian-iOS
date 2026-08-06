@@ -1188,7 +1188,7 @@ private fun ApiKeyConfigCard(
             }
             TtsProvider.OPENAI_COMPAT -> {
                 Text(
-                    text = "兼容 OpenAI Audio Speech：POST /v1/audio/speech\n可填 Base URL（如 https://xxx/v1）或完整 speech 地址",
+                    text = "兼容 OpenAI Audio Speech：POST /v1/audio/speech\n可填 Base URL（如 https://xxx/v1）或完整 speech 地址\n局域网自建服务可用 http://192.168.x.x:port/v1",
                     fontSize = 12.sp,
                     color = textSecondaryColor
                 )

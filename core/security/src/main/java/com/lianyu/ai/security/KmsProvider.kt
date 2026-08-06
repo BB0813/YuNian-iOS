@@ -55,7 +55,15 @@ object KmsProvider {
      * Loads DK into CPU NEON registers.
      */
     fun initialize(): Boolean {
-        return nativeInit() == 1
+        // kms_init() returns KMS_OK(0) on success — KMS_STATE_READY is
+        // observable via nativeGetStatus().  A previous `== 1` comparison
+        // never matched KMS_OK(0), so initialize() always reported failure
+        // even when the keychain was fully derived.  Check status directly
+        // so callers see the true operational state.
+        val rc = nativeInit()
+        if (rc == 0) return true
+        // Some builds/patches returned READY(1) historically — accept both.
+        return rc == 1
     }
 
     /**

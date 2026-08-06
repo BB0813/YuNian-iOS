@@ -2,10 +2,10 @@
     <string name="backup_title">データバックアップ</string>
     <string name="backup_back">戻る</string>
     <string name="backup_export_title">バックアップをエクスポート</string>
-    <string name="backup_export_desc">すべての会話データを暗号化バックアップファイルとしてエクスポートします</string>
+    <string name="backup_export_desc">エクスポートするデータを選択。ローカルに保存または他の端末に転送できます</string>
     <string name="backup_export_btn">エクスポート</string>
     <string name="backup_import_title">バックアップをインポート</string>
-    <string name="backup_import_desc">バックアップファイルからデータを復元します。現在のデータはすべて上書きされます</string>
+    <string name="backup_import_desc">バックアップファイルからデータをインポート。連絡先名で統合され、既存データは上書きされません</string>
     <string name="backup_import_btn">インポート</string>
-    <string name="backup_notice">💡 注意事項：\n• バックアップファイルはパスワードで保護されています\n• インポートすると現在のチャットデータがすべて消去されます\n• 画像や音声などのメディアファイルは含まれません\n• 定期的なエクスポートをお勧めします</string>
+    <string name="backup_notice">💡 注意事項：\n• バックアップファイルはパスワードで保護されています\n• エクスポート時は連絡先を選択できます\n• テキスト・画像・音声などすべてのチャット項目が含まれます\n• インポートは連絡先名で統合され、既存データを上書きしません\n• 定期的なエクスポートをお勧めします</string>
 </resources>

@@ -45,6 +45,42 @@ typedef enum {
 } zt_trust_state_t;
 
 /* ==================================================================
+ * Client Risk Level — Threshold-Based Risk Assessment
+ * ================================================================== */
+
+/**
+ * Fine-grained risk tier derived from the raw threat score.
+ *
+ * This is the primary "how risky is this client right now" signal
+ * consumed by sensitive-operation gates.  The raw score is bucketed
+ * into 5 tiers using the configurable thresholds below, so policy
+ * decisions (cloud access, secret decrypt, session use) can be made
+ * against a risk LEVEL instead of an opaque integer.
+ */
+typedef enum {
+    ZT_RISK_SAFE      = 0,  /**< score == 0: clean device, full trust */
+    ZT_RISK_LOW       = 1,  /**< score 1-2: minor flags (ptrace_scope, vpn) */
+    ZT_RISK_MEDIUM    = 2,  /**< score 3-5: suspicious, degrade features */
+    ZT_RISK_HIGH      = 3,  /**< score 6-9: likely compromised, lock sensitive */
+    ZT_RISK_CRITICAL  = 4,  /**< score >= 10: definite breach, full lock */
+} zt_risk_level_t;
+
+/**
+ * Risk thresholds — configurable knobs for the scoring model.
+ * Lowering them makes the system more conservative (more clients
+ * flagged), raising them makes it more permissive.
+ *
+ *   score <  ZT_RISK_THRESHOLD_MEDIUM  → SAFE
+ *   score <  ZT_RISK_THRESHOLD_HIGH    → LOW (if > 0) / MEDIUM
+ *   score <  ZT_RISK_THRESHOLD_CRITICAL→ HIGH
+ *   score >= ZT_RISK_THRESHOLD_CRITICAL→ CRITICAL
+ */
+#define ZT_RISK_THRESHOLD_MEDIUM   1   /* score >= 1  → at least LOW      */
+#define ZT_RISK_THRESHOLD_HIGH     3   /* score >= 3  → MEDIUM            */
+#define ZT_RISK_THRESHOLD_CRITICAL 6   /* score >= 6  → HIGH              */
+#define ZT_RISK_THRESHOLD_ABSOLUTE 10  /* score >= 10 → CRITICAL          */
+
+/* ==================================================================
  * Access Decision Enumeration
  * ================================================================== */
 
@@ -304,6 +340,25 @@ void zero_trust_wipe_all_keys(void);
  * @return String constant: "TRUST", "SUSPICIOUS", or "BREACH".
  */
 const char* zero_trust_state_name(zt_trust_state_t state);
+
+/**
+ * Map the current raw threat score to a risk level.
+ *
+ * Thresholds are configurable via ZT_RISK_THRESHOLD_* macros in
+ * zero-trust.h.  This is the canonical "client risk" signal for
+ * sensitive-operation policy decisions.
+ *
+ * @return Current zt_risk_level_t tier (0-4).
+ */
+zt_risk_level_t zero_trust_get_risk_level(void);
+
+/**
+ * Get a human-readable string for a risk level.
+ *
+ * @param level  The risk level.
+ * @return String constant: "SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL".
+ */
+const char* zero_trust_risk_level_name(zt_risk_level_t level);
 
 /** Convenience: check if system is in locked (BREACH) state. */
 int zero_trust_is_locked(void);

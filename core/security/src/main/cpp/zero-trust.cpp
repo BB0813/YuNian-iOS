@@ -36,6 +36,7 @@
 #include <pthread.h>
 #include <atomic>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -122,6 +123,18 @@ extern int g_sig_ok;
 /** Error threshold: 3 consecutive detection failures → BREACH escalation */
 #define ZT_ERROR_THRESHOLD       3
 
+/**
+ * MITM user-CA cert threshold.
+ *
+ * check_user_ca_certs() returns the NUMBER of user-added CA certs.
+ * A single leftover dev-tool root CA (Reqable/Charles/Fiddler) on a
+ * development device is not an interception indicator by itself, so we
+ * only score when the count reaches this threshold.  Real MITM setups
+ * typically also run a proxy or a sniffing process, which are scored
+ * separately (mitm_proc / mitm_port).
+ */
+#define ZT_MITM_CA_THRESHOLD     2
+
 /** Default threat score weights */
 #define ZT_WEIGHT_ROOT           3
 #define ZT_WEIGHT_MAGISK         3
@@ -194,6 +207,45 @@ static struct {
 static pthread_mutex_t g_zt_initial_eval_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_zt_initial_eval_cond = PTHREAD_COND_INITIALIZER;
 
+/* ==================================================================
+ * Score Breakdown Diagnostics
+ *
+ * Records which detection-chain items contributed to the threat
+ * score. Exposed via JNI zeroTrustGetScoreBreakdown() so the app
+ * can dump the exact score sources into the diag file.
+ * ================================================================== */
+
+#define ZT_BREAKDOWN_MAX 96
+static char       g_zt_breakdown_buf[2048];
+static int        g_zt_breakdown_count = 0;
+static pthread_mutex_t g_zt_breakdown_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void zt_breakdown_reset(void)
+{
+    pthread_mutex_lock(&g_zt_breakdown_mutex);
+    g_zt_breakdown_buf[0] = '\0';
+    g_zt_breakdown_count = 0;
+    pthread_mutex_unlock(&g_zt_breakdown_mutex);
+}
+
+static void zt_breakdown_add(const char* name)
+{
+    pthread_mutex_lock(&g_zt_breakdown_mutex);
+    if (g_zt_breakdown_count < ZT_BREAKDOWN_MAX) {
+        size_t len = strlen(g_zt_breakdown_buf);
+        size_t nl  = strlen(name);
+        if (len + nl + 2 < sizeof(g_zt_breakdown_buf)) {
+            if (len > 0) {
+                g_zt_breakdown_buf[len++] = ',';
+            }
+            memcpy(g_zt_breakdown_buf + len, name, nl);
+            g_zt_breakdown_buf[len + nl] = '\0';
+            g_zt_breakdown_count++;
+        }
+    }
+    pthread_mutex_unlock(&g_zt_breakdown_mutex);
+}
+
 static void zt_mark_initial_eval_complete(void)
 {
     if (g_zt.initial_eval_complete.exchange(1, std::memory_order_acq_rel) == 0) {
@@ -254,6 +306,52 @@ int zero_trust_is_locked(void) {
 
 int zero_trust_is_degraded(void) {
     return g_zt.degraded.load(std::memory_order_acquire);
+}
+
+/* ==================================================================
+ * Client Risk Level — Threshold-Based Risk Assessment
+ * ================================================================== */
+
+/**
+ * Map the current raw threat score to a 5-tier risk level using the
+ * configurable ZT_RISK_THRESHOLD_* knobs.
+ *
+ *   score <  ZT_RISK_THRESHOLD_MEDIUM   → ZT_RISK_SAFE
+ *   score <  ZT_RISK_THRESHOLD_HIGH     → ZT_RISK_LOW
+ *   score <  ZT_RISK_THRESHOLD_CRITICAL → ZT_RISK_MEDIUM
+ *   score <  ZT_RISK_THRESHOLD_ABSOLUTE → ZT_RISK_HIGH
+ *   score >= ZT_RISK_THRESHOLD_ABSOLUTE → ZT_RISK_CRITICAL
+ *
+ * If no evaluation has run yet, the score is 0 → SAFE (fail-open for
+ * the risk tier; the state machine still starts BREACH/fail-closed).
+ */
+zt_risk_level_t zero_trust_get_risk_level(void)
+{
+    int score = g_zt.score.load(std::memory_order_acquire);
+
+    if (score < ZT_RISK_THRESHOLD_MEDIUM) {
+        return ZT_RISK_SAFE;
+    } else if (score < ZT_RISK_THRESHOLD_HIGH) {
+        return ZT_RISK_LOW;
+    } else if (score < ZT_RISK_THRESHOLD_CRITICAL) {
+        return ZT_RISK_MEDIUM;
+    } else if (score < ZT_RISK_THRESHOLD_ABSOLUTE) {
+        return ZT_RISK_HIGH;
+    } else {
+        return ZT_RISK_CRITICAL;
+    }
+}
+
+const char* zero_trust_risk_level_name(zt_risk_level_t level)
+{
+    switch (level) {
+        case ZT_RISK_SAFE:      return "SAFE";
+        case ZT_RISK_LOW:       return "LOW";
+        case ZT_RISK_MEDIUM:    return "MEDIUM";
+        case ZT_RISK_HIGH:      return "HIGH";
+        case ZT_RISK_CRITICAL:  return "CRITICAL";
+        default:                return "UNKNOWN";
+    }
 }
 
 const char* zero_trust_module_name(zt_module_id_t mod)
@@ -409,17 +507,22 @@ int zero_trust_run_detection_chain(void)
     int score = 0;
     int errors __attribute__((unused)) = 0;
 
+    zt_breakdown_reset();
+
     /* 1. Root detection (weight: 3) */
     if (check_root()) {
         score += ZT_WEIGHT_ROOT;
+        zt_breakdown_add("root:3");
     }
     if (check_magisk_props()) {
         score += ZT_WEIGHT_MAGISK;
+        zt_breakdown_add("magisk_props:3");
     }
 
     /* 2. Hook detection (weight: 3) */
     if (check_hook_enhanced()) {
         score += ZT_WEIGHT_HOOK;
+        zt_breakdown_add("hook:3");
     }
 
     /* 3. Signature verification (weight: 3)
@@ -427,122 +530,161 @@ int zero_trust_run_detection_chain(void)
      * If signature is invalid, add full weight. */
     if (!g_sig_ok) {
         score += ZT_WEIGHT_SIGNATURE;
+        zt_breakdown_add("signature:3");
     }
 
     /* 4. Emulator detection (weight: 2) */
     if (check_emulator()) {
         score += ZT_WEIGHT_EMULATOR;
+        zt_breakdown_add("emulator:2");
     }
 
     /* 5. Debug detection (weight: 2) */
     if (check_debug_enhanced() || tp() > 0) {
         score += ZT_WEIGHT_DEBUG;
+        zt_breakdown_add("debug:2");
     }
 
-    /* 6. MITM detection (weight: 2 each, 3 checks) */
-    if (scan_proc_detect_mitm()) {
+    /* 6. MITM detection (weight: 2 each, 3 checks)
+     *
+     * The user-CA check now returns a cert COUNT.  We score it only when
+     * the count reaches ZT_MITM_CA_THRESHOLD (>= 2 user certs) OR when a
+     * single cert coexists with an ACTIVE interception channel (proxy
+     * port open or sniffing process) — a lone leftover dev-tool CA is
+     * treated as benign so development devices are not false-flagged.
+     */
+    int mitm_proc = scan_proc_detect_mitm();
+    int mitm_port = check_proxy_port();
+    int mitm_ca   = check_user_ca_certs();
+
+    if (mitm_proc) {
         score += ZT_WEIGHT_MITM_PROC;
+        zt_breakdown_add("mitm_proc:2");
     }
-    if (check_user_ca_certs()) {
-        score += ZT_WEIGHT_MITM_CA;
-    }
-    if (check_proxy_port()) {
+    if (mitm_port) {
         score += ZT_WEIGHT_MITM_PORT;
+        zt_breakdown_add("mitm_port:2");
+    }
+    if (mitm_ca >= ZT_MITM_CA_THRESHOLD) {
+        score += ZT_WEIGHT_MITM_CA;
+        zt_breakdown_add("mitm_ca:2");
+    } else if (mitm_ca > 0 && (mitm_proc || mitm_port)) {
+        score += ZT_WEIGHT_MITM_CA;
+        zt_breakdown_add("mitm_ca:2(chan)");
     }
 
     /* 7. VPN/TUN detection (weight: 1) */
     if (detect_vpn_tun()) {
         score += ZT_WEIGHT_VPN;
+        zt_breakdown_add("vpn_tun:1");
     }
 
     /* 8. Frida files (weight: 3) */
     if (check_frida_files()) {
         score += ZT_WEIGHT_FRIDA_FILES;
+        zt_breakdown_add("frida_files:3");
     }
 
     /* 9. Magisk mounts (weight: 2) */
     if (check_magisk_mounts()) {
         score += ZT_WEIGHT_MAGISK_MOUNTS;
+        zt_breakdown_add("magisk_mounts:2");
     }
 
     /* 10. SELinux permissive (weight: 2) */
     if (check_selinux_permissive()) {
         score += ZT_WEIGHT_SELINUX;
+        zt_breakdown_add("selinux:2");
     }
 
     /* 11. Ptrace scope (weight: 1) */
     if (check_ptrace_scope()) {
         score += ZT_WEIGHT_PTRACE;
+        zt_breakdown_add("ptrace:1");
     }
 
     /* 12. Debuggable build props (weight: 2) */
     if (check_debuggable_props()) {
         score += ZT_WEIGHT_DEBUGGABLE;
+        zt_breakdown_add("debuggable:2");
     }
 
     /* 13. Library injection (weight: 3) */
     if (check_library_injection()) {
         score += ZT_WEIGHT_LIB_INJECT;
+        zt_breakdown_add("lib_inject:3");
     }
 
     /* 14. Virtual environment (weight: 2) */
     if (check_virtual_env()) {
         score += ZT_WEIGHT_VIRTUAL;
+        zt_breakdown_add("virtual_env:2");
     }
 
     /* 15. Tampered time (weight: 1) */
     if (check_tampered_time()) {
         score += ZT_WEIGHT_TIME_TAMPER;
+        zt_breakdown_add("time_tamper:1");
     }
 
     /* 16. Zygisk modules (weight: 3) */
     if (check_zygisk_modules()) {
         score += ZT_WEIGHT_ZYGISK;
+        zt_breakdown_add("zygisk:3");
     }
 
     /* 17. Kernel modules (weight: 2) */
     if (check_kernel_modules()) {
         score += ZT_WEIGHT_KERNEL_MOD;
+        zt_breakdown_add("kernel_mod:2");
     }
 
     /* 18. Native bridge (weight: 1) */
     if (check_native_bridge()) {
         score += ZT_WEIGHT_NATIVE_BRIDGE;
+        zt_breakdown_add("native_bridge:1");
     }
 
     /* 19. Bootloader state (weight: 2) */
     if (check_bootloader()) {
         score += ZT_WEIGHT_BOOTLOADER;
+        zt_breakdown_add("bootloader:2");
     }
 
     /* 20. Emulator sensors (weight: 2) */
     if (check_emulator_sensors()) {
         score += ZT_WEIGHT_EMU_SENSORS;
+        zt_breakdown_add("emu_sensors:2");
     }
 
     /* 21. TCP connections — frida ports (weight: 2) */
     if (check_proc_net_tcp_conn()) {
         score += ZT_WEIGHT_TCP_CONN;
+        zt_breakdown_add("tcp_conn:2");
     }
 
     /* 22. Overlay attack (weight: 1) */
     if (check_overlay_attack()) {
         score += ZT_WEIGHT_OVERLAY;
+        zt_breakdown_add("overlay:1");
     }
 
     /* 23. System fingerprint (weight: 2) */
     if (check_system_fingerprint()) {
         score += ZT_WEIGHT_SYS_FP;
+        zt_breakdown_add("sys_fp:2");
     }
 
     /* 24. Telephony emulator (weight: 2) */
     if (check_telephony_emulator()) {
         score += ZT_WEIGHT_TELEPHONY;
+        zt_breakdown_add("telephony:2");
     }
 
     /* 25. Ring-0 maps (weight: 1) */
     if (check_ring0_maps()) {
         score += ZT_WEIGHT_RING0;
+        zt_breakdown_add("ring0:1");
     }
 
     /* 26. Error counter escalation */
@@ -550,21 +692,25 @@ int zero_trust_run_detection_chain(void)
         std::memory_order_relaxed);
     if (prev_errors >= ZT_ERROR_THRESHOLD) {
         score += (prev_errors / ZT_ERROR_THRESHOLD) * ZT_WEIGHT_ERROR_PER_3;
+        zt_breakdown_add("error_count:+");
     }
 
     /* 27. DEX integrity (weight: 3) */
     if (check_dex_integrity() == 0) {
         score += 3;
+        zt_breakdown_add("dex_integrity:3");
     }
 
     /* 28. SO .text section integrity (weight: 3) */
     if (check_so_integrity() == 0) {
         score += 3;
+        zt_breakdown_add("so_integrity:3");
     }
 
     /* 29. Resources integrity (weight: 2) */
     if (check_resources_integrity() == 0) {
         score += 2;
+        zt_breakdown_add("res_integrity:2");
     }
 
     return score;
@@ -596,7 +742,7 @@ static zt_trust_state_t zt_score_to_state(int score,
 
     if (score == 0) {
         return ZT_TRUST;
-    } else if (score <= 5) {
+    } else if (score < ZT_RISK_THRESHOLD_CRITICAL) {
         return ZT_SUSPICIOUS;
     } else {
         return ZT_BREACH;
@@ -688,6 +834,17 @@ zt_trust_state_t zero_trust_get_state(void)
 int zero_trust_get_score(void)
 {
     return g_zt.score.load(std::memory_order_acquire);
+}
+
+/* C interface for the score breakdown string (used by native-bridge.cpp
+ * RN wrapper and by the JNI zeroTrustGetScoreBreakdown export). Returns a
+ * pointer to a static buffer; caller must copy it immediately. */
+extern "C" const char* zero_trust_get_score_breakdown_str(void)
+{
+    pthread_mutex_lock(&g_zt_breakdown_mutex);
+    const char* p = g_zt_breakdown_buf;
+    pthread_mutex_unlock(&g_zt_breakdown_mutex);
+    return p;
 }
 
 uint64_t zero_trust_last_eval_ms(void)
@@ -1118,6 +1275,40 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore(
 {
     (void)env; (void)clazz;
     return (jint)zero_trust_get_score();
+}
+
+/**
+ * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown
+ *
+ * Returns a comma-separated list of detection items that contributed
+ * to the current threat score (e.g. "root:3,emulator:2"). Used for
+ * diagnostics to pinpoint the exact score source.
+ */
+jstring JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown(
+    JNIEnv* env, jclass clazz)
+{
+    (void)clazz;
+    pthread_mutex_lock(&g_zt_breakdown_mutex);
+    jstring ret = env->NewStringUTF(g_zt_breakdown_buf);
+    pthread_mutex_unlock(&g_zt_breakdown_mutex);
+    return ret;
+}
+
+/**
+ * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel
+ *
+ * Returns the current client risk level derived from the raw threat
+ * score using the configurable ZT_RISK_THRESHOLD_* knobs:
+ *   0 = SAFE, 1 = LOW, 2 = MEDIUM, 3 = HIGH, 4 = CRITICAL
+ *
+ * Sensitive-operation gates compare this tier against an allowed
+ * maximum risk threshold (see SecurityState.SENSITIVE_OPS_MAX_RISK).
+ */
+jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel(
+    JNIEnv* env, jclass clazz)
+{
+    (void)env; (void)clazz;
+    return (jint)zero_trust_get_risk_level();
 }
 
 /**

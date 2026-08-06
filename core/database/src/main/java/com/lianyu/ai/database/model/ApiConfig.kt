@@ -77,7 +77,9 @@ enum class ApiProvider(val displayName: String, val defaultBaseUrl: String, val 
     SILICONFLOW("硅基流动", "https://api.siliconflow.cn/v1/", "Qwen/Qwen2.5-7B-Instruct"),
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1/", "openai/gpt-4o-mini"),
     GROQ("Groq", "https://api.groq.com/openai/v1/", "llama-3.1-8b-instant"),
-    PARTNER("Clove API", SuFlowApi.BASE_URL, "auto"),
+    // PARTNER 的 baseUrl 必须带 /v1 —— SuFlowAPI 的 chat/models 路由是 /v1/chat/completions、/v1/models
+    // （handshake/keys 等无 /v1 前缀的端点走 RemoteKeyProvider.serverUrl = SuFlowApi.BASE_URL，不受此值影响）
+    PARTNER("Clove API", SuFlowApi.CHAT_BASE_URL, "auto"),
     CUSTOM("自定义 API", "", ""),
     IFLYTEK("讯飞星火", "https://spark-api-open.xf-yun.com/v1/", "generalv3.5")
 }

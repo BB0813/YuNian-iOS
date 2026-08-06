@@ -18,6 +18,7 @@ Architecture (Chow-style):
 
 import sys
 import os
+import re
 import argparse
 import zlib
 from hashlib import sha256
@@ -210,72 +211,225 @@ def generate_wb_tables(key_bytes, output_file=sys.stdout):
         out.write(f'    0x{zlib.crc32(round_data) & 0xFFFFFFFF:08X},\n')
     out.write('};\n\n')
 
-    # ---- Inverse T-Boxes (decrypt) ----
-    # InvT-Box: InvSubBytes(x ^ inv_round_key[pos]) → InvShiftRows → InvMixColumns
-    # For inverse, we need the inverse round keys (last round's key is first)
-    # The round key order for decryption: rk[14], rk[13], ..., rk[1]
-    inv_rks = list(reversed(rks[1:]))  # 14 inverse round keys
+    # ---- Inverse tables (decrypt) ----
+    write_inverse_tables(out, rks[1:])
+    out.write('/* End of generated tables */\n')
 
-    out.write('/* Inverse T-Boxes: g_wb_inv_tbox[round][position][256 entries × 4 bytes] */\n')
-    out.write('/* Each entry = InvMixColumns contribution of INV_SBOX[x ^ inv_round_key[pos]] */\n')
-    out.write('/* after InvShiftRows moves byte to column (col+row) mod 4 */\n')
-    out.write('static const uint8_t g_wb_inv_tbox[14][16][1024] = {\n')
+
+def write_inverse_tables(out, fwd_rks):
+    """Write two-level inverse tables (g_wb_inv_mc + g_wb_inv_sb) from forward round keys.
+
+    fwd_rks: 14 round keys rk[1]..rk[14] (in encrypt order).
+    Inverse round key order for decryption: rk[14], rk[13], ..., rk[1]
+    """
+    inv_rks = list(reversed(fwd_rks))  # 14 inverse round keys
+
+    # Inverse MixColumns coefficient table (per byte):
+    #   inv_mc[row][t][byte] = M_INV[row][t] * byte   (M_INV = inverse MixColumns matrix)
+    # Decrypt round: w[col*4+row] = sum_t M_INV[row][t] * y[col*4+t]
+    #   -> w[col*4+row] = sum_t inv_mc[row][t][ y[col*4+t] ]
+    # ISR (read form): s[(c,r)] = w[((c-r)&3, r)]
+    #   -> s[col*4+row] = w[((col-row)&3)*4 + row]
+    # ISB + AddRoundKey: out[pos] = INV_SBOX[s[pos]] ^ inv_rk[pos]
+    M_INV = [
+        [14, 11, 13, 9],
+        [9, 14, 11, 13],
+        [13, 9, 14, 11],
+        [11, 13, 9, 14],
+    ]
+
+    out.write('/* Inverse MixColumns coefficient tables: g_wb_inv_mc[round][row][t][byte] */\n')
+    out.write('/* inv_mc[row][t][byte] = M_INV[row][t] * byte */\n')
+    out.write('static const uint8_t g_wb_inv_mc[14][4][4][256] = {\n')
 
     for r in range(14):
-        out.write(f'  /* Inverse round {r} */ {{\n')
-        rk = inv_rks[r]  # inverse round key
-        for pos in range(16):
-            out.write(f'    /* Position {pos} */ {{\n')
-            col = pos >> 2
-            row = pos & 3
-            isr_col = (col + row) & 3  # InvShiftRows target column
-
-            for x in range(256):
-                # InvSubBytes with embedded round key
-                xored = x ^ rk[pos]
-                isb = INV_SBOX[xored]
-                col_in = [0, 0, 0, 0]
-                col_in[row] = isb
-                # InvMixColumns
-                imc = inv_mix_columns_column(col_in)
-                if x < 256:
-                    out.write(f'      0x{imc[0]:02x},0x{imc[1]:02x},0x{imc[2]:02x},0x{imc[3]:02x}')
-                    if x < 255:
+        out.write(f'  /* Round {r} */ {{\n')
+        for row in range(4):
+            out.write(f'    /* Row {row} */ {{\n')
+            for t in range(4):
+                coef = M_INV[row][t]
+                out.write(f'      /* t={t} coef {coef} */ {{\n')
+                for b in range(256):
+                    v = gf_mul(coef, b)
+                    out.write(f'0x{v:02x}')
+                    if b < 255:
                         out.write(',')
-                    if (x + 1) % 4 == 0 and x < 255:
-                        out.write('\n')
-            out.write('    },\n')
-        out.write('  },\n')
+                    if (b + 1) % 16 == 0 and b < 255:
+                        out.write('\n       ')
+                out.write('\n      },')
+            out.write('\n    },')
+        out.write('\n  },\n')
     out.write('};\n\n')
 
-    # ---- Inverse checksums ----
-    out.write('/* Anti-DFA checksums for inverse T-Boxes */\n')
-    out.write('static const uint32_t g_wb_inv_checksum[14] = {\n')
+    # ---- Inverse MixColumns checksums ----
+    out.write('/* Anti-DFA CRC32 checksums for inverse MixColumns tables */\n')
+    out.write('static const uint32_t g_wb_inv_mc_checksum[14] = {\n')
+    for r in range(14):
+        round_data = bytearray()
+        for row in range(4):
+            for t in range(4):
+                coef = M_INV[row][t]
+                for b in range(256):
+                    round_data.append(gf_mul(coef, b))
+        out.write(f'    0x{zlib.crc32(round_data) & 0xFFFFFFFF:08X},\n')
+    out.write('};\n\n')
+
+    # ---- Inverse SubBytes + round key tables ----
+    # inv_sb[pos][byte] = INV_SBOX[byte] ^ inv_round_key[pos]
+    out.write('/* Inverse SubBytes + AddRoundKey tables: g_wb_inv_sb[round][pos][byte] */\n')
+    out.write('/* inv_sb[pos][byte] = INV_SBOX[byte] ^ inv_round_key[pos] */\n')
+    out.write('static const uint8_t g_wb_inv_sb[14][16][256] = {\n')
+
+    for r in range(14):
+        out.write(f'  /* Round {r} */ {{\n')
+        rk = inv_rks[r]
+        for pos in range(16):
+            out.write(f'    /* Position {pos} */ {{\n      ')
+            for b in range(256):
+                v = INV_SBOX[b] ^ rk[pos]
+                out.write(f'0x{v:02x}')
+                if b < 255:
+                    out.write(',')
+                if (b + 1) % 16 == 0 and b < 255:
+                    out.write('\n      ')
+            out.write('\n    },')
+        out.write('\n  },\n')
+    out.write('};\n\n')
+
+    # ---- Inverse SubBytes checksums ----
+    out.write('/* Anti-DFA CRC32 checksums for inverse SubBytes tables */\n')
+    out.write('static const uint32_t g_wb_inv_sb_checksum[14] = {\n')
     for r in range(14):
         round_data = bytearray()
         rk = inv_rks[r]
         for pos in range(16):
-            row = pos & 3
-            for x in range(256):
-                xored = x ^ rk[pos]
-                isb = INV_SBOX[xored]
-                col_in = [0, 0, 0, 0]
-                col_in[row] = isb
-                imc = inv_mix_columns_column(col_in)
-                round_data.extend(imc)
+            for b in range(256):
+                round_data.append(INV_SBOX[b] ^ rk[pos])
         out.write(f'    0x{zlib.crc32(round_data) & 0xFFFFFFFF:08X},\n')
     out.write('};\n\n')
 
-    out.write('/* End of generated tables */\n')
+
+def merge_inverse_tables(existing_inc, output_file):
+    """Read an existing wb_tables.inc, extract forward round keys from its T-Boxes,
+    and rewrite ONLY the inverse-table section. Forward tables, ext masks and forward
+    checksums are preserved byte-for-byte (old CBC ciphertext stays decryptable)."""
+    # Read as bytes: the legacy header may contain non-UTF8 characters (old em-dash
+    # comments), so preserve everything before the inverse marker verbatim.
+    with open(existing_inc, 'rb') as f:
+        data = f.read()
+
+    inv_marker = b'g_wb_inv_tbox'
+    pos = data.find(inv_marker)
+    if pos < 0:
+        raise ValueError(f'{existing_inc}: inverse table marker not found')
+    line_start = data.rfind(b'\n', 0, pos) + 1
+    prefix_bytes = data[:line_start]
+
+    # Decode the prefix for regex work (replacement chars are fine for byte search).
+    prefix_text = prefix_bytes.decode('utf-8', errors='replace')
+
+    # Parse forward tbox from the prefix text (tables are uint8_t declarations).
+    tbox = _extract_uint8_array(prefix_text, 'g_wb_tbox')
+    if len(tbox) != 14 * 16 * 1024:
+        raise ValueError(f'bad forward tbox size {len(tbox)}')
+
+    rks = extract_forward_round_keys(tbox)
+    print('forward round keys extracted:', file=sys.stderr)
+    for i, rk in enumerate(rks):
+        print(f'  rk[{i+1}] = {rk.hex()}', file=sys.stderr)
+
+    output_file.write(prefix_bytes)
+    writer = _BinWriter(output_file)
+    write_inverse_tables(writer, rks)
+    output_file.write(b'/* End of generated tables */\n')
+
+
+class _BinWriter:
+    """Adapter: allows str writes to a binary stream (UTF-8 encoded)."""
+
+    def __init__(self, bin_stream):
+        self._s = bin_stream
+
+    def write(self, s):
+        if isinstance(s, str):
+            self._s.write(s.encode('utf-8'))
+        else:
+            self._s.write(s)
+
+
+def extract_forward_round_keys(tbox):
+    """From the forward T-Box (14*16*1024 bytes), recover rk[1..14].
+    In a forward T-Box, entry x outputs all-zero 4 bytes iff SBOX[x ^ rk] == 0,
+    i.e. x ^ rk == SBOX^-1[0] == 0x52, so rk[pos] = x ^ 0x52."""
+    rks = []
+    for r in range(14):
+        rk = bytearray(16)
+        for pos in range(16):
+            base = (r * 16 + pos) * 1024
+            found = None
+            for x in range(256):
+                e = tbox[base + x * 4: base + x * 4 + 4]
+                if all(b == 0 for b in e):
+                    found = x
+                    break
+            if found is None:
+                raise ValueError(f'no zero output at round {r} pos {pos}')
+            rk[pos] = found ^ 0x52
+        rks.append(bytes(rk))
+    return rks
+
+
+def _extract_uint8_array(text, name):
+    """Extract one uint8_t array body from .inc text as a bytearray."""
+    m = re.search(r'static const uint8_t\s+' + re.escape(name) + r'(?:\s*\[[^\]]*\])+\s*=', text)
+    if not m:
+        raise ValueError(f'{name}: declaration not found')
+    start = text.find('{', m.end())
+    depth = 0
+    end = -1
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    body = text[start + 1: end]
+    nums = re.findall(r'0x([0-9a-fA-F]{2})', body)
+    return bytearray(int(b, 16) for b in nums)
 
 
 def main():
     parser = argparse.ArgumentParser(description='Generate WB-AES tables (corrected)')
-    parser.add_argument('--key', required=True,
+    parser.add_argument('--key',
                         help='Key: hex:<hex> or "random"')
+    parser.add_argument('--merge-from', default=None,
+                        help='Existing wb_tables.inc: keep forward tables byte-identical, '
+                             'regenerate only the inverse tables')
     parser.add_argument('--output', '-o', default=None,
                         help='Output file (default: stdout)')
     args = parser.parse_args()
+
+    if args.merge_from:
+        if args.key:
+            print('Error: --merge-from and --key are mutually exclusive', file=sys.stderr)
+            sys.exit(1)
+        if args.output:
+            with open(args.output, 'wb') as f:
+                merge_inverse_tables(args.merge_from, f)
+            print(f'Tables written to {args.output}', file=sys.stderr)
+        else:
+            import io
+            buf = io.BytesIO()
+            merge_inverse_tables(args.merge_from, buf)
+            sys.stdout.buffer.write(buf.getvalue())
+        return
+
+    if not args.key:
+        print('Error: either --key or --merge-from is required', file=sys.stderr)
+        sys.exit(1)
 
     if args.key == 'random':
         key = os.urandom(32)

@@ -63,6 +63,14 @@ build_signed.bat
 branch_diff_report.md
 debug-*.md
 
+# Local scratch / backups / notes
+_usage_check.*
+build_*.txt
+install_*.txt
+tools/_tmp_*.py
+*.bak_oldinv
+ui*_local.xml
+
 # Docs
 _push_tmp/
 .workbuddy/

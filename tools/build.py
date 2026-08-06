@@ -311,6 +311,35 @@ def shell_dex():
     print(f"  {os.path.getsize(out)}B")
     return out
 
+def dex_ctr_encrypt(data, key):
+    """Fast DEX stream cipher v2 — MUST match nativeDecryptDex (dex-extractor.cpp).
+
+    Layout: IV(16) || ciphertext
+    For each 4KiB block:
+      seed = HMAC-SHA256(key, IV || be64(block_idx) || 8x00)   # 32B
+      keystream chunks = SHA256(seed || be32(sub))              # 32B each
+    """
+    import hashlib as _hl, hmac as _hm
+    block_size = 4096
+    iv = os.urandom(16)
+    enc = bytearray(iv)
+    total_blocks = (len(data) + block_size - 1) // block_size
+    for block_idx in range(total_blocks):
+        offset = block_idx * block_size
+        chunk = data[offset:offset + block_size]
+        seed = _hm.new(key, struct.pack(">16sQ8x", iv, block_idx), _hl.sha256).digest()
+        produced = 0
+        sub = 0
+        while produced < len(chunk):
+            ks = _hl.sha256(seed + struct.pack(">I", sub)).digest()
+            n = min(32, len(chunk) - produced)
+            for j in range(n):
+                enc.append(chunk[produced + j] ^ ks[j])
+            produced += n
+            sub += 1
+    return bytes(enc)
+
+
 def encrypt_dex(src_apk):
     """HMAC-SHA256 CTR encrypt all .dex files + app_meta.bin (real Application class name)."""
     import hashlib as _hl, hmac as _hm
@@ -327,29 +356,17 @@ def encrypt_dex(src_apk):
                 if count == 0 and extra_name == "classes.dex":
                     extra_name = "classes2.dex"
                 open(os.path.join(extra_dex, extra_name), "wb").write(data)
-            iv = os.urandom(16)
-            enc = bytearray(iv)
-            for i in range(0, len(data), 16):
-                ctr = struct.pack('>16sQ8x', iv, i // 16)
-                ks = _hm.new(DEX_KEY, ctr[:32], _hl.sha256).digest()
-                for j in range(min(16, len(data) - i)):
-                    enc.append(data[i + j] ^ ks[j])
+            enc = dex_ctr_encrypt(data, DEX_KEY)
             out_name = name.replace("/","_").replace(".dex",".dat")
-            open(os.path.join(work, out_name), "wb").write(bytes(enc))
+            open(os.path.join(work, out_name), "wb").write(enc)
             count += 1
             print(f"  {name} → {out_name} {len(enc)//1024}KB")
 
     # Encrypt real Application class name as app_meta.bin
     real_app_class = "com.lianyu.ai.LianYuApplication"
-    iv = os.urandom(16)
     data = real_app_class.encode("utf-8")
-    enc = bytearray(iv)
-    for i in range(0, len(data), 16):
-        ctr = struct.pack('>16sQ8x', iv, i // 16)
-        ks = _hm.new(DEX_KEY, ctr[:32], _hl.sha256).digest()
-        for j in range(min(16, len(data) - i)):
-            enc.append(data[i + j] ^ ks[j])
-    open(os.path.join(work, "app_meta.bin"), "wb").write(bytes(enc))
+    enc = dex_ctr_encrypt(data, DEX_KEY)
+    open(os.path.join(work, "app_meta.bin"), "wb").write(enc)
     print(f"  app_meta.bin → {real_app_class} ({len(data)}B + 16B IV)")
 
     print(f"  {count} DEX + 1 meta")
@@ -388,6 +405,7 @@ def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_
                 data = zin.read(item.filename)
                 if item.filename == "classes.dex": data = shell
                 elif item.filename.startswith("META-INF/"): continue
+                elif item.filename.startswith("assets/shell/"): continue  # stale entries (e.g. Gradle thin-shell) — we rewrite these below
                 elif item.filename.startswith("classes") and item.filename.endswith(".dex"): continue
                 elif item.filename.endswith(".packed.so"): continue
                 else:
@@ -473,7 +491,12 @@ def main():
         gradlew = os.path.join(PROJECT, "gradlew.bat")
         gradle_cmd = [gradlew, f"assemble{variant.capitalize()}", "--no-daemon", "-q"]
         if args.release:
-            gradle_cmd.extend(["-x", "lintVitalAnalyzeRelease", "-x", "lintVitalReportRelease", "-x", "lintVitalRelease"])
+            # Skip Gradle's built-in thin-shell pipeline: build.py implements the
+            # full Ultimate Shell hardening itself, and it must consume the PLAIN
+            # APK (multi-MB business DEX) — otherwise Gradle already stripped the
+            # DEX into assets/shell/*.dat and we'd re-encrypt a stub + duplicate
+            # ZIP entries (ApkFormatException in apksigner).
+            gradle_cmd.extend(["-x", "lintVitalAnalyzeRelease", "-x", "lintVitalReportRelease", "-x", "lintVitalRelease", "-PlianyuSkipThinShell=true"])
         run(gradle_cmd, timeout=600)
         gradle_apk = find_gradle_apk(variant)
 

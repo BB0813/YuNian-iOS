@@ -80,18 +80,30 @@ static uint32_t compute_tbox_checksum(int r) {
     return ~checksum;
 }
 
-static uint32_t compute_inv_tbox_checksum(int r) {
+/* CRC32 over all bytes of g_wb_inv_mc[r] (4*4*256 = 4096 bytes). */
+static uint32_t compute_inv_mc_checksum(int r) {
     uint32_t checksum = 0xFFFFFFFFu;
-    for (int pos = 0; pos < 16; pos++) {
-        for (int e = 0; e < 256; e++) {
-            const uint8_t* data = &g_wb_inv_tbox[r][pos][e * 4];
-            for (int b = 0; b < 4; b++) {
-                checksum ^= data[b];
+    for (int row = 0; row < 4; row++)
+        for (int t = 0; t < 4; t++)
+            for (int e = 0; e < 256; e++) {
+                uint8_t b = g_wb_inv_mc[r][row][t][e];
+                checksum ^= b;
                 for (int bit = 0; bit < 8; bit++)
                     checksum = (checksum >> 1) ^ (0xEDB88320u & -(checksum & 1));
             }
+    return ~checksum;
+}
+
+/* CRC32 over all bytes of g_wb_inv_sb[r] (16*256 = 4096 bytes). */
+static uint32_t compute_inv_sb_checksum(int r) {
+    uint32_t checksum = 0xFFFFFFFFu;
+    for (int pos = 0; pos < 16; pos++)
+        for (int e = 0; e < 256; e++) {
+            uint8_t b = g_wb_inv_sb[r][pos][e];
+            checksum ^= b;
+            for (int bit = 0; bit < 8; bit++)
+                checksum = (checksum >> 1) ^ (0xEDB88320u & -(checksum & 1));
         }
-    }
     return ~checksum;
 }
 
@@ -286,65 +298,83 @@ int wb_aes_256_encrypt_persistent(const uint8_t in[16], uint8_t out[16]) {
 
 /*
  * Decrypt one 128-bit block using white-box AES-256.
- * Uses inverse T-Boxes (generated as separate tables).
+ * Uses two-level inverse tables (g_wb_inv_mc + g_wb_inv_sb).
+ *
+ * Deny logic: see encrypt_internal.
  */
-int wb_aes_256_decrypt(const uint8_t in[16], uint8_t out[16]) {
+static int wb_aes_256_decrypt_internal(const uint8_t in[16], uint8_t out[16],
+                                       bool deny_degraded) {
     OBF_BARRIER(191);
     if (!g_wb_inited) return -1;
     if (g_wb_tampered) return -1;
-    if (zero_trust_is_locked()) return -1;
-    if (zero_trust_is_degraded()) return -1;
+    if (deny_degraded && zero_trust_is_locked()) return -1;
+    if (deny_degraded && zero_trust_is_degraded()) return -1;
 
     uint8_t state[16] __attribute__((aligned(16)));
+    uint8_t wcol[16] __attribute__((aligned(16)));
     uint8_t next[16] __attribute__((aligned(16))) = {0};
 
-    /* Input encoding (inverse) */
+    /* External encodings are swapped relative to encryption:
+     *   encrypt: in ^= ext_in ... out ^= ext_out
+     *   decrypt: in ^= ext_out ... out ^= ext_in
+     * so that decrypt(encrypt(x)) == x. */
     for (int i = 0; i < 16; i++) {
-        state[i] = in[i] ^ g_wb_ext_in[i];
+        state[i] = in[i] ^ g_wb_ext_out[i];
     }
 
-    /* Inverse rounds — InvSubBytes + InvShiftRows + InvMixColumns in T-Boxes */
+    /* Inverse rounds: InvMixColumns -> InvShiftRows -> InvSubBytes+AddRoundKey
+     *
+     * Round structure (column-major layout, pos = col*4 + row):
+     *   1) wcol[col*4+row] = XOR_t g_wb_inv_mc[r][row][t][ state[col*4+t] ]
+     *      (inverse MixColumns per column, coefficient M_INV[row][t])
+     *   2) s[pos] = wcol[((col-row)&3)*4 + row]   (InvShiftRows, read form)
+     *   3) next[pos] = g_wb_inv_sb[r][pos][ s[pos] ]
+     *      (InvSubBytes + AddRoundKey with inverse round key embedded)
+     */
     for (int r = 0; r < 14; r++) {
-        if (compute_inv_tbox_checksum(r) != g_wb_inv_checksum[r]) {
-            WB_LOGE("inverse table checksum mismatch at round %d", r);
+        if (compute_inv_mc_checksum(r) != g_wb_inv_mc_checksum[r]) {
+            WB_LOGE("inverse MC table checksum mismatch at round %d", r);
+            g_wb_tampered = 1;
+            return -1;
+        }
+        if (compute_inv_sb_checksum(r) != g_wb_inv_sb_checksum[r]) {
+            WB_LOGE("inverse SB table checksum mismatch at round %d", r);
             g_wb_tampered = 1;
             return -1;
         }
 
-        __builtin_memset(next, 0, 16);
+        /* Step 1: inverse MixColumns per column */
+        for (int col = 0; col < 4; col++) {
+            for (int row = 0; row < 4; row++) {
+                uint8_t acc = 0;
+                for (int t = 0; t < 4; t++) {
+                    acc ^= g_wb_inv_mc[r][row][t][state[col * 4 + t]];
+                }
+                wcol[col * 4 + row] = acc;
+            }
+        }
 
+        /* Step 2 + 3: InvShiftRows (read form) + InvSubBytes + AddRoundKey */
         for (int pos = 0; pos < 16; pos++) {
-            int row   = pos & 3;
-            int col   = pos >> 2;
-            /* InvShiftRows shifts right: byte at (row,col) → (row, (col+row) mod 4) */
-            int isr_c = (col + row) & 3;
-
-            const uint8_t* tbox = g_wb_inv_tbox[r][pos];
-            uint8_t idx = state[pos];
-            uint32_t val;
-            uint8_t* vp = (uint8_t*)&val;
-
-            vp[0] = tbox[(idx << 2) + 0]; vp[1] = tbox[(idx << 2) + 1];
-            vp[2] = tbox[(idx << 2) + 2]; vp[3] = tbox[(idx << 2) + 3];
-
-            /* Accumulate using inverse ShiftRows mapping */
-            int out_base = isr_c << 2;
-            next[out_base + 0] ^= vp[0];
-            next[out_base + 1] ^= vp[1];
-            next[out_base + 2] ^= vp[2];
-            next[out_base + 3] ^= vp[3];
-
+            int row = pos & 3;
+            int col = pos >> 2;
+            uint8_t s = wcol[((col - row) & 3) * 4 + row];
+            next[pos] = g_wb_inv_sb[r][pos][s];
         }
 
         __builtin_memcpy(state, next, 16);
     }
 
-    /* Output encoding */
+    /* Output encoding (inverse, swapped) */
     for (int i = 0; i < 16; i++) {
-        out[i] = state[i] ^ g_wb_ext_out[i];
+        out[i] = state[i] ^ g_wb_ext_in[i];
     }
 
     return 0;
+}
+
+int wb_aes_256_decrypt(const uint8_t in[16], uint8_t out[16]) {
+    return wb_aes_256_decrypt_internal(in, out, true);
 }
 
 /*
@@ -394,25 +424,29 @@ int wb_aes_256_selftest(void) {
     uint8_t ct[16];
     uint8_t dt[16];
 
+    /* Integrity self-test — must NOT be gated by the zero-trust degraded/
+     * locked state, because this self-test is what determines that state.
+     * Use the non-gated internal paths (deny_degraded=false) so a clean
+     * device always passes regardless of the current trust score. */
     /* Test 1: all zeros */
-    if (wb_aes_256_encrypt(pt, ct) != 0) return -1;
-    if (wb_aes_256_decrypt(ct, dt) != 0) return -1;
+    if (wb_aes_256_encrypt_persistent(pt, ct) != 0) return -1;
+    if (wb_aes_256_decrypt_internal(ct, dt, false) != 0) return -1;
     for (int i = 0; i < 16; i++) {
         if (dt[i] != pt[i]) return -1;
     }
 
     /* Test 2: all ones */
     memset(pt, 0xFF, 16);
-    if (wb_aes_256_encrypt(pt, ct) != 0) return -1;
-    if (wb_aes_256_decrypt(ct, dt) != 0) return -1;
+    if (wb_aes_256_encrypt_persistent(pt, ct) != 0) return -1;
+    if (wb_aes_256_decrypt_internal(ct, dt, false) != 0) return -1;
     for (int i = 0; i < 16; i++) {
         if (dt[i] != pt[i]) return -1;
     }
 
     /* Test 3: counter pattern */
     for (int i = 0; i < 16; i++) pt[i] = i;
-    if (wb_aes_256_encrypt(pt, ct) != 0) return -1;
-    if (wb_aes_256_decrypt(ct, dt) != 0) return -1;
+    if (wb_aes_256_encrypt_persistent(pt, ct) != 0) return -1;
+    if (wb_aes_256_decrypt_internal(ct, dt, false) != 0) return -1;
     for (int i = 0; i < 16; i++) {
         if (dt[i] != pt[i]) return -1;
     }

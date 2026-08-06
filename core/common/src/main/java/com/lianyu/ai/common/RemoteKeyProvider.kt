@@ -84,6 +84,16 @@ object RemoteKeyProvider {
     @Volatile
     private var lastFetchMs: Long = 0
 
+    /**
+     * 最近一次云端请求的失败原因（可空）。
+     * 由 httpPost/httpGet/fetchEncryptedKeys 在失败时写入，
+     * 供 UI（设置页握手测试 / 会话诊断）展示明确原因，
+     * 如「云端服务尚未开启」（cloud_service_disabled）。
+     */
+    @Volatile
+    var lastCloudError: CloudError? = null
+        private set
+
     @Volatile
     private var sessionPrefsCache: SharedPreferences? = null
 
@@ -173,6 +183,10 @@ object RemoteKeyProvider {
     /** Direct handshake call — used by SettingsViewModel test button */
     fun cloveHandshake(ctx: Context): JSONObject {
         if (!isBuiltinCloudAccessAllowed()) {
+            lastCloudError = CloudError(
+                code = CloudError.BUILTIN_ACCESS_DENIED,
+                message = "内置云端访问被安全策略拒绝"
+            )
             return JSONObject().apply {
                 put("ok", false)
                 put("error", CLOUD_ACCESS_DENIED)
@@ -180,16 +194,27 @@ object RemoteKeyProvider {
         }
         val url = URL("${resolveServerUrl()}$HANDSHAKE_PATH")
         val handshake = buildHandshakeBody()
-        handshake.error?.let { return it }
+        handshake.error?.let {
+            lastCloudError = CloudError.parse(it.toString()) ?: CloudError(
+                code = it.optString("error", CloudError.NETWORK_ERROR),
+                message = it.optString("message").ifEmpty { null }
+            )
+            return it
+        }
         val body = handshake.body ?: return JSONObject().apply {
+            lastCloudError = CloudError(code = "device_sign_unavailable", message = "设备签名不可用")
             put("ok", false)
             put("error", "device_sign_unavailable")
         }
         val result = httpPost(url, body.toString())
         result?.let { storeHandshakeResult(ctx, it) }
         return result ?: JSONObject().apply {
+            if (lastCloudError == null) {
+                lastCloudError = CloudError(code = CloudError.NETWORK_ERROR, message = "网络连接失败")
+            }
             put("ok", false)
-            put("error", "network_error")
+            put("error", lastCloudError?.code ?: CloudError.NETWORK_ERROR)
+            lastCloudError?.message?.let { put("message", it) }
         }
     }
 
@@ -408,6 +433,10 @@ object RemoteKeyProvider {
     private fun fetchEncryptedKeys(ctx: Context): List<String>? {
         val handshakeBuild = buildHandshakeBody()
         handshakeBuild.error?.let {
+            lastCloudError = CloudError.parse(it.toString()) ?: CloudError(
+                code = it.optString("error", CloudError.NETWORK_ERROR),
+                message = it.optString("message").ifEmpty { null }
+            )
             SecureLog.w("RemoteKeyProvider", "Handshake preflight failed: ${it.optString("error")}")
             return null
         }
@@ -424,7 +453,9 @@ object RemoteKeyProvider {
         val ok = handshakeResp.optBoolean("ok", false)
         if (!ok) {
             val error = handshakeResp.optString("error", "unknown")
-            SecureLog.w("RemoteKeyProvider", "Handshake failed: $error")
+            val message = handshakeResp.optString("message").ifEmpty { null }
+            lastCloudError = CloudError(code = error, message = message)
+            SecureLog.w("RemoteKeyProvider", "Handshake failed: $error${message?.let { " ($it)" } ?: ""}")
             return null
         }
 
@@ -543,13 +574,31 @@ object RemoteKeyProvider {
             }
 
             val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
-                return JSONObject().apply {
-                    put("ok", false)
-                    put("error", "app_key_mismatch")
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                // 解析服务端错误体（标准 ErrorResponse 或 handshake 信封），
+                // 保留 message 供 UI 展示「云端服务尚未开启」等明确原因。
+                val cloudError = CloudError.parseErrorStream(connection, responseCode)
+                if (cloudError != null) {
+                    lastCloudError = cloudError
+                    SecureLog.w(
+                        "RemoteKeyProvider",
+                        "HTTP POST $responseCode error=${cloudError.code} message=${cloudError.message}"
+                    )
+                    return JSONObject().apply {
+                        put("ok", false)
+                        put("error", cloudError.code)
+                        cloudError.message?.let { put("message", it) }
+                    }
                 }
+                // 无错误体：认证类状态码保持向后兼容的 app_key_mismatch。
+                if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
+                    return JSONObject().apply {
+                        put("ok", false)
+                        put("error", "app_key_mismatch")
+                    }
+                }
+                return null
             }
-            if (responseCode != HttpURLConnection.HTTP_OK) return null
 
             val responseBody = connection.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
             return JSONObject(responseBody)
@@ -576,13 +625,31 @@ object RemoteKeyProvider {
             }
 
             val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
-                return JSONObject().apply {
-                    put("ok", false)
-                    put("error", "app_key_mismatch")
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                // 解析服务端错误体（标准 ErrorResponse 或 handshake 信封），
+                // 保留 message 供 UI 展示「云端服务尚未开启」等明确原因。
+                val cloudError = CloudError.parseErrorStream(connection, responseCode)
+                if (cloudError != null) {
+                    lastCloudError = cloudError
+                    SecureLog.w(
+                        "RemoteKeyProvider",
+                        "HTTP GET $responseCode error=${cloudError.code} message=${cloudError.message}"
+                    )
+                    return JSONObject().apply {
+                        put("ok", false)
+                        put("error", cloudError.code)
+                        cloudError.message?.let { put("message", it) }
+                    }
                 }
+                // 无错误体：认证类状态码保持向后兼容的 app_key_mismatch。
+                if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED || responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
+                    return JSONObject().apply {
+                        put("ok", false)
+                        put("error", "app_key_mismatch")
+                    }
+                }
+                return null
             }
-            if (responseCode != HttpURLConnection.HTTP_OK) return null
 
             val responseBody = connection.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
             return JSONObject(responseBody)

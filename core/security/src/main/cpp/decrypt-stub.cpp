@@ -347,9 +347,16 @@ void lianyu_auto_decrypt() {
     lianyu_d2_decrypt();
 }
 
-// Function pointer placed directly in .init_array section.
-// The 'used' attribute prevents --gc-sections from removing it.
+// Function pointer placed directly in the .init_array section.
+// NOTE: we use .init_array.00000 (init_priority 0), NOT plain .init_array.
+// GNU ld sorts SORT_BY_INIT_PRIORITY(.init_array.*) sections by their
+// numeric priority, so .init_array.00000 is guaranteed to run BEFORE any
+// compiler-generated constructors that land in plain .init_array.
+// This is critical: those constructors live in .text which is still
+// ENCRYPTED at load time — running them before lianyu_auto_decrypt would
+// SIGILL. The symbols must also be listed as `global` in version-script.map
+// so --gc-sections treats them as GC roots and keeps this entry alive.
 // On ARM64, .init_array entries are 8-byte function pointers.
 typedef void (*init_func_t)(void);
-__attribute__((used, section(".init_array")))
+__attribute__((used, section(".init_array.00000")))
 init_func_t lianyu_init_ptr = &lianyu_auto_decrypt;

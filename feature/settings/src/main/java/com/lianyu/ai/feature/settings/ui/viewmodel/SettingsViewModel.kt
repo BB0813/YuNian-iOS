@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lianyu.ai.common.AppSettingsStore
+import com.lianyu.ai.common.CloudError
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
@@ -498,6 +499,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         return@launch
                     } else {
                         val err = errorCode ?: "unknown"
+                        val serverMessage = handshakeJson.optString("message").ifEmpty { null }
                         // key_disabled: admin disabled the key, show the disabled client_id
                         if (err == "key_disabled" && clientId != null) {
                             updateConnectionStatus(key, ConnectionResult(
@@ -505,12 +507,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                                 "密钥已被管理员禁用", err, clientId = clientId
                             ))
                         } else {
+                            // 优先展示服务器明确原因（如「云端服务尚未开启」），
+                            // 其次回退到错误码友好文案，最后才是通用「连接失败」。
+                            val friendly = CloudError(code = err, message = null).friendlyMessage()
+                            val displayMessage = serverMessage
+                                ?: if (friendly != "请求失败（$err）") friendly else "连接失败"
                             updateConnectionStatus(key, ConnectionResult(
                                 ConnectionStatus.FAILED, latency,
-                                "连接失败", err
+                                displayMessage, err
                             ))
                         }
-                        SecureLog.e("SettingsViewModel", "PARTNER handshake FAILED error=$err")
+                        SecureLog.e("SettingsViewModel", "PARTNER handshake FAILED error=$err${serverMessage?.let { " ($it)" } ?: ""}")
                         return@launch
                     }
                 } catch (e: Exception) {

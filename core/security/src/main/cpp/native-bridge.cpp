@@ -727,12 +727,18 @@ extern "C" __attribute__((visibility("default"))) int scan_proc_detect_mitm() {
                 state = (f2(j) & 1) ? 5 : 7;
                 break;
             case 6:
+                /* Deliberately NOT matching the bare substring "proxy"/"Proxy"
+                 * here: many OEM system daemons (e.g. MTK's
+                 * /vendor/bin/mtk_storageproxyd, "storageproxyd") contain that
+                 * substring and would cause false positives.  Only match known
+                 * MITM tool package names / explicit daemon names. */
                 if (strstr(buf, "com.guoshi.httpcanary") ||
                     strstr(buf, "com.guoshi") ||
-                    strstr(buf, "proxy") ||
-                    strstr(buf, "Proxy") ||
+                    strstr(buf, "com.panda.proxy") ||
+                    strstr(buf, "com.androproxy") ||
                     strstr(buf, "vpncapture") ||
-                    strstr(buf, "VpnCapture"))
+                    strstr(buf, "VpnCapture") ||
+                    strstr(buf, "androiddebugapp"))
                     found = 1;
                 state = 1;
                 break;
@@ -759,6 +765,7 @@ extern "C" __attribute__((visibility("default"))) int check_user_ca_certs() {
     volatile int state = 0;
     volatile int result = 0;
     volatile int i = 0;
+    volatile int user_count = 0;
     DIR* dir = nullptr;
     struct dirent* entry = nullptr;
     int count = 0;
@@ -770,6 +777,11 @@ extern "C" __attribute__((visibility("default"))) int check_user_ca_certs() {
         NULL
     };
 
+    /* Returns the number of USER-ADDED CA certs (cacerts-added dir).
+     * System CA dirs (/etc/security/cacerts) are never counted — they are
+     * part of the OS trust store, not an interception indicator.  Callers
+     * compare against ZT_MITM_CA_THRESHOLD instead of treating a single
+     * leftover dev-tool cert as a breach. */
     while (!result) {
         switch (state) {
             case 0:
@@ -785,12 +797,13 @@ extern "C" __attribute__((visibility("default"))) int check_user_ca_certs() {
                 entry = readdir(dir);
                 if (!entry) { closedir(dir); state = 3; break; }
                 if ((entry->d_type == DT_REG || entry->d_type == DT_LNK)
-                    && strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
+                    && strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
                     count++;
+                }
                 state = (f2(count) & 1) ? 2 : 5;
                 break;
             case 3:
-                if (i == 0 && count > 0) { result = 1; state = 998; break; }
+                if (i == 0 && count > 0) { user_count = count; result = 1; state = 998; break; }
                 state = 4;
                 break;
             case 4:
@@ -802,7 +815,7 @@ extern "C" __attribute__((visibility("default"))) int check_user_ca_certs() {
                 state = 2;
                 break;
             case 998:
-                return result;
+                return user_count;
             case 999:
                 return 0;
             default:
@@ -810,7 +823,7 @@ extern "C" __attribute__((visibility("default"))) int check_user_ca_certs() {
                 break;
         }
     }
-    return result;
+    return user_count;
 }
 
 extern "C" __attribute__((visibility("default"))) int check_proxy_port() {
@@ -1440,8 +1453,12 @@ static int rd() {
             case 8:  // MITM: process scan
                 if (scan_proc_detect_mitm()) { g_guard_ok = 0; g_mitm_detected = 1; score += 2; }
                 state = 9; break;
-            case 9:  // MITM: CA certs
-                if (check_user_ca_certs()) { g_guard_ok = 0; g_mitm_detected = 1; score += 2; }
+            case 9:  // MITM: CA certs (count >= 2 = threshold, or 1 + active channel)
+                if (check_user_ca_certs() >= 2 ||
+                    (check_user_ca_certs() > 0 &&
+                     (scan_proc_detect_mitm() || check_proxy_port()))) {
+                    g_guard_ok = 0; g_mitm_detected = 1; score += 2;
+                }
                 state = 10; break;
             case 10: // MITM: proxy port
                 if (check_proxy_port()) { g_guard_ok = 0; g_mitm_detected = 1; score += 2; }
@@ -1691,11 +1708,9 @@ static jboolean verify_sig(JNIEnv* env, jclass, jobject ctx) {
     // Cache: only run the expensive JNI cert chain once per process
     if (g_sig_ok) { g_sig_ok_bridge = 1; return JNI_TRUE; }
     g_ck = 110;
-    LS_LOGE(">>> sig:cp110 do_check_sig");
     int ok = do_check_sig(env, ctx);
     g_sig_ok = ok;
     g_sig_ok_bridge = ok ? 1 : 0;
-    LS_LOGE(">>> sig:cp111 result=%d", ok);
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -1773,7 +1788,9 @@ static jint native_threat_score(JNIEnv*, jclass) {
     if (check_emulator()) score += 2;
     if (check_debug_enhanced()) score += 2;
     if (scan_proc_detect_mitm()) score += 2;
-    if (check_user_ca_certs()) score += 2;
+    if (check_user_ca_certs() >= 2 ||
+        (check_user_ca_certs() > 0 &&
+         (scan_proc_detect_mitm() || check_proxy_port()))) score += 2;
     if (check_proxy_port()) score += 2;
     if (check_frida_files()) score += 3;
     if (check_magisk_mounts()) score += 2;
@@ -1832,12 +1849,10 @@ static void native_reset_guard(JNIEnv*, jclass) {
 
 // === Phase 2: White-Box AES JNI ===
 static void native_wb_init(JNIEnv*, jclass) {
-    LS_LOGE(">>> wbAesInit START");
     wb_aes_init();
     // Layer 5 memory guard DISABLED — ptrace self-attach causes crash on Android 14
     // mg_stack_canary_init();
     // mg_ptrace_self_attach();
-    LS_LOGE(">>> wbAesInit DONE (memory guard OFF)");
 }
 
 static bool secure_random_bytes(uint8_t* buffer, size_t len);
@@ -2215,7 +2230,6 @@ static int apk_cache_hit(int idx) {
 
 extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) {
     g_ck = 200;
-    LS_LOGE(">>> dex:cp200");
     int cached = apk_cache_hit(0);
     if (cached >= 0) return cached;
 
@@ -2232,7 +2246,7 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
     if (fd < 0) { apk_cache_set(0, 0, NULL); return 0; }
 
     off_t fsize = lseek(fd, 0, SEEK_END);
-    if (fsize <= 0 || fsize > 100 * 1024 * 1024) { close(fd); apk_cache_set(0, 0, NULL); return 0; }
+    if (fsize <= 0 || fsize > 256 * 1024 * 1024) { close(fd); apk_cache_set(0, 0, NULL); return 0; }
     lseek(fd, 0, SEEK_SET);
 
     uint8_t* apk_data = (uint8_t*)malloc((size_t)fsize);
@@ -2262,7 +2276,7 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
         pos = data_start + comp_size;
     }
 
-    if (dex_total > 0 && dex_total < 100 * 1024 * 1024) {
+    if (dex_total > 0 && dex_total < 256 * 1024 * 1024) {
         uint8_t* dex_buf = (uint8_t*)malloc(dex_total);
         if (dex_buf) {
             size_t wpos = 0;
@@ -2290,7 +2304,6 @@ extern "C" __attribute__((visibility("default"))) int check_dex_integrity(void) 
 
     free(apk_data);
     apk_cache_set(0, ok, digest);
-    LS_LOGE(">>> dex:result=%d", ok);
     return ok;
 }
 
@@ -2309,13 +2322,14 @@ extern int zero_trust_is_degraded(void);
 extern int zero_trust_is_locked(void);
 extern int zero_trust_is_continuous_eval_running(void);
 extern int wb_aes_256_selftest(void);
+extern const char* zero_trust_get_score_breakdown_str(void);
+extern int zero_trust_get_risk_level(void);
 }
 
 
 
 extern "C" int check_so_integrity(void) {
     g_ck = 201;
-    LS_LOGE(">>> so:cp201");
     int cached = apk_cache_hit(1);
     if (cached >= 0) return cached;
 
@@ -2339,7 +2353,6 @@ extern "C" int check_so_integrity(void) {
     if (obs_ptr) {
         size_t obs_off = (size_t)(obs_ptr - seg_copy);
         memset((void*)obs_ptr, 0, 96);
-        LS_LOGE(">>> so:zeroed obs at off=0x%zx", obs_off);
     }
 
     uint8_t digest[32];
@@ -2348,13 +2361,11 @@ extern "C" int check_so_integrity(void) {
 
     int ok = g_apk_digests_obs[32] == 0 ? -1 : apk_hash_compare(digest, 32);
     apk_cache_set(1, ok, digest);
-    LS_LOGE(">>> so:result=%d", ok);
     return ok;
 }
 
 extern "C" int check_resources_integrity(void) {
     g_ck = 202;
-    LS_LOGE(">>> res:cp202");
     int cached = apk_cache_hit(2);
     if (cached >= 0) return cached;
 
@@ -2374,7 +2385,6 @@ extern "C" int check_resources_integrity(void) {
 
     int ok = g_apk_digests_obs[64] == 0 ? -1 : apk_hash_compare(digest, 64);
     apk_cache_set(2, ok, digest);
-    LS_LOGE(">>> res:result=%d", ok);
     return ok;
 }
 
@@ -2769,7 +2779,11 @@ extern "C" {
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpWbAesKeycheck(
     JNIEnv* env, jobject thiz) {
-    return wb_aes_256_selftest();
+    /* Run the WB-AES keycheck bytecode inside the VM. The bytecode performs
+       HC_WB_AES_KEYCHECK → selftest()==0 ? 1 : 0, so R0==1 on success.
+       (Previously bound to wb_aes_256_selftest() directly, whose 0=success
+       semantics never matched the Kotlin ==1 expectation — always failing.) */
+    return native_vmp_wb_aes_keycheck(env, (jclass)thiz);
 }
 
 /* RN */ jlong Java_com_lianyu_ai_security_NativeBridge_vmpKmsDeriveSk(
@@ -2789,7 +2803,11 @@ extern "C" {
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpApkSigVerify(
     JNIEnv* env, jobject thiz) {
-    return check_apk_signature(env, thiz, NULL);
+    /* Run the APK signature verification bytecode inside the VM
+       (HC_TRACER → HC_ROOT_CHECK → HC_SIG_VERIFY). Previously bound to
+       check_apk_signature(env, thiz, NULL) which requires a real Context;
+       the NULL context crashed with a JNI GetObjectClass abort. */
+    return native_vmp_apk_sig_verify(env, (jclass)thiz);
 }
 
 /* ================================================================
@@ -2893,6 +2911,18 @@ extern "C" {
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore(
     JNIEnv* env, jobject thiz) {
     return (jint)zero_trust_get_score();
+}
+
+/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown(
+    JNIEnv* env, jobject thiz) {
+    (void)thiz;
+    return env->NewStringUTF(zero_trust_get_score_breakdown_str());
+}
+
+/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel(
+    JNIEnv* env, jobject thiz) {
+    (void)thiz;
+    return (jint)zero_trust_get_risk_level();
 }
 
 /* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded(
@@ -3101,7 +3131,9 @@ extern "C" __attribute__((visibility("default"))) int check_dns_hijack(void) {
             /* Check for signs of tampering: size anomaly, missing localhost */
             if (n<20 || n>65536 || !strstr(b,"127.0.0.1")) {r=1;s=998;break;}
             /* Check for known malicious patterns */
-            if (strstr(b,"lianyu.chat") || strstr(b,"suflow.cloud") ||
+            /* NOTE: suflow.cloud is our production partner gateway — not malicious.
+               The DNS hijack check must NOT flag our own domain in /etc/hosts. */
+            if (strstr(b,"lianyu.chat") ||
                 strstr(b,"api.openai")  || strstr(b,"api.anthropic")) {r=1;s=998;break;}
             s=999;break;
         case 998:return 1;
@@ -3170,6 +3202,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
             {const_cast<char*>("zeroTrustEvaluate"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustEvaluate},
             {const_cast<char*>("zeroTrustGetState"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState},
             {const_cast<char*>("zeroTrustGetScore"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore},
+            {const_cast<char*>("zeroTrustGetScoreBreakdown"), const_cast<char*>("()Ljava/lang/String;"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown},
+            {const_cast<char*>("zeroTrustGetRiskLevel"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel},
             {const_cast<char*>("zeroTrustIsDegraded"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded},
             {const_cast<char*>("zeroTrustIsLocked"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked},
             {const_cast<char*>("zeroTrustIsContinuousEvaluationRunning"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning},
@@ -3214,7 +3248,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 }
 
 /* Trust anchors VMP bytecode placeholder — real via vmp_protect.py */
-const uint8_t g_vmp_trust_anchors_verify[8] = {0x01, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0xFF};
+const uint8_t g_vmp_trust_anchors_verify[8] = {0xC2, 0x00, 0x00, 0x14, 0x00, 0x00, 0x78, 0xFF};
 const uint32_t g_vmp_trust_anchors_verify_size = 8;
 
 /*

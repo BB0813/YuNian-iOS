@@ -126,6 +126,10 @@ object NativeBridge {
     @JvmStatic
     external fun zeroTrustGetScore(): Int
     @JvmStatic
+    external fun zeroTrustGetScoreBreakdown(): String
+    @JvmStatic
+    external fun zeroTrustGetRiskLevel(): Int
+    @JvmStatic
     external fun zeroTrustIsDegraded(): Int
     @JvmStatic
     external fun zeroTrustIsLocked(): Int
