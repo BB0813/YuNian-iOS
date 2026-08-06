@@ -2,6 +2,7 @@ package com.lianyu.ai.network.tts
 
 import android.content.Context
 import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.network.NetworkConstants
 import com.lianyu.ai.network.RequestSecurityInterceptor
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,16 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
         builder.build()
+    }
+
+    // [TTS FIX] 长文本语音超时：按"一个字符 1 秒"动态配备超时
+    private fun clientFor(textLength: Int): OkHttpClient {
+        val timeoutMs = TimeoutBudgets.ttsSynthTimeoutMs(textLength)
+        return client.newBuilder()
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
     }
 
     private var config: TtsConfig = TtsConfig()
@@ -84,7 +95,7 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 .addHeader("Authorization", "Bearer $apiKey")
                 .build()
 
-            val response = client.newCall(request).execute()
+            val response = clientFor(text.length).newCall(request).execute()
             val body = response.body?.bytes()
 
             if (!response.isSuccessful || body == null) {

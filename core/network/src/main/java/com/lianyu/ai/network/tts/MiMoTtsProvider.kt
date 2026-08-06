@@ -26,14 +26,23 @@ import java.util.concurrent.TimeUnit
  */
 class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
-    private val client = run {
+    // [TTS FIX] 固定超时的 client 改为按文本长度动态构建（见 clientFor）。
+    // 长文本合成耗时随长度增长，固定 30s 窗口会掐断长文本 → 语音条退化纯文本。
+    private val baseClient = run {
         val builder = OkHttpClient.Builder()
-            .callTimeout(TimeoutBudgets.TTS_SYNTH_MS, TimeUnit.MILLISECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(TimeoutBudgets.TTS_SYNTH_MS, TimeUnit.MILLISECONDS)
-            .writeTimeout(TimeoutBudgets.TTS_SYNTH_MS, TimeUnit.MILLISECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
         builder.build()
+    }
+
+    /** [TTS FIX] 按文本长度构建带动态超时的 client：一个字符 1 秒。 */
+    private fun clientFor(textLength: Int): OkHttpClient {
+        val timeoutMs = TimeoutBudgets.ttsSynthTimeoutMs(textLength)
+        return baseClient.newBuilder()
+            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
     }
 
     private var config: TtsConfig = TtsConfig()
@@ -89,7 +98,8 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                     .addHeader("api-key", apiKey)
                     .build()
 
-                client.newCall(request).execute().use { response ->
+                // [TTS FIX] 按文本长度动态配备超时（一个字符 1 秒）
+                clientFor(text.length).newCall(request).execute().use { response ->
                     val body = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
                         SecureLog.e(TAG, "HTTP ${response.code}, bodyBytes=${body.length}")
@@ -156,7 +166,8 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("api-key", apiKey)
                 .build()
-            client.newCall(request).execute().use { response ->
+            // [TTS FIX] testConnection 用 2 字符超时（走动态函数，下限 30s）
+            clientFor(2).newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 response.isSuccessful && extractAudioData(body).isNotBlank()
             }

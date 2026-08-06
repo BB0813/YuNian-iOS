@@ -2,6 +2,7 @@ package com.lianyu.ai.network.tts
 
 import android.content.Context
 import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.network.RequestSecurityInterceptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -122,7 +123,7 @@ host: tts-api.xfyun.cn"""
 
     private suspend fun synthesizeViaWebSocket(url: String, text: String, voice: String): ByteArray? {
         var result: ByteArray? = null
-        
+
         val request = Request.Builder().url(url).build()
         val webSocketListener = object : WebSocketListener() {
             private val audioBuffer = mutableListOf<Byte>()
@@ -188,8 +189,9 @@ host: tts-api.xfyun.cn"""
         }
         
         client.newWebSocket(request, webSocketListener)
-        
-        Thread.sleep(5000)
+
+        // [TTS FIX] 长文本语音超时：原固定 sleep(5s) 对长文本不足，按"一个字符 1 秒"动态等待
+        Thread.sleep(TimeoutBudgets.ttsSynthTimeoutMs(text.length))
         
         return result
     }
