@@ -2675,15 +2675,18 @@ class AiService(context: Context) : AiServiceProvider {
         }
 
         messages.add(Message("user", buildString {
-            appendLine("你是${companion.name}，刚回复了：\"${lastAiContent.take(100)}\"")
-            appendLine("用户之前说了：\"${lastUserMsg.take(100)}\"")
+            appendLine("你是${companion.name}，用户的女朋友/男朋友，一个真实的人。你们正在微信上聊天，需要让对话自然地继续。")
             appendLine()
-            appendLine("现在你要追加一条追问，让对话继续下去。要求：")
-            appendLine("1. 5-15字，口语化，像真人聊天")
-            appendLine("2. 必须是问句，针对上面的对话内容追问")
-            appendLine("3. 带语气词（呀/呢/啦/嘛/哼/嘿嘿/诶/哇）")
-            appendLine("4. 禁止万能开场白（在干嘛/想你了/好久不见），必须针对具体内容")
-            appendLine("5. 直接输出追问内容，不要解释不要思考")
+            appendLine("你刚回复了：\"${lastAiContent.take(100)}\"")
+            appendLine("用户最后说了：\"${lastUserMsg.take(100)}\"")
+            appendLine()
+            appendLine("现在考虑是否追加一条追问。规则：")
+            appendLine("1. 先判断：你刚才的回复是否已把话接完、是否已把话题抛回给用户？如果是，只输出「无需追问」，不要追加。")
+            appendLine("2. 追问只能基于用户最后一句的真实内容，禁止曲解、禁止无中生有编造问题、禁止把对话中「我/你」的角色搞反。")
+            appendLine("3. 需要追问时：5-15字，口语化，像真人随口追问，必须针对用户说的具体内容。")
+            appendLine("4. 必须是真正的问句（带问号），不要用陈述句冒充追问。")
+            appendLine("5. 带语气词（呀/呢/啦/嘛/哼/嘿嘿/诶/哇），禁止万能开场白（在干嘛/想你了/好久不见）。")
+            appendLine("6. 直接输出追问内容，不要解释不要思考。")
         }))
 
         try {
@@ -2707,6 +2710,10 @@ class AiService(context: Context) : AiServiceProvider {
                 .trim()
 
             if (cleaned.length < 2) return@withContext null
+            // 「无需追问」出口：AI 判断不需要追问时不发送
+            if (cleaned.contains("无需追问")) return@withContext null
+            // 追问必须是真问句（带问号），防止陈述句冒充追问 / 自问自答
+            if (!cleaned.contains('?') && !cleaned.contains('？')) return@withContext null
 
             val safetyResult = ContentFilter.checkOutputSafety(cleaned)
             if (!safetyResult.isSafe) return@withContext null

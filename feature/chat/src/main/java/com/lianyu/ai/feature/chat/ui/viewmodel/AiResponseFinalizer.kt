@@ -344,14 +344,34 @@ class AiResponseFinalizer(
         SecureLog.d("ChatViewModel", "Enqueue WeChat proactive message, companionId=$companionId, messageId=$messageId, hasFinalContent=${!finalContent.isNullOrBlank()}")
     }
 
+    /** 防连环追问：同一伴侣两次自动追问的最小间隔（30 分钟），避免「AI 自问自答」。 */
+    private val followUpMinIntervalMs = 30 * 60 * 1000L
+
+    /** 自动追问触发概率：仅在「话头停在 AI 侧」时以低概率触发。 */
+    private val followUpTriggerProbability = 0.15f
+
+    /** 上次自动追问时间（毫秒），防连环追问。 */
+    @Volatile
+    private var lastFollowUpAt: Long = 0L
+
     /**
-     * 连续追问：AI回复后按概率触发追问，让对话继续下去。
-     * 条件：1) 设置允许追问 2) AI回复不含问句 3) 50%概率触发
+     * 连续追问：AI回复后按低概率触发追问，让对话继续下去。
+     *
+     * 触发门槛（全部满足才追）：
+     * 1) 设置允许追问
+     * 2) AI 主回复不含问句（没有把话头递回）
+     * 3) AI 主回复也没有任何「对用户的互动/调侃/回应」——话头确实停在 AI 侧
+     * 4) 距上次追问至少 30 分钟（防连环追问/自问自答）
+     * 5) 15% 概率触发
      */
     private fun triggerFollowUpIfNeeded(aiContent: String, allowFollowUp: Boolean) {
         if (!allowFollowUp) return
         if (questionRegex.containsMatchIn(aiContent)) return
-        if (kotlin.random.Random.nextFloat() > 0.5f) return
+        if (looksLikeTurnBackToUser(aiContent)) return
+        val now = System.currentTimeMillis()
+        if (now - lastFollowUpAt < followUpMinIntervalMs) return
+        if (kotlin.random.Random.nextFloat() > followUpTriggerProbability) return
+        lastFollowUpAt = now
 
         applicationApiScope.launch {
             try {
@@ -394,6 +414,20 @@ class AiResponseFinalizer(
                 SecureLog.w("ChatViewModel", "Follow-up question failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * 主回复是否已把「话头」递回给用户。
+     * 只要回复已指向用户（第二人称），或带互动语气（调侃/撒娇/威胁/反问），
+     * 就认为话头已递回，不再自动追加追问——避免「AI 自问自答」的观感。
+     */
+    private fun looksLikeTurnBackToUser(text: String): Boolean {
+        if (text.contains("你")) return true
+        val interactiveMarkers = listOf(
+            "吧", "呀", "嘛", "哼", "啦", "呗", "哈哈", "嘿嘿", "嘻嘻",
+            "~", "～", "等着", "看你", "找你", "来找我", "算账", "不信", "才怪",
+        )
+        return interactiveMarkers.any { text.contains(it) }
     }
 
     private fun splitIntoSegments(text: String): List<String> {

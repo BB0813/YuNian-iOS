@@ -2,6 +2,7 @@ package com.lianyu.ai.network.tts
 
 import android.content.Context
 import com.lianyu.ai.common.SecureLog
+import com.lianyu.ai.common.TimeoutBudgets
 import com.lianyu.ai.network.RequestSecurityInterceptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,6 +26,17 @@ class AliyunTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             .readTimeout(30, TimeUnit.SECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
         builder.build()
+    }
+
+    // [TTS FIX] 长文本语音超时：按"一个字符 1 秒"动态配备超时，
+    // 合成请求用 clientFor(text.length)，token 等短请求仍用固定 client。
+    private fun clientFor(textLength: Int): OkHttpClient {
+        val timeoutMs = TimeoutBudgets.ttsSynthTimeoutMs(textLength)
+        return client.newBuilder()
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
     }
 
     private var accessToken: String? = null
@@ -70,7 +82,8 @@ class AliyunTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 .addHeader("X-NLS-Token", token)
                 .build()
 
-            val response = client.newCall(request).execute()
+            // [TTS FIX] 合成请求按文本长度动态配备超时（一个字符 1 秒）
+            val response = clientFor(text.length).newCall(request).execute()
             val body = response.body?.bytes()
 
             if (!response.isSuccessful || body == null) {

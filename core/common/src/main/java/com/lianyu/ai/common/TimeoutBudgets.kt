@@ -19,14 +19,32 @@ object TimeoutBudgets {
     const val API_CHAT_MS = 15_000L          // 普通AI对话 (15s)
     const val API_VISION_MS = 30_000L        // 视觉识别 (30s，需编码+传输)
     const val API_STREAM_MS = 20_000L        // 流式对话 (20s)
-    const val TTS_SYNTH_MS = 10_000L         // TTS合成 (10s)
+    // [TTS FIX] TTS_SYNTH_MS 从10s提升至30s：SuFlowAPI 日志实测 GSVI-v4 合成耗时 6~17.3s
+    // （2026-08-06 共64次请求中17次>=9s、8次>=10s）。原10s窗口叠加 TLS/上传/下载开销后，
+    // 服务端合成>9s时客户端必然超时被掐断 → withTimeoutOrNull 返回 null → 消息退化为纯文本。
+    // 30s 覆盖实测最大 17.3s 并留出网络余量。
+    const val TTS_SYNTH_MS = 30_000L         // TTS合成基准超时 (30s，服务端实测最慢17.3s)
+    // [TTS FIX] 长文本语音超时：固定 30s 对长文本仍不足（合成耗时与文本长度强相关）。
+    // 按"一个字符 1 秒"动态配备超时，下限 30s（短文本也要网络往返），上限 180s 防极端卡死。
+    const val TTS_SYNTH_PER_CHAR_MS = 1_000L     // 每个字符的超时预算
+    const val TTS_SYNTH_MAX_MS = 180_000L        // 动态超时上限 (3min，超长文本应分段合成)
+
+    /**
+     * [TTS FIX] 按文本长度动态计算 TTS 合成超时：一个字符 1 秒。
+     * 长文本（如 AI 长篇回复）合成耗时可达数分钟，固定窗口必然超时退化纯文本。
+     * @return 毫秒，位于 [TTS_SYNTH_MS] 与 [TTS_SYNTH_MAX_MS] 之间。
+     */
+    fun ttsSynthTimeoutMs(textLength: Int): Long =
+        (textLength.toLong() * TTS_SYNTH_PER_CHAR_MS)
+            .coerceIn(TTS_SYNTH_MS, TTS_SYNTH_MAX_MS)
     const val STT_RECOGNIZE_MS = 15_000L     // 语音识别 (15s)
     // [M11 FIX] ChatViewModel 使用的实际超时值（OkHttp callTimeout 对齐，网络慢时需更长）
     const val CHAT_VM_API_TIMEOUT_MS = 30_000L      // ChatViewModel AI 调用超时
     const val CHAT_VM_VISION_TIMEOUT_MS = 60_000L   // ChatViewModel 视觉调用超时
     const val CHAT_VM_SAFETY_CLASSIFY_MS = 30_000L  // ChatViewModel 安全分类超时
     const val CHAT_VM_MEMORY_EXTRACT_MS = 5_000L    // ChatViewModel 记忆提取超时
-    const val CHAT_VM_TTS_SYNTH_MS = 10_000L        // ChatViewModel TTS 超时
+    // [TTS FIX] 对齐 TTS_SYNTH_MS 提升至30s，避免 ChatViewModel 侧额外掐断慢合成
+    const val CHAT_VM_TTS_SYNTH_MS = 30_000L        // ChatViewModel TTS 超时
     const val CHAT_VM_BATCH_WINDOW_MS = 2_500L      // ChatViewModel 批量合并窗口
     // [P1 FIX] 散落在 ChatViewModel 的硬编码超时归一至此
     const val MODEL_OUTPUT_VERIFY_MS = 5_000L  // 贝叶斯模型输出校验（语义不同于 MEMORY_EXTRACT）

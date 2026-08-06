@@ -21,7 +21,8 @@ class AndroidTtsProvider : TtsProviderInterface {
     override suspend fun synthesize(context: Context, text: String, voiceId: String?): String? {
         // [P2 REVIEW FIX] synthesize 的 deferred.await() 无超时，若 TTS 回调丢失会永久挂起。
         // 包 withTimeoutOrNull 防泄漏（超时返回 null，调用方已有 null 处理逻辑）。
-        return withTimeoutOrNull(TimeoutBudgets.TTS_SYNTH_MS) {
+        // [TTS FIX] 按文本长度动态配备超时（一个字符 1 秒），长文本朗读/合成不再被固定窗口掐断。
+        return withTimeoutOrNull(TimeoutBudgets.ttsSynthTimeoutMs(text.length)) {
             val t = tts ?: return@withTimeoutOrNull null
             val deferred = CompletableDeferred<Unit>()
 

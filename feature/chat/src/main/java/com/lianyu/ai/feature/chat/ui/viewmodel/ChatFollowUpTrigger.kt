@@ -23,11 +23,22 @@ internal object ChatFollowUpTrigger {
 
     private val QUESTION_REGEX = Regex("[?？]|吗|呢|什么|怎么|为什么|多少|哪|谁|几|是不是|有没有|能不能|会不会|要不要|好不好")
 
+    /** 防连环追问：两次自动追问的最小间隔（30 分钟），避免「AI 自问自答」。 */
+    private const val FOLLOW_UP_MIN_INTERVAL_MS = 30 * 60 * 1000L
+
+    /** 自动追问触发概率：仅在「话头停在 AI 侧」时以低概率触发。 */
+    private const val FOLLOW_UP_TRIGGER_PROBABILITY = 0.15f
+
+    @Volatile
+    private var lastFollowUpAt: Long = 0L
+
     /**
      * Trigger a follow-up question if conditions are met:
      * 1) Settings allow follow-up messages
-     * 2) AI reply doesn't already contain a question
-     * 3) 50% probability
+     * 2) AI reply doesn't already contain a question（话头已递回）
+     * 3) AI reply doesn't contain interaction markers targeting the user（话头已递回）
+     * 4) At least 30 minutes since last follow-up
+     * 5) 15% probability
      *
      * @param scope Coroutine scope to launch the follow-up in (application-level).
      * @param aiContent The AI's reply content.
@@ -51,7 +62,11 @@ internal object ChatFollowUpTrigger {
     ) {
         if (!allowFollowUp) return
         if (QUESTION_REGEX.containsMatchIn(aiContent)) return
-        if (kotlin.random.Random.nextFloat() > 0.5f) return
+        if (looksLikeTurnBackToUser(aiContent)) return
+        val now = System.currentTimeMillis()
+        if (now - lastFollowUpAt < FOLLOW_UP_MIN_INTERVAL_MS) return
+        if (kotlin.random.Random.nextFloat() > FOLLOW_UP_TRIGGER_PROBABILITY) return
+        lastFollowUpAt = now
 
         scope.launch {
             try {
@@ -82,6 +97,20 @@ internal object ChatFollowUpTrigger {
                 SecureLog.w("ChatViewModel", "Follow-up question failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * 主回复是否已把「话头」递回给用户。
+     * 只要回复已指向用户（第二人称），或带互动语气（调侃/撒娇/威胁/反问），
+     * 就认为话头已递回，不再自动追加追问——避免「AI 自问自答」的观感。
+     */
+    private fun looksLikeTurnBackToUser(text: String): Boolean {
+        if (text.contains("你")) return true
+        val interactiveMarkers = listOf(
+            "吧", "呀", "嘛", "哼", "啦", "呗", "哈哈", "嘿嘿", "嘻嘻",
+            "~", "～", "等着", "看你", "找你", "来找我", "算账", "不信", "才怪",
+        )
+        return interactiveMarkers.any { text.contains(it) }
     }
 }
 

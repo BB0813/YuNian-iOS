@@ -28,14 +28,23 @@ import java.util.concurrent.TimeUnit
  */
 class OpenAiCompatibleTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
-    private val client = run {
+    // [TTS FIX] 固定超时的 client 改为按文本长度动态构建（见 clientFor）。
+    // 保留基础 builder，合成时按文本长度配备超时，长文本不再被 30s 固定窗口掐断。
+    private val baseClient = run {
         val builder = OkHttpClient.Builder()
-            .callTimeout(TimeoutBudgets.TTS_SYNTH_MS, TimeUnit.MILLISECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(TimeoutBudgets.TTS_SYNTH_MS, TimeUnit.MILLISECONDS)
-            .writeTimeout(TimeoutBudgets.TTS_SYNTH_MS, TimeUnit.MILLISECONDS)
         RequestSecurityInterceptor.enforceTls(builder)
         builder.build()
+    }
+
+    /** [TTS FIX] 按文本长度构建带动态超时的 client：一个字符 1 秒。 */
+    private fun clientFor(textLength: Int): OkHttpClient {
+        val timeoutMs = TimeoutBudgets.ttsSynthTimeoutMs(textLength)
+        return baseClient.newBuilder()
+            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
     }
 
     private var config: TtsConfig = TtsConfig()
@@ -83,12 +92,27 @@ class OpenAiCompatibleTtsProvider : TtsProviderInterface, ConfigurableTtsProvide
                     .addHeader("Authorization", "Bearer $apiKey")
                     .build()
 
-                client.newCall(request).execute().use { response ->
+                // [TTS FIX] 按文本长度动态配备超时（一个字符 1 秒）
+                clientFor(text.length).newCall(request).execute().use { response ->
                     val bodyBytes = response.body?.bytes()
                     if (!response.isSuccessful || bodyBytes == null || bodyBytes.isEmpty()) {
                         SecureLog.e(
                             TAG,
                             "HTTP ${response.code}, bodyBytes=${bodyBytes?.size ?: 0}"
+                        )
+                        return@withContext null
+                    }
+
+                    // [TTS FIX] 校验响应体是否为有效音频，避免网关返回 2xx + 错误 JSON
+                    // （如 {"error":{"message":"app_key错误"...}}，实测 110 字节）被当成音频文件
+                    // 写盘入库 → 消息有语音条但播放失败。
+                    val contentType = response.header("Content-Type").orEmpty()
+                    if (!isLikelyAudioBody(bodyBytes, contentType, format)) {
+                        SecureLog.e(
+                            TAG,
+                            "Response body is not valid audio: code=${response.code}, " +
+                                "contentType='$contentType', bytes=${bodyBytes.size}, " +
+                                "head=${bodyBytes.toHexPreview()}"
                         )
                         return@withContext null
                     }
@@ -140,7 +164,8 @@ class OpenAiCompatibleTtsProvider : TtsProviderInterface, ConfigurableTtsProvide
                 .addHeader("Authorization", "Bearer $apiKey")
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            // [TTS FIX] testConnection 用 2 字符超时（走动态函数，下限 30s）
+            clientFor(2).newCall(request).execute().use { response ->
                 val ok = response.isSuccessful && (response.body?.contentLength() ?: 1L) != 0L
                 if (!ok) {
                     SecureLog.e(TAG, "testConnection HTTP ${response.code}")
@@ -229,5 +254,77 @@ class OpenAiCompatibleTtsProvider : TtsProviderInterface, ConfigurableTtsProvide
             val f = raw.trim().lowercase(Locale.US)
             return if (f in ALLOWED_FORMATS) f else "mp3"
         }
+
+        /**
+         * [TTS FIX] 判断响应体是否为有效音频数据。
+         *
+         * 背景：部分 OpenAI-compatible 网关（NewAPI/OneAPI/自建代理）在鉴权失败或模型
+         * 报错时仍返回 HTTP 2xx + JSON 错误体。若不校验，错误 JSON 会被当作音频文件
+         * 写盘入库，UI 显示语音条但播放失败（实测 110 字节 `{"error":{...}}` 被当成 wav）。
+         *
+         * 策略（按优先级）：
+         * 1. Content-Type 明确为 audio 类型 → 放行；
+         * 2. 明确为 JSON 或纯文本 → 拒绝（网关错误响应）；
+         * 3. 按文件头 magic bytes 识别 WAV / MP3 / FLAC / OGG(Opus) / AAC；
+         * 4. 以上都无结论时：体积过小（< 128B）视为错误体拒绝，否则放行（pcm 等裸流）。
+         */
+        fun isLikelyAudioBody(
+            body: ByteArray,
+            contentType: String,
+            format: String
+        ): Boolean {
+            val ct = contentType.lowercase(Locale.US)
+            if (ct.isNotBlank()) {
+                if (ct.startsWith("audio/")) return true
+                if (ct.contains("json") || ct.startsWith("text/") ||
+                    ct.contains("html") || ct.contains("xml")
+                ) {
+                    return false
+                }
+            }
+            // magic bytes 识别
+            if (body.size >= 12 && body[0] == 'R'.code.toByte() && body[1] == 'I'.code.toByte() &&
+                body[2] == 'F'.code.toByte() && body[3] == 'F'.code.toByte() &&
+                body[8] == 'W'.code.toByte() && body[9] == 'A'.code.toByte() &&
+                body[10] == 'V'.code.toByte() && body[11] == 'E'.code.toByte()
+            ) {
+                return true // WAV RIFF/WAVE
+            }
+            if (body.size >= 3 && body[0] == 'I'.code.toByte() && body[1] == 'D'.code.toByte() &&
+                body[2] == '3'.code.toByte()
+            ) {
+                return true // MP3 ID3 tag
+            }
+            if (body.size >= 4 && body[0] == 0xFF.toByte() && (body[1] == 0xFB.toByte() ||
+                    body[1] == 0xF3.toByte() || body[1] == 0xF2.toByte())
+            ) {
+                return true // MP3 帧头 0xFFFB/0xFFF3/0xFFF2
+            }
+            if (body.size >= 4 && body[0] == 'f'.code.toByte() && body[1] == 'L'.code.toByte() &&
+                body[2] == 'a'.code.toByte() && body[3] == 'C'.code.toByte()
+            ) {
+                return true // FLAC
+            }
+            if (body.size >= 4 && body[0] == 'O'.code.toByte() && body[1] == 'g'.code.toByte() &&
+                body[2] == 'g'.code.toByte() && body[3] == 'S'.code.toByte()
+            ) {
+                return true // OGG (Opus/Vorbis)
+            }
+            if (body.size >= 4 && body[0] == 0xFF.toByte() && (body[1] == 0xF1.toByte() ||
+                    body[1] == 0xF9.toByte())
+            ) {
+                return true // AAC ADTS 帧头
+            }
+            // 未识别类型：极小体积大概率是错误 JSON / 空壳，拒绝；
+            // 其余（pcm 等无头裸流）放行。
+            return body.size >= 128
+        }
+
+        /** 输出前若干字节的可见 ASCII 预览，便于定位错误体内容。 */
+        private fun ByteArray.toHexPreview(limit: Int = 32): String =
+            take(limit).joinToString("") { b ->
+                val v = b.toInt() and 0xFF
+                if (v in 0x20..0x7E) v.toChar().toString() else "."
+            }
     }
 }

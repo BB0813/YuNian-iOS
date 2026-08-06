@@ -60,7 +60,10 @@ class ChatTtsController(
         val cleaned = TtsTextCleaner.clean(text, cfg.skipParentheses)
         if (cleaned.isBlank()) return null
         return try {
-            val tempPath = withTimeoutOrNull(TimeoutBudgets.TTS_SYNTH_MS) {
+            // [TTS FIX] 长文本语音超时：按"一个字符 1 秒"动态配备超时，
+            // 长文本合成耗时随长度增长，固定 30s 对长文本仍不足。
+            val timeoutMs = TimeoutBudgets.ttsSynthTimeoutMs(cleaned.length)
+            val tempPath = withTimeoutOrNull(timeoutMs) {
                 ttsService.synthesize(cleaned)
             } ?: return null
             val durablePath = persistVoiceBarFile(File(tempPath)) ?: return null
