@@ -13,15 +13,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 数据导出服务 — 读取全部用户数据，解密后组装为 [BackupData]。
+ * 数据导出服务 — 读取用户数据，解密后组装为 [BackupData]。
+ *
+ * 支持按选中的联系人（companionId 集合）导出，未指定时导出全部。
  */
 class BackupExportService(private val context: Context) {
 
     private val db = AppDatabase.getDatabase(context)
     private val deviceId = DeviceIdProvider.getDeviceId(context)
 
-    suspend fun export(): BackupData = withContext(Dispatchers.IO) {
-        val companions = db.companionDao().getAllCompanionsSync().map { it.toSnapshot() }
+    suspend fun export(companionIds: Set<Long>? = null): BackupData = withContext(Dispatchers.IO) {
+        val allCompanions = db.companionDao().getAllCompanionsSync()
+        val selectedCompanions = if (companionIds.isNullOrEmpty()) allCompanions
+        else allCompanions.filter { it.id in companionIds }
+
+        val companions = selectedCompanions.map { it.toSnapshot() }
         val chatMessages = mutableListOf<ChatMessageSnapshot>()
         val chatGroups = db.chatGroupDao().getAllGroupsSync().map { it.toSnapshot() }
         val groupMessages = mutableListOf<GroupMessageSnapshot>()
@@ -29,7 +35,7 @@ class BackupExportService(private val context: Context) {
         val tempMemories = db.memoryDao().getAllTempMemoriesSync(deviceId).map { it.toSnapshot() }
         val tokenUsages = db.tokenUsageDao().getAllUsageSync(deviceId).map { it.toSnapshot() }
 
-        // 读取每条 companion 的聊天消息（已解密）
+        // 读取每条选中 companion 的聊天消息（已解密）
         for (c in companions) {
             val raw = db.messageDao().getAllMessagesSync(c.id, "chat")
             chatMessages.addAll(
@@ -60,7 +66,53 @@ class BackupExportService(private val context: Context) {
             tokenUsages = tokenUsages
         )
     }
+
+    /**
+     * 统计每个联系人的导出数据概况（供导出选择页网格展示）。
+     *
+     * @return 按最后数据时间倒序排列的统计列表
+     */
+    suspend fun getCompanionStats(): List<CompanionExportStat> = withContext(Dispatchers.IO) {
+        db.companionDao().getAllCompanionsSync().map { companion ->
+            val raw = db.messageDao().getAllMessagesSync(companion.id, "chat")
+            val messages = ChatMessageCrypto.decryptFromStorage(raw.map { it.toChatMessage() })
+            val totalSizeBytes = messages.sumOf { m ->
+                estimateMessageSizeBytes(m)
+            }
+            CompanionExportStat(
+                companionId = companion.id,
+                name = companion.name,
+                avatarUrl = companion.avatarUrl,
+                messageCount = messages.size,
+                totalSizeBytes = totalSizeBytes,
+                lastTimestamp = messages.maxOfOrNull { it.timestamp } ?: 0L
+            )
+        }.sortedByDescending { it.lastTimestamp }
+    }
+
+    /** 估算单条消息占用大小：正文字节数 + linkString 引用的媒体文件大小（若存在） */
+    private fun estimateMessageSizeBytes(message: ChatMessage): Long {
+        var size = message.content.toByteArray(Charsets.UTF_8).size.toLong()
+        val mediaPath = message.linkString.ifBlank { message.content }
+        if (mediaPath.isNotBlank()) {
+            runCatching {
+                val f = java.io.File(mediaPath)
+                if (f.exists() && f.isFile) size += f.length()
+            }
+        }
+        return size
+    }
 }
+
+/** 导出选择页展示用的联系人统计 */
+data class CompanionExportStat(
+    val companionId: Long,
+    val name: String,
+    val avatarUrl: String?,
+    val messageCount: Int,
+    val totalSizeBytes: Long,
+    val lastTimestamp: Long
+)
 
 // --- Entity → Snapshot 映射扩展 ---
 
@@ -74,7 +126,9 @@ private fun com.lianyu.ai.database.model.CompanionEntity.toSnapshot() = Companio
 private fun ChatMessage.toSnapshot() = ChatMessageSnapshot(
     id = id, companionId = companionId, content = content, isFromUser = isFromUser,
     timestamp = timestamp, type = type.name, searchContent = searchContent,
-    fileFormat = fileFormat.name, linkString = linkString
+    fileFormat = fileFormat.name, linkString = linkString,
+    turnId = turnId, eventIndex = eventIndex, durationMs = durationMs,
+    anchorMessageId = anchorMessageId
 )
 
 private fun com.lianyu.ai.database.model.ChatGroup.toSnapshot() = ChatGroupSnapshot(

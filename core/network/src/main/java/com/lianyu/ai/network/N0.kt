@@ -30,7 +30,9 @@ class N0(
     companion object {
         /**
          * Enforce TLS security on an OkHttpClient builder.
-         * Limits to TLS 1.2+ and strong cipher suites.
+         * Limits to TLS 1.2+ and strong cipher suites for HTTPS.
+         * ConnectionSpec.CLEARTEXT is kept so http:// requests remain governed
+         * by the platform network_security_config (see RequestSecurityInterceptor).
          */
         fun enforceTls(builder: OkHttpClient.Builder) {
             try {
@@ -42,7 +44,7 @@ class N0(
                         okhttp3.CipherSuite.TLS_CHACHA20_POLY1305_SHA256
                     )
                     .build()
-                builder.connectionSpecs(listOf(tlsSpec))
+                builder.connectionSpecs(listOf(ConnectionSpec.CLEARTEXT, tlsSpec))
             } catch (_: Exception) {
                 // Keep platform defaults if the restricted TLS spec is unavailable.
             }

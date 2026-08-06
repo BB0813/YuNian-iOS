@@ -62,7 +62,12 @@ data class ChatMessageSnapshot(
     val type: String = "TEXT",
     val searchContent: String = "",
     val fileFormat: String = "TEXT",
-    val linkString: String = ""
+    val linkString: String = "",
+    // 补齐图片/语音/时间线等所有数据库字段
+    val turnId: String? = null,
+    val eventIndex: Int? = null,
+    val durationMs: Long? = null,
+    val anchorMessageId: Long? = null
 )
 
 @Serializable

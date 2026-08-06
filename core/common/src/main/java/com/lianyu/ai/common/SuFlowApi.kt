@@ -5,7 +5,8 @@ package com.lianyu.ai.common
  * 统一管理 URL、端点路径、认证方式
  */
 object SuFlowApi {
-    /** SuFlow API 基础地址 — Clove API 服务器 (HTTPS + cert pinning) */
+    // ── 生产指向: suflow.cloud (经 nginx 443, TLS 证书固定) ──
+    // 服务器 154.94.237.51, API 监听 127.0.0.1:9876, 由 nginx 80/443 转发
     const val BASE_URL = "https://suflow.cloud"
 
     /** Auth 基础地址 */

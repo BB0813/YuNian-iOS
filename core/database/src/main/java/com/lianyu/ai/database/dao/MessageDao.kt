@@ -358,6 +358,9 @@ interface MessageDao {
     @Query("UPDATE message_bodies SET content = :content, searchContent = :searchContent WHERE messageId = :messageId")
     suspend fun updateHotMessageContent(messageId: Long, content: String, searchContent: String): Int
 
+    @Query("UPDATE messages SET anchorMessageId = :anchorMessageId WHERE id = :id")
+    suspend fun updateAnchorMessageId(id: Long, anchorMessageId: Long?)
+
     @Transaction
     suspend fun updateMessageContent(messageId: Long, content: String, searchContent: String): Int {
         val updated = updateHotMessageContent(messageId, content, searchContent)

@@ -1,5 +1,5 @@
 # Encode URL for RemoteKeyProvider XOR obfuscation
-url = 'http://156.233.228.31:9876'
+url = 'https://suflow.cloud'
 total = len(url)
 parts = [[], [], []]
 for i, ch in enumerate(url):

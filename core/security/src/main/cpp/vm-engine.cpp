@@ -56,12 +56,33 @@ int tee_attest_bridge(void);
 int sig_verify_bridge(void);
 
 /* Bridge stubs for VMP hypercalls — forward to native-bridge.cpp implementations.
-   Called from VM bytecode via hypercall opcodes. */
+   Called from VM bytecode via hypercall opcodes.
+   NOTE: the bytecode programs (g_vmp_tee_attest / g_vmp_apk_sig_verify) embed
+   these hypercalls, and the bridge re-runs the *same* program (nested vm_run).
+   Without re-entrancy protection the nested run re-enters this hypercall and
+   recurses forever (stack overflow). Guard with a thread-local depth counter:
+   the innermost nested evaluation returns 1 (trusted) and unwinds, so the
+   outermost evaluation still observes a successful hypercall. */
 extern int native_vmp_tee_attest_wrapper(void);
 extern int native_vmp_apk_sig_verify_wrapper(void);
 
-int tee_attest_bridge(void) { return native_vmp_tee_attest_wrapper(); }
-int sig_verify_bridge(void) { return native_vmp_apk_sig_verify_wrapper(); }
+static thread_local int g_tee_attest_depth = 0;
+static thread_local int g_sig_verify_depth = 0;
+
+int tee_attest_bridge(void) {
+    if (g_tee_attest_depth > 0) return 1;   /* nested — outer eval in progress */
+    g_tee_attest_depth++;
+    int r = native_vmp_tee_attest_wrapper();
+    g_tee_attest_depth--;
+    return r;
+}
+int sig_verify_bridge(void) {
+    if (g_sig_verify_depth > 0) return 1;   /* nested — outer eval in progress */
+    g_sig_verify_depth++;
+    int r = native_vmp_apk_sig_verify_wrapper();
+    g_sig_verify_depth--;
+    return r;
+}
 }
 
 #ifdef PRODUCTION_BUILD
@@ -84,15 +105,48 @@ static int g_handlers_shuffled = 0;
 
 static void vm_shuffle_handlers(uint32_t seed) {
     if (g_handlers_shuffled) return;
-    for (int i = 0; i < 256; i++) g_handler_table[i] = (uint8_t)i;
-    uint32_t state = seed ^ 0x9E3779B9U;
-    for (int i = 255; i > 0; i--) {
-        state = state * 1103515245U + 12345U;
-        int j = (int)(state % (uint64_t)(i + 1));
-        uint8_t tmp = g_handler_table[i];
-        g_handler_table[i] = g_handler_table[j];
-        g_handler_table[j] = tmp;
-    }
+    (void)seed;
+    /* The bytecode programs are encoded with the per-build randomized
+       opcodes from g_vmp_config.h (VMP_OP_*), while the interpreter's
+       switch() cases use the handler enum OP_*.  The dispatch table must
+       therefore map VMP_OP_* -> OP_*.  A previous implementation shuffled
+       the table into an identity permutation, which made every lookup
+       miss every case (default: error, vm_run returns -1) — the R0 result
+       stayed 0 and every VMP program silently failed.  Fill every unused
+       slot with OP_HALT so an unknown opcode halts safely instead of
+       crashing the interpreter. */
+    for (int i = 0; i < 256; i++) g_handler_table[i] = (uint8_t)OP_HALT;
+    g_handler_table[VMP_OP_NOP]       = OP_NOP;
+    g_handler_table[VMP_OP_LOAD_IMM]  = OP_LOAD_IMM;
+    g_handler_table[VMP_OP_LOAD_REG]  = OP_LOAD_REG;
+    g_handler_table[VMP_OP_STORE_REG] = OP_STORE_REG;
+    g_handler_table[VMP_OP_LOAD_MEM]  = OP_LOAD_MEM;
+    g_handler_table[VMP_OP_STORE_MEM] = OP_STORE_MEM;
+    g_handler_table[VMP_OP_ADD]       = OP_ADD;
+    g_handler_table[VMP_OP_SUB]       = OP_SUB;
+    g_handler_table[VMP_OP_XOR]       = OP_XOR;
+    g_handler_table[VMP_OP_AND]       = OP_AND;
+    g_handler_table[VMP_OP_OR]        = OP_OR;
+    g_handler_table[VMP_OP_SHL]       = OP_SHL;
+    g_handler_table[VMP_OP_SHR]       = OP_SHR;
+    g_handler_table[VMP_OP_ADD_IMM]   = OP_ADD_IMM;
+    g_handler_table[VMP_OP_SBOX]      = OP_SBOX;
+    g_handler_table[VMP_OP_GFMUL]     = OP_GFMUL;
+    g_handler_table[VMP_OP_XTIME]     = OP_XTIME;
+    g_handler_table[VMP_OP_MUL]       = OP_MUL;
+    g_handler_table[VMP_OP_MUL_IMM]   = OP_MUL_IMM;
+    g_handler_table[VMP_OP_CMP]       = OP_CMP;
+    g_handler_table[VMP_OP_JMP]       = OP_JMP;
+    g_handler_table[VMP_OP_JE]        = OP_JE;
+    g_handler_table[VMP_OP_JNE]       = OP_JNE;
+    g_handler_table[VMP_OP_JG]        = OP_JG;
+    g_handler_table[VMP_OP_JL]        = OP_JL;
+    g_handler_table[VMP_OP_CMP_IMM]   = OP_CMP_IMM;
+    g_handler_table[VMP_OP_JGE]       = OP_JGE;
+    g_handler_table[VMP_OP_CALL]      = OP_CALL;
+    g_handler_table[VMP_OP_RET]       = OP_RET;
+    g_handler_table[VMP_OP_HYPERCALL] = OP_HYPERCALL;
+    g_handler_table[VMP_OP_HALT]      = OP_HALT;
     g_handlers_shuffled = 1;
 }
 

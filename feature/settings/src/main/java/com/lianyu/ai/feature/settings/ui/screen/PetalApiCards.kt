@@ -104,6 +104,8 @@ private fun mapErrorCode(code: String): String = when (code) {
     "key_disabled" -> "密钥已禁用"
     "network_error" -> "网络不通"
     "timeout" -> "超时"
+    "cloud_service_disabled" -> "云端服务尚未开启"
+    "app_key_mismatch" -> "应用凭证校验失败"
     else -> "失败"
 }
 
@@ -779,7 +781,8 @@ fun PetalApiCard(
                             if (connectionResult.latencyMs > 0) "已连接 ${connectionResult.latencyMs}ms" else "已连接"
                         SettingsViewModel.ConnectionStatus.FAILED -> {
                             val err = connectionResult.errorCode
-                            if (err != null) mapErrorCode(err) else "失败"
+                            connectionResult.errorMessage?.takeIf { it.isNotBlank() }
+                                ?: if (err != null) mapErrorCode(err) else "失败"
                         }
                         SettingsViewModel.ConnectionStatus.TESTING -> "测试中"
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> "未测试"
@@ -1048,7 +1051,8 @@ fun PetalSavedApiCard(
                             if (connectionResult.latencyMs > 0) "已连接 ${connectionResult.latencyMs}ms" else "已连接"
                         SettingsViewModel.ConnectionStatus.FAILED -> {
                             val err = connectionResult.errorCode
-                            if (err != null) mapErrorCode(err) else "失败"
+                            connectionResult.errorMessage?.takeIf { it.isNotBlank() }
+                                ?: if (err != null) mapErrorCode(err) else "失败"
                         }
                         SettingsViewModel.ConnectionStatus.TESTING -> "测试中"
                         SettingsViewModel.ConnectionStatus.UNKNOWN -> "未测试"

@@ -167,7 +167,6 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             private set
 
         private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
         fun initBusiness(app: Application) {
             SaltStore.init(app)
             SecureLog.init(com.lianyu.ai.BuildConfig.DEBUG)
@@ -330,8 +329,12 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             ServiceRegistry.registerSingleton(BuiltinCloudAccessPolicy::class.java) {
                 object : BuiltinCloudAccessPolicy {
                     override fun isBuiltinCloudAccessAllowed(): Boolean {
-                        return SecurityState.snapshot().isTrustedForSensitiveOps &&
-                            NativeBridge.zeroTrustIsLocked() == 0
+                        // Refresh the client risk tier from the native threshold
+                        // model before deciding, so the risk gate is current.
+                        SecurityState.updateRiskLevel()
+                        val snap = SecurityState.snapshot()
+                        val locked = NativeBridge.zeroTrustIsLocked()
+                        return snap.isTrustedForSensitiveOps && locked == 0
                     }
 
                     override fun denialReason(): String? {

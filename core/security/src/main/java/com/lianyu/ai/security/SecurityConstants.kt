@@ -55,6 +55,8 @@ object SecurityConstants {
 
     /** @SecurityLevel HIGH — Native string-table encrypted */
     object ApiEndpoints {
+        // 生产指向: 与 core:common SuFlowApi.BASE_URL 保持一致
+        // suflow.cloud 经 nginx 443 转发至 SuFlowAPI 127.0.0.1:9876
         const val SUFLOW_BASE_URL      = "https://suflow.cloud"
         const val CHAT_COMPLETIONS     = "/chat/completions"
         const val MODELS_LIST          = "/models"

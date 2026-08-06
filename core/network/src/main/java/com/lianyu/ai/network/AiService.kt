@@ -846,7 +846,10 @@ class AiService(context: Context) : AiServiceProvider {
                 val response = executeAdaptive(config, request, lightClient)
                 val body = response.body?.string() ?: throw Exception("Empty response")
                 if (!response.isSuccessful) {
-                    throw Exception("HTTP ${response.code}")
+                    val errorMsg = if (body.trimStart().startsWith("{")) {
+                        runCatching { json.decodeFromString<ChatCompletionResponse>(body).error?.message }.getOrNull()
+                    } else null
+                    throw Exception(errorMsg ?: "HTTP ${response.code}: 服务器返回错误页面")
                 }
                 ensureNotHtml(body, response)
                 val parsed = json.decodeFromString<ChatCompletionResponse>(body)
@@ -1053,8 +1056,11 @@ class AiService(context: Context) : AiServiceProvider {
                 val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty response"))
 
                 if (!response.isSuccessful) {
-                    SecureLog.api("MODELS", "HTTP ${response.code}")
-                    return@withContext Result.failure(Exception("HTTP " + response.code))
+                    val errorMsg = if (body.trimStart().startsWith("{")) {
+                        runCatching { json.decodeFromString<ChatCompletionResponse>(body).error?.message }.getOrNull()
+                    } else null
+                    SecureLog.api("MODELS", "HTTP ${response.code}: ${errorMsg ?: "no error body"}")
+                    return@withContext Result.failure(Exception(errorMsg ?: "HTTP " + response.code))
                 }
 
                 // Some providers (e.g. Xunfei) don't support /models and return HTML
@@ -1296,6 +1302,11 @@ class AiService(context: Context) : AiServiceProvider {
             if (remoteKeys.isNotEmpty()) {
                 SecureLog.d("AiService", "Fetched ${remoteKeys.size} remote keys for PARTNER send path")
                 return 0 to remoteKeys
+            }
+            // 云端明确拒绝（如「云端服务尚未开启」/ 应用凭证校验失败）时，把具体原因抛给上层展示，
+            // 而不是笼统的「没有可用的 API Key」。
+            com.lianyu.ai.common.RemoteKeyProvider.lastCloudError?.let { cloudError ->
+                throw IllegalStateException(cloudError.friendlyMessage())
             }
             SecureLog.w("AiService", "RemoteKeyProvider returned no keys for PARTNER")
         }

@@ -24,6 +24,7 @@ import com.lianyu.ai.common.PerformanceTrace
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.backup.BackupScreen
+import com.lianyu.ai.feature.backup.BackupExportSelectScreen
 import com.lianyu.ai.feature.chat.ui.screen.ChatDetailScreen
 import com.lianyu.ai.feature.chat.ui.screen.ChatScreen
 import com.lianyu.ai.feature.chat.ui.screen.VoiceCallScreen
@@ -315,7 +316,13 @@ internal fun MainNavHost(
             QQBotSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(MainRoute.DataBackup.route) {
-            BackupScreen(onNavigateBack = { navController.popBackStack() })
+            BackupScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onExportSelect = { navController.navigate(MainRoute.BackupExportSelect.route) }
+            )
+        }
+        composable(MainRoute.BackupExportSelect.route) {
+            BackupExportSelectScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(MainRoute.Coffee.route) {
             CoffeeScreen(

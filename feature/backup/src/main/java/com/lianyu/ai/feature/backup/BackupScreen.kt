@@ -23,8 +23,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -33,16 +35,20 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.security.SecureRandom
 
 /**
  * 数据备份与恢复界面。
  *
- * 导出流程：点击导出 → 密码弹窗 → export(password) → 收集加密数据 → SAF 保存文件
+ * 导出流程：点击导出 → 进入联系人选择页 → 选择数据 → 设置密码 → 导出加密备份
  * 导入流程：点击导入 → SAF 选择文件 → 密码弹窗 → import(uri, password)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BackupScreen(onNavigateBack: () -> Unit) {
+fun BackupScreen(
+    onNavigateBack: () -> Unit,
+    onExportSelect: () -> Unit
+) {
     val context = LocalContext.current
     val colorScheme = AppTheme.colors
     val scope = rememberCoroutineScope()
@@ -96,13 +102,6 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
             pendingImportUri = it
             passwordMode = PasswordMode.IMPORT
             showPasswordDialog = true
-        }
-    }
-
-    // 收集导入请求 → 打开 SAF
-    LaunchedEffect(Unit) {
-        viewModel.importRequest.collect {
-            importFileLauncher.launch(arrayOf("application/octet-stream", "*/*"))
         }
     }
 
@@ -184,10 +183,7 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
                     buttonText = stringResource(R.string.backup_export_btn),
                     buttonColor = AppTheme.colors.success,
                     isLoading = uiState is BackupViewModel.UiState.Exporting,
-                    onClick = {
-                        passwordMode = PasswordMode.EXPORT
-                        showPasswordDialog = true
-                    }
+                    onClick = { onExportSelect() }
                 )
             }
 
@@ -205,7 +201,7 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
                     buttonText = stringResource(R.string.backup_import_btn),
                     buttonColor = AppTheme.colors.danger,
                     isLoading = uiState is BackupViewModel.UiState.Importing,
-                    onClick = { viewModel.requestImport() }
+                    onClick = { importFileLauncher.launch(arrayOf("application/octet-stream", "*/*")) }
                 )
             }
 
@@ -244,16 +240,50 @@ fun BackupScreen(onNavigateBack: () -> Unit) {
 
 enum class PasswordMode { EXPORT, IMPORT }
 
+/**
+ * 生成高强度随机密码（24 位，含大小写字母 + 数字 + 特殊符号）。
+ * 使用 SecureRandom，避免用户设置弱密码导致备份文件易被暴力破解。
+ */
+internal fun generateStrongPassword(length: Int = 24): String {
+    val upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    val lower = "abcdefghijkmnpqrstuvwxyz"
+    val digits = "23456789"
+    val symbols = "!@#$%^&*()-_=+"
+    val all = upper + lower + digits + symbols
+    val random = SecureRandom()
+    val sb = StringBuilder(length)
+    // 保证每类字符至少出现一次
+    sb.append(upper[random.nextInt(upper.length)])
+    sb.append(lower[random.nextInt(lower.length)])
+    sb.append(digits[random.nextInt(digits.length)])
+    sb.append(symbols[random.nextInt(symbols.length)])
+    repeat(length - 4) { sb.append(all[random.nextInt(all.length)]) }
+    // Fisher-Yates 洗牌，避免固定前缀模式
+    val chars = sb.toString().toCharArray()
+    for (i in chars.size - 1 downTo 1) {
+        val j = random.nextInt(i + 1)
+        val tmp = chars[i]
+        chars[i] = chars[j]
+        chars[j] = tmp
+    }
+    return String(chars)
+}
+
 @Composable
-private fun PasswordDialog(
+internal fun PasswordDialog(
     mode: PasswordMode,
     isLoading: Boolean,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var showPassword by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    // EXPORT 模式：自动生成 24 位强密码（每次打开弹窗生成一次）
+    val generated = remember(mode) {
+        if (mode == PasswordMode.EXPORT) generateStrongPassword() else ""
+    }
+    var password by remember(mode) { mutableStateOf(generated) }
+    var showPassword by remember { mutableStateOf(mode == PasswordMode.EXPORT) }
+    var copied by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
@@ -267,38 +297,72 @@ private fun PasswordDialog(
         text = {
             Column {
                 if (mode == PasswordMode.EXPORT) {
-                    Text("请设置6位以上密码保护备份文件", style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
+                    Text(
+                        "已自动生成高强度密码，点击复制保存。导入时需要输入此密码。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant
+                    )
                 } else {
-                    Text("请输入备份时设置的密码", style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
+                    Text(
+                        "请输入备份时设置的密码",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it; error = null },
+                    onValueChange = { password = it; error = null; copied = false },
                     label = { Text("密码") },
                     singleLine = true,
                     visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
-                        IconButton(onClick = { showPassword = !showPassword }) {
-                            Icon(
-                                if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (showPassword) "隐藏密码" else "显示密码"
-                            )
+                        Row {
+                            if (mode == PasswordMode.EXPORT) {
+                                // 重新生成
+                                IconButton(
+                                    onClick = {
+                                        password = generateStrongPassword()
+                                        copied = false
+                                    },
+                                    enabled = !isLoading
+                                ) {
+                                    Icon(Icons.Filled.Refresh, "重新生成密码")
+                                }
+                                // 一键复制
+                                IconButton(
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(password))
+                                        copied = true
+                                    },
+                                    enabled = !isLoading
+                                ) {
+                                    Icon(
+                                        if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                                        if (copied) "已复制" else "复制密码"
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { showPassword = !showPassword },
+                                enabled = !isLoading
+                            ) {
+                                Icon(
+                                    if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (showPassword) "隐藏密码" else "显示密码"
+                                )
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading
                 )
-                if (mode == PasswordMode.EXPORT) {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = confirmPassword,
-                        onValueChange = { confirmPassword = it; error = null },
-                        label = { Text("确认密码") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading
+                if (mode == PasswordMode.EXPORT && copied) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "已复制到剪贴板",
+                        color = AppTheme.colors.success,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
                 error?.let {
@@ -312,7 +376,6 @@ private fun PasswordDialog(
                 onClick = {
                     when {
                         password.length < 6 -> error = "密码至少6位"
-                        mode == PasswordMode.EXPORT && password != confirmPassword -> error = "两次密码不一致"
                         else -> onConfirm(password)
                     }
                 },
@@ -384,7 +447,7 @@ private fun BackupCard(
 // 工具函数
 // ============================================================================
 
-private fun dateString(): String {
+internal fun dateString(): String {
     val cal = java.util.Calendar.getInstance()
     return "${cal.get(java.util.Calendar.YEAR)}-${(cal.get(java.util.Calendar.MONTH) + 1).toString().padStart(2, '0')}-${cal.get(java.util.Calendar.DAY_OF_MONTH).toString().padStart(2, '0')}"
 }

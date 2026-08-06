@@ -70,6 +70,7 @@ sealed class MainRoute(val route: String) {
 
     // === 数据备份 ===
     object DataBackup : MainRoute("data_backup")
+    object BackupExportSelect : MainRoute("backup_export_select")
 
     // === 瑞幸咖啡 ===
     object Coffee : MainRoute("coffee")
@@ -127,6 +128,7 @@ sealed class MainRoute(val route: String) {
             route == "wechat_bind" -> WeChatBind
             route == "qqbot_settings" -> QQBotSettings
             route == "data_backup" -> DataBackup
+            route == "backup_export_select" -> BackupExportSelect
             route == "coffee" -> Coffee
             route == "coffee_settings" -> CoffeeSettings
             route == "coffee_token" -> CoffeeToken
