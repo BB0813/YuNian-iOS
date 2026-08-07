@@ -120,6 +120,17 @@ object LuckinCoffeeTools {
             {"type":"object","properties":{"deptId":{"type":"integer","description":"门店ID"},"productList":{"type":"array","items":{"type":"object","properties":{"amount":{"type":"integer"},"productId":{"type":"integer"},"skuCode":{"type":"string"}},"required":["amount","productId","skuCode"]}},"longitude":{"type":"number","description":"经度"},"latitude":{"type":"number","description":"纬度"},"remark":{"type":"string","description":"订单备注（可选）"}},"required":["deptId","productList","longitude","latitude"]}
         """.trimIndent()
 
+        override val requiresConfirmation: Boolean get() = true
+
+        override fun summarizeArguments(argumentsJson: String): String {
+            val obj = runCatching { json.parseToJsonElement(argumentsJson).jsonObject }.getOrNull()
+            val deptId = obj?.get("deptId")?.jsonPrimitive?.longOrNull
+            val count = obj?.get("productList")?.let { el ->
+                runCatching { (el as kotlinx.serialization.json.JsonArray).size }.getOrDefault(0)
+            } ?: 0
+            return "瑞幸下单 · 门店 $deptId · 商品 $count 件（将生成支付二维码）"
+        }
+
         override suspend fun execute(argumentsJson: String): String {
             if (!provider.isAvailable()) return """{"error":"瑞幸 Token 未配置"}"""
             val obj = json.parseToJsonElement(argumentsJson).jsonObject

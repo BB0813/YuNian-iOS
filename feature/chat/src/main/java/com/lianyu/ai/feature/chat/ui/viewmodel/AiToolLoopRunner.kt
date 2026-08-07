@@ -27,7 +27,15 @@ import kotlinx.serialization.json.put
  *
  * @param aiService AI 服务网关，用于 [sendMessage] 调用
  */
-class AiToolLoopRunner(private val aiService: AiServiceProvider) {
+/** 工具执行前的用户确认门控；返回 true 继续执行，false 表示用户拒绝。 */
+fun interface ConfirmationGate {
+    suspend fun requestConfirmation(toolName: String, argumentsJson: String): Boolean
+}
+
+class AiToolLoopRunner(
+    private val aiService: AiServiceProvider,
+    private val confirmationGate: ConfirmationGate? = null
+) {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -60,16 +68,23 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
 
             for (toolCall in activeToolCalls) {
                 val tool = ToolRegistry.get(toolCall.name)
-                val result = if (tool != null) {
-                    runCatching {
-                        withTimeoutOrNull(TimeoutBudgets.MCP_READ_MS) {
-                            tool.execute(argumentsForTool(toolCall.name, toolCall.arguments, companionInfo, groupId))
-                        } ?: "工具执行超时"
-                    }.getOrElse {
-                        "工具执行失败: ${it.message}"
+                val arguments = argumentsForTool(toolCall.name, toolCall.arguments, companionInfo, groupId)
+                val result = when {
+                    tool == null -> "工具 ${toolCall.name} 不存在"
+                    tool.requiresConfirmation && confirmationGate != null -> {
+                        val gate = confirmationGate
+                        val confirmed = runCatching {
+                            withTimeoutOrNull(TimeoutBudgets.AUTOMATION_CONFIRM_TIMEOUT_MS) {
+                                gate.requestConfirmation(toolCall.name, arguments)
+                            } ?: false
+                        }.getOrDefault(false)
+                        if (confirmed) {
+                            executeTool(tool, arguments)
+                        } else {
+                            "用户已取消操作"
+                        }
                     }
-                } else {
-                    "工具 ${toolCall.name} 不存在"
+                    else -> executeTool(tool, arguments)
                 }
                 ChatDebugLog.log("[ToolLoop] ${toolCall.name} executed, resultLen=${result.length}")
 
@@ -107,20 +122,29 @@ class AiToolLoopRunner(private val aiService: AiServiceProvider) {
         return currentResponse
     }
 
+    private suspend fun executeTool(tool: AiTool, arguments: String): String =
+        runCatching {
+            withTimeoutOrNull(TimeoutBudgets.MCP_READ_MS) {
+                tool.execute(arguments)
+            } ?: "工具执行超时"
+        }.getOrElse {
+            "工具执行失败: ${it.message}"
+        }
+
     private fun argumentsForTool(
         toolName: String,
         argumentsJson: String,
         companionInfo: AiCompanionInfo,
         groupId: Long?
     ): String {
-        if (toolName != "recall_memory") return argumentsJson
+        if (toolName != "recall_memory" && toolName != "automation_create") return argumentsJson
         val obj = runCatching { json.parseToJsonElement(argumentsJson).jsonObject }.getOrNull() ?: return argumentsJson
         return JsonObject(
             buildJsonObject {
                 obj.forEach { (key, value) ->
                     if (key != "companionId" && key != "groupId") put(key, value)
                 }
-                if (groupId != null) {
+                if (groupId != null && toolName == "recall_memory") {
                     put("groupId", groupId)
                 } else {
                     put("companionId", companionInfo.id)
