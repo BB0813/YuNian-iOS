@@ -8,6 +8,7 @@ import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
 import com.lianyu.ai.domain.ProactiveMessageSettings
+import com.lianyu.ai.network.bubble.BubbleJsonProtocol
 import java.util.Calendar
 
 /**
@@ -230,6 +231,12 @@ object AiPromptBuilder {
     internal fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
         // 先统一剥离思考标签/未闭合块/纯文本 CoT，避免后续兜底把思考写回气泡
         val thinkingStripped = ResponsePostProcessor.stripThinkingContent(response)
+        // 气泡连发协议保护：剥离思考后整段为合法气泡 JSON 时，persona 后处理会破坏协议格式
+        // （\{.*?\} 正则会把 {"text":"...","continue":true} 整个删掉 → 循环连发解析失败）。
+        // 气泡协议在 system prompt 中声明优先级最高，此处直接原样返回。
+        if (BubbleJsonProtocol.parseStrict(thinkingStripped) != null) {
+            return thinkingStripped
+        }
         var cleaned = thinkingStripped
             .replace(Regex("\\*.*?\\*"), "")
             .replace(Regex("<(?!\\[).*?>"), "")
