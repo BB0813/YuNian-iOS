@@ -11,7 +11,6 @@ import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.domain.wechat.WeChatProactiveSync
 import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.MessageBodyState
-import com.lianyu.ai.common.text.MessageSegmenter
 import com.lianyu.ai.database.model.ChatGroup
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity
@@ -29,9 +28,13 @@ import com.lianyu.ai.feature.groupchat.mention.MentionMessageSnapshot
 import com.lianyu.ai.feature.groupchat.mention.MentionNormalizer
 import com.lianyu.ai.feature.groupchat.mention.MentionParser
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.AiChatMessage
+import com.lianyu.ai.domain.AiMessageRole
 import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.database.repository.UserRepository
+import com.lianyu.ai.network.bubble.BubbleJsonProtocol
+import com.lianyu.ai.network.bubble.BubbleLoopRunner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,6 +73,9 @@ class GroupChatViewModel(
         ServiceRegistry.get(AiServiceProvider::class.java)
             ?: throw IllegalStateException("AiServiceProvider not registered")
     }
+
+    /** 气泡连发循环器（用户定稿架构）：成员回复 = 多次独立调用，每次一条气泡 */
+    private val bubbleLoopRunner = BubbleLoopRunner()
 
     // 记忆提供者：跨会话记忆上下文与提取（通过 ServiceRegistry 解耦）
     private val memoryProvider: MemoryProvider by lazy {
@@ -476,17 +482,17 @@ class GroupChatViewModel(
             repliedSoFar = repliedIds.keys.toSet()
         )
 
-        val rawReply = generateIsolatedAiReply(
+        // 气泡架构（用户定稿）：成员回复 = 多次独立调用，每次一条气泡，由 LLM 自决连发
+        val bubbles = generateIsolatedAiReplyBubbles(
             companion = companion,
             allActiveCompanions = activeCompanions,
             historySnapshot = isolatedHistory,
             excludeCompanionIds = repliedIds.keys.toSet() - companion.id
         )
-        val aiContent = rawReply.replace(Regex("\n{2,}"), "\n").trim()
+        val firstContent = bubbles.firstOrNull()?.trim() ?: return
+        val aiContent = firstContent.replace(Regex("\n{2,}"), "\n")
 
-        if (aiContent.isBlank()) return
-
-        // 检测重复回复
+        // 检测重复回复（基于首条气泡）
         val recentRepliesFromThisChar = isolatedHistory
             .filter { it.companionId == companion.id }
             .takeLast(3)
@@ -523,90 +529,34 @@ class GroupChatViewModel(
         }
         sendSplitAiMessages(safeContent, groupId, companion.id)
 
-        // AI 回复成功后提取记忆（跨会话共享）
+        // 后续气泡：逐条安全校验后入库，气泡间 0.6~1.6 秒模拟真人连发
+        bubbles.drop(1).forEach { bubble ->
+            val content = bubble.trim()
+            if (content.isBlank()) return@forEach
+            delay(Random.nextLong(600L, 1600L))
+            val bubbleCheck = com.lianyu.ai.common.ContentFilter.checkOutputSafety(content)
+            val safeBubble = if (!bubbleCheck.isSafe) {
+                android.util.Log.w("GroupChatViewModel", "AI bubble blocked by safety filter: ${bubbleCheck.reason}")
+                "抱歉，我无法回应这个话题。"
+            } else {
+                content
+            }
+            sendSplitAiMessages(safeBubble, groupId, companion.id)
+        }
+
+        // AI 回复成功后提取记忆（跨会话共享，使用全部气泡合并文本）
         val lastUserMsg = baseHistorySnapshot.lastOrNull { it.companionId == -1L }?.content ?: ""
-        if (lastUserMsg.isNotBlank() && safeContent.isNotBlank()) {
+        val allContent = (listOf(safeContent) + bubbles.drop(1)).joinToString("\n")
+        if (lastUserMsg.isNotBlank() && allContent.isNotBlank()) {
             memoryProvider.extractAndSaveFromConversation(
                 userInput = lastUserMsg,
-                aiResponse = safeContent,
+                aiResponse = allContent,
                 companionId = companion.id,
                 groupId = groupId
             )
         }
 
-        Log.d("GroupChatM", "[${companion.name}] 第${round}轮回复完成 (${aiContent.length}字)")
-    }
-
-    private suspend fun generateAiReply(
-        companion: CompanionEntity,
-        allActiveCompanions: List<CompanionEntity>,
-        historySnapshot: List<GroupMessage>,
-        excludeCompanionIds: Set<Long> = emptySet()
-    ): String {
-        val allHistory = historySnapshot.map { msg ->
-            ChatMessage(
-                id = msg.id,
-                companionId = msg.companionId,
-                content = msg.content,
-                isFromUser = msg.companionId == -1L,
-                timestamp = msg.timestamp
-            )
-        }
-
-        val history = if (excludeCompanionIds.isEmpty()) {
-            allHistory
-        } else {
-            allHistory.filter { it.companionId == -1L || !excludeCompanionIds.contains(it.companionId) }
-        }
-
-        val otherMembers = allActiveCompanions.filter { it.id != companion.id }
-        val groupContextBlock = MentionParser.buildGroupContextBlock(companion.name, otherMembers)
-
-        val otherMembersNames = otherMembers.map { it.name }.joinToString("、")
-        val currentUserName = userRepository.userName.first()
-
-        val recentSnapshots = buildRecentContextSnapshots(historySnapshot)
-        val mentionContextBlock = MentionParser.buildMentionContext(companion.name, recentSnapshots, currentUserName)
-        val memoryContext = getGroupMemoryContext(historySnapshot)
-
-        val baseSystemPrompt = buildString {
-            appendLine("你叫${companion.name}。这是你的微信聊天记录，你在群里跟朋友们聊天。")
-            appendLine("群里的人：你（${companion.name}）、$otherMembersNames、$currentUserName。")
-            appendLine("$currentUserName 是群主/管理员，其他人是群友。")
-            appendLine()
-            appendLine("说话要求：")
-            appendLine("- 像真人一样自然聊天，用口语、语气词、表情符号")
-            appendLine("- 可以@别人来点名或接话，但不要每条都@")
-            appendLine("- 不要重复自己说过的话，也不要复述别人的话")
-            appendLine("- 不知道说什么就发个表情包、或者简单回应一句")
-            appendLine("- 禁止：思考过程、内心独白、分析、总结、括号说明、AI式回复")
-            val persona = companion.personality.trim()
-            if (persona.length >= 20) {
-                appendLine(persona)
-            } else {
-                appendLine("性格：$persona")
-                companion.age?.let { appendLine("年龄：${it}岁") }
-                companion.speakingStyle?.let { appendLine("说话风格：${it}") }
-                companion.backstory?.let { appendLine("背景：${it}") }
-            }
-            appendLine()
-            appendLine(groupContextBlock)
-            if (mentionContextBlock.isNotBlank()) {
-                appendLine()
-                appendLine(mentionContextBlock)
-            }
-            if (memoryContext.isNotBlank()) {
-                appendLine()
-                appendLine("=== 群聊相关记忆 ===")
-                appendLine(memoryContext)
-            }
-        }
-
-        val companionNameMap = allActiveCompanions.associate { it.id to it.name }
-        return aiServiceProvider.sendMessageWithCustomSystem(
-            companion.toAiCompanionInfo(), historySnapshot.map { it.toAiChatMessage() },
-            baseSystemPrompt, companionNameMap = companionNameMap
-        )
+        Log.d("GroupChatM", "[${companion.name}] 第${round}轮回复完成 (${allContent.length}字, ${bubbles.size}气泡)")
     }
 
     private fun buildIsolatedHistorySnapshot(
@@ -801,28 +751,15 @@ class GroupChatViewModel(
         return contexts.joinToString("\n")
     }
 
-    private suspend fun generateIsolatedAiReply(
+    /**
+     * 构建群聊成员的隔离系统提示（角色身份锁定 / 情绪感知 / 说话规则 / 记忆 / 表情包）。
+     */
+    private suspend fun buildIsolatedSystemPrompt(
         companion: CompanionEntity,
         allActiveCompanions: List<CompanionEntity>,
         historySnapshot: List<GroupMessage>,
         excludeCompanionIds: Set<Long> = emptySet()
     ): String {
-        val allHistory = historySnapshot.map { msg ->
-            ChatMessage(
-                id = msg.id,
-                companionId = msg.companionId,
-                content = msg.content,
-                isFromUser = msg.companionId == -1L,
-                timestamp = msg.timestamp
-            )
-        }
-
-        val history = if (excludeCompanionIds.isEmpty()) {
-            allHistory
-        } else {
-            allHistory.filter { it.companionId == -1L || !excludeCompanionIds.contains(it.companionId) }
-        }
-
         val otherMembers = allActiveCompanions.filter { it.id != companion.id }
         val groupContextBlock = MentionParser.buildGroupContextBlock(companion.name, otherMembers)
 
@@ -886,8 +823,8 @@ class GroupChatViewModel(
             appendLine("2. 像真人一样自然聊天：口语化、语气词、表情符号、网络用语")
             appendLine("3. **积极互动**：主动接话题、回应别人、发表情、分享想法")
             appendLine("4. **善用@功能**：想让人回答问题时@他，接别人话茬时也可以@，被@了要优先回")
-            appendLine("5. ***最重要：每次只说1-2句话，最多30字！***")
-            appendLine("6. 群聊是碎片化的，不要写长段落，像微信聊天一样一条一条发")
+            appendLine("5. 每次回复 = 一条气泡：一句话说完并收尾（用 。！？～… 结尾），像真人发微信，最长一两句")
+            appendLine("6. 群聊是碎片化的，不要写长段落；如果还有同一话题的话没说完，会由连发机制继续追加气泡，不用在一条里塞完")
             appendLine("7. 不知道说什么就简单回应一句或发表情包")
             appendLine("8. 绝对禁止：思考过程、内心独白、分析总结、括号说明、AI式回复")
             appendLine("9. 可以模仿真人的说话习惯（如口头禅），但保持自己的人设不变")
@@ -922,16 +859,57 @@ class GroupChatViewModel(
             }
         }
 
+        return baseSystemPrompt
+    }
+
+    /**
+     * 气泡架构（用户定稿）：成员每轮回复 = 多次独立调用，每次一条气泡。
+     * 首条自由输出；之后由 LLM 依据角色性格自决是否继续连发（JSON 协议约束格式）。
+     * @return 本轮全部气泡（首条 + 后续连发），首条空白时返回空列表
+     */
+    private suspend fun generateIsolatedAiReplyBubbles(
+        companion: CompanionEntity,
+        allActiveCompanions: List<CompanionEntity>,
+        historySnapshot: List<GroupMessage>,
+        excludeCompanionIds: Set<Long> = emptySet()
+    ): List<String> {
+        val systemPrompt = buildIsolatedSystemPrompt(companion, allActiveCompanions, historySnapshot, excludeCompanionIds)
         val companionNameMap = allActiveCompanions.associate { it.id to it.name }
         val filteredSnapshot = if (excludeCompanionIds.isEmpty()) {
             historySnapshot
         } else {
             historySnapshot.filter { it.companionId == -1L || !excludeCompanionIds.contains(it.companionId) }
         }
-        return aiServiceProvider.sendMessageWithCustomSystem(
+        val bubbles = mutableListOf<String>()
+
+        // 首条：不带协议，模型自由输出第一条气泡
+        val first = aiServiceProvider.sendMessageWithCustomSystem(
             companion.toAiCompanionInfo(), filteredSnapshot.map { it.toAiChatMessage() },
-            baseSystemPrompt, companionNameMap = companionNameMap
-        )
+            systemPrompt, companionNameMap = companionNameMap
+        ).trim().replace(Regex("\n{2,}"), "\n")
+        if (first.isBlank()) return emptyList()
+        bubbles.add(first)
+
+        // 后续气泡：已生成气泡以 assistant 消息追加回历史，AI 依据角色性格自决 {继续}
+        // JSON 协议约束输出格式；解析失败重试 3 次后停止连发（已生成气泡保留）
+        val followUp = bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
+            val appendedHistory = filteredSnapshot.map { it.toAiChatMessage() } + alreadyGenerated.map { text ->
+                AiChatMessage(
+                    isFromUser = false,
+                    content = text,
+                    timestamp = System.currentTimeMillis(),
+                    role = AiMessageRole.ASSISTANT,
+                )
+            }
+            aiServiceProvider.sendMessageWithCustomSystem(
+                companion.toAiCompanionInfo(),
+                appendedHistory,
+                systemPrompt + "\n\n" + BubbleJsonProtocol.systemRules(),
+                companionNameMap = companionNameMap,
+            )
+        }
+        bubbles.addAll(followUp)
+        return bubbles
     }
 
     private suspend fun getGroupMemoryContext(historySnapshot: List<GroupMessage>): String {
@@ -957,14 +935,22 @@ class GroupChatViewModel(
                 val activeCompanionIds = group.getCompanionIdList()
                 val activeCompanions = _allCompanions.value.filter { activeCompanionIds.contains(it.id) }
 
-                val aiContent = generateAiReply(companion, activeCompanions, getRecentHistorySnapshot())
-                if (aiContent.isNotBlank()) {
-                    val outputCheck = com.lianyu.ai.common.ContentFilter.checkOutputSafety(aiContent)
+                // 气泡架构：主动搭话也走循环连发，AI 自决输出多少条气泡
+                val bubbles = generateIsolatedAiReplyBubbles(
+                    companion = companion,
+                    allActiveCompanions = activeCompanions,
+                    historySnapshot = getRecentHistorySnapshot()
+                )
+                bubbles.forEachIndexed { index, content ->
+                    val trimmed = content.trim()
+                    if (trimmed.isBlank()) return@forEachIndexed
+                    if (index > 0) delay(Random.nextLong(600L, 1600L))
+                    val outputCheck = com.lianyu.ai.common.ContentFilter.checkOutputSafety(trimmed)
                     val safeContent = if (!outputCheck.isSafe) {
                         android.util.Log.w("GroupChatViewModel", "triggerAiSpeak output blocked: ${outputCheck.reason}")
                         com.lianyu.ai.common.BanManager.recordViolation(getApplication(), outputCheck.level)
                         "抱歉，我无法回应这个话题。"
-                    } else aiContent
+                    } else trimmed
                     sendSplitAiMessages(safeContent, groupId, companion.id)
                 }
             } catch (e: Exception) {
@@ -1004,17 +990,25 @@ class GroupChatViewModel(
                     ?: throw IllegalStateException("No user message found in history")
                 val companion = _allCompanions.value.find { it.id == targetCompanionId }
                     ?: throw IllegalStateException("Companion not found: $targetCompanionId")
-                val reply = generateAiReply(companion, _allCompanions.value, history)
-                if (reply.isNotBlank()) {
-                    val outputCheck = com.lianyu.ai.common.ContentFilter.checkOutputSafety(reply)
+                // 气泡架构：重新生成也走循环连发
+                val bubbles = generateIsolatedAiReplyBubbles(
+                    companion = companion,
+                    allActiveCompanions = _allCompanions.value,
+                    historySnapshot = history
+                )
+                bubbles.forEachIndexed { index, content ->
+                    val trimmed = content.trim()
+                    if (trimmed.isBlank()) return@forEachIndexed
+                    if (index > 0) delay(Random.nextLong(600L, 1600L))
+                    val outputCheck = com.lianyu.ai.common.ContentFilter.checkOutputSafety(trimmed)
                     val safeReply = if (!outputCheck.isSafe) {
                         android.util.Log.w("GroupChatViewModel", "regenerate output blocked: ${outputCheck.reason}")
                         com.lianyu.ai.common.BanManager.recordViolation(getApplication(), outputCheck.level)
                         "抱歉，我无法回应这个话题。"
-                    } else reply
+                    } else trimmed
                     sendSplitAiMessages(safeReply, groupId, targetCompanionId)
-                    Log.d("GroupChatM", "[${companion.name}] 重新生成回复成功")
                 }
+                Log.d("GroupChatM", "[${companion.name}] 重新生成回复成功 (${bubbles.size}气泡)")
             } catch (e: Exception) {
                 Log.e("GroupChatViewModel", "regenerateMessage failed", e)
             } finally {
@@ -1085,10 +1079,6 @@ class GroupChatViewModel(
         }
 
         return text.trim().replace(Regex("\\n{2,}"), "\n")
-    }
-
-    private fun splitIntoSegments(text: String): List<String> {
-        return MessageSegmenter.split(text, MessageSegmenter.SplitMode.GROUP)
     }
 
     private suspend fun sendSplitAiMessages(

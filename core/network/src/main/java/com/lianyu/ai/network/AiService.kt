@@ -477,7 +477,7 @@ class AiService(context: Context) : AiServiceProvider {
     /**
      * 发送消息（非流式，兼容旧接口）
      */
-    suspend fun sendMessage(companion: CompanionModel?, history: List<ChatMessage>, stickerProbability: Int = 30, ntpTimeEnabled: Boolean = false): AiResponse {
+    suspend fun sendMessage(companion: CompanionModel?, history: List<ChatMessage>, stickerProbability: Int = 30, ntpTimeEnabled: Boolean = false, extraSystemRules: String = ""): AiResponse {
         // 运营错误统一 [TOAST] 前缀：上层只 Toast，禁止当对话内容入库
         if (companion == null) return AiResponse("[TOAST]系统正在加载伴侣信息，请稍后再试")
 
@@ -526,7 +526,9 @@ class AiService(context: Context) : AiServiceProvider {
                     phase = phase,
                     allowEnvAnchor = allowEnvAnchor,
                 )
-                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
+                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion).let {
+                    if (extraSystemRules.isNotBlank()) "$it\n\n$extraSystemRules" else it
+                }
                 val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
                 val messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig)
 
@@ -2261,11 +2263,12 @@ class AiService(context: Context) : AiServiceProvider {
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
         stickerProbability: Int,
-        ntpTimeEnabled: Boolean
+        ntpTimeEnabled: Boolean,
+        extraSystemRules: String
     ): AiResponse {
         val entity = companion.toCompanionEntity()
         val messages = sanitizeDomainHistory(history)
-        return sendMessage(entity, messages, stickerProbability, ntpTimeEnabled)
+        return sendMessage(entity, messages, stickerProbability, ntpTimeEnabled, extraSystemRules)
     }
 
     override suspend fun sendMessage(
@@ -2273,14 +2276,15 @@ class AiService(context: Context) : AiServiceProvider {
         history: List<AiChatMessage>,
         stickerProbability: Int,
         ntpTimeEnabled: Boolean,
-        tools: List<AiTool>?
+        tools: List<AiTool>?,
+        extraSystemRules: String
     ): AiResponse {
         if (tools.isNullOrEmpty()) {
-            return sendMessage(companion, history, stickerProbability, ntpTimeEnabled)
+            return sendMessage(companion, history, stickerProbability, ntpTimeEnabled, extraSystemRules)
         }
         val entity = companion.toCompanionEntity()
         val messages = sanitizeDomainHistory(history)
-        return sendMessageWithTools(entity, messages, stickerProbability, ntpTimeEnabled, tools)
+        return sendMessageWithTools(entity, messages, stickerProbability, ntpTimeEnabled, tools, extraSystemRules)
     }
 
     /**
@@ -2461,7 +2465,8 @@ class AiService(context: Context) : AiServiceProvider {
         history: List<ChatMessage>,
         stickerProbability: Int,
         ntpTimeEnabled: Boolean,
-        tools: List<AiTool>
+        tools: List<AiTool>,
+        extraSystemRules: String = ""
     ): AiResponse {
         if (companion == null) return AiResponse("[TOAST]系统正在加载伴侣信息，请稍后再试")
 
@@ -2500,7 +2505,9 @@ class AiService(context: Context) : AiServiceProvider {
                     phase = phase,
                     allowEnvAnchor = allowEnvAnchor,
                 )
-                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion)
+                val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, companion).let {
+                    if (extraSystemRules.isNotBlank()) "$it\n\n$extraSystemRules" else it
+                }
                 val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
                 val messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig)
 

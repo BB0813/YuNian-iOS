@@ -4,7 +4,7 @@ package com.lianyu.ai.network.tts
  * TTS 专用文本清洗器（纯函数，无状态）。
  *
  * 参考反编译代码 [H:\aiyu\chat_tts] 的 `CleanerPatterns.java` + `MainActivityKt.cleanMessageForDisplay`，
- * 精简为 TTS 朗读前的清洗规则。**不负责分段**——分段由 [com.lianyu.ai.common.text.MessageSegmenter] 统一处理，
+ * 精简为 TTS 朗读前的清洗规则。**不负责分段**——气泡架构下每条回复即一条气泡，
  * 此处仅移除不应当被朗读出来的杂质（贴纸标签、Markdown 标记、指令标签、括号内心戏）。
  *
  * 清洗顺序（与参考一致）：

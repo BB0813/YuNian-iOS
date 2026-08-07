@@ -326,6 +326,8 @@ class AiResponseFinalizer(
      */
     private suspend fun synthesizeVoiceBarOrNull(text: String): com.lianyu.ai.feature.chat.voice.VoiceBarAudio? {
         if (text.isBlank() || text == "\u200B") return null
+        // [FIX] 跳过纯省略号/纯语气词段（如 "..."、"唔"），不浪费 TTS 合成
+        if (MessageSegmenter.isNoiseText(text)) return null
         return runCatching { chatTtsController.synthesizeOnly(text) }
             .onFailure { SecureLog.w("ChatViewModel", "Voice bar synth failed: ${it.message}") }
             .getOrNull()
@@ -430,8 +432,12 @@ class AiResponseFinalizer(
         return interactiveMarkers.any { text.contains(it) }
     }
 
+    /**
+     * 气泡架构（用户定稿）：AI 每次回复 = 一条气泡，不再由客户端启发式分句。
+     * 分段入口退化为「整条一条」；连发由上层 BubbleLoopRunner 多次调用产出。
+     */
     private fun splitIntoSegments(text: String): List<String> {
-        return MessageSegmenter.split(text, MessageSegmenter.SplitMode.SIMPLE)
+        return listOf(text)
     }
 
     /**

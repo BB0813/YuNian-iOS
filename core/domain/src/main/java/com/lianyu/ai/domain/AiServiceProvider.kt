@@ -69,13 +69,16 @@ interface AiServiceProvider {
      * @param companion 伴侣角色信息
      * @param history 聊天历史消息
      * @param stickerProbability 表情包发送概率 (0-100)
+     * @param extraSystemRules 追加到系统提示末尾的附加指令（如气泡连发 JSON 协议）；
+     *       默认空字符串表示不追加
      * @return AI 响应
      */
     suspend fun sendMessage(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
         stickerProbability: Int = 0,
-        ntpTimeEnabled: Boolean = false
+        ntpTimeEnabled: Boolean = false,
+        extraSystemRules: String = ""
     ): AiResponse
 
     /**
@@ -85,13 +88,15 @@ interface AiServiceProvider {
      * 调用方负责执行 tool_calls 并重新调用本方法（传入追加了 tool 结果的 history）。
      *
      * @param tools 可被 AI 调用的工具列表，null 或空表示不支持工具调用
+     * @param extraSystemRules 追加到系统提示末尾的附加指令；默认空字符串表示不追加
      */
     suspend fun sendMessage(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
         stickerProbability: Int,
         ntpTimeEnabled: Boolean,
-        tools: List<AiTool>?
+        tools: List<AiTool>?,
+        extraSystemRules: String = ""
     ): AiResponse
 
     /**

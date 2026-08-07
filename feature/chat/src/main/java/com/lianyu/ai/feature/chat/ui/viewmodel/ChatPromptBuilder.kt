@@ -76,7 +76,7 @@ object ChatPromptBuilder {
             appendLine("A. 长度服从动作数：闲聊单动作通常一句完整口语即可；解释/答问可稍长。不要为凑字再塞第二个动作，也不要为压字数写残句。")
             appendLine("B. 每句话用标点结尾（。！？～…），表意收住。")
             appendLine("C. 不要重复同样的话。")
-            appendLine("D. 分块：像真人微信，同一意图可发 1~3 条短气泡，气泡间用空行分隔；分块是排版不是多塞动作。短肯定（嗯、好、行）单独成句。不要 markdown。")
+            appendLine("D. 每条回复 = 一条气泡：把同一动作用一句完整口语说完并收尾；不要用空行/换行分块（连发由系统连发机制处理）。不要 markdown。")
             if (innerThoughtEnabled) {
                 appendLine("E. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。")
             } else {

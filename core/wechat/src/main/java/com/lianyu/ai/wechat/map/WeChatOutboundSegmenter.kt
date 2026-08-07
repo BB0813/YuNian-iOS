@@ -1,6 +1,5 @@
 package com.lianyu.ai.wechat.map
 
-import com.lianyu.ai.common.text.MessageSegmenter
 import com.lianyu.ai.domain.wechat.WeChatContentKind
 import com.lianyu.ai.domain.wechat.WeChatOutboundRequest
 import com.lianyu.ai.domain.wechat.WeChatOutboundSegment
@@ -10,16 +9,16 @@ import java.util.UUID
 /**
  * 出站分段契约（S0）。
  *
- * 直接委托 App 使用的 [MessageSegmenter] SIMPLE 模式，确保两个通道规则一致。
+ * 气泡架构（用户定稿）：AI 每条回复 = 一条气泡，不做客户端语义分句，整条作为单个出站分段。
  */
 object WeChatOutboundSegmenter {
 
     /**
-     * 与 App 的 [MessageSegmenter.SplitMode.SIMPLE] 一致：
-     * 空串 trim 后仍返回单元素 `listOf("")`。
+     * 整条文本作为一个分段：
+     * 空串 trim 后仍返回单元素 `listOf("")`，与旧契约行为一致。
      */
     fun splitTextSimple(text: String): List<String> =
-        MessageSegmenter.split(text, MessageSegmenter.SplitMode.SIMPLE)
+        if (text.isBlank()) listOf("") else listOf(text)
 
     /**
      * 将出站请求展开为 Outbox 分段。
