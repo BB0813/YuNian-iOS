@@ -3,7 +3,8 @@ package com.lianyu.ai.feature.chat.ui.viewmodel
 internal object ChatToolIntent {
     private val keywords = listOf(
         "记忆", "记得", "回忆", "想起", "以前", "之前", "偏好", "喜欢什么",
-        "咖啡", "瑞幸", "luckin", "拿铁", "美式", "生椰", "门店", "下单", "订单", "取餐", "取消订单", "支付", "价格"
+        "咖啡", "瑞幸", "luckin", "拿铁", "美式", "生椰", "门店", "下单", "订单", "取餐", "取消订单", "支付", "价格",
+        "提醒", "定时", "几点", "每天", "每周", "明天", "明早", "闹钟", "待办", "别忘了", "自动化"
     )
 
     fun shouldEnableTools(content: String, latestUserText: String?): Boolean {
