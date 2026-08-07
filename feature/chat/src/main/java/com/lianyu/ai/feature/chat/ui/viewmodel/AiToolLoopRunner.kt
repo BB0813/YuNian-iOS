@@ -8,6 +8,7 @@ import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.AiTool
 import com.lianyu.ai.domain.ToolRegistry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -21,9 +22,8 @@ import kotlinx.serialization.json.put
  * 流程：AI 返回 tool_calls → 执行本地工具 → 把结果追加到 history → 重新调用 AI。
  * 最多 [maxRounds] 轮，防死循环。最后一轮若仍为 tool_calls，转为提示文本。
  *
- * 安全约束：createOrder 等涉及支付的工具需用户确认——当前实现直接执行
- * （createOrder 工具的 description 已告知 AI 先确认，且 AI 系统提示词注入了说明）。
- * 后续可在此拦截特定工具名做用户确认交互。
+ * 安全约束：createOrder 等涉及支付的工具需用户确认——已实现确认门控机制，
+ * 需要确认的工具执行前经 [ConfirmationGate] 等待用户确认，超时或拒绝则返回"用户已取消操作"。
  *
  * @param aiService AI 服务网关，用于 [sendMessage] 调用
  */
@@ -73,11 +73,15 @@ class AiToolLoopRunner(
                     tool == null -> "工具 ${toolCall.name} 不存在"
                     tool.requiresConfirmation && confirmationGate != null -> {
                         val gate = confirmationGate
-                        val confirmed = runCatching {
+                        val confirmed = try {
                             withTimeoutOrNull(TimeoutBudgets.AUTOMATION_CONFIRM_TIMEOUT_MS) {
                                 gate.requestConfirmation(toolCall.name, arguments)
                             } ?: false
-                        }.getOrDefault(false)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            false
+                        }
                         if (confirmed) {
                             executeTool(tool, arguments)
                         } else {
@@ -86,7 +90,7 @@ class AiToolLoopRunner(
                     }
                     else -> executeTool(tool, arguments)
                 }
-                ChatDebugLog.log("[ToolLoop] ${toolCall.name} executed, resultLen=${result.length}")
+                ChatDebugLog.log("[ToolLoop] ${toolCall.name} processed, resultLen=${result.length}")
 
                 // 架构：工具结果必须标记 TOOL（序列化为 user 侧），禁止写成 assistant 导致自言自语
                 mutableHistory.add(
@@ -123,12 +127,14 @@ class AiToolLoopRunner(
     }
 
     private suspend fun executeTool(tool: AiTool, arguments: String): String =
-        runCatching {
+        try {
             withTimeoutOrNull(TimeoutBudgets.MCP_READ_MS) {
                 tool.execute(arguments)
             } ?: "工具执行超时"
-        }.getOrElse {
-            "工具执行失败: ${it.message}"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "工具执行失败: ${e.message}"
         }
 
     private fun argumentsForTool(
