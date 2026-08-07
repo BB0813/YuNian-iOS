@@ -109,6 +109,10 @@ class ChatViewModel(
     val chatTtsConfig: StateFlow<ChatTtsConfig> = generation.chatTtsConfig
     val ttsState: StateFlow<ChatTtsState> = generation.ttsState
 
+    val confirmationRequest: StateFlow<ToolConfirmationRequest?> = generation.confirmationRequest
+
+    fun respondToConfirmation(id: Long, confirmed: Boolean) = generation.respondToConfirmation(id, confirmed)
+
     private var avatarUnsubscribe: (() -> Unit)? = null
     private var nicknameUnsubscribe: (() -> Unit)? = null
 

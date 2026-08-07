@@ -170,6 +170,7 @@ fun ChatScreen(
     val viewModel: ChatViewModel = viewModel(
         factory = ChatViewModelFactory(context.applicationContext as Application, companionId)
     )
+    val confirmationRequest by viewModel.confirmationRequest.collectAsStateWithLifecycle()
     val currentOnIntent by rememberUpdatedState(viewModel::handleIntent)
     val onIntent: (ChatIntent) -> Unit = remember { { intent -> currentOnIntent(intent) } }
     var quoteReply by remember { mutableStateOf<QuoteReply?>(null) }
@@ -1029,6 +1030,34 @@ fun ChatScreen(
                 onDismiss = { showImagePicker = false }
             )
         }
+    }
+
+    confirmationRequest?.let { request ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.respondToConfirmation(request.id, confirmed = false) },
+            title = {
+                androidx.compose.material3.Text(
+                    when (request.toolName) {
+                        "automation_create" -> "AI 请求创建自动化"
+                        "luckin_create_order" -> "AI 请求确认下单"
+                        else -> "AI 请求执行操作"
+                    }
+                )
+            },
+            text = {
+                androidx.compose.material3.Text(request.summary)
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { viewModel.respondToConfirmation(request.id, confirmed = true) }
+                ) { androidx.compose.material3.Text("确认") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { viewModel.respondToConfirmation(request.id, confirmed = false) }
+                ) { androidx.compose.material3.Text("取消") }
+            }
+        )
     }
 }
 
