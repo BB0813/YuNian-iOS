@@ -444,4 +444,23 @@ object MessageSegmenter {
 
         return result.ifEmpty { listOf(text) }
     }
+
+    /**
+     * 判断文本是否为「纯噪声」——仅含省略号/语气词/标点/空白，无实质内容。
+     * 用于 TTS 等场景跳过无意义片段（不浪费合成）。
+     */
+    fun isNoiseText(text: String): Boolean {
+        if (text.isBlank()) return true
+        val noiseOnly = Regex("^[.…·~～\u2026\u4E00-\u9FFF\u3000\\s!！?？、，,。]+$")
+        if (!noiseOnly.matches(text)) return false
+        // 语义语气词集合：只有这些短词组成的文本才算噪声（避免误杀正常中文句子）
+        val interjection = setOf(
+            "嗯", "嗯嗯", "嗯哼", "唔", "啊", "哦", "噢", "喔", "哈", "哈哈", "呵呵", "嘿", "唉",
+            "呀", "嘛", "呢", "吧", "啦", "咯", "呗", "哟", "哇", "诶", "哎", "啧", "嗯呐",
+        )
+        val core = text.filter { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }
+        if (core.isEmpty()) return true
+        // 纯语气词组成（长度 <= 4 且每个字都在语气词集合中）
+        return core.length <= 4 && core.all { it.toString() in interjection }
+    }
 }
