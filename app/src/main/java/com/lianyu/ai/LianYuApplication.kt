@@ -46,6 +46,7 @@ import com.lianyu.ai.wechat.WeChatDialoguePortImpl
 import com.lianyu.ai.wechat.WeChatIdentityMapPortImpl
 import com.lianyu.ai.wechat.WeChatOutboundPortImpl
 
+import com.lianyu.ai.feature.automation.data.AutomationStore
 import com.lianyu.ai.feature.notification.NotificationHelper
 import com.lianyu.ai.push.PushManager
 import com.lianyu.ai.feature.wechat.service.WeChatChannelKeeper
@@ -456,6 +457,23 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             com.lianyu.ai.feature.memory.MemoryRecallTools.registerAll(
                 ServiceRegistry.getOrThrow(MemoryProvider::class.java)
             )
+            // ── 自动化工具（AI 对话可创建/取消定时自动化） ──
+            ServiceRegistry.registerSingleton(AutomationStore::class.java) {
+                com.lianyu.ai.feature.automation.data.AutomationStore(app)
+            }
+            com.lianyu.ai.feature.automation.AutomationTools.registerAll(
+                ServiceRegistry.getOrThrow(AutomationStore::class.java),
+                app
+            )
+            // 启动对账：重建全部启用自动化的 WorkManager 调度
+            runCatching {
+                kotlinx.coroutines.runBlocking {
+                    val automations = ServiceRegistry.getOrThrow(AutomationStore::class.java).list()
+                    com.lianyu.ai.feature.automation.AutomationScheduler.rescheduleAll(app, automations)
+                }
+            }.onFailure {
+                SecureLog.e("LianYuApplication", "Automation rescheduleAll failed", it)
+            }
             // markInitialized 延后到 seed + HomeListCache.warm 之后，
             // 保证主界面首帧即可拿到联系人/会话快照。
         }
