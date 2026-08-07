@@ -24,16 +24,6 @@ class AutomationFireWorker(
             ?: return@withContext Result.success()
         if (!automation.enabled) return@withContext Result.success()
 
-        // 循环类先算下次触发并重排（ONCE 不重排）
-        if (automation.type != com.lianyu.ai.feature.automation.data.AutomationType.ONCE) {
-            val next = AutomationSchedulePolicy.nextTriggerAtMillis(automation, System.currentTimeMillis())
-            if (next != null) {
-                val updated = automation.copy(triggerAtMillis = next)
-                store.upsert(updated)
-                AutomationScheduler.reschedule(context, updated)
-            }
-        }
-
         // 系统通知（title 为用户自己的任务名）
         AutomationNotifier.show(context, automation.title, automation.message, automation.companionId)
 
@@ -53,6 +43,20 @@ class AutomationFireWorker(
             }.onFailure { SecureLog.e("AutomationFireWorker", "write chat message failed", it) }
         } else {
             SecureLog.w("AutomationFireWorker", "Automation message blocked by safety: ${outputSafety.reason}")
+        }
+
+        // 循环类在触发动作之后才重排（ONCE 不重排）。若在触发前重排，
+        // enqueueUniqueWork(REPLACE) 会取消同名运行中的 work，与当前 worker 自身
+        // 形成自取消竞态，可能把本次触发标记为 CANCELLED 而丢失消息腿。
+        if (automation.type != com.lianyu.ai.feature.automation.data.AutomationType.ONCE) {
+            runCatching {
+                val next = AutomationSchedulePolicy.nextTriggerAtMillis(automation, System.currentTimeMillis())
+                if (next != null) {
+                    val updated = automation.copy(triggerAtMillis = next)
+                    store.upsert(updated)
+                    AutomationScheduler.reschedule(context, updated)
+                }
+            }.onFailure { SecureLog.e("AutomationFireWorker", "reschedule automation failed", it) }
         }
 
         Result.success()

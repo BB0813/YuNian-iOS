@@ -12,7 +12,9 @@ import androidx.core.app.NotificationCompat
  */
 object AutomationNotifier {
     private const val CHANNEL_ID = "automation_channel"
-    private const val NOTIFICATION_ID_BASE = 5000
+    // 避开 feature:notification/NotificationHelper 的 companionId * 1000 + timeInt
+    // 通知 ID 区间（0 ~ N*1000+999）。同一伴侣多个自动化仍互相替换，可接受。
+    private const val NOTIFICATION_ID_BASE = 2_000_000
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
