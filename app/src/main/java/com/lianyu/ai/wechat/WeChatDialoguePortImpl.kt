@@ -4,7 +4,6 @@ import android.content.Context
 import com.lianyu.ai.common.BanManager
 import com.lianyu.ai.common.ContentFilter
 import com.lianyu.ai.common.SecureLog
-import com.lianyu.ai.common.text.MessageSegmenter
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
@@ -162,19 +161,17 @@ class WeChatDialoguePortImpl(
         }
 
         val contentToStore = aiResponseText.ifBlank { "API返回空内容" }
-        val assistantMessageIds = MessageSegmenter.split(
-            contentToStore,
-            MessageSegmenter.SplitMode.SIMPLE,
-        ).map { segment ->
+        // 气泡架构（用户定稿）：AI 回复整条为一条气泡，不做客户端语义分句
+        val assistantMessageIds = listOf(
             messageWriter.enqueueChat(
                 ChatMessage(
                     companionId = companionId,
-                    content = segment,
+                    content = contentToStore,
                     isFromUser = false,
                     timestamp = System.currentTimeMillis(),
                 )
             )
-        }.filter { it > 0L }
+        ).filter { it > 0L }
         val aiMessageId = assistantMessageIds.lastOrNull() ?: -1L
 
         if (aiMessageId > 0) {
@@ -254,19 +251,17 @@ class WeChatDialoguePortImpl(
             }
         }
 
-        val assistantMessageIds = MessageSegmenter.split(
-            responseText,
-            MessageSegmenter.SplitMode.SIMPLE,
-        ).map { segment ->
+        // 气泡架构（用户定稿）：视觉回复同样整条为一条气泡
+        val assistantMessageIds = listOf(
             messageWriter.enqueueChat(
                 ChatMessage(
                     companionId = companionId,
-                    content = segment,
+                    content = responseText,
                     isFromUser = false,
                     timestamp = System.currentTimeMillis(),
                 )
             )
-        }.filter { it > 0L }
+        ).filter { it > 0L }
         val aiMessageId = assistantMessageIds.lastOrNull() ?: -1L
 
         runCatching {

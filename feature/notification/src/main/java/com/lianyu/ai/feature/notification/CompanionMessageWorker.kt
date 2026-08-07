@@ -162,8 +162,8 @@ class CompanionMessageWorker(
                 return@withContext Result.success()
             }
 
-            // ── 分段发送：按自然句号/感叹号/问号/换行拆分，逐条入库+广播 ──
-            val segments = splitIntoSegments(messageContent)
+            // 气泡架构（用户定稿）：AI 每条回复 = 一条气泡，不做客户端语义分句，整条入库+广播
+            val segments = listOf(messageContent.trim()).filter { it.isNotBlank() }
             var totalSegmentsSent = 0
 
             for ((index, segment) in segments.withIndex()) {
@@ -204,40 +204,6 @@ class CompanionMessageWorker(
         } catch (_: Exception) {
             Result.retry()
         }
-    }
-
-    /**
-     * 将长文本拆分为自然短段落。
-     * 按中文句号/感叹号/问号/换行分割，每段不超过60字。
-     */
-    private fun splitIntoSegments(text: String): List<String> {
-        val trimmed = text.trim()
-        if (trimmed.length <= 60) return listOf(trimmed)
-
-        // 按句子边界分割
-        val sentenceParts = trimmed.split(Regex("(?<=[。！？!?\n])"))
-        val segments = mutableListOf<String>()
-        var currentSegment = StringBuilder()
-
-        for (part in sentenceParts) {
-            val candidate = if (currentSegment.isEmpty()) part else "$currentSegment$part"
-            if (candidate.length <= 60) {
-                currentSegment = StringBuilder(candidate)
-            } else {
-                if (currentSegment.isNotEmpty()) {
-                    segments.add(currentSegment.toString().trim())
-                }
-                currentSegment = StringBuilder(part)
-            }
-        }
-        if (currentSegment.isNotEmpty()) {
-            segments.add(currentSegment.toString().trim())
-        }
-
-        // 兜底：如果某段仍然过长，强制按字数截断
-        return segments.flatMap { seg ->
-            if (seg.length <= 60) listOf(seg) else seg.chunked(60)
-        }.filter { it.isNotBlank() }
     }
 
     private fun broadcastProactiveWeChatMessage(companionId: Long, messageId: Long) {

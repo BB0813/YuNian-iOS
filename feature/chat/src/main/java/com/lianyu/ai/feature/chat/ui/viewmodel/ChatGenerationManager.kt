@@ -39,6 +39,8 @@ import com.lianyu.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
 import com.lianyu.ai.feature.chat.voice.ChatTtsController
 import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.network.ChatTypingState
+import com.lianyu.ai.network.bubble.BubbleJsonProtocol
+import com.lianyu.ai.network.bubble.BubbleLoopRunner
 import com.lianyu.ai.network.stream.NonStreamingAssistantStreamAdapter
 import com.lianyu.ai.network.tts.ChatTtsConfig
 import com.lianyu.ai.network.tts.ChatTtsMode
@@ -170,6 +172,11 @@ class ChatGenerationManager private constructor(
 
     private val toolLoopRunner = AiToolLoopRunner(aiService)
     private val streamApplier = PendingTurnStreamApplier()
+    /**
+     * 气泡连发循环器（用户定稿架构）：
+     * 首条气泡由完整生成流程产出，之后由 LLM 自决是否继续连发（每次调用一条气泡）。
+     */
+    private val bubbleLoopRunner = BubbleLoopRunner()
     private val responseFinalizer by lazy { AiResponseFinalizer(
         companionId = companionId,
         chatRepository = chatRepository,
@@ -740,20 +747,68 @@ class ChatGenerationManager private constructor(
 
             val reasoningForCommit = streamResult.reasoningText
 
-            // 1) 分段投递期间保持 loading/typing（模拟真人连发）
-            // 2) 最后一条消息可见后立刻 exitLoading，避免记忆/追问把「对方正在输入」拖住
-            val delivered = responseFinalizer.deliverResponse(
+            // 首条气泡：保持完整能力（流式/工具/视觉/本地模型）生成，整条作为第一条气泡落地
+            val firstDelivered = responseFinalizer.deliverResponse(
                 aiContent = aiContent,
                 reasoning = reasoningForCommit,
-                userContentForMemory = userContentForMemory,
+                userContentForMemory = null,
                 logMessage = if (batchMessageCount > 1) "AI batch response received (${batchMessageCount} msgs)" else "AI response received",
                 pendingTurn = pendingTurn,
                 reasoningStartedAtMs = requestStartedAt,
             )
+
+            // 后续气泡：循环调用 LLM，每次调用输出一条气泡（用户定稿架构）
+            // - 本地模型/视觉路径不循环（本地无 JSON 能力；视觉后续无图上下文）
+            // - 首条之后的每次调用：已生成气泡以 assistant 消息追加回历史，AI 依据角色性格自决 {继续}
+            // - JSON 协议约束输出格式，解析失败最多重试 3 次，仍失败则停止连发（已生成气泡保留）
+            val enableBubbleChain = imagePath == null && !isLocalModelEnabled()
+            val followUpBubbles = if (enableBubbleChain) {
+                bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
+                    val appendedHistory = modelHistory + alreadyGenerated.map { text ->
+                        AiChatMessage(
+                            isFromUser = false,
+                            content = text,
+                            timestamp = System.currentTimeMillis(),
+                            role = com.lianyu.ai.domain.AiMessageRole.ASSISTANT,
+                        )
+                    }
+                    val resp = aiService.sendMessage(
+                        companion = companion.toAiCompanionInfo(),
+                        history = appendedHistory,
+                        stickerProbability = stickerProbability,
+                        ntpTimeEnabled = ntpTimeEnabled,
+                        extraSystemRules = BubbleJsonProtocol.systemRules(),
+                    )
+                    resp.content
+                }
+            } else {
+                emptyList()
+            }
+
+            // 逐条落地后续气泡，气泡间 0.8~2 秒模拟真人连发
+            followUpBubbles.forEach { bubble ->
+                delay(800L + kotlin.random.Random.nextLong(1200L))
+                responseFinalizer.deliverResponse(
+                    aiContent = bubble,
+                    reasoning = null,
+                    userContentForMemory = null,
+                    pendingTurn = pendingTurn,
+                )
+            }
+
+            // 1) 全部气泡可见后立刻 exitLoading，避免记忆/追问把「对方正在输入」拖住
+            // 2) 记忆统一用全部气泡合并文本（避免只存首条）
             exitLoading()
             loadingReleased = true
-            responseFinalizer.afterDeliver(delivered)
-            SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}")
+            val allBubbleContent = (listOf(aiContent) + followUpBubbles).joinToString("\n")
+            responseFinalizer.afterDeliver(
+                firstDelivered.copy(
+                    aiContent = allBubbleContent,
+                    segments = listOf(aiContent) + followUpBubbles,
+                    userContentForMemory = userContentForMemory,
+                )
+            )
+            SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}, bubbles=${1 + followUpBubbles.size}")
         } catch (e: CancellationException) {
             StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
             val cancelReason = e.message ?: ""
@@ -861,7 +916,7 @@ class ChatGenerationManager private constructor(
             appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
             appendLine("5. 不要重复同样的话。")
             appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
-            appendLine("7. 分块：同一意图可发 1~3 条短气泡（空行分隔）把话说完整；分块≠多塞动作。短肯定（嗯、好、行）单独成句。")
+            appendLine("7. 每条回复 = 一条气泡：把同一动作用一句完整口语说完并收尾；不要用空行/换行分块（连发由系统连发机制处理）。")
             if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
             RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
             if (stickerProbability > 0) appendLine("12. 表情包：可按语境偶尔使用[名称]格式。")

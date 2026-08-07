@@ -198,7 +198,7 @@ object ResponsePostProcessor {
 
         val result = kept.joinToString("\n\n").trim()
         if (result.isNotBlank()) {
-            // 各段再压一次尾部护理；保留多段空行，供 MessageSegmenter 拆气泡
+            // 各段再压一次尾部护理；保留多段空行，由上层整体作为一条气泡交付
             val tightenedParts = kept.map { enforceSingleActionFocus(trimSinglePackedSentence(it)) }
                 .map { it.trim() }
                 .filter { it.isNotBlank() && !isCarePackageClause(it) }

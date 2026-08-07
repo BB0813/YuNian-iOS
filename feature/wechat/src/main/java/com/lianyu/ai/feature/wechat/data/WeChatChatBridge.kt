@@ -217,12 +217,19 @@ class WeChatChatBridge(
                 .getOrDefault(Pair(aiResponseText, emptyList<StickerInfo>()))
             if (processed.first.isNotEmpty() && processed.first != aiResponseText) {
                 val messageIds = result.assistantMessageIds.ifEmpty { listOf(aiMessageId) }
-                val segments = com.lianyu.ai.common.text.MessageSegmenter.split(
-                    processed.first,
-                    com.lianyu.ai.common.text.MessageSegmenter.SplitMode.SIMPLE,
-                )
+                // 气泡架构（用户定稿）：AI 回复整条一条气泡，回写整条内容（不按 SIMPLE 分段）
+                val segments = if (messageIds.size <= 1) {
+                    listOf(processed.first)
+                } else {
+                    messageIds.indices.map { index ->
+                        val text = processed.first
+                        if (index == messageIds.lastIndex) text else ""
+                    }
+                }
                 messageIds.zip(segments).forEach { (messageId, segment) ->
-                    chatRepository.updateMessageContent(messageId, segment)
+                    if (segment.isNotBlank()) {
+                        chatRepository.updateMessageContent(messageId, segment)
+                    }
                 }
             }
         }

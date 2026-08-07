@@ -8,7 +8,7 @@ package com.lianyu.ai.domain.wechat
  * ## 已锁定（2026-07-20）
  * 1. 模块形态 A：新建 `:core:wechat` + 瘦 `:feature:wechat`
  * 2. DialoguePort：app 适配现有 AI（ServiceRegistry），禁止 feature→feature
- * 3. 分段：与 App 同 [com.lianyu.ai.common.text.MessageSegmenter.SplitMode.SIMPLE]
+ * 3. 气泡：整条回复 = 一条气泡；连发由上层 BubbleLoopRunner 多次调用产出（不再客户端分句）
  * 4. S0：双端数据类型对齐；S1+S2：Outbox 分段投递 + Inbox 去重串行
  * 5. S3：Bridge 拆除内嵌 AI；[WeChatDialoguePort] 由 app 绑定
  * 6. S4：Transport 会话稳定（热更新 contextToken、主轮询租约、指数退避）

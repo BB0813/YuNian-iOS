@@ -67,7 +67,7 @@ data class WeChatInboundMessage(
 /**
  * 出站请求（App → 微信），进入 Outbox 前。
  *
- * [text] 为完整正文；分段由 ContentPipeline 使用 MessageSegmenter.SIMPLE 产生 [WeChatOutboundSegment]。
+ * [text] 为完整正文；气泡架构下整条 = 一条出站（不再客户端分句）。
  */
 data class WeChatOutboundRequest(
     val companionId: Long,
@@ -80,7 +80,7 @@ data class WeChatOutboundRequest(
     val createdAtMs: Long = System.currentTimeMillis(),
 )
 
-/** 出站分段（与 App 气泡分段对齐；微信侧逐段 send） */
+/** 出站分段（气泡架构：整条一条；微信侧逐段 send） */
 data class WeChatOutboundSegment(
     val outboxId: String,
     val wechatUserId: String,
