@@ -85,6 +85,9 @@ sealed class MainRoute(val route: String) {
     /** 独立订单查询页（带初始订单号，从订单历史跳入） */
     data class CoffeeOrderQueryWithId(val orderId: String) : MainRoute("coffee_order/$orderId")
 
+    // === 自动化 ===
+    object Automation : MainRoute("automation")
+
     companion object {
         val mainTabRoutes = setOf("home", "contacts", "profile")
 
@@ -133,6 +136,7 @@ sealed class MainRoute(val route: String) {
             route == "coffee_settings" -> CoffeeSettings
             route == "coffee_token" -> CoffeeToken
             route == "coffee_order" -> CoffeeOrderQuery
+            route == "automation" -> Automation
             route?.startsWith("coffee_order/") == true -> {
                 CoffeeOrderQueryWithId(route.removePrefix("coffee_order/"))
             }

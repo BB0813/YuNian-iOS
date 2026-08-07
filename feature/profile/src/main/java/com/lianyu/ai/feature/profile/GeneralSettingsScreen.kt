@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Info
@@ -299,7 +300,8 @@ fun GeneralCategoryScreen(
 @Composable
 fun ToolsSettingsScreen(
     onNavigateBack: () -> Unit,
-    onCoffeeClick: () -> Unit
+    onCoffeeClick: () -> Unit,
+    onAutomationClick: () -> Unit = {}
 ) {
     val colorScheme = AppTheme.colors
     Scaffold(
@@ -344,6 +346,12 @@ fun ToolsSettingsScreen(
                         stringResource(R.string.coffee_title),
                         stringResource(R.string.coffee_desc),
                         onCoffeeClick
+                    ),
+                    MenuItemData(
+                        Icons.Filled.Alarm,
+                        "自动化",
+                        "AI 设置的定时提醒与自动化任务",
+                        onAutomationClick
                     )
                 )
             )
