@@ -172,6 +172,8 @@ class ChatGenerationManager private constructor(
         )
         typingState.stopTyping()
         _confirmationRequest.value = request
+        // 丢弃上一轮取消/超时残留的响应，防止自动确认本轮请求
+        while (confirmationChannel.tryReceive().isSuccess) { }
         return try {
             confirmationChannel.receive()
         } finally {

@@ -9,7 +9,10 @@ import com.lianyu.ai.domain.AiToolCall
 import com.lianyu.ai.domain.ToolRegistry
 import com.lianyu.ai.feature.chat.ui.viewmodel.AiToolLoopRunner
 import com.lianyu.ai.feature.chat.ui.viewmodel.ConfirmationGate
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -21,6 +24,7 @@ class AiToolLoopRunnerConfirmationTest {
     private var gateResult = true
     private var toolExecuted = 0
     private var toolResultContent: String? = null
+    private var sendMessageCalls = 0
 
     @After
     fun tearDown() {
@@ -36,6 +40,7 @@ class AiToolLoopRunnerConfirmationTest {
             tools: List<AiTool>?,
             extraSystemRules: String
         ): AiResponse {
+            loopRunner.sendMessageCalls++
             // 第一轮返回 tool_call，之后返回正常回复
             val hasToolResult = history.any { it.toolName != null }
             return if (!hasToolResult) {
@@ -154,5 +159,25 @@ class AiToolLoopRunnerConfirmationTest {
         assertEquals(0, toolExecuted)
         assertEquals("完成", resp.content)
         assertTrue(toolResultContent!!.contains("用户已取消"))
+    }
+
+    @Test
+    fun cancellationDuringGateAbortsLoop() = runBlocking {
+        ToolRegistry.register(ConfirmMeTool(this@AiToolLoopRunnerConfirmationTest))
+        // Gate 永久挂起：进入确认门控后协程一直挂在等待用户确认
+        val gate = ConfirmationGate { _, _ ->
+            suspendCancellableCoroutine<Boolean> { }
+        }
+        val runner = AiToolLoopRunner(FakeAiService(this@AiToolLoopRunnerConfirmationTest), gate)
+        val job = launch {
+            runner.executeWithToolLoop(companion(), emptyList(), 0, false, ToolRegistry.all())
+        }
+        delay(200) // 第一轮返回 tool_call、进入 Gate 挂起
+        job.cancel()
+        job.join()
+        delay(300)
+        // 取消应中止循环：仅第一轮发起过 sendMessage，未执行工具
+        assertEquals(1, sendMessageCalls)
+        assertEquals(0, toolExecuted)
     }
 }
