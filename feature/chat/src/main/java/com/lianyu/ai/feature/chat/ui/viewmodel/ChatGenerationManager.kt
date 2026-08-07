@@ -156,6 +156,39 @@ class ChatGenerationManager private constructor(
     private val _events = MutableSharedFlow<ChatUiEvent>(extraBufferCapacity = 8)
     val events: SharedFlow<ChatUiEvent> = _events.asSharedFlow()
 
+    private val _confirmationRequest = MutableStateFlow<ToolConfirmationRequest?>(null)
+    /** AI 工具确认卡片请求；非空时 ChatScreen 弹确认 Dialog */
+    val confirmationRequest: StateFlow<ToolConfirmationRequest?> = _confirmationRequest.asStateFlow()
+    private val confirmationChannel = Channel<Boolean>(capacity = 1)
+
+    private suspend fun requestToolConfirmation(toolName: String, argumentsJson: String): Boolean {
+        val tool = ToolRegistry.get(toolName)
+        val summary = tool?.summarizeArguments(argumentsJson) ?: argumentsJson.take(120)
+        val request = ToolConfirmationRequest(
+            id = System.currentTimeMillis(),
+            toolName = toolName,
+            summary = summary,
+            argumentsJson = argumentsJson
+        )
+        typingState.stopTyping()
+        _confirmationRequest.value = request
+        return try {
+            confirmationChannel.receive()
+        } finally {
+            if (_confirmationRequest.value?.id == request.id) {
+                _confirmationRequest.value = null
+            }
+            if (activeRequests.get() > 0) typingState.startTyping()
+        }
+    }
+
+    fun respondToConfirmation(id: Long, confirmed: Boolean) {
+        val current = _confirmationRequest.value
+        if (current?.id != id) return
+        _confirmationRequest.value = null
+        confirmationChannel.trySend(confirmed)
+    }
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -170,7 +203,7 @@ class ChatGenerationManager private constructor(
 
     val pipeline = MessagePipelineRunner { level -> BanManager.recordViolation(application, level) }
 
-    private val toolLoopRunner = AiToolLoopRunner(aiService)
+    private val toolLoopRunner = AiToolLoopRunner(aiService, confirmationGate = ::requestToolConfirmation)
     private val streamApplier = PendingTurnStreamApplier()
     /**
      * 气泡连发循环器（用户定稿架构）：
@@ -215,6 +248,11 @@ class ChatGenerationManager private constructor(
             val result = messageQueue.trySend(content)
             if (result.isSuccess) {
                 _queueDepth.value += 1
+                // 乐观 typing：入队即显示，不等 2.5s 合并窗口 + pipeline 校验
+                // 上一轮 AI 仍在生成时 activeRequests>0，enterLoading 不会重复置 typing
+                if (!typingState.isTyping.value) {
+                    typingState.startTyping()
+                }
             } else {
                 _events.tryEmit(ChatUiEvent.Error("消息队列已满，请稍后再试"))
                 SecureLog.w("ChatGenerationManager", "Message queue full, dropped: ${content.take(20)}...")
@@ -435,6 +473,7 @@ class ChatGenerationManager private constructor(
                     val job = startSendMessage(batch)
                     if (job == null) {
                         // 校验失败（封禁/无 API/违规等）：丢弃本批，避免死循环
+                        typingState.stopTyping()
                         repeat(batchSize) { if (pending.isNotEmpty()) pending.removeAt(0) }
                         waitForMergeWindow = pending.isEmpty()
                         continue
@@ -465,6 +504,7 @@ class ChatGenerationManager private constructor(
                     waitForMergeWindow = true
                 } catch (e: Exception) {
                     SecureLog.e("ChatGenerationManager", "doSendMessage failed", e)
+                    typingState.stopTyping()
                     _events.tryEmit(
                         ChatUiEvent.Error("消息发送失败: ${e.message?.take(50) ?: "未知错误"}")
                     )
