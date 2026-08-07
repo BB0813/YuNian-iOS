@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import com.lianyu.ai.common.PerformanceTrace
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.ServiceRegistry
+import com.lianyu.ai.feature.automation.ui.AutomationListScreen
 import com.lianyu.ai.feature.backup.BackupScreen
 import com.lianyu.ai.feature.backup.BackupExportSelectScreen
 import com.lianyu.ai.feature.chat.ui.screen.ChatDetailScreen
@@ -291,7 +292,8 @@ internal fun MainNavHost(
         composable(MainRoute.SettingsTools.route) {
             ToolsSettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onCoffeeClick = { navController.navigate(MainRoute.Coffee.route) }
+                onCoffeeClick = { navController.navigate(MainRoute.Coffee.route) },
+                onAutomationClick = { navController.navigate(MainRoute.Automation.route) }
             )
         }
         composable(MainRoute.SettingsPermissions.route) {
@@ -372,6 +374,9 @@ internal fun MainNavHost(
                 initialOrderId = orderId,
                 onBack = { navController.popBackStack() }
             )
+        }
+        composable(MainRoute.Automation.route) {
+            AutomationListScreen(onNavigateBack = { navController.popBackStack() })
         }
     }
 }
