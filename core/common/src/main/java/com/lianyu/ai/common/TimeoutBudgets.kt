@@ -77,6 +77,9 @@ object TimeoutBudgets {
     const val CONTENT_FILTER_MS = 3_000L     // 内容过滤
     const val SAFETY_CLASSIFY_MS = 30_000L   // 安全分类
 
+    // === AI 工具确认卡片 ===
+    const val AUTOMATION_CONFIRM_TIMEOUT_MS = 60_000L  // 确认卡片等待上限，超时按拒绝处理
+
     // === 分岔点硬限制 ===
     const val CHANNEL_CAPACITY = 100         // 消息队列容量
     const val MAX_CONCURRENT_API = 3         // 最大并发API请求

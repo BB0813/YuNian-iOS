@@ -24,6 +24,18 @@ interface AiTool {
      * @return 结果 JSON 字符串（会作为 tool message 回传给 AI）
      */
     suspend fun execute(argumentsJson: String): String
+
+    /**
+     * 涉及支付/创建等副作用，执行前需用户确认。
+     * 默认 false；createOrder / automation_create 等覆写为 true。
+     */
+    val requiresConfirmation: Boolean get() = false
+
+    /**
+     * 生成确认卡片的人类可读摘要。
+     * 默认返回参数 JSON 截断；各工具可按需覆写（如「每天 08:00 · 喝水」）。
+     */
+    fun summarizeArguments(argumentsJson: String): String = argumentsJson.take(120)
 }
 
 /**
