@@ -52,41 +52,25 @@ class VolcengineTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 return@withContext null
             }
 
-            val url = "https://openspeech.bytedance.com/api/v1/tts"
-
-            val requestBody = JSONObject().apply {
-                put("app", JSONObject().apply {
-                    put("appid", appId)
-                    put("cluster", cluster)
-                    put("token", token)
-                })
-                put("user", JSONObject())
-                put("audio", JSONObject().apply {
-                    put("voice_type", voiceId ?: "BV001_streaming")
-                    put("encoding", "mp3")
-                    put("speed_ratio", 1.0)
-                    put("volume_ratio", 1.0)
-                    put("pitch_ratio", 1.0)
-                })
-                put("request", JSONObject().apply {
-                    put("reqid", UUID.randomUUID().toString())
-                    put("text", text)
-                    put("text_type", "plain")
-                    put("operation", "query")
-                })
-            }.toString()
-
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody.toRequestBody("application/json".toMediaType()))
-                .addHeader("Content-Type", "application/json")
-                .build()
+            val request = buildTtsRequest(text, voiceId ?: "BV001_streaming", appId, token, cluster)
 
             val response = clientFor(text.length).newCall(request).execute()
+            if (!response.isSuccessful) {
+                // [ADAPT] 打印错误响应体，便于定位真实原因
+                val errBody = runCatching { response.body?.string() }.getOrNull().orEmpty()
+                SecureLog.e("VolcengineTts", "HTTP ${response.code}: ${response.message} body=$errBody")
+                return@withContext null
+            }
             val body = response.body?.bytes()
+            if (body == null || body.isEmpty()) {
+                SecureLog.e("VolcengineTts", "Empty response body")
+                return@withContext null
+            }
 
-            if (!response.isSuccessful || body == null) {
-                SecureLog.e("VolcengineTts", "HTTP ${response.code}")
+            // [ADAPT] 火山异常时可能返回 JSON 错误体，按 Content-Type 识别，避免把错误 JSON 当 mp3 写盘
+            val contentType = response.header("Content-Type", "") ?: ""
+            if (contentType.contains("application/json") || contentType.contains("text/")) {
+                SecureLog.e("VolcengineTts", "Unexpected error body: ${String(body).take(500)}")
                 return@withContext null
             }
 
@@ -100,6 +84,37 @@ class VolcengineTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             SecureLog.e("VolcengineTts", "Synthesis failed", e)
             null
         }
+    }
+
+    /** 构造火山 TTS 请求（合成与探活共用，避免两处逻辑漂移）。 */
+    private fun buildTtsRequest(text: String, voiceType: String, appId: String, token: String, cluster: String): Request {
+        val requestBody = JSONObject().apply {
+            put("app", JSONObject().apply {
+                put("appid", appId)
+                put("cluster", cluster)
+                put("token", token)
+            })
+            put("user", JSONObject())
+            put("audio", JSONObject().apply {
+                put("voice_type", voiceType)
+                put("encoding", "mp3")
+                put("speed_ratio", 1.0)
+                put("volume_ratio", 1.0)
+                put("pitch_ratio", 1.0)
+            })
+            put("request", JSONObject().apply {
+                put("reqid", UUID.randomUUID().toString())
+                put("text", text)
+                put("text_type", "plain")
+                put("operation", "query")
+            })
+        }.toString()
+
+        return Request.Builder()
+            .url("https://openspeech.bytedance.com/api/v1/tts")
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .addHeader("Content-Type", "application/json")
+            .build()
     }
 
     override fun getVoices(): List<TtsVoice> {
@@ -127,10 +142,24 @@ class VolcengineTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
-            config.volcengineAppId.isNotBlank() && config.volcengineToken.isNotBlank()
+            val appId = config.volcengineAppId
+            val token = config.volcengineToken
+            if (appId.isBlank() || token.isBlank()) return false
+
+            val cluster = config.volcengineCluster.ifBlank { "volcano_tts" }
+            // 真探活：实际请求一次短文本合成，Key/应用无效会直接报错
+            val request = buildTtsRequest("测试", "BV001_streaming", appId, token, cluster)
+            val response = clientFor(2).newCall(request).execute()
+            val ok = response.isSuccessful
+            if (!ok) {
+                val errBody = runCatching { response.body?.string() }.getOrNull().orEmpty()
+                SecureLog.e("VolcengineTts", "test HTTP ${response.code} body=$errBody")
+            }
+            ok
         } catch (e: Exception) {
+            SecureLog.e("VolcengineTts", "testConnection failed", e)
             false
         }
     }

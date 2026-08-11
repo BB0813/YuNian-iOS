@@ -287,7 +287,55 @@ fun GeneralCategoryScreen(
                     )
                 )
             )
+            Spacer(modifier = Modifier.height(12.dp))
+            TypingSpinnerSettingCard()
             Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+// ============================================================================
+// 聊天页顶栏转圈动画开关
+// ============================================================================
+
+@Composable
+private fun TypingSpinnerSettingCard() {
+    val viewModel: TypingSpinnerSettingsViewModel = viewModel()
+    val showTypingSpinner by viewModel.showTypingSpinner.collectAsStateWithLifecycle()
+    val colorScheme = AppTheme.colors
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "回复时显示转圈动画",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp
+                    ),
+                    color = colorScheme.onSurface
+                )
+                Text(
+                    "AI回复期间顶栏显示转圈；关闭后仅显示“对方正在输入”",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = showTypingSpinner,
+                onCheckedChange = viewModel::setShowTypingSpinner
+            )
         }
     }
 }

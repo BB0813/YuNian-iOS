@@ -139,3 +139,34 @@ If a build fails due to environment issues, report it rather than modifying thes
 - When modifying `core:*` modules, expect cascading rebuilds across all dependent feature modules. Use `./gradlew clean` for large changes.
 - If the app crashes on startup with a linker error, verify NDK installation and that `core:security` compiled successfully.
 - `ContentFilter` regex patterns in `core:common` are a security baseline — changes should be reviewed carefully.
+
+## 新功能开发规范
+
+### 1. 冲突预审（必做）
+
+添加任何新功能前，必须先审核与原有功能是否会产生冲突。审查清单：
+
+| 审查维度 | 检查项 |
+|----------|--------|
+| 保活链路 | 是否影响 FGS / Worker / 进程内常驻的存活时序？Doze 冻结下是否可恢复？WakeLock 续租是否正常？ |
+| 心跳机制 | 是否在会话建立后立即稳定发送心跳？ack 超时是否检测？重连封顶/退避是否正常？ |
+| 消息管线 | 是否改变发送→typing→AI 生成时序？typing 显示前是否插入同步阻塞？ |
+| 网络层 | 是否与 ilink SDK / QQ Gateway / OkHttp 超时冲突？连接互斥锁是否正常？ |
+| 安全模块 | 是否与 ContentFilter / pipeline / Bayesian 分类冲突？加密路径是否正常？ |
+| 数据库 | 是否新增 Entity / Migration？是否修改 DAO 签名？ |
+
+清单未通过 → 禁止提交。
+
+### 2. 架构最小变更原则
+
+- 不产生冲突的情况下，**禁止改动原有项目架构与规范**。
+- 新增独立类优先于扩展已有耦合类。
+- 涉及保活/心跳/消息时序的功能，PR 描述必须标注 **"已验证不影响熄屏保活 / typing 时序 / 重连循环"**。
+
+### 3. 已修复回归记录（2026-08-07）
+
+| 问题 | 根因 | 教训 |
+|------|------|------|
+| QQ 机器人一直重连 | `startHeartbeat` 的 `while(isConnected.get())` 在 Hello 阶段即退出，心跳永不发送 | 心跳标志与 `isConnected` 解耦，Hello 后立即发 |
+| 微信熄屏 2 分钟掉线 | e7165c2 把保活改成"FGS+Worker 兜底"，Worker 在 Doze 下不可靠 | FGS 被杀后立即自重启，不依赖 Worker |
+| typing 延迟十几秒 | typing 被 2.5s 合并窗口 + pipeline 阻塞 | typing 乐观显示，入队即置 |

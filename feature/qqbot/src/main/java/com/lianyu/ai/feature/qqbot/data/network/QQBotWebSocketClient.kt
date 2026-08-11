@@ -68,6 +68,25 @@ class QQBotWebSocketClient(
     @Volatile
     private var sessionId: String? = null
 
+    /**
+     * 心跳生命周期标志，与 [isConnected] 解耦。
+     *
+     * 历史缺陷：原来心跳 while 条件依赖 isConnected，但 startHeartbeat 在 opHello 阶段
+     * 被调用，此时 isConnected 仍为 false（要等 READY 事件才置 true）。协程首次检查
+     * isConnected==false 立即退出 → 永不发心跳 → 网关约 2 分钟后踢线 → 无限重连循环。
+     * 用独立的 heartbeatActive 标志：startHeartbeat 时置 true，cleanupConnectionState 时 false，
+     * 让心跳在 Identify/Resume 之后、READY 之前就能稳定发送。
+     */
+    @Volatile
+    private var heartbeatActive = false
+
+    /** 最近一次收到 opHeartbeatAck 的时间戳；0 表示尚未收到过。 */
+    @Volatile
+    private var lastHeartbeatAckMs = 0L
+
+    /** 心跳 ack 超时判定（纯逻辑，见 [HeartbeatAckTracker]）。 */
+    private val heartbeatAckTracker = HeartbeatAckTracker()
+
     private val opDispatch = 0
     private val opHeartbeat = 1
     private val opIdentify = 2
@@ -222,10 +241,14 @@ class QQBotWebSocketClient(
                         tokenStore.setSessionId(null)
                         tokenStore.setLastSequence(0)
                     }
+                    // 连续 op9 >= 5 次说明凭证本身无效，通知 AUTH_FAILED 避免无限风暴
+                    if (reconnectAttempt.get() >= 5) {
+                        onConnectionStateChange?.invoke(ConnectionState.AUTH_FAILED)
+                    }
                     reconnect()
                 }
                 opHeartbeatAck -> {
-                    // ignore
+                    lastHeartbeatAckMs = System.currentTimeMillis()
                 }
                 else -> SecureLog.d(TAG, "Unhandled op: ${payload.op}")
             }
@@ -326,26 +349,39 @@ class QQBotWebSocketClient(
 
     private fun startHeartbeat(intervalMs: Long) {
         heartbeatJob?.cancel()
+        heartbeatActive = true
+        lastHeartbeatAckMs = 0L
+        heartbeatAckTracker.reset()
         heartbeatJob = scope.launch {
             val period = (intervalMs * 0.8).toLong().coerceAtLeast(5000)
-            while (isActive && isConnected.get()) {
+            while (isActive && heartbeatActive) {
                 delay(period)
-                if (isConnected.get()) {
-                    send(json.encodeToString(QQGatewayPayload(op = opHeartbeat, d = JsonPrimitive(lastSequence.get()))))
+                if (!heartbeatActive) break
+                // 发送新一轮心跳前，先判定上一轮是否已收到 ack。
+                // 连续 2 个周期未收到 → 死连接，主动重连（比等服务器踢线更早恢复）。
+                if (heartbeatAckTracker.onBeforeSend(System.currentTimeMillis(), lastHeartbeatAckMs)) {
+                    SecureLog.w(TAG, "No heartbeat ACK for 2 consecutive intervals, reconnecting")
+                    reconnect()
+                    return@launch
                 }
+                send(json.encodeToString(QQGatewayPayload(op = opHeartbeat, d = JsonPrimitive(lastSequence.get()))))
             }
         }
     }
 
-    private fun send(text: String) {
+    private fun send(text: String): Boolean {
         val sent = webSocket?.send(text) ?: false
         if (!sent) SecureLog.w(TAG, "Failed to send websocket message")
+        return sent
     }
 
     private fun cleanupConnectionState() {
         val wasConnected = isConnected.get()
         isConnected.set(false)
         isConnecting.set(false)
+        heartbeatActive = false
+        lastHeartbeatAckMs = 0L
+        heartbeatAckTracker.reset()
         heartbeatJob?.cancel()
         heartbeatJob = null
         if (wasConnected) {

@@ -58,10 +58,12 @@ class MicrosoftTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             val token = getAccessToken(subscriptionKey, region) ?: return@withContext null
             val voice = voiceId ?: "zh-CN-XiaoxiaoNeural"
 
+            // [ADAPT] 文本必须做 XML 转义：SSML 是 XML，文本含 & < > 等字符会直接合成失败
+            val escapedText = escapeXml(text)
             val ssml = """
                 <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
                     <voice name="$voice">
-                        $text
+                        $escapedText
                     </voice>
                 </speak>
             """.trimIndent()
@@ -76,10 +78,15 @@ class MicrosoftTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
             // [TTS FIX] 合成请求按文本长度动态配备超时（一个字符 1 秒）
             val response = clientFor(text.length).newCall(request).execute()
+            if (!response.isSuccessful) {
+                // [ADAPT] 打印错误响应体，便于定位真实原因
+                val errBody = runCatching { response.body?.string() }.getOrNull().orEmpty()
+                SecureLog.e("MicrosoftTts", "HTTP ${response.code}: ${response.message} body=$errBody")
+                return@withContext null
+            }
             val body = response.body?.bytes()
-
-            if (!response.isSuccessful || body == null) {
-                SecureLog.e("MicrosoftTts", "HTTP ${response.code}")
+            if (body == null || body.isEmpty()) {
+                SecureLog.e("MicrosoftTts", "Empty response body")
                 return@withContext null
             }
 
@@ -110,13 +117,23 @@ class MicrosoftTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
-            config.azureSubscriptionKey.isNotBlank() && config.azureRegion.isNotBlank()
+            if (config.azureSubscriptionKey.isBlank() || config.azureRegion.isBlank()) return false
+            // 真探活：换取 token 成功即 Key 有效
+            getAccessToken(config.azureSubscriptionKey, config.azureRegion) != null
         } catch (e: Exception) {
             false
         }
     }
+
+    /** SSML 是 XML，合成文本必须转义，否则 & < > 等字符导致请求被拒。 */
+    private fun escapeXml(value: String): String =
+        value.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&apos;")
 
     private suspend fun getAccessToken(subscriptionKey: String, region: String): String? = withContext(Dispatchers.IO) {
         if (accessToken != null && System.currentTimeMillis() < tokenExpireTime) {

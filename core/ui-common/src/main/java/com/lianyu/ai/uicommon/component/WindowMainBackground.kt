@@ -38,11 +38,18 @@ object WindowMainBackground {
     @Volatile
     private var appliedDark: Boolean? = null
 
-    /** 从 SharedPreferences 读取主背景 key 与当前深浅色，应用到 Activity 窗口。 */
+    /**
+     * 从 SharedPreferences 读取主背景 key 与当前深浅色，应用到 Activity 窗口。
+     *
+     * 必须 forceApply：Activity 重建（旋转 / recreate / 系统配置变更 / 后台回收恢复）
+     * 会创建全新 Window，其初始背景是主题 XML 的浅色 windowBackground（#FFDEFCF9 兜底）。
+     * 静态缓存 appliedKey/appliedDark 跨 Window 存活，若走 [apply] 会因 key + 深浅色
+     * 未变而跳过，导致深色主题卡在浅色背景上。
+     */
     fun applyFromPrefs(activity: Activity) {
         val key = getMainBackgroundKey(activity)
         val isDark = resolveIsDarkTheme(activity)
-        apply(activity.window, activity, key, isDark)
+        forceApply(activity.window, activity, key, isDark)
     }
 
     /**

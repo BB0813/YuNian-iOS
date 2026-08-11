@@ -30,6 +30,11 @@ object WeChatChannelRuntime {
     private val primaryClaimedAtMs = AtomicLong(0L)
     private val lastHealAtMs = AtomicLong(0L)
 
+    /** 看门狗巡检停摆检测：两次巡检间隔超过阈值视为进程被冻结 / FGS 被杀停摆 */
+    private val lastWatchdogTickAtMs = AtomicLong(0L)
+    private val watchdogStallCount = AtomicInteger(0)
+    private val lastWatchdogStallMs = AtomicLong(0L)
+
     const val BASE_BACKOFF_MS = 2_000L
     const val MAX_BACKOFF_MS = 60_000L
     const val SUCCESS_IDLE_MS = 0L
@@ -42,6 +47,9 @@ object WeChatChannelRuntime {
 
     /** 看门狗巡检间隔（FGS 内循环）。 */
     const val WATCHDOG_INTERVAL_MS = 60_000L
+
+    /** 两次看门狗巡检超过该间隔即判定"停摆"（冻结/被杀），约 2.5 个周期。 */
+    const val WATCHDOG_STALL_THRESHOLD_MS = 150_000L
 
     /** 两次强制自愈最小间隔，防止 FGS/Worker 互踢。 */
     const val HEAL_COOLDOWN_MS = 30_000L
@@ -101,6 +109,27 @@ object WeChatChannelRuntime {
     fun primaryClaimedAtMs(): Long = primaryClaimedAtMs.get()
 
     fun lastHealAtMs(): Long = lastHealAtMs.get()
+
+    /**
+     * 看门狗每次巡检调用：记录时间戳并检测停摆。
+     * 正常巡检间隔为 [WATCHDOG_INTERVAL_MS]；间隔远超阈值说明进程被冻结（vivo/iQOO 后台冻结）
+     * 或 FGS 被杀后长时间无人巡检——这正是"熄屏 2 分钟掉线"的可观测信号。
+     */
+    fun onWatchdogTick(nowMs: Long = System.currentTimeMillis()) {
+        val prev = lastWatchdogTickAtMs.getAndSet(nowMs)
+        if (prev > 0L) {
+            val gap = nowMs - prev
+            if (gap > WATCHDOG_STALL_THRESHOLD_MS) {
+                watchdogStallCount.incrementAndGet()
+                lastWatchdogStallMs.set(gap)
+                SecureLog.w(TAG, "watchdog_stall gapMs=$gap count=${watchdogStallCount.get()}")
+            }
+        }
+    }
+
+    fun watchdogStallCount(): Int = watchdogStallCount.get()
+
+    fun lastWatchdogStallMs(): Long = lastWatchdogStallMs.get()
 
     /**
      * 是否长时间没有 poll 心跳。
@@ -198,6 +227,8 @@ object WeChatChannelRuntime {
             sendingOutboxCount = sendingOutboxCount,
             recentFailures = recentFailures,
             updatedAtMs = System.currentTimeMillis(),
+            watchdogStallCount = watchdogStallCount(),
+            lastWatchdogStallMs = lastWatchdogStallMs(),
         )
     }
 
@@ -210,6 +241,9 @@ object WeChatChannelRuntime {
         lastError.set(null)
         primaryClaimedAtMs.set(0L)
         lastHealAtMs.set(0L)
+        lastWatchdogTickAtMs.set(0L)
+        watchdogStallCount.set(0)
+        lastWatchdogStallMs.set(0L)
     }
 
     data class WatchdogDecision(

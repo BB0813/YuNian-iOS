@@ -15,6 +15,8 @@ sealed class MainRoute(val route: String) {
     // === 聊天 ===
     data class Chat(val companionId: Long) : MainRoute("chat/$companionId")
     data class ChatDetail(val companionId: Long) : MainRoute("chat_detail/$companionId")
+    /** 免打扰时间段自定义设置页（对话设置 → 免打扰） */
+    data class DndSettings(val companionId: Long) : MainRoute("chat_detail_dnd/$companionId")
     data class VoiceCall(val companionId: Long) : MainRoute("voice_call/$companionId")
 
     // === 群聊 ===
@@ -145,6 +147,7 @@ sealed class MainRoute(val route: String) {
                 CoffeeProduct(parts.getOrNull(0)?.toLongOrNull() ?: 0L, parts.getOrNull(1)?.toLongOrNull() ?: 0L)
             }
             route?.startsWith("chat/") == true -> Chat(route.removePrefix("chat/").toLongOrNull() ?: 0L)
+            route?.startsWith("chat_detail_dnd/") == true -> DndSettings(route.removePrefix("chat_detail_dnd/").toLongOrNull() ?: 0L)
             route?.startsWith("chat_detail/") == true -> ChatDetail(route.removePrefix("chat_detail/").toLongOrNull() ?: 0L)
             route?.startsWith("voice_call/") == true -> VoiceCall(route.removePrefix("voice_call/").toLongOrNull() ?: 0L)
             route?.startsWith("group_chat/") == true -> GroupChat(route.removePrefix("group_chat/").toLongOrNull() ?: 0L)

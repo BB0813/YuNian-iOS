@@ -56,6 +56,7 @@ fun ChatTopBarRegion(
     onBackClick: () -> Unit,
     onDetailClick: (Long) -> Unit,
     adaptiveSizing: AdaptiveSizing,
+    showTypingSpinner: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.fillMaxWidth()) {
@@ -88,6 +89,7 @@ fun ChatTopBarRegion(
                         companionId = companionId,
                         companionData = companionData,
                         isLoading = isLoading,
+                        showTypingSpinner = showTypingSpinner,
                         onDetailClick = onDetailClick,
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -154,6 +156,7 @@ private fun ChatTitleSlot(
     companionId: Long,
     companionData: CompanionEntity?,
     isLoading: Boolean,
+    showTypingSpinner: Boolean,
     onDetailClick: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -169,7 +172,7 @@ private fun ChatTitleSlot(
             label = "title_switch"
         ) { loading ->
             if (loading) {
-                TypingTitle()
+                TypingTitle(showTypingSpinner = showTypingSpinner)
             } else {
                 CompanionTitle(
                     companionId = companionId,
@@ -182,16 +185,18 @@ private fun ChatTitleSlot(
 }
 
 @Composable
-private fun TypingTitle() {
+private fun TypingTitle(showTypingSpinner: Boolean) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(10.dp),
-            strokeWidth = 1.5.dp,
-            color = AppTheme.colors.metadataContent
-        )
+        if (showTypingSpinner) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(10.dp),
+                strokeWidth = 1.5.dp,
+                color = AppTheme.colors.metadataContent
+            )
+        }
         Text(
             text = "对方正在输入...",
             style = MaterialTheme.typography.titleMedium.copy(

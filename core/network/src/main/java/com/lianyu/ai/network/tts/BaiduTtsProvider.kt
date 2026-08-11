@@ -119,9 +119,11 @@ class BaiduTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
-            config.baiduApiKey.isNotBlank() && config.baiduSecretKey.isNotBlank()
+            if (config.baiduApiKey.isBlank() || config.baiduSecretKey.isBlank()) return false
+            // 真探活：换取 access_token 成功即 Key 有效
+            getAccessToken(config.baiduApiKey, config.baiduSecretKey) != null
         } catch (e: Exception) {
             false
         }

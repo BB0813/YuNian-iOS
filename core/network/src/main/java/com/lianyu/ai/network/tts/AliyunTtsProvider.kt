@@ -127,11 +127,16 @@ class AliyunTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
-            config.aliyunKeyId.isNotBlank() && 
-            config.aliyunKeySecret.isNotBlank() && 
-            config.aliyunAppKey.isNotBlank()
+            if (config.aliyunKeyId.isBlank() ||
+                config.aliyunKeySecret.isBlank() ||
+                config.aliyunAppKey.isBlank()
+            ) {
+                return false
+            }
+            // 真探活：换取 token 成功即 Key 有效（不再"配置非空即通过"）
+            getToken(config.aliyunKeyId, config.aliyunKeySecret) != null
         } catch (e: Exception) {
             false
         }

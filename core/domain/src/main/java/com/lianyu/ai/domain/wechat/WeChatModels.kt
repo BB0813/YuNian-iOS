@@ -162,6 +162,10 @@ data class WeChatChannelHealthSnapshot(
     val sendingOutboxCount: Int = 0,
     val recentFailures: List<WeChatOutboxFailure> = emptyList(),
     val updatedAtMs: Long = System.currentTimeMillis(),
+    /** 看门狗停摆次数：进程被 ROM 冻结 / FGS 被杀后长时间无巡检则 +1（熄屏掉线取证） */
+    val watchdogStallCount: Int = 0,
+    /** 最近一次看门狗停摆时长（毫秒） */
+    val lastWatchdogStallMs: Long = 0L,
 )
 
 /** Outbox 近期失败摘要（设置页可观测） */

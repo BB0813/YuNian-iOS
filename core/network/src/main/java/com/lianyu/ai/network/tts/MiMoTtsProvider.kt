@@ -137,7 +137,7 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         TtsVoice("__custom__", "自定义 voice", "自定义", "zh-CN", "在设置页填写 voice")
     )
 
-    override suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun testConnection(context: Context): Boolean = withContext(Dispatchers.IO) {
         val apiKey = config.mimoApiKey.trim()
         val baseUrl = normalizeBaseUrl(config.mimoBaseUrl) ?: return@withContext false
         if (apiKey.isBlank()) return@withContext false

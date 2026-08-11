@@ -181,6 +181,12 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
 
             bgScope.launch {
                 registerServiceProviders(app)
+                // 启动即修复历史头像脏数据（曾误存 cacheDir，系统清缓存后头像变白）
+                runCatching {
+                    ServiceRegistry.getOrThrow(UserRepository::class.java).repairUserAvatar(app)
+                }.onFailure {
+                    SecureLog.e("LianYuApplication", "Repair user avatar failed", it)
+                }
                 runCatching { AppDatabase.verifyAndRecover(app) }
                     .onFailure { SecureLog.e("LianYuApplication", "Database verification failed", it) }
                 seedDefaultCompanion(app)
@@ -465,6 +471,10 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 ServiceRegistry.getOrThrow(AutomationStore::class.java),
                 app
             )
+            // 自动化到点检查兜底：保活服务周期性 tick（Doze 下 WorkManager 延迟时兜底触发）
+            ServiceRegistry.registerSingleton(com.lianyu.ai.domain.AutomationTickProvider::class.java) {
+                com.lianyu.ai.feature.automation.AutomationTickProviderImpl(app)
+            }
             // 启动对账：重建全部启用自动化的 WorkManager 调度
             runCatching {
                 kotlinx.coroutines.runBlocking {

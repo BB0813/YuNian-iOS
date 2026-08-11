@@ -51,9 +51,15 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
     private var config: TtsConfig = TtsConfig()
 
+    /** 最近一次合成失败原因（UI 直接展示，release 可见）。 */
+    @Volatile
+    private var lastErrorMsg: String? = null
+
     override fun updateConfig(config: TtsConfig) {
         this.config = config
     }
+
+    override fun lastError(): String? = lastErrorMsg
 
     override suspend fun synthesize(context: Context, text: String, voiceId: String?): String? = withContext(Dispatchers.IO) {
         try {
@@ -64,14 +70,40 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 config.siliconflowApiKey
             }
             val model = config.siliconflowTtsModel.ifBlank { "FunAudioLLM/CosyVoice2-0.5B" }
-            val finalVoice = voiceId ?: config.siliconflowCustomVoiceId.ifBlank {
-                "FunAudioLLM/CosyVoice2-0.5B:anna"
+            // [FIX] 自定义音色优先（对齐"自定义 OpenAI"行为：customTtsVoiceId 说了算）：
+            // 只要配置了自定义音色就直接用它，不被下拉框的预设音色覆盖。
+            // 用户实测：下拉停在预设（如 Alex）时 App 发的是预设而非自定义音色，
+            // 而该账户预设会 500 → 误以为自定义音色失败。
+            val rawVoice = when {
+                config.siliconflowCustomVoiceId.isNotBlank() -> config.siliconflowCustomVoiceId
+                voiceId.isNullOrBlank() || voiceId == "__custom__" ->
+                    "FunAudioLLM/CosyVoice2-0.5B:anna"
+                else -> voiceId
             }
+
+            // [DIAG] 合成入口关键参数（SecureLog 调试门控，release 不输出）
+            SecureLog.d(
+                "SiliconFlowTts",
+                "synthesize enter: len=${text.length}, useGlobal=${config.siliconflowUseGlobalKey}, " +
+                    "customVoice='${config.siliconflowCustomVoiceId}', voiceId='$voiceId', rawVoice='$rawVoice'"
+            )
 
             if (apiKey.isBlank()) {
                 SecureLog.w("SiliconFlowTts", "API Key not configured")
+                lastErrorMsg = "API Key 未配置"
                 return@withContext null
             }
+            // 记录 Key 来源与前缀，便于定位"Key 对不上"（如全局 Key 是旧值/别的厂商）
+            SecureLog.d(
+                "SiliconFlowTts",
+                "key source: useGlobal=${config.siliconflowUseGlobalKey}, prefix=${apiKey.take(6)}…"
+            )
+
+            // [ADAPT] 克隆音色适配：voice 必须传完整 speech: URI。
+            // 用户只填了音色名称（customName，如 dp_42824）时先解析出 URI；
+            // 已带 speech: 前缀或预设音色（model:name）则原样透传。
+            val finalVoice = resolveVoiceUri(apiKey, rawVoice)
+            SecureLog.d("SiliconFlowTts", "request voice='$finalVoice' (raw='$rawVoice'), model=$model")
 
             val sampleRate = config.siliconflowSampleRate
             val speed = config.siliconflowSpeed.toDoubleOrNull() ?: 1.0
@@ -96,12 +128,20 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 .build()
 
             val response = clientFor(text.length).newCall(request).execute()
-            val body = response.body?.bytes()
-
-            if (!response.isSuccessful || body == null) {
-                SecureLog.e("SiliconFlowTts", "HTTP ${response.code}: ${response.message}")
+            if (!response.isSuccessful) {
+                // [FIX] 记录错误响应体，便于定位真实原因（voice 非法 / Key 错误 / 限流等）
+                val errBody = runCatching { response.body?.string() }.getOrNull().orEmpty()
+                lastErrorMsg = "HTTP ${response.code}: $errBody"
+                SecureLog.e("SiliconFlowTts", "HTTP ${response.code}: ${response.message} body=$errBody")
                 return@withContext null
             }
+            val body = response.body?.bytes()
+            if (body == null || body.isEmpty()) {
+                lastErrorMsg = "服务端返回空音频（voice='$finalVoice'）"
+                SecureLog.e("SiliconFlowTts", "Empty response body (voice='$finalVoice')")
+                return@withContext null
+            }
+            SecureLog.i("SiliconFlowTts", "synthesize OK: code=${response.code}, bytes=${body.size}, voice='$finalVoice'")
 
             val outputDir = File(context.cacheDir, "tts_audio")
             outputDir.mkdirs()
@@ -111,55 +151,121 @@ class SiliconFlowTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             SecureLog.i("SiliconFlowTts", "TTS success: ${outputFile.absolutePath}")
             outputFile.absolutePath
         } catch (e: Exception) {
+            lastErrorMsg = e.message ?: e.javaClass.simpleName
             SecureLog.e("SiliconFlowTts", "Synthesis failed", e)
             null
         }
     }
 
+    /**
+     * 解析最终 voice 参数（克隆音色适配）：
+     * - `speech:` 开头 → 完整 URI，原样返回
+     * - 含 `:`（预设音色 `模型:音色`）→ 原样返回
+     * - 其余视为克隆音色名称（customName，如 dp_42824）→ 调音色列表接口解析出 URI；
+     *   列表查询失败/未找到 → 原样透传，交由服务端报错（错误体现在日志中）
+     */
+    private suspend fun resolveVoiceUri(apiKey: String, voice: String): String {
+        if (voice.startsWith("speech:") || voice.contains(":")) return voice
+        return runCatching {
+            val request = Request.Builder()
+                .url(NetworkConstants.SILICONFLOW_VOICE_LIST_URL)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .build()
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    SecureLog.w("SiliconFlowTts", "voice list HTTP ${resp.code}, keep voice=$voice")
+                    return@use voice
+                }
+                val json = resp.body?.string() ?: return@use voice
+                resolveVoiceUriFromJson(json, voice) ?: voice
+            }
+        }.getOrDefault(voice)
+    }
+
     override fun getVoices(): List<TtsVoice> {
+        // 官方文档（https://api-docs.siliconflow.cn/docs/userguide/capabilities/text-to-speech）：
+        // CosyVoice2-0.5B 系统预设音色共 8 个，请求时需带模型前缀 "FunAudioLLM/CosyVoice2-0.5B:音色名"。
+        // [FIX] 此前列表混入 8 个不存在的音色（chloe/emma/grace/henry/jack/luna/sarah/sophia/william），
+        // 选中即报错；且漏了 claire。按文档重写。
         return listOf(
-            // CosyVoice2 预设音色
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:anna", "Anna", "女", "zh-CN", "温柔知性女声 (默认)"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:alex", "Alex", "男", "zh-CN", "沉稳磁性男声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:bella", "Bella", "女", "zh-CN", "活泼甜美女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:benjamin", "Benjamin", "男", "en-US", "美式英语男声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:charles", "Charles", "男", "en-GB", "英式英语男声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:chloe", "Chloe", "女", "en-US", "美式英语女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:david", "David", "男", "zh-CN", "阳光开朗男声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:diana", "Diana", "女", "en-US", "优雅美式女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:emma", "Emma", "女", "zh-CN", "亲切邻家女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:grace", "Grace", "女", "zh-CN", "端庄大气女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:henry", "Henry", "男", "zh-CN", "成熟稳重男声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:jack", "Jack", "男", "zh-CN", "青春活力男声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:luna", "Luna", "女", "zh-CN", "梦幻空灵女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:sarah", "Sarah", "女", "en-US", "知性美式女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:sophia", "Sophia", "女", "zh-CN", "温柔治愈女声"),
-            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:william", "William", "男", "en-US", "标准美式男声"),
-            // Custom voice hint
-            TtsVoice("__custom__", "自定义音色", "自定义", "zh-CN", "使用自定义 voice_id (在设置页面填入)")
+            // ── 男声 ──
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:alex", "Alex", "男", "zh-CN", "沉稳男声 (steady male)"),
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:benjamin", "Benjamin", "男", "en-US", "深沉男声 (deep male)"),
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:charles", "Charles", "男", "en-GB", "磁性男声 (magnetic male)"),
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:david", "David", "男", "zh-CN", "阳光开朗男声 (cheerful male)"),
+            // ── 女声 ──
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:anna", "Anna", "女", "zh-CN", "沉稳女声 (steady female)"),
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:bella", "Bella", "女", "zh-CN", "热情女声 (passionate female)"),
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:claire", "Claire", "女", "zh-CN", "温柔女声 (gentle female)"),
+            TtsVoice("FunAudioLLM/CosyVoice2-0.5B:diana", "Diana", "女", "en-US", "开朗女声 (cheerful female)"),
+            // ── 自定义克隆音色 ──
+            TtsVoice("__custom__", "自定义音色", "自定义", "zh-CN", "使用克隆音色（设置页填入名称或 speech: URI）")
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
-            config.siliconflowApiKey.isNotBlank() || config.siliconflowUseGlobalKey
+            val apiKey = if (config.siliconflowUseGlobalKey) {
+                getGlobalApiKey(context) ?: config.siliconflowApiKey
+            } else {
+                config.siliconflowApiKey
+            }
+            if (apiKey.isBlank()) return false
+            // 真探活：调音色列表接口，Key 无效/欠费/无权限直接 4xx（不再"Key 非空即通过"）
+            val request = Request.Builder()
+                .url(NetworkConstants.SILICONFLOW_VOICE_LIST_URL)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .build()
+            client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
+            SecureLog.e("SiliconFlowTts", "testConnection failed", e)
             false
         }
     }
 
     /**
-     * 尝试从全局 API 配置中获取 API Key
+     * 获取硅基流动全局 API Key。
+     *
+     * [FIX] 只读 `api_key_SILICONFLOW`（对齐 SiliconFlowSttProvider）：
+     * 绝不能回退到"当前聊天模型商"的 Key（如 DeepSeek）——那会把别的厂商 Key 发给
+     * 硅基接口导致 401。用户实测：同一 Key 在"自定义 OpenAI"成功、硅基 provider 失败，
+     * 根因就是这里拿错了 Key。全局 Key 未配置时由调用方回退到 TTS 设置页填的
+     * config.siliconflowApiKey。
      */
     private fun getGlobalApiKey(context: Context): String? {
         return try {
             val prefs = context.getSharedPreferences("api_settings", Context.MODE_PRIVATE)
-            val currentApiName = prefs.getString("current_api_provider", null) ?: return null
-            // Try to get the key for the current active API provider
-            prefs.getString("api_key_$currentApiName", null)
-                ?: prefs.getString("api_key_SILICONFLOW", null)
+            prefs.getString("api_key_SILICONFLOW", null)
         } catch (e: Exception) {
             null
+        }
+    }
+
+    companion object {
+        /**
+         * 从音色列表响应 JSON 中解析 voice 对应的 URI（纯函数，可单测）。
+         *
+         * 实测硅基流动 `/v1/audio/voice/list` 响应键是 **`result`（单数）**：
+         * `{"result":[{"customName":"dp_42824","uri":"speech:...","text":"...","model":"..."}]}`
+         * 兼容早期文档的 `results` 双写。
+         *
+         * @return 匹配到的 URI；未找到/解析失败返回 null（调用方回退原 voice）。
+         */
+        internal fun resolveVoiceUriFromJson(json: String, voice: String): String? {
+            return runCatching {
+                val resultArray = JSONObject(json).let { obj ->
+                    obj.optJSONArray("result") ?: obj.optJSONArray("results")
+                } ?: return null
+                for (i in 0 until resultArray.length()) {
+                    val item = resultArray.optJSONObject(i) ?: continue
+                    val name = item.optString("customName")
+                    val uri = item.optString("uri")
+                    if (name == voice || uri == voice) {
+                        return uri.takeIf { it.isNotBlank() }
+                    }
+                }
+                null
+            }.getOrNull()
         }
     }
 }

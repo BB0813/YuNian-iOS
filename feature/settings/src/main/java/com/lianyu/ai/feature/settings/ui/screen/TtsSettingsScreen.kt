@@ -5,6 +5,8 @@ package com.lianyu.ai.feature.settings.ui.screen
 import com.lianyu.ai.uicommon.theme.AppTheme
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -61,6 +64,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -115,13 +119,83 @@ fun TtsSettingsScreen(
 
     var isVisible by remember { mutableStateOf(false) }
     var ttsEnabled by remember { mutableStateOf(false) }
-    var selectedProvider by remember { mutableStateOf(TtsProvider.ANDROID) }
+    var selectedProvider by remember { mutableStateOf(TtsProvider.entries.first()) }
     var selectedVoiceId by remember { mutableStateOf("") }
     var showProviderDropdown by remember { mutableStateOf(false) }
     var showVoiceDropdown by remember { mutableStateOf(false) }
     var isTesting by remember { mutableStateOf(false) }
     var isSynthesizing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
+
+    // ── 试听播放器：合成后真实播放；再次点击重播缓存音频（不重复合成） ──
+    var previewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var isPreviewPlaying by remember { mutableStateOf(false) }
+    var previewAudioPath by remember { mutableStateOf<String?>(null) }
+    // 缓存键：provider + 下拉音色 + 自定义音色字段，任一变化都重新合成
+    var previewCacheKey by remember { mutableStateOf("") }
+
+    fun stopPreview() {
+        previewPlayer?.let { player ->
+            runCatching {
+                if (player.isPlaying) player.stop()
+                player.release()
+            }
+        }
+        previewPlayer = null
+        isPreviewPlaying = false
+    }
+
+    /**
+     * 同步 prepare + start：本地缓存文件 prepare 只要几十毫秒，
+     * 成功立即置播放态（按钮立刻切"停止"）；失败当场报错，不再静默。
+     */
+    fun playPreview(path: String) {
+        stopPreview()
+        try {
+            val player = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                setDataSource(path)
+                setOnCompletionListener {
+                    stopPreview()
+                    testResult = "✓ 播放完成"
+                }
+                setOnErrorListener { _, _, _ ->
+                    stopPreview()
+                    testResult = "✗ 播放中断"
+                    true
+                }
+                prepare()
+            }
+            previewPlayer = player
+            player.start()
+            isPreviewPlaying = true
+
+            // [FIX] 完成兜底：部分设备 MediaPlayer 不回调 onCompletion，
+            // 按音频时长+1.5s 强制复位（仅当仍是当前播放器时生效，避免误停新播放）。
+            val durationMs = runCatching { player.duration.toLong() }.getOrDefault(0L).coerceAtLeast(0L)
+            scope.launch {
+                delay(durationMs + 1500L)
+                if (previewPlayer === player) {
+                    stopPreview()
+                    testResult = "✓ 播放完成"
+                }
+            }
+        } catch (e: Exception) {
+            stopPreview()
+            val reason = e.message ?: e.javaClass.simpleName
+            testResult = "✗ 播放失败：$reason"
+            scope.launch { snackbarHostState.showSnackbar(testResult!!) }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { stopPreview() }
+    }
 
     val config = remember {
         TtsConfig.fromSharedPreferences(context)
@@ -177,9 +251,10 @@ fun TtsSettingsScreen(
 
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("tts_settings", Context.MODE_PRIVATE)
-        ttsEnabled = prefs.getBoolean("tts_enabled", false)
-        val providerName = prefs.getString("tts_provider", TtsProvider.ANDROID.name)
-        selectedProvider = TtsProvider.entries.find { it.name == providerName } ?: TtsProvider.ANDROID
+        ttsEnabled = prefs.getBoolean("tts_enabled", true)
+        val providerName = prefs.getString("tts_provider", null)
+        // 系统TTS(ANDROID)已移除：旧配置残留 "ANDROID" 时回退到第一个可用 provider
+        selectedProvider = TtsProvider.entries.find { it.name == providerName } ?: TtsProvider.entries.first()
         // 旧版把自定义端点挂在 SiliconFlow 开关下：有 URL 且开过开关则迁移到 OPENAI_COMPAT
         val legacyCustom = prefs.getBoolean("sf_use_custom_tts", false)
         if (
@@ -250,6 +325,32 @@ fun TtsSettingsScreen(
             provider = selectedProvider,
             voiceId = selectedVoiceId
         )
+    }
+
+    /** 强制重新合成并播放（试听首次 / 重新合成按钮共用），并更新缓存。 */
+    fun synthesizeAndPlay(hint: String) {
+        scope.launch {
+            isSynthesizing = true
+            testResult = null
+            saveSettings()
+
+            val audioPath = ttsService.testWithSampleText(
+                selectedProvider,
+                "你好，这是一个语音合成测试。",
+                selectedVoiceId
+            )
+            isSynthesizing = false
+            if (audioPath != null) {
+                previewAudioPath = audioPath
+                previewCacheKey = "${selectedProvider.name}|$selectedVoiceId|$sfCustomVoiceId"
+                testResult = hint
+                snackbarHostState.showSnackbar(testResult!!)
+                playPreview(audioPath)
+            } else {
+                testResult = "✗ 合成失败：${ttsService.lastSynthesisError ?: "未知原因"}"
+                snackbarHostState.showSnackbar(testResult!!)
+            }
+        }
     }
 
     fun saveChatTtsSettings() {
@@ -490,7 +591,7 @@ fun TtsSettingsScreen(
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
                                     onClick = {
@@ -522,32 +623,29 @@ fun TtsSettingsScreen(
                                         Icon(
                                             imageVector = Icons.Filled.Refresh,
                                             contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("测试连接", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("测试连接", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                     }
                                 }
 
                                 Button(
                                     onClick = {
-                                        scope.launch {
-                                            isSynthesizing = true
-                                            testResult = null
-                                            saveSettings()
-                                            
-                                            if (selectedProvider == TtsProvider.ANDROID) {
-                                                ttsService.setProvider(TtsProvider.ANDROID)
-                                            }
-                                            
-                                            val audioPath = ttsService.testWithSampleText(
-                                                selectedProvider,
-                                                "你好，这是一个语音合成测试。"
-                                            )
-                                            isSynthesizing = false
-                                            testResult = if (audioPath != null) "✓ 合成成功: ${audioPath.substringAfterLast("/")}" else "✗ 合成失败"
-                                            snackbarHostState.showSnackbar(testResult!!)
+                                        // 播放中 → 点击停止
+                                        if (isPreviewPlaying) {
+                                            stopPreview()
+                                            return@Button
                                         }
+                                        // 缓存命中（同 provider/音色/自定义音色字段）→ 直接重播，不重新合成
+                                        val cacheKey = "${selectedProvider.name}|$selectedVoiceId|$sfCustomVoiceId"
+                                        if (previewAudioPath != null && previewCacheKey == cacheKey) {
+                                            testResult = "✓ 重播中…"
+                                            scope.launch { snackbarHostState.showSnackbar(testResult!!) }
+                                            playPreview(previewAudioPath!!)
+                                            return@Button
+                                        }
+                                        synthesizeAndPlay("✓ 合成成功，播放中…")
                                     },
                                     enabled = !isSynthesizing && !isTesting,
                                     modifier = Modifier.weight(1f).height(48.dp),
@@ -557,20 +655,59 @@ fun TtsSettingsScreen(
                                         contentColor = PetalOnPrimaryContainer
                                     )
                                 ) {
+                                    when {
+                                        isSynthesizing -> {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = PetalOnPrimaryContainer,
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                        isPreviewPlaying -> {
+                                            Icon(
+                                                imageVector = Icons.Filled.Stop,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("停止", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                        }
+                                        else -> {
+                                            Icon(
+                                                imageVector = Icons.Filled.PlayArrow,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("试听", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                        }
+                                    }
+                                }
+
+                                Button(
+                                    onClick = { synthesizeAndPlay("✓ 重新合成，播放中…") },
+                                    enabled = !isSynthesizing && !isTesting,
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = PetalPrimary.copy(alpha = 0.10f),
+                                        contentColor = PetalPrimary
+                                    )
+                                ) {
                                     if (isSynthesizing) {
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(20.dp),
-                                            color = PetalOnPrimaryContainer,
+                                            color = PetalPrimary,
                                             strokeWidth = 2.dp
                                         )
                                     } else {
                                         Icon(
-                                            imageVector = Icons.Filled.PlayArrow,
+                                            imageVector = Icons.Filled.Refresh,
                                             contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("试听", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("重新合成", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                     }
                                 }
                             }
@@ -1124,8 +1261,15 @@ private fun ApiKeyConfigCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 TtsTextField(value = sfCustomVoiceId, onValueChange = onSfCustomVoiceIdChange,
-                    label = "自定义音色 voice_id (可选)", isDarkTheme = isDarkTheme, dividerColor = dividerColor,
+                    label = "自定义音色 (名称或 speech: URI)", isDarkTheme = isDarkTheme, dividerColor = dividerColor,
                     textPrimaryColor = textPrimaryColor, textSecondaryColor = textSecondaryColor)
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "克隆音色：可填音色名称（如 dp_42824，自动解析 URI）或直接粘贴完整 URI（speech:...）",
+                    fontSize = 12.sp,
+                    color = textSecondaryColor
+                )
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -1264,13 +1408,6 @@ private fun ApiKeyConfigCard(
                         }
                     }
                 }
-            }
-            TtsProvider.ANDROID -> {
-                Text(
-                    text = "使用系统内置 TTS 引擎，无需配置 API Key\n建议在系统设置中安装高质量TTS引擎以获得更好效果",
-                    fontSize = 13.sp,
-                    color = textSecondaryColor
-                )
             }
             TtsProvider.SHERPA_LOCAL -> {
                 // 本地离线 TTS 配置在 ApiKeyConfigCard 外部独立渲染（见 TtsSettingsScreen 主体）

@@ -286,6 +286,7 @@ fun ChatScreen(
     val appSettingsStore = remember(context) { com.lianyu.ai.common.AppSettingsStore(context) }
     val showReasoning by appSettingsStore.showReasoningFlow.collectAsStateWithLifecycle(initialValue = false)
     val autoCollapseReasoning by appSettingsStore.autoCollapseReasoningFlow.collectAsStateWithLifecycle(initialValue = true)
+    val showTypingSpinner by appSettingsStore.showTypingSpinnerFlow.collectAsStateWithLifecycle(initialValue = false)
     val chatItems = remember(messageMetadata, messageBodies, showReasoning) {
         toChatListItems(messageMetadata, messageBodies, showReasoning = showReasoning)
     }
@@ -309,6 +310,7 @@ fun ChatScreen(
     val isRegenerating by viewModel.isRegenerating.collectAsStateWithLifecycle()
     val availableApis by viewModel.availableApis.collectAsStateWithLifecycle()
     val currentApi by viewModel.currentApi.collectAsStateWithLifecycle()
+    val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
@@ -442,16 +444,26 @@ fun ChatScreen(
         }.collect(viewModel::loadVisibleMessageBodies)
     }
 
-    // 新消息时自动滚动到底部：用户消息始终滚动，AI 消息仅在用户位于底部时滚动
+    // 新消息时自动滚动到底部：用户消息始终滚动，AI 消息仅在用户位于底部时滚动。
+    // key 同时取「底部项的 stableId + 正文是否就绪」：元数据先于正文到达时，
+    // 正文 Ready 后会再触发一次贴底，避免停在占位行导致最新消息停留在列表底缘
+    // （被输入框压住）。未读数只在消息 id 变化时累计一次，正文补触发不重复 +1。
     val lastMessageId = messages.lastOrNull()?.id
-    LaunchedEffect(lastMessageId) {
+    val bottomItemStableId = visibleChatItems.firstOrNull()?.stableId
+    val bottomItemContentReady = visibleChatItems.firstOrNull()?.let { item ->
+        item.messageOrNull != null || item !is ChatListItem.BodyLoading
+    } == true
+    var autoScrollCountedId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(lastMessageId, bottomItemStableId, bottomItemContentReady) {
         if (messages.isEmpty()) return@LaunchedEffect
         val lastMessage = messages.lastOrNull()
         val isMyMessage = lastMessage?.isFromUser == true
+        val isNewMessage = autoScrollCountedId != lastMessageId
+        if (isNewMessage) autoScrollCountedId = lastMessageId
         if (wasAtBottom || isMyMessage) {
             listState.scrollToItem(0)
-            unreadNewMessages = 0
-        } else {
+            if (isNewMessage) unreadNewMessages = 0
+        } else if (isNewMessage) {
             unreadNewMessages += 1
         }
     }
@@ -802,6 +814,8 @@ fun ChatScreen(
                 isBlocked = detailSettings.blocked,
                 isLoading = isLoading,
                 quoteReply = quoteReply,
+                inputText = draftText,
+                onInputTextChange = viewModel::setDraftText,
                 ttsState = ttsState,
                 showStickerPanel = showStickerPanel,
                 showExtensionPanel = showExtensionPanel,
@@ -971,6 +985,7 @@ fun ChatScreen(
             companionId = companionId,
             companionData = companionData,
             isLoading = isLoading,
+            showTypingSpinner = showTypingSpinner,
             onBackClick = exitChat,
             onDetailClick = onNavigateToDetail,
             adaptiveSizing = adaptiveSizing

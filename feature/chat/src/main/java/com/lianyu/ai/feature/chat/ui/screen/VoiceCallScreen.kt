@@ -219,8 +219,21 @@ fun VoiceCallScreen(
         currentAiJob = null
     }
 
+    /** 设置页「启用 TTS 语音」主开关；关闭时通话内 AI 语音一律不播报。默认开启。 */
+    fun isTtsVoiceEnabled(): Boolean =
+        context.getSharedPreferences("tts_settings", android.content.Context.MODE_PRIVATE)
+            .getBoolean("tts_enabled", true)
+
     // ── TTS 播放 ──
     fun speakText(text: String) {
+        // [FIX] 设置页「启用 TTS 语音」开关（文案："开启后 AI 回复将使用语音播放"）此前无人读取，
+        // 导致关闭后语音通话的问候语/AI 回复依旧出声。关闭时不播报，直接恢复录音保持通话可用。
+        if (!isTtsVoiceEnabled()) {
+            if (isMicEnabled && callState == CallState.CONNECTED) {
+                voiceManager.startListening()
+            }
+            return
+        }
         scope.launch(Dispatchers.IO) {
             try {
                 val audioPath = ttsService.synthesize(text)

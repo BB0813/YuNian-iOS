@@ -44,6 +44,10 @@ open class WeChatPollingService : Service() {
     private var holdsPrimaryLease = false
     private var wakeLock: PowerManager.WakeLock? = null
 
+    /** 防抖：onTimeout/onDestroy 自重启最小间隔，避免系统反复杀→重启→杀的循环 */
+    @Volatile
+    private var lastRestartAtMs = 0L
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
@@ -67,7 +71,7 @@ open class WeChatPollingService : Service() {
 
     override fun onTimeout(startId: Int) {
         super.onTimeout(startId)
-        Log.w(TAG, "Foreground service timeout reached, scheduling restart and stopping gracefully")
+        Log.w(TAG, "Foreground service timeout reached, restarting immediately")
         releasePrimaryLease()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -75,9 +79,9 @@ open class WeChatPollingService : Service() {
             // ignore cleanup errors
         }
         stopSelf(startId)
-        // 周期兜底 + 立即一轮 poll/drain，缩短 FGS 被系统掐断后的空窗
-        runCatching { WeChatPollingWorker.schedule(applicationContext) }
-        runCatching { WeChatPollingWorker.scheduleImmediate(applicationContext) }
+        // 立即自重启（照搬 QQBotForegroundService.onTimeout 模式），
+        // 而非仅靠 Worker 兜底——Worker 在 Doze 下不可靠，会导致熄屏 2 分钟掉线
+        scheduleRestartWithDebounce()
     }
 
     override fun onDestroy() {
@@ -86,10 +90,11 @@ open class WeChatPollingService : Service() {
         watchdogJob?.cancel()
         releasePrimaryLease()
         releaseWakeLock()
-        // 仍登录时保留周期 Worker，并补一轮立即兜底（避免仅靠 15min 周期）
+        // 仍登录时立即自重启（恢复进程内常驻 poll，Worker 在 Doze 下不可靠）
         runCatching {
             val loggedIn = WeChatServiceLocator.tokenStore(applicationContext).isLoggedInSync()
             if (loggedIn) {
+                scheduleRestartWithDebounce()
                 WeChatPollingWorker.schedule(applicationContext)
                 WeChatPollingWorker.scheduleImmediate(applicationContext)
             }
@@ -101,21 +106,28 @@ open class WeChatPollingService : Service() {
     /**
      * 带超时的 PARTIAL_WAKE_LOCK：每轮 poll / 看门狗续租，避免无限持锁激怒厂商策略。
      * 超时 ≈ 长轮询 + 最大退避 + 余量。
+     *
+     * 续租采用「释放旧锁 + 申请新锁」而非复用同一锁对象重复 acquire(timeout)：
+     * 部分 Android 版本对已持有的非引用计数锁重复 acquire(timeout) 不重置超时，
+     * 首个 timeout runnable 到点仍会释放锁 → 锁在 135s（≈熄屏"两分钟"）后过期，
+     * CPU 休眠 → 微信+QQ 同进程同停，且与设备/ROM 无关（AOSP 层行为）。
      */
     private fun renewWakeLock() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val lock = wakeLock ?: powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "$packageName:wechat-polling",
-        ).also {
-            it.setReferenceCounted(false)
-            wakeLock = it
-        }
+        releaseWakeLock()
         try {
-            lock.acquire(WAKE_LOCK_TIMEOUT_MS)
-            Log.d(TAG, "Partial wake lock renewed for ${WAKE_LOCK_TIMEOUT_MS}ms")
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val lock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "$packageName:wechat-polling",
+            ).apply {
+                setReferenceCounted(false)
+                acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
+            wakeLock = lock
+            Log.d(TAG, "Partial wake lock acquired for ${WAKE_LOCK_TIMEOUT_MS}ms")
         } catch (error: Exception) {
-            Log.w(TAG, "Wake lock renew failed: ${error.message}")
+            // acquire 失败（罕见）：wakeLock 保持 null，下一轮 poll/看门狗续租时重试
+            Log.w(TAG, "Wake lock acquire failed: ${error.message}")
         }
     }
 
@@ -135,6 +147,8 @@ open class WeChatPollingService : Service() {
         watchdogJob = serviceScope.launch {
             while (isActive) {
                 delay(WeChatChannelRuntime.WATCHDOG_INTERVAL_MS)
+                // 巡检心跳：用于检测进程冻结 / FGS 停摆（熄屏掉线取证）
+                WeChatChannelRuntime.onWatchdogTick()
                 renewWakeLock()
                 val decision = WeChatChannelRuntime.evaluateWatchdog()
                 if (!decision.needsAction) {
@@ -233,6 +247,21 @@ open class WeChatPollingService : Service() {
         }
     }
 
+    /**
+     * 带防抖的自重启：10 秒内不重复 startForegroundService，
+     * 避免厂商 ROM 反复杀 FGS → 重启 → 再杀的恶性循环。
+     */
+    private fun scheduleRestartWithDebounce() {
+        val now = System.currentTimeMillis()
+        if (now - lastRestartAtMs < RESTART_DEBOUNCE_MS) {
+            Log.w(TAG, "Restart debounced (last=${now - lastRestartAtMs}ms ago)")
+            return
+        }
+        lastRestartAtMs = now
+        WeChatPollingService.start(applicationContext)
+        Log.i(TAG, "Scheduled immediate restart")
+    }
+
     private fun createNotification(): Notification {
         val channelId = CHANNEL_ID
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -276,16 +305,27 @@ open class WeChatPollingService : Service() {
         private const val CHANNEL_ID = "wechat_polling"
         private const val CHANNEL_NAME = "微信消息轮询"
         private const val CHANNEL_DESCRIPTION = "保持微信消息实时接收"
-        /** 长轮询 + 最大退避 + 30s 余量，到期由 poll/看门狗续租。 */
+        /** 长轮询 + 最大退避 + 3min 余量（看门狗每 60s 续租，留足调度抖动窗口）。覆盖 FGS 自重启窗口。 */
         private val WAKE_LOCK_TIMEOUT_MS =
-            TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS + WeChatChannelRuntime.MAX_BACKOFF_MS + 30_000L
+            TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS + WeChatChannelRuntime.MAX_BACKOFF_MS + 180_000L
+
+        /** onTimeout/onDestroy 自重启防抖间隔，避免厂商 ROM 反复杀→重启循环。 */
+        private const val RESTART_DEBOUNCE_MS = 10_000L
 
         fun start(context: Context) {
             val intent = Intent().setClassName(context.packageName, SHELL_SERVICE_CLASS)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (error: Exception) {
+                // Android 12+ 后台启动 FGS 会抛 ForegroundServiceStartNotAllowedException。
+                // 自重启路径（onDestroy/onTimeout）在熄屏后台运行时可能命中，
+                // 若不加保护会直接崩溃整个进程（微信+QQ 同进程同死）。
+                // 失败不致命：Worker / 看门狗 / onResume 兜底会再次拉起。
+                Log.w(TAG, "start FGS from background rejected: ${error.message}")
             }
         }
 

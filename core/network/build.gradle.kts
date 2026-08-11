@@ -45,4 +45,5 @@ dependencies {
     compileOnly(files("libs/sherpa-onnx-1.13.3.aar"))
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

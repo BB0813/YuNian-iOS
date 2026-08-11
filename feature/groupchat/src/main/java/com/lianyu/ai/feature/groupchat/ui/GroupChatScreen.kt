@@ -1013,8 +1013,8 @@ fun GroupChatBubble(
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = remember(message.timestamp) { dateFormat.format(Date(message.timestamp)) }
 
-    // 气泡不透明；自己 / AI 统一 AI 标准色
-    val userBubbleColor = AppTheme.colors.secondaryBubbleBackground
+    // 气泡不透明；自己 lilac（primary）/ AI sky（secondary）分色区分归属
+    val userBubbleColor = AppTheme.colors.primaryBubbleBackground
     val aiBubbleColor = AppTheme.colors.secondaryBubbleBackground
 
     AppListItemLayout(

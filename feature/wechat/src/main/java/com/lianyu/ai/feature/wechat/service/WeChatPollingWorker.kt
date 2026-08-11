@@ -95,6 +95,10 @@ class WeChatPollingWorker(
 
         /**
          * FGS 超时/进程恢复后立刻补一轮 poll+drain，不替换周期任务。
+         *
+         * 用 KEEP 而非 REPLACE：REPLACE 会取消「正在运行」的同名 worker，
+         * 若上轮立即轮询正阻塞在 getUpdates()，会被中途打断 → 会话状态残留。
+         * KEEP 只在无 pending/running 时才入队，幂等且不打断在途轮询。
          */
         fun scheduleImmediate(context: Context) {
             val constraints = Constraints.Builder()
@@ -108,7 +112,7 @@ class WeChatPollingWorker(
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 IMMEDIATE_WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
+                ExistingWorkPolicy.KEEP,
                 request,
             )
             SecureLog.i(TAG, "immediate poll worker enqueued")

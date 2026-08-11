@@ -28,6 +28,7 @@ import com.lianyu.ai.feature.backup.BackupScreen
 import com.lianyu.ai.feature.backup.BackupExportSelectScreen
 import com.lianyu.ai.feature.chat.ui.screen.ChatDetailScreen
 import com.lianyu.ai.feature.chat.ui.screen.ChatScreen
+import com.lianyu.ai.feature.chat.ui.screen.DndSettingsScreen
 import com.lianyu.ai.feature.chat.ui.screen.VoiceCallScreen
 import com.lianyu.ai.feature.coffee.ui.CoffeeOrderQueryScreen
 import com.lianyu.ai.feature.coffee.ui.CoffeeScreen
@@ -142,6 +143,17 @@ internal fun MainNavHost(
             val detailCompanionId = backStackEntry.arguments?.getLong("companionId") ?: 0L
             ChatDetailScreen(
                 companionId = detailCompanionId,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToDndSettings = { navController.navigate(MainRoute.DndSettings(detailCompanionId).route) }
+            )
+        }
+        composable(
+            MainRoute.DndSettings(0).route.replace("0", "{companionId}"),
+            arguments = listOf(navArgument("companionId") { type = NavType.LongType })
+        ) { backStackEntry ->
+            val dndCompanionId = backStackEntry.arguments?.getLong("companionId") ?: 0L
+            DndSettingsScreen(
+                companionId = dndCompanionId,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

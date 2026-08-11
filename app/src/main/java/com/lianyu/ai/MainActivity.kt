@@ -196,20 +196,20 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermission()
         CompanionKeepAliveService.start(this)
         CompanionMessageWorker.schedule(this)
-        // IQOO/OriginOS 设备启用 JobScheduler 第三层兜底保活
-        if (RomUtils.isVivo) {
-            scheduleIqooKeepAliveJob()
-        }
+        // JobScheduler 第三层兜底保活（全设备启用：进程被杀后由系统作业拉起恢复，
+        // 覆盖 WorkManager 在 Doze 下延迟的窗口；原生 Android / 国产 ROM 通用）
+        scheduleIqooKeepAliveJob()
 
         appScope.launch { updateManager.checkForUpdates() }
         startMemoryMonitor()
     }
 
     /**
-     * IQOO/OriginOS 专用 JobScheduler 第三层保活调度。
+     * JobScheduler 第三层保活调度（每 15 分钟）。
      *
-     * OriginOS 对前台服务和 WorkManager 都有严格限制，
-     * 使用 JobScheduler 作为兜底机制：每 15 分钟检查并重启保活服务。
+     * 进程被杀后，WorkManager 在 Doze 下可能延迟数分钟；JobScheduler 由系统作业服务
+     * 托管，作为独立恢复通道。作业运行期允许后台启动 FGS（Android 12+ 豁免），
+     * 因此能真正拉起已死的保活/轮询服务。
      */
     private fun scheduleIqooKeepAliveJob() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {

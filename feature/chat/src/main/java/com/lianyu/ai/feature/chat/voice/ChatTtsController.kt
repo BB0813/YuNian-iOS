@@ -45,6 +45,11 @@ class ChatTtsController(
     private val _currentText = MutableStateFlow("")
     val currentText: StateFlow<String> = _currentText.asStateFlow()
 
+    /** 设置页「启用 TTS 语音」主开关；关闭时语音条合成与通话播报统一静音。默认开启。 */
+    private fun ttsMasterEnabled(): Boolean =
+        context.getSharedPreferences("tts_settings", android.content.Context.MODE_PRIVATE)
+            .getBoolean("tts_enabled", true)
+
     /**
      * 仅合成并持久化音频，返回 [VoiceBarAudio]；不自动播放。
      * 用于 [ChatTtsMode.VOICE_BAR]：写入 ChatMessage.linkString + type=VOICE，
@@ -57,6 +62,13 @@ class ChatTtsController(
         }
         val cfg = configProvider()
         if (cfg.mode != ChatTtsMode.VOICE_BAR) return null
+        // [FIX] 设置页「启用 TTS 语音」主开关关闭时，语音条即使开启也不合成。
+        // 这里读实时 prefs（而非内存 config），也覆盖了设置页改模式/开关不通知
+        // 已存活 ChatGenerationManager 的路径。
+        if (!ttsMasterEnabled()) {
+            SecureLog.d(TAG, "synthesizeOnly skipped: TTS master switch off")
+            return null
+        }
         val cleaned = TtsTextCleaner.clean(text, cfg.skipParentheses)
         if (cleaned.isBlank()) return null
         return try {

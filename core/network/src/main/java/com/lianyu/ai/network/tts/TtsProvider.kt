@@ -1,7 +1,9 @@
 package com.lianyu.ai.network.tts
 
 enum class TtsProvider(val displayName: String, val description: String) {
-    ANDROID("系统TTS", "使用系统内置语音引擎，无需配置"),
+    // 系统TTS（ANDROID）已移除：Android 系统 TTS 引擎普遍不支持文件合成
+    // （synthesizeToFile 返回 ERROR），无法产出语音条音频；且旧配置残留
+    // "ANDROID" 会被 TtsService / 设置页回退到 entries.first()。
     ALIYUN("阿里云", "阿里云语音合成 - 多种音色可选"),
     BAIDU("百度", "百度语音合成 - 中文效果好"),
     XUNFEI("讯飞", "讯飞语音 - 情感丰富"),
