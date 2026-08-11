@@ -84,11 +84,15 @@ class XunfeiTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
-            config.xunfeiAppId.isNotBlank() && 
-            config.xunfeiApiKey.isNotBlank() && 
-            config.xunfeiApiSecret.isNotBlank()
+            if (config.xunfeiAppId.isBlank() || config.xunfeiApiKey.isBlank() || config.xunfeiApiSecret.isBlank()) {
+                return false
+            }
+            // 真探活：WebSocket 实际合成一段测试文本，能出音频即配置有效
+            val url = buildWebSocketUrl(config.xunfeiAppId, config.xunfeiApiKey, config.xunfeiApiSecret)
+            val audio = synthesizeViaWebSocket(url, "测试", "xiaoyan")
+            audio != null && audio.isNotEmpty()
         } catch (e: Exception) {
             false
         }
@@ -122,12 +126,15 @@ host: tts-api.xfyun.cn"""
     }
 
     private suspend fun synthesizeViaWebSocket(url: String, text: String, voice: String): ByteArray? {
-        var result: ByteArray? = null
+        // [FIX] result 由 WebSocket 回调线程写入、主线程 sleep 后读取：
+        // 普通 var 跨线程无可见性保证，可能读到 null（间歇性合成失败）。
+        // 用 AtomicReference 保证写读可见。
+        val result = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
 
         val request = Request.Builder().url(url).build()
         val webSocketListener = object : WebSocketListener() {
             private val audioBuffer = mutableListOf<Byte>()
-            
+
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
                 val requestJson = JSONObject().apply {
                     put("header", JSONObject().apply {
@@ -151,10 +158,10 @@ host: tts-api.xfyun.cn"""
                         })
                     })
                 }
-                
+
                 webSocket.send(requestJson.toString())
             }
-            
+
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 synchronized(audioBuffer) {
                     for (byte in bytes.toByteArray()) {
@@ -162,37 +169,43 @@ host: tts-api.xfyun.cn"""
                     }
                 }
             }
-            
+
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val json = JSONObject(text)
                     val header = json.getJSONObject("header")
                     val code = header.getInt("code")
-                    
+
                     if (code != 0) {
                         SecureLog.e("XunfeiTts", "Error code: $code")
                     }
-                    
+
                     val status = header.getInt("status")
                     if (status == 2) {
-                        result = synchronized(audioBuffer) { audioBuffer.toByteArray() }
+                        result.set(synchronized(audioBuffer) { audioBuffer.toByteArray() })
                         webSocket.close(1000, "Complete")
                     }
                 } catch (e: Exception) {
                     SecureLog.e("XunfeiTts", "Parse message error", e)
                 }
             }
-            
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
                 SecureLog.e("XunfeiTts", "WebSocket failure", t)
             }
         }
-        
-        client.newWebSocket(request, webSocketListener)
+
+        val webSocket = client.newWebSocket(request, webSocketListener)
 
         // [TTS FIX] 长文本语音超时：原固定 sleep(5s) 对长文本不足，按"一个字符 1 秒"动态等待
         Thread.sleep(TimeoutBudgets.ttsSynthTimeoutMs(text.length))
-        
-        return result
+
+        // 超时未完成：主动关闭连接，避免 WebSocket 泄漏
+        if (result.get() == null) {
+            runCatching { webSocket.cancel() }
+            SecureLog.w("XunfeiTts", "synthesis timeout, websocket cancelled")
+        }
+
+        return result.get()
     }
 }

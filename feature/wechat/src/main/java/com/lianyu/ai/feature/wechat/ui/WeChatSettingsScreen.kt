@@ -677,6 +677,13 @@ private fun ChannelHealthCard(
             fontSize = 12.sp,
             color = AppTheme.colors.onSurfaceVariant,
         )
+        if (health.watchdogStallCount > 0) {
+            Text(
+                text = "看门狗停摆 ${health.watchdogStallCount} 次（最长 ${health.lastWatchdogStallMs / 1000}s）",
+                fontSize = 12.sp,
+                color = AppTheme.colors.warning,
+            )
+        }
         if (!health.lastError.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(

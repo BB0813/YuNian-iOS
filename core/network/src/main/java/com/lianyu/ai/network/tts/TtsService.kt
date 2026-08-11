@@ -9,8 +9,7 @@ import java.io.File
 class TtsService(private val context: Context) {
 
     private val providers = mutableMapOf<TtsProvider, TtsProviderInterface>()
-    private var currentProvider: TtsProvider = TtsProvider.ANDROID
-    private val androidTts = AndroidTtsProvider()
+    private var currentProvider: TtsProvider = TtsProvider.entries.first()
     private val sherpaLocalTts = SherpaLocalTtsProvider()
     private var currentConfig: TtsConfig = TtsConfig.fromSharedPreferences(context)
 
@@ -24,12 +23,12 @@ class TtsService(private val context: Context) {
         providers[TtsProvider.MIMO] = MiMoTtsProvider()
         providers[TtsProvider.OPENAI_COMPAT] = OpenAiCompatibleTtsProvider()
         providers[TtsProvider.SHERPA_LOCAL] = sherpaLocalTts
-        providers[TtsProvider.ANDROID] = androidTts
 
-        // 从 prefs 恢复当前 provider，避免进程重启后落回系统 TTS
+        // 从 prefs 恢复当前 provider；系统TTS(ANDROID)已移除，
+        // 旧配置残留 "ANDROID" 时 entries.find 失败，回退到第一个可用 provider。
         val prefs = context.getSharedPreferences("tts_settings", Context.MODE_PRIVATE)
-        val providerName = prefs.getString("tts_provider", TtsProvider.ANDROID.name)
-        currentProvider = TtsProvider.entries.find { it.name == providerName } ?: TtsProvider.ANDROID
+        val providerName = prefs.getString("tts_provider", null)
+        currentProvider = TtsProvider.entries.find { it.name == providerName } ?: TtsProvider.entries.first()
         providers.values.filterIsInstance<ConfigurableTtsProvider>().forEach { it.updateConfig(currentConfig) }
         SecureLog.i("TtsService", "Initialized with provider=${currentProvider.displayName}")
     }
@@ -60,27 +59,44 @@ class TtsService(private val context: Context) {
 
     fun getConfig(): TtsConfig = currentConfig
 
+    /** 最近一次合成失败的展示原因（试听按钮直接展示；成功时清空）。 */
+    @Volatile
+    var lastSynthesisError: String? = null
+        private set
+
     suspend fun synthesize(text: String, voiceId: String? = null): String? = withContext(Dispatchers.IO) {
         try {
-            if (currentProvider == TtsProvider.ANDROID && !androidTts.isInitialized()) {
-                androidTts.initialize(context)
-            }
             val provider = providers[currentProvider]
                 ?: throw IllegalStateException("Provider ${currentProvider.name} not initialized")
 
+            // [ADAPT] 调用方（语音条/语音通话/试听）不传 voiceId 时，
+            // 统一用设置页保存的音色（tts_voice_<PROVIDER>），否则音色选择从未生效。
+            val resolvedVoiceId = voiceId ?: savedVoiceFor(currentProvider)
+
             SecureLog.d("TtsService", "Synthesizing text with ${currentProvider.displayName}, length=${text.length}")
-            val result = provider.synthesize(context, text, voiceId)
+            lastSynthesisError = null
+            val result = provider.synthesize(context, text, resolvedVoiceId)
 
             if (result != null) {
                 SecureLog.i("TtsService", "TTS synthesis successful: $result")
             } else {
-                SecureLog.w("TtsService", "TTS synthesis returned null")
+                lastSynthesisError = provider.lastError() ?: "合成失败（${currentProvider.displayName}）"
+                SecureLog.e("TtsService", "TTS synthesis returned null: $lastSynthesisError")
             }
             result
         } catch (e: Exception) {
+            lastSynthesisError = e.message ?: e.javaClass.simpleName
             SecureLog.e("TtsService", "TTS synthesis failed", e)
             null
         }
+    }
+
+    /** 设置页保存的当前 provider 音色（无/空则返回 null，交给 provider 用默认）。 */
+    private fun savedVoiceFor(provider: TtsProvider): String? {
+        return runCatching {
+            val prefs = context.getSharedPreferences("tts_settings", Context.MODE_PRIVATE)
+            prefs.getString("tts_voice_${provider.name}", null)?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     fun getVoices(provider: TtsProvider = currentProvider): List<TtsVoice> {
@@ -96,32 +112,42 @@ class TtsService(private val context: Context) {
             }
 
             val isConfigured = currentConfig.isProviderConfigured(provider)
-            if (!isConfigured && provider != TtsProvider.ANDROID) {
+            if (!isConfigured) {
                 SecureLog.w("TtsService", "Provider ${provider.displayName} not configured")
                 return@withContext false
             }
 
-            p.testConnection()
+            p.testConnection(context)
         } catch (e: Exception) {
             SecureLog.e("TtsService", "Test provider ${provider.displayName} failed", e)
             false
         }
     }
 
-    suspend fun testWithSampleText(provider: TtsProvider = currentProvider, text: String = "你好，这是一个语音合成测试。"): String? {
+    suspend fun testWithSampleText(
+        provider: TtsProvider = currentProvider,
+        text: String = "你好，这是一个语音合成测试。",
+        voiceId: String? = null
+    ): String? {
         return try {
-            if (provider == TtsProvider.ANDROID && !androidTts.isInitialized()) {
-                androidTts.initialize(context)
-            }
-
             val p = providers[provider] ?: return null
             if (p is ConfigurableTtsProvider) {
                 p.updateConfig(currentConfig)
             }
 
-            SecureLog.i("TtsService", "Testing TTS with sample text for ${provider.displayName}")
-            p.synthesize(context, text, null)
+            // [FIX] voiceId 优先取调用方显式传入（设置页试听传当前选中音色，
+            // 避免读异步写盘的 tts_voice_<厂商> 拿到旧值）；未传时回退 prefs。
+            val resolvedVoiceId = voiceId ?: savedVoiceFor(provider)
+            SecureLog.i("TtsService", "Testing TTS with sample text for ${provider.displayName}, voice=$resolvedVoiceId")
+            lastSynthesisError = null
+            val result = p.synthesize(context, text, resolvedVoiceId)
+            if (result == null) {
+                lastSynthesisError = p.lastError() ?: "合成失败（${provider.displayName}）"
+                SecureLog.e("TtsService", "Test synthesis failed: $lastSynthesisError")
+            }
+            result
         } catch (e: Exception) {
+            lastSynthesisError = e.message ?: e.javaClass.simpleName
             SecureLog.e("TtsService", "Test synthesis failed", e)
             null
         }

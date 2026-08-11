@@ -80,6 +80,13 @@ object TimeoutBudgets {
     // === AI 工具确认卡片 ===
     const val AUTOMATION_CONFIRM_TIMEOUT_MS = 60_000L  // 确认卡片等待上限，超时按拒绝处理
 
+    // === 自动化工作流 ===
+    // [P0] 单节点 AI 生成业务超时：底层 OkHttp 读超时 20s，但多节点串行会累计拖爆
+    // WorkManager(10min)/tick(60s) 窗口。45s 覆盖慢模型单次生成并留余量。
+    const val AUTOMATION_AI_TIMEOUT_MS = 45_000L
+    // 整图执行总预算：多 AI_GENERATE 节点串行累计不能拖爆 worker/tick 窗口
+    const val AUTOMATION_WORKFLOW_TOTAL_MS = 180_000L
+
     // === 分岔点硬限制 ===
     const val CHANNEL_CAPACITY = 100         // 消息队列容量
     const val MAX_CONCURRENT_API = 3         // 最大并发API请求

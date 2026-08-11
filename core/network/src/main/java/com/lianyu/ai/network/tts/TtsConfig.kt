@@ -43,7 +43,6 @@ data class TtsConfig(
 ) {
     fun isProviderConfigured(provider: TtsProvider): Boolean {
         return when (provider) {
-            TtsProvider.ANDROID -> true
             TtsProvider.ALIYUN -> aliyunKeyId.isNotBlank() && aliyunKeySecret.isNotBlank() && aliyunAppKey.isNotBlank()
             TtsProvider.BAIDU -> baiduApiKey.isNotBlank() && baiduSecretKey.isNotBlank()
             TtsProvider.XUNFEI -> xunfeiAppId.isNotBlank() && xunfeiApiKey.isNotBlank() && xunfeiApiSecret.isNotBlank()

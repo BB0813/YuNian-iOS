@@ -55,6 +55,8 @@ object NetworkConstants {
     // ── 硅基流动 STT/TTS endpoint（基于 ApiProvider.SILICONFLOW.defaultBaseUrl 构建） ──
     val SILICONFLOW_STT_URL = ApiProvider.SILICONFLOW.defaultBaseUrl.trimEnd('/') + "/audio/transcriptions"
     val SILICONFLOW_TTS_URL = ApiProvider.SILICONFLOW.defaultBaseUrl.trimEnd('/') + "/audio/speech"
+    /** 克隆音色列表（customName→speech:URI 解析用） */
+    val SILICONFLOW_VOICE_LIST_URL = ApiProvider.SILICONFLOW.defaultBaseUrl.trimEnd('/') + "/audio/voice/list"
 
     // ── QQ Bot 官方 API ──
     const val QQ_BOT_AUTH_BASE_URL = "https://bots.qq.com/"

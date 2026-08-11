@@ -143,7 +143,7 @@ class OpenAiCompatibleTtsProvider : TtsProviderInterface, ConfigurableTtsProvide
         TtsVoice("__custom__", "自定义 voice", "自定义", "zh-CN", "在设置页填写 voice 字段")
     )
 
-    override suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun testConnection(context: Context): Boolean = withContext(Dispatchers.IO) {
         try {
             val apiKey = config.customTtsApiKey.trim()
             val speechUrl = normalizeSpeechUrl(config.customTtsUrl) ?: return@withContext false

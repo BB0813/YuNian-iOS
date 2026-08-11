@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.chat.R
+import com.lianyu.ai.feature.chat.data.CompanionChatDetailSettings
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatDetailSettingsViewModel
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatDetailSettingsViewModelFactory
 import com.lianyu.ai.feature.chat.ui.viewmodel.ChatViewModel
@@ -72,7 +73,8 @@ import com.lianyu.ai.uicommon.theme.AppTheme
 @Composable
 fun ChatDetailScreen(
     companionId: Long,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToDndSettings: () -> Unit
 ) {
     val context = LocalContext.current
     val appContext = remember(context) { context.applicationContext as Application }
@@ -301,16 +303,9 @@ fun ChatDetailScreen(
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
-                SettingsToggleRow(
-                    title = "夜间免打扰 (23:00-08:00)",
-                    checked = settings.dndStartMinutes == 23 * 60 && settings.dndEndMinutes == 8 * 60,
-                    onCheckedChange = { checked ->
-                        settingsViewModel.updateSettings {
-                            if (checked) it.copy(dndStartMinutes = 23 * 60, dndEndMinutes = 8 * 60)
-                            else it.copy(dndStartMinutes = 0, dndEndMinutes = 0)
-                        }
-                    }
-                )
+                SettingsRow(title = "免打扰时间段", subtitle = dndRangeLabel(settings)) {
+                    onNavigateToDndSettings()
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -598,6 +593,13 @@ private fun intervalLabel(minutes: Int): String {
         minutes % 60 == 0 -> "${minutes / 60} 小时"
         else -> "${minutes / 60} 小时 ${minutes % 60} 分钟"
     }
+}
+
+/** 免打扰时间段摘要：0,0 视为未设置；跨午夜（开始 > 结束）加标识。 */
+private fun dndRangeLabel(settings: CompanionChatDetailSettings): String {
+    if (settings.dndStartMinutes == 0 && settings.dndEndMinutes == 0) return "未设置，点击设置"
+    val label = "${formatMinutesToTime(settings.dndStartMinutes)} - ${formatMinutesToTime(settings.dndEndMinutes)}"
+    return if (settings.dndStartMinutes > settings.dndEndMinutes) "$label（跨夜）" else label
 }
 
 @Composable

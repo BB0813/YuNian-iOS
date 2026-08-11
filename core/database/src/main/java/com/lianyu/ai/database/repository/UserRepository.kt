@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.lianyu.ai.common.CompanionRole
+import com.lianyu.ai.common.ImageUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
 
 class UserRepository(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
@@ -52,6 +54,34 @@ class UserRepository(context: Context) {
             prefs.edit { remove("user_avatar") }
         }
         _userAvatar.value = avatarUri
+    }
+
+    /**
+     * 修复历史头像脏数据：早期版本把裁剪头像写入 cacheDir，系统可能在存储不足时清空，
+     * 导致存储的头像路径悬空、头像显示为白底。
+     * - 文件仍在（cacheDir 内）→ 迁入 filesDir/avatars 持久目录并更新引用；
+     * - 文件已丢失 → 清除引用，UI 回退为首字母兜底。
+     * 在 Application 启动时调用一次。
+     */
+    suspend fun repairUserAvatar(context: Context) {
+        val current = prefs.getString("user_avatar", null) ?: return
+        val file = runCatching { File(current) }.getOrNull() ?: return
+        // 仅处理本地绝对路径；content:// / http 等由 Coil 按需加载，无需迁移
+        if (!file.isAbsolute) return
+        if (file.absolutePath.startsWith(context.cacheDir.absolutePath)) {
+            val migrated = ImageUtils.saveUriToInternalStorage(context, current)
+            if (migrated != null) {
+                prefs.edit { putString("user_avatar", migrated) }
+                _userAvatar.value = migrated
+            } else {
+                prefs.edit { remove("user_avatar") }
+                _userAvatar.value = null
+            }
+        } else if (!file.exists()) {
+            // 持久目录内文件也被删（如备份还原丢失）→ 回退首字母
+            prefs.edit { remove("user_avatar") }
+            _userAvatar.value = null
+        }
     }
 
     fun updateSelectedRole(role: CompanionRole) {

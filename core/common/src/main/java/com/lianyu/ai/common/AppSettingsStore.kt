@@ -59,6 +59,9 @@ class AppSettingsStore(context: Context) {
 
         private val YANDERE_MODE_INSTALLED_APPS_KEY = booleanPreferencesKey("yandere_mode_installed_apps")
         private const val DEFAULT_YANDERE_MODE_INSTALLED_APPS = true
+
+        private val SHOW_TYPING_SPINNER_KEY = booleanPreferencesKey("show_typing_spinner")
+        private const val DEFAULT_SHOW_TYPING_SPINNER = false
     }
 
     object VisionModels {
@@ -264,5 +267,19 @@ class AppSettingsStore(context: Context) {
 
     suspend fun setYandereModeInstalledApps(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[YANDERE_MODE_INSTALLED_APPS_KEY] = enabled }
+    }
+
+    /**
+     * 聊天页顶栏「对方正在输入」是否显示转圈动画。
+     * 默认关闭（false）：仅显示文字，仿微信风格。
+     */
+    val showTypingSpinnerFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[SHOW_TYPING_SPINNER_KEY] ?: DEFAULT_SHOW_TYPING_SPINNER
+    }
+
+    suspend fun getShowTypingSpinner(): Boolean = showTypingSpinnerFlow.first()
+
+    suspend fun setShowTypingSpinner(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[SHOW_TYPING_SPINNER_KEY] = enabled }
     }
 }

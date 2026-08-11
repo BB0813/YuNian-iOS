@@ -3,6 +3,7 @@ agp = "9.2.1"
 coreKtx = "1.13.1"
 junit = "4.13.2"
 junitVersion = "1.2.1"
+orgJson = "20231013"
 testRunner = "1.6.2"
 espressoCore = "3.6.1"
 lifecycleRuntimeKtx = "2.8.4"
@@ -41,6 +42,8 @@ paging = "3.3.6"
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+# JVM 版 org.json：本地单测提供真实 JSONObject 解析（Android 的 org.json 是 stub，直接跑会抛 Stub!）
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "testRunner" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }

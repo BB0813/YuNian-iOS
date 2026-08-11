@@ -66,6 +66,8 @@ import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
 fun WeChatChatInputBar(
     onSendMessage: (String) -> Unit,
     isLoading: Boolean,
+    text: String,
+    onTextChange: (String) -> Unit,
     availableApis: List<ApiProviderInfo> = emptyList(),
     currentApi: ApiProviderInfo? = null,
     onSwitchApi: ((ApiProviderInfo) -> Unit)? = null,
@@ -75,7 +77,6 @@ fun WeChatChatInputBar(
     onVoiceRecordCancel: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var text by remember { mutableStateOf("") }
     var showApiSelector by remember { mutableStateOf(false) }
     val adaptiveSizing = rememberAdaptiveSizing()
     val hintColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -131,7 +132,7 @@ fun WeChatChatInputBar(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         androidx.compose.foundation.text.BasicTextField(
-                            value = text, onValueChange = { text = it },
+                            value = text, onValueChange = onTextChange,
                             modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                             decorationBox = { innerTextField ->
                                 Box(contentAlignment = Alignment.CenterStart) {
@@ -149,7 +150,7 @@ fun WeChatChatInputBar(
                             keyboardActions = KeyboardActions(
                                 onSend = {
                                     if (text.isNotBlank()) {
-                                        onSendMessage(text.trim()); text = ""
+                                        onSendMessage(text.trim())
                                     }
                                 }
                             ),
@@ -180,7 +181,6 @@ fun WeChatChatInputBar(
                             onClick = {
                                 if (canSend) {
                                     onSendMessage(text.trim())
-                                    text = ""
                                 }
                             },
                             onLongClick = {

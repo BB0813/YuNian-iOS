@@ -38,8 +38,8 @@ fun ChatMessageFrame(
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val haptic = LocalHapticFeedback.current
-    // 自己 / AI 同色（AI 标准 sky）；仅 side 镜像区分归属
-    val bubbleColor = colors.secondaryBubbleBackground
+    // 自己 lilac（primary）/ AI sky（secondary）分色区分归属，side 镜像为辅
+    val bubbleColor = if (isMine) colors.primaryBubbleBackground else colors.secondaryBubbleBackground
     // 箭头占位：画在气泡盒内侧，不计入正文区
     val bubbleArrowWidth = 5.dp
     val bubbleContentPadding = Modifier.padding(

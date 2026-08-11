@@ -9,15 +9,17 @@ import com.lianyu.ai.feature.notification.CompanionKeepAliveService
 import com.lianyu.ai.feature.notification.CompanionMessageWorker
 
 /**
- * IQOO/OriginOS 专用保活 JobService。
+ * JobScheduler 第三层兜底保活（全设备）。
  *
- * [FIX] 2026-06-22: OriginOS 对前台服务和 WorkManager 都有严格限制，
- * 使用 JobScheduler 作为第三层兜底保活机制。
+ * 进程被杀后由系统作业服务拉起，恢复保活服务 + 微信/QQ 通道。
+ * 作业运行期允许后台启动 FGS（Android 12+ 豁免），覆盖 WorkManager
+ * 在 Doze 下延迟的空窗。类名保留历史命名（曾为 IQOO/OriginOS 专用）。
  *
  * 职责：
  * 1. 检查前台服务是否存活，若已死则尝试重启
  * 2. 确保 WorkManager 中有待处理的 CompanionMessageWorker
- * 3. 记录设备级诊断日志（用于排查 IQOO 特定问题）
+ * 3. 恢复微信主轮询 FGS / QQ Bot FGS（按登录态）
+ * 4. 记录设备级诊断日志
  */
 class IqooKeepAliveJobService : JobService() {
 
@@ -64,7 +66,29 @@ class IqooKeepAliveJobService : JobService() {
             SecureLog.w("IqooKeepAliveJobService", "Failed to schedule WorkManager: ${e.message}")
         }
 
-        // 3. 记录设备级诊断信息
+        // 3. 微信通道恢复：登录态下幂等拉起 FGS 主轮询 + Worker 兜底
+        //    （作业运行期允许后台启动 FGS，进程被杀后由本作业复活通道）
+        runCatching {
+            kotlinx.coroutines.runBlocking {
+                com.lianyu.ai.feature.wechat.service.WeChatChannelKeeper.ensureRunning(context)
+            }
+        }.onFailure {
+            SecureLog.w("IqooKeepAliveJobService", "WeChat ensureRunning failed: ${it.message}")
+        }
+
+        // 4. QQ 通道恢复：已配置账号才拉起 FGS（避免幽灵通知）
+        runCatching {
+            val loggedIn = kotlinx.coroutines.runBlocking {
+                com.lianyu.ai.feature.qqbot.service.QQBotServiceLocator.tokenStore(context).isLoggedIn()
+            }
+            if (loggedIn) {
+                com.lianyu.ai.feature.qqbot.service.QQBotForegroundService.start(context)
+            }
+        }.onFailure {
+            SecureLog.w("IqooKeepAliveJobService", "QQ FGS start failed: ${it.message}")
+        }
+
+        // 5. 记录设备级诊断信息
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
             val isIgnoring = powerManager.isIgnoringBatteryOptimizations(context.packageName)

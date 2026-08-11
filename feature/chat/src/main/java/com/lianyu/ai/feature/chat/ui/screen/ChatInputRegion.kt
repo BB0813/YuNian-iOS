@@ -42,6 +42,8 @@ fun ChatInputRegion(
     isBlocked: Boolean,
     isLoading: Boolean,
     quoteReply: QuoteReply?,
+    inputText: String,
+    onInputTextChange: (String) -> Unit,
     @Suppress("UNUSED_PARAMETER") ttsState: ChatTtsState,
     showStickerPanel: Boolean,
     showExtensionPanel: Boolean,
@@ -107,6 +109,8 @@ fun ChatInputRegion(
                     WeChatChatInputBar(
                         onSendMessage = onSendMessage,
                         isLoading = isLoading,
+                        text = inputText,
+                        onTextChange = onInputTextChange,
                         availableApis = availableApis,
                         currentApi = currentApi,
                         onSwitchApi = onSwitchApi,

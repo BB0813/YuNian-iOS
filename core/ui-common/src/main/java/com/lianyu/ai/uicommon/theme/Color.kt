@@ -57,11 +57,11 @@ val WeChatLightTextTertiary = Color(0xFF8A829A)
 // ============================================================
 
 // 消息气泡必须不透明，避免聊天背景透出
-// 统一标准：sky #CADEFC（自己 / AI 同色，靠左右箭头区分归属）
+// AI 标准色 sky #CADEFC；自己品牌 lilac #CCA8E9（浅色）/ #A888D0（深色），分色区分归属
 val AiBubbleLight = PastelSky
 val AiBubbleDark = PastelSky
-val SelfBubbleLight = AiBubbleLight
-val SelfBubbleDark = AiBubbleDark
+val SelfBubbleLight = PastelLilac
+val SelfBubbleDark = PinkDark
 val AiBubbleBorderDark = PastelLavender.copy(alpha = 0.40f)
 val AiBubbleBorderLight = PastelLavender.copy(alpha = 0.28f)
 /** 气泡上的深色文字，保证在 pastel 底上可读 */

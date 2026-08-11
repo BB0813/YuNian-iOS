@@ -19,9 +19,9 @@ import androidx.compose.ui.graphics.luminance
  */
 object AppColors {
     // ── Bubble backgrounds ──────────────────────────────────────────
-    // 统一 AI 标准色 sky #CADEFC；自己/AI 同底，靠布局左右与箭头区分
+    // AI 标准色 sky #CADEFC；自己品牌 lilac #CCA8E9/#A888D0，按 isMine 区分
     fun primaryBubbleBackground(colorScheme: ColorScheme): Color =
-        secondaryBubbleBackground(colorScheme)
+        if (isDarkSurface(colorScheme)) SelfBubbleDark else SelfBubbleLight
     fun primaryBubbleContent(colorScheme: ColorScheme): Color = BubbleOnPink
     fun secondaryBubbleBackground(colorScheme: ColorScheme): Color =
         if (isDarkSurface(colorScheme)) AiBubbleDark else AiBubbleLight

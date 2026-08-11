@@ -88,10 +88,10 @@ class SherpaLocalTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         )
     }
 
-    override suspend fun testConnection(): Boolean {
+    override suspend fun testConnection(context: Context): Boolean {
         return try {
             // testConnection 在 TtsService 里会被调用，但本地模型的"连接"
-            // 实际是文件是否存在 + 是否启用
+            // 实际是文件是否存在 + 是否启用（在 synthesize 里校验）
             true
         } catch (_: Exception) {
             false
