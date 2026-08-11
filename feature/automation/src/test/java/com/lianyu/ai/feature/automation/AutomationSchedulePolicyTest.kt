@@ -4,6 +4,7 @@ import com.lianyu.ai.feature.automation.data.Automation
 import com.lianyu.ai.feature.automation.data.AutomationSchedulePolicy
 import com.lianyu.ai.feature.automation.data.AutomationType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -126,6 +127,67 @@ class AutomationSchedulePolicyTest {
             calendar(2026, 7, 8, 10, 0).timeInMillis,
             AutomationSchedulePolicy.nextTriggerAtMillis(c, calendar(2026, 7, 7, 7, 0).timeInMillis)!!
         )
+    }
+
+    @Test
+    fun normalizedAutomationFixesDailyTriggerAt() {
+        val now = referenceDay(0, 21, 0) // 周一 21:00
+        // DAILY 创建时 triggerAtMillis=0（AI 只传 hour/minute）
+        val a = automation(AutomationType.DAILY, hourOfDay = 8, minuteOfHour = 0)
+        val normalized = AutomationSchedulePolicy.normalizedAutomation(a, now)
+        // 应被初始化为"下次 8 点"（周二 08:00）
+        assertEquals(referenceDay(1, 8, 0), normalized.triggerAtMillis)
+        // ONCE 不受影响
+        val once = automation(AutomationType.ONCE, triggerAtMillis = 1_700_000_000_000L)
+        assertEquals(1_700_000_000_000L, AutomationSchedulePolicy.normalizedAutomation(once, now).triggerAtMillis)
+    }
+
+    @Test
+    fun shouldFireRejectsUninitializedTriggerAt() {
+        val now = referenceDay(0, 21, 0)
+        // triggerAtMillis=0 的旧数据：即便 now>=0 也不应触发（防御，等待规范化）
+        val bad = automation(AutomationType.DAILY, hourOfDay = 8, minuteOfHour = 0) // triggerAtMillis=0
+        assertFalse(AutomationSchedulePolicy.shouldFire(bad, now))
+        // 规范化后（下次 8 点）且未到点 → 仍不触发
+        val normalized = AutomationSchedulePolicy.normalizedAutomation(bad, now)
+        assertFalse(AutomationSchedulePolicy.shouldFire(normalized, referenceDay(0, 21, 0)))
+        // 到点（周二 08:00）→ 触发
+        assertTrue(AutomationSchedulePolicy.shouldFire(normalized, referenceDay(1, 8, 0)))
+    }
+
+    @Test
+    fun shouldFireToTimeAndIdempotent() {
+        val now = 1_700_000_000_000L
+        // 到点 + 未执行 → 应触发
+        val due = automation(
+            AutomationType.DAILY, hourOfDay = 8, minuteOfHour = 0
+        ).copy(triggerAtMillis = now - 1000L, stats = com.lianyu.ai.feature.automation.data.AutomationStats())
+        assertTrue(AutomationSchedulePolicy.shouldFire(due, now))
+
+        // 未到点 → 不触发
+        val notYet = due.copy(triggerAtMillis = now + 60_000L)
+        assertFalse(AutomationSchedulePolicy.shouldFire(notYet, now))
+
+        // 本次计划已处理（lastScheduledFiredAt 已推进到 triggerAtMillis 之后）→ 幂等跳过
+        val alreadyFired = due.copy(
+            stats = com.lianyu.ai.feature.automation.data.AutomationStats(
+                fireCount = 1, lastFiredAt = now - 500L,
+                lastScheduledFiredAt = now - 500L, lastResult = "success"
+            )
+        )
+        assertFalse(AutomationSchedulePolicy.shouldFire(alreadyFired, now))
+
+        // 手动执行只更新 lastFiredAt、不动 lastScheduledFiredAt → 本次计划仍应触发（不误杀调度）
+        val manualFiredOnly = due.copy(
+            stats = com.lianyu.ai.feature.automation.data.AutomationStats(
+                fireCount = 1, lastFiredAt = now - 500L, lastResult = "success"
+            )
+        )
+        assertTrue(AutomationSchedulePolicy.shouldFire(manualFiredOnly, now))
+
+        // 停用 → 不触发
+        val disabled = due.copy(enabled = false)
+        assertFalse(AutomationSchedulePolicy.shouldFire(disabled, now))
     }
 
     private fun calendar(year: Int, month0: Int, day: Int, hour: Int, minute: Int): Calendar =

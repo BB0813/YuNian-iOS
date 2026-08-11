@@ -886,7 +886,11 @@ class ChatGenerationManager private constructor(
     }
 
     private fun shouldEnableToolsFor(content: String, history: List<ChatMessage>): Boolean {
-        return ChatToolIntent.shouldEnableTools(content, history.lastOrNull { it.isFromUser }?.content)
+        // 纯本地关键词判断，0 网络延迟；AI 预判已移除（阻塞回复起点且结果不可靠）
+        return ChatToolIntent.shouldEnableTools(
+            content = content,
+            latestUserText = history.lastOrNull { it.isFromUser }?.content
+        )
     }
 
     private fun broadcastWeChatMessage(messageId: Long, finalContent: String? = null) {

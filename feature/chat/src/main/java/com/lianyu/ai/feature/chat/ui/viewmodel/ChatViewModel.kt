@@ -28,6 +28,7 @@ import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.domain.ToolRegistry
 import com.lianyu.ai.domain.UserProfileProvider
 import com.lianyu.ai.feature.chat.data.ChatContextResolver
+import com.lianyu.ai.feature.chat.data.ChatDraftStore
 import com.lianyu.ai.feature.chat.voice.ChatTtsState
 import com.lianyu.ai.network.stt.AndroidSttProvider
 import com.lianyu.ai.network.stt.SttService
@@ -55,6 +56,7 @@ class ChatViewModel(
     private val companionRepository = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
     private val apiConfigRepository = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
     private val contextResolver = ChatContextResolver(chatRepository)
+    private val draftStore = ChatDraftStore(application)
     private val generation = ChatGenerationManager.acquire(application, companionId)
     private val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
@@ -102,6 +104,10 @@ class ChatViewModel(
     private val _events = MutableSharedFlow<ChatUiEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<ChatUiEvent> = _events.asSharedFlow()
 
+    // 输入框草稿：init 时从持久化恢复，击键即存盘；仅发送或用户手动删空时清空
+    private val _draftText = MutableStateFlow(draftStore.getDraft(companionId))
+    val draftText: StateFlow<String> = _draftText.asStateFlow()
+
     val isLoading: StateFlow<Boolean> = generation.isLoading
     val isTyping: StateFlow<Boolean> = generation.isTyping
     val typingText: StateFlow<String> = generation.typingText
@@ -127,7 +133,10 @@ class ChatViewModel(
 
     fun handleIntent(intent: ChatIntent) {
         when (intent) {
-            is ChatIntent.SendText -> generation.sendText(intent.content)
+            is ChatIntent.SendText -> {
+                generation.sendText(intent.content)
+                clearDraft()
+            }
             is ChatIntent.SendImage -> generation.sendImage(intent.imagePath)
             is ChatIntent.SendVideo -> sendVideo(intent.videoPath)
             is ChatIntent.SendVoice -> sendVoice(intent.audioPath, intent.duration)
@@ -143,6 +152,15 @@ class ChatViewModel(
             is ChatIntent.NavigateToMessage -> navigateToMessage(intent.messageId)
         }
     }
+
+    /** 更新输入框草稿并持久化；空文本表示用户手动删空，同时移除存盘草稿。 */
+    fun setDraftText(text: String) {
+        if (_draftText.value == text) return
+        _draftText.value = text
+        draftStore.setDraft(companionId, text)
+    }
+
+    private fun clearDraft() = setDraftText("")
 
     fun refreshCompanionData() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -187,7 +205,11 @@ class ChatViewModel(
             val history = com.lianyu.ai.domain.AiDialogueHistoryPolicy.sanitizeForModel(
                 rawHistory.map { it.toAiChatMessage() }
             )
-            val tools = if (ChatToolIntent.shouldEnableTools(text, rawHistory.lastOrNull { it.isFromUser }?.content)) {
+            val tools = if (ChatToolIntent.shouldEnableTools(
+                    text,
+                    rawHistory.lastOrNull { it.isFromUser }?.content
+                )
+            ) {
                 ToolRegistry.all()
             } else {
                 emptyList()
@@ -612,6 +634,8 @@ class ChatViewModel(
         avatarUnsubscribe = null
         nicknameUnsubscribe?.invoke()
         nicknameUnsubscribe = null
+        // 兜底 flush 最新草稿：击键即 apply（内存同步），此处确保任何时序下都不丢
+        draftStore.setDraft(companionId, _draftText.value)
         // 对齐 ChatTtsController 约定：离开聊天页时停止朗读并释放 MediaPlayer
         generation.stopTts()
         contextResolver.clearCache(companionId)
