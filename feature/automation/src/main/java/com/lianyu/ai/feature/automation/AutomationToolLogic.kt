@@ -2,9 +2,13 @@ package com.lianyu.ai.feature.automation
 
 import com.lianyu.ai.feature.automation.data.Automation
 import com.lianyu.ai.feature.automation.data.AutomationType
+import com.lianyu.ai.feature.automation.data.WorkflowEdge
+import com.lianyu.ai.feature.automation.data.WorkflowNode
+import com.lianyu.ai.feature.automation.data.WorkflowNodeType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -27,10 +31,23 @@ object AutomationToolLogic {
         val message: String
     )
 
+    data class CreateWorkflowParams(
+        val title: String,
+        val companionId: Long,
+        val type: AutomationType,
+        val triggerAtMillis: Long,
+        val hourOfDay: Int,
+        val minuteOfHour: Int,
+        val dayOfWeekCalendar: Int?,
+        val description: String,
+        val nodes: List<WorkflowNode>,
+        val edges: List<WorkflowEdge>
+    )
+
     /**
      * 解析 AI 的 automation_create 参数。
      * AI 约定：type = "once"|"daily"|"weekly"；dayOfWeek 1=周一..7=周日；
-     * once 用 triggerAt（epoch ms）；daily/weekly 用 hour/minute（+dayOfWeek）。
+     * once 用 triggerAt（epoch ms）；daily/weekly 用 hour+minute（+dayOfWeek）。
      * @return 解析失败返回 null
      */
     fun parseCreateParams(argsJson: String): CreateParams? {
@@ -51,6 +68,8 @@ object AutomationToolLogic {
             // AI 传 1=周一..7=周日 → Calendar 语义（1=周日）: +1，周日(7) → 1
             val dayOfWeekAi = obj["dayOfWeek"]?.jsonPrimitive?.intOrNull
             val dayOfWeekCalendar = dayOfWeekAi?.let { if (it in 1..7) (it % 7) + 1 else null }
+            // WEEKLY 缺 dayOfWeek（或值非法）→ 解析失败，让 AI 补参；禁止静默降级为每天轰炸
+            if (type == AutomationType.WEEKLY && dayOfWeekCalendar == null) return null
             val message = obj["message"]?.jsonPrimitive?.contentOrNull
                 ?.takeIf { it.isNotBlank() } ?: defaultMessage(title)
             CreateParams(
@@ -64,6 +83,79 @@ object AutomationToolLogic {
                 message = message
             )
         }.getOrNull()
+    }
+
+    /**
+     * 解析 AI 的 automation_create_workflow 参数。
+     * @return 解析失败返回 null
+     */
+    fun parseCreateWorkflowParams(argsJson: String): CreateWorkflowParams? {
+        return runCatching {
+            val obj = json.parseToJsonElement(argsJson).jsonObject
+            val title = obj["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
+            val companionId = obj["companionId"]?.jsonPrimitive?.longOrNull ?: 0L
+            if (companionId <= 0L) return null
+            val type = when (obj["type"]?.jsonPrimitive?.contentOrNull) {
+                "once" -> AutomationType.ONCE
+                "daily" -> AutomationType.DAILY
+                "weekly" -> AutomationType.WEEKLY
+                else -> return null
+            }
+            val triggerAt = obj["triggerAt"]?.jsonPrimitive?.longOrNull ?: 0L
+            val hour = obj["hour"]?.jsonPrimitive?.intOrNull ?: 0
+            val minute = obj["minute"]?.jsonPrimitive?.intOrNull ?: 0
+            val dayOfWeekAi = obj["dayOfWeek"]?.jsonPrimitive?.intOrNull
+            val dayOfWeekCalendar = dayOfWeekAi?.let { if (it in 1..7) (it % 7) + 1 else null }
+            // WEEKLY 缺 dayOfWeek（或值非法）→ 解析失败，让 AI 补参；禁止静默降级为每天轰炸
+            if (type == AutomationType.WEEKLY && dayOfWeekCalendar == null) return null
+            val description = obj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+
+            val nodes = obj["nodes"]?.jsonArray?.map { parseWorkflowNode(it.jsonObject) } ?: emptyList()
+            val edges = obj["edges"]?.jsonArray?.map { parseWorkflowEdge(it.jsonObject) } ?: emptyList()
+
+            CreateWorkflowParams(
+                title = title,
+                companionId = companionId,
+                type = type,
+                triggerAtMillis = triggerAt,
+                hourOfDay = hour.coerceIn(0, 23),
+                minuteOfHour = minute.coerceIn(0, 59),
+                dayOfWeekCalendar = dayOfWeekCalendar,
+                description = description,
+                nodes = nodes,
+                edges = edges
+            )
+        }.getOrNull()
+    }
+
+    private fun parseWorkflowNode(obj: kotlinx.serialization.json.JsonObject): WorkflowNode {
+        val type = when (obj["type"]?.jsonPrimitive?.contentOrNull?.lowercase()) {
+            "start" -> WorkflowNodeType.START
+            "end" -> WorkflowNodeType.END
+            "action" -> WorkflowNodeType.ACTION
+            "ai_generate" -> WorkflowNodeType.AI_GENERATE
+            "condition" -> WorkflowNodeType.CONDITION
+            else -> WorkflowNodeType.START
+        }
+        return WorkflowNode(
+            id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
+            type = type,
+            title = obj["title"]?.jsonPrimitive?.contentOrNull ?: "",
+            prompt = obj["prompt"]?.jsonPrimitive?.contentOrNull ?: "",
+            outputVar = obj["outputVar"]?.jsonPrimitive?.contentOrNull ?: "",
+            message = obj["message"]?.jsonPrimitive?.contentOrNull ?: "",
+            actionType = obj["actionType"]?.jsonPrimitive?.contentOrNull ?: "companion",
+            conditionExpr = obj["conditionExpr"]?.jsonPrimitive?.contentOrNull ?: ""
+        )
+    }
+
+    private fun parseWorkflowEdge(obj: kotlinx.serialization.json.JsonObject): WorkflowEdge {
+        return WorkflowEdge(
+            id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
+            source = obj["source"]?.jsonPrimitive?.contentOrNull ?: "",
+            target = obj["target"]?.jsonPrimitive?.contentOrNull ?: "",
+            label = obj["label"]?.jsonPrimitive?.contentOrNull ?: ""
+        )
     }
 
     /** 按 title 模糊匹配（包含即命中） */

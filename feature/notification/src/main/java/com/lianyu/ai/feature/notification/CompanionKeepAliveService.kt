@@ -15,7 +15,14 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.work.WorkManager
 import androidx.core.app.NotificationCompat
+import com.lianyu.ai.domain.AutomationTickProvider
+import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.notification.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 open class CompanionKeepAliveService : Service() {
 
@@ -26,6 +33,7 @@ open class CompanionKeepAliveService : Service() {
     // onDestroy 检查此标记决定是否自重启。
     @Volatile private var stopRequested = false
     private val handler = Handler(Looper.getMainLooper())
+    private val tickScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wakeLockRunnable = object : Runnable {
         override fun run() {
             acquireWakeLock()
@@ -51,11 +59,30 @@ open class CompanionKeepAliveService : Service() {
         }
     }
 
+    // 自动化到点检查兜底：WorkManager 在 Doze 下可能延迟触发，
+    // 这里每分钟检查一次，经 ServiceRegistry 桥接到 feature:automation（保持模块隔离）。
+    private val automationTickRunnable = object : Runnable {
+        override fun run() {
+            tickScope.launch {
+                runCatching {
+                    ServiceRegistry.get(AutomationTickProvider::class.java)?.onTick()
+                }.onFailure {
+                    com.lianyu.ai.common.SecureLog.w(
+                        "KeepAliveService",
+                        "automation tick failed: ${it.message}"
+                    )
+                }
+            }
+            handler.postDelayed(this, 60 * 1000L)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         acquireWakeLock()
         handler.postDelayed(wakeLockRunnable, 5 * 60 * 1000L)
         handler.postDelayed(heartbeatRunnable, 60 * 60 * 1000L) // 首次延迟 60 分钟
+        handler.postDelayed(automationTickRunnable, 60 * 1000L) // 首次延迟 1 分钟
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -89,6 +116,8 @@ open class CompanionKeepAliveService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(wakeLockRunnable)
         handler.removeCallbacks(heartbeatRunnable)
+        handler.removeCallbacks(automationTickRunnable)
+        tickScope.cancel()
         releaseWakeLock()
         super.onDestroy()
 
@@ -172,10 +201,16 @@ open class CompanionKeepAliveService : Service() {
 
         fun start(context: Context) {
             val intent = Intent().setClassName(context.packageName, SHELL_SERVICE_CLASS)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (error: Exception) {
+                // Android 12+ 后台启动 FGS 抛 ForegroundServiceStartNotAllowedException。
+                // onDestroy/onTaskRemoved 自重启路径可能命中；失败不致命，由 JobScheduler / Worker 兜底。
+                com.lianyu.ai.common.SecureLog.w("KeepAliveService", "start FGS from background rejected: ${error.message}")
             }
         }
 

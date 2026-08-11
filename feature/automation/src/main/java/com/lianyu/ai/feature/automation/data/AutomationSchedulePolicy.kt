@@ -8,6 +8,34 @@ import java.util.Calendar
  */
 object AutomationSchedulePolicy {
 
+    /**
+     * 判断本次触发是否应执行（到点 + 幂等）。
+     * 幂等依据：lastScheduledFiredAt < triggerAtMillis 表示本次计划尚未被处理，
+     * 与 WorkManager worker / 保活 tick 双路径共用，避免重复执行。
+     * 手动执行只更新 lastFiredAt，不影响本判定（否则一次手动执行会让
+     * DAILY/WEEKLY 的 lastFiredAt 越过 triggerAtMillis，调度永久静默失效）。
+     *
+     * 防御：非 ONCE 类型若 triggerAtMillis 未初始化（<=0，如旧数据），不触发，
+     * 由 [normalizedAutomation] 修复后再按新时刻触发。
+     */
+    fun shouldFire(a: Automation, now: Long): Boolean {
+        return a.enabled &&
+            a.triggerAtMillis > 0 &&
+            now >= a.triggerAtMillis &&
+            a.stats.lastScheduledFiredAt < a.triggerAtMillis
+    }
+
+    /**
+     * 规范化触发时刻：非 ONCE 且 triggerAtMillis 未初始化（<=0）
+     * → 初始化为下一次触发时刻。修复 DAILY/WEEKLY 创建时 triggerAtMillis=0
+     * 导致判定失效、触发时机错乱的问题。
+     */
+    fun normalizedAutomation(a: Automation, now: Long): Automation {
+        if (a.type == AutomationType.ONCE || a.triggerAtMillis > 0) return a
+        val next = nextTriggerAtMillis(a, now) ?: return a
+        return a.copy(triggerAtMillis = next)
+    }
+
     fun nextTriggerAtMillis(a: Automation, now: Long): Long? {
         return when (a.type) {
             AutomationType.ONCE -> if (a.triggerAtMillis > now) a.triggerAtMillis else null
