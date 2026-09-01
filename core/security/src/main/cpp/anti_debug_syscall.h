@@ -29,6 +29,7 @@
   #define __NR_connect 203
   #define __NR_ptrace  117
   #define __NR_getpid  172
+  #define __NR_fcntl   25
 #elif defined(__arm__)
   // ARM32 (armeabi-v7a) syscall numbers
   #define __NR_openat  322
@@ -38,6 +39,7 @@
   #define __NR_connect 283
   #define __NR_ptrace  26
   #define __NR_getpid  20
+  #define __NR_fcntl   55
 #elif defined(__x86_64__)
   // x86_64 syscall numbers
   #define __NR_openat  257
@@ -79,6 +81,10 @@ static inline long ad_sys_socket(int domain, int type, int protocol) {
 
 static inline long ad_sys_connect(int fd, const void* addr, size_t addrlen) {
     return syscall(__NR_connect, fd, addr, addrlen);
+}
+
+static inline long ad_sys_fcntl(int fd, int cmd, long arg) {
+    return syscall(__NR_fcntl, fd, cmd, arg);
 }
 
 /* ── TracerPid check via syscall ── */
@@ -125,9 +131,15 @@ struct ad_sockaddr_in {
 
 static int ad_check_frida_port_syscall(void) {
     // Check ports 27042-27055 (Frida default range)
+    // Use non-blocking connect to avoid hanging on Huawei kernels
+    // where localhost SYN packets may be silently dropped during startup.
     for (int port = 27042; port <= 27055; port++) {
         long sock = ad_sys_socket(2/*AF_INET*/, 1/*SOCK_STREAM*/, 0);
         if (sock < 0) continue;
+
+        // Set non-blocking to avoid indefinite hang on connect()
+        int flags = ad_sys_fcntl((int)sock, 3/*F_GETFL*/, 0);
+        if (flags >= 0) ad_sys_fcntl((int)sock, 4/*F_SETFL*/, flags | 0x800/*O_NONBLOCK*/);
 
         struct ad_sockaddr_in addr = {0};
         addr.sin_family = 2;  // AF_INET

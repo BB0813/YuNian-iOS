@@ -71,7 +71,9 @@ object NotificationHelper {
 
         with(NotificationManagerCompat.from(context)) {
             try {
-                val notificationId = (companionId * 1000 + System.currentTimeMillis().toInt()).toInt()
+                // [C10 FIX] 原 (companionId * 1000 + timestamp) 在 companionId 很大时溢出 Int，
+                // 改用 xor 混合高位和低位，避免整数溢出导致的 notificationId 碰撞。
+                val notificationId = ((companionId.toInt() and 0xFFFF) xor (System.currentTimeMillis().toInt() and 0x7FFFFFFF))
                 notify(notificationId, notification)
             } catch (e: SecurityException) {
                 // silently ignore: app lacks notification permission

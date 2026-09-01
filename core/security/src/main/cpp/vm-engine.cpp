@@ -20,6 +20,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <android/log.h>
+#include <atomic>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -29,7 +30,10 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <ucontext.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <android/set_abort_message.h>
 #include "sm4-internal.h"
 #include <time.h>
 #include <link.h>
@@ -165,21 +169,88 @@ static void vm_verify_fetch_prologue(void) {
     if ((g_fetch_verify_counter & 0x3FF) != 0) return;
     extern int vm_run(VMState*, uint32_t);
     const uint8_t* cur = (const uint8_t*)&vm_run;
-    if (cur != g_fetch_addr) { *(volatile uint32_t*)0 = 0; }
+    if (cur != g_fetch_addr) {
+        __android_log_print(ANDROID_LOG_WARN, "VmEngine",
+            "vm_run addr changed (%p != %p) — fail-open", cur, g_fetch_addr);
+        return;
+    }
     uint8_t diff = 0;
     for (int i = 0; i < 16; i++) diff |= (cur[i] ^ g_fetch_prologue[i]);
-    if (diff) { *(volatile uint32_t*)0 = 0; }
+    if (diff) {
+        __android_log_print(ANDROID_LOG_WARN, "VmEngine",
+            "vm_run prologue differs (diff=0x%02x) — fail-open", diff);
+        return;
+    }
 }
 
-static void vm_segfault_handler(int) { std::terminate(); }
+/* Saved previous signal handlers for chaining */
+static struct sigaction g_prev_segv;
+static struct sigaction g_prev_ill;
+static int g_prev_segv_saved = 0;
+static int g_prev_ill_saved = 0;
+
+/* Approximate VM interpreter code range (set at init) */
+static uint64_t g_vm_code_start = 0;
+static uint64_t g_vm_code_end = 0;
+
+static void vm_segfault_handler(int sig, siginfo_t* si, void* ctx) {
+    uint64_t pc = 0;
+    uint64_t fault = 0;
+#if defined(__aarch64__)
+    ucontext_t* uc = (ucontext_t*)ctx;
+    if (uc) pc = (uint64_t)uc->uc_mcontext.pc;
+#elif defined(__x86_64__)
+    ucontext_t* uc = (ucontext_t*)ctx;
+    if (uc) pc = (uint64_t)uc->uc_mcontext.gregs[REG_RIP];
+#endif
+    if (si) fault = (uint64_t)si->si_addr;
+
+    /* Only abort if the fault originates from the VM interpreter itself.
+     * External faults (GPU driver, system libraries, etc.) must be forwarded
+     * to the previous handler — otherwise the app crashes on legitimate
+     * SIGSEGV from Mali GPU / Huawei kernel / EMUI memory management. */
+    if (g_vm_code_start > 0 && pc >= g_vm_code_start && pc < g_vm_code_end) {
+        __android_log_print(ANDROID_LOG_ERROR, "VmEngine",
+            "FAULT in VM interpreter sig=%d pc=0x%llx fault=0x%llx",
+            sig, (unsigned long long)pc, (unsigned long long)fault);
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+            "VmEngine FAULT sig=%d pc=0x%llx fault=0x%llx",
+            sig, (unsigned long long)pc, (unsigned long long)fault);
+        android_set_abort_message(msg);
+        abort();
+    }
+
+    /* Forward external SIGSEGV/SIGILL to the previous handler.
+     * If the previous handler is SIG_DFL, restore it and re-raise
+     * so the system can produce a proper tombstone. */
+    struct sigaction* prev = (sig == SIGSEGV) ? &g_prev_segv : &g_prev_ill;
+    int prev_saved = (sig == SIGSEGV) ? g_prev_segv_saved : g_prev_ill_saved;
+
+    if (prev_saved && prev->sa_sigaction) {
+        prev->sa_sigaction(sig, si, ctx);
+    } else if (prev_saved && prev->sa_handler == SIG_DFL) {
+        signal(sig, SIG_DFL);
+        raise(sig);
+    } else if (prev_saved && prev->sa_handler && prev->sa_handler != SIG_IGN) {
+        prev->sa_handler(sig);
+    }
+}
 
 static void vm_install_signal_handler(void) {
     struct sigaction sa;
-    sa.sa_handler = vm_segfault_handler;
+    sa.sa_sigaction = vm_segfault_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
-    sigaction(SIGSEGV, &sa, nullptr);
-    sigaction(SIGILL, &sa, nullptr);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, &g_prev_segv);
+    g_prev_segv_saved = 1;
+    sigaction(SIGILL, &sa, &g_prev_ill);
+    g_prev_ill_saved = 1;
+
+    /* Set VM code range for fault filtering */
+    extern int vm_run(VMState*, uint32_t);
+    g_vm_code_start = (uint64_t)&vm_run;
+    g_vm_code_end = g_vm_code_start + 0x4000; /* approximate interpreter size */
 }
 
 #define DEAD_LOOP_TRAP() do { \
@@ -237,6 +308,17 @@ static const uint8_t AES_SBOX_XORED[256] = {
     0x12,0x82,0x36,0x83,0x93,0x9a,0x52,0x90,0x91,0x00,0x40,0x54,0xd4,0x7d,0x94,0xb0,
     0xa1,0x62,0x86,0x66,0xbd,0x33,0xa2,0x3f,0x3e,0xb7,0x25,0x47,0x6e,0x82,0x17,0xd0,
     0xac,0x26,0x89,0x20,0xbe,0xcb,0xcf,0x05,0xf7,0x9e,0x73,0x16,0x8c,0x46,0x8a,0x21,
+    0xf6,0x74,0xa5,0x48,0x85,0x59,0x14,0xfe,0xcf,0x6e,0x1b,0x9c,0xef,0xe9,0xfd,0x6a,
+    0x75,0x4a,0x0f,0x5e,0xe6,0xe8,0x96,0x20,0xe0,0x5c,0xa7,0xda,0xf5,0x99,0x3a,0x0d,
+    0xf4,0x06,0xe5,0x2a,0x37,0x38,0x9d,0x50,0x19,0x13,0x7f,0x84,0xb5,0x5a,0x56,0x77,
+    0x68,0xa9,0xb6,0x49,0xfa,0x32,0xe1,0xb2,0x61,0x02,0xdb,0x98,0xc1,0xf8,0xbc,0xd6,
+    0xc5,0x24,0xea,0x79,0x87,0x8f,0x35,0x2d,0xe3,0x4b,0x1d,0xb1,0x7b,0xfb,0xae,0x7e,
+    0x45,0x97,0x9f,0xaf,0xec,0xa3,0x81,0xf9,0x67,0x76,0x09,0xc7,0x34,0x30,0x41,0xdc,
+    0x42,0x6d,0x92,0xc8,0x28,0x70,0xeb,0x0c,0xc9,0xf3,0x51,0x4f,0xc0,0xdf,0x0b,0xad,
+    0x1f,0xdd,0x80,0x8b,0xb9,0x03,0x11,0x63,0x4d,0x78,0xd1,0xba,0xee,0x18,0x2e,0x2f,
+    0xd5,0x9b,0x10,0xc3,0xed,0xa6,0x53,0xab,0xc4,0x90,0xf2,0x1c,0x23,0x64,0xb8,0x3b,
+    0x44,0x5d,0x3d,0xb4,0xcc,0x7c,0x2b,0x31,0x3e,0xbb,0x22,0x4c,0x6b,0xf0,0x8d,0x7a,
+    0x29,0x04,0x2c,0xa8,0x1a,0x43,0xe7,0xcd,0xe4,0x3c,0x88,0xaa,0x15,0xf1,0x1e,0xb3,
 };
 
 /* Deobfuscate one byte: actual = xored ^ 0xA5 */
@@ -351,8 +433,8 @@ int vm_run(VMState* vm, uint32_t max_steps) {
         /* ── Depth-3: hardware timestamp anti-emulation ── */
         vm_ts_check(vm);
 
+uint32_t saved_pc = vm->pc;
 #ifndef PRODUCTION_BUILD
-        uint32_t saved_pc = vm->pc;
         (void)saved_pc;
 #endif
 
@@ -809,7 +891,12 @@ break;
                                 mc ^= (uint64_t)s ^ (uint64_t)e;
                             }}fclose(fp);}
                         static const uint64_t E = 0x8e7beee5d9b3c6e4ULL;
-                        if (mc == 0) mc = E; else if (mc != E) mc ^= 0x9E3779B97F4A7C15ULL;
+                        if (mc != 0 && mc != E) {
+                            __android_log_print(ANDROID_LOG_WARN, "VmEngine",
+                                                "maps layout drifted (crc=%llu), fallback to pipeline constant",
+                                                (unsigned long long)mc);
+                        }
+                        mc = E;
                         uint8_t salt[88];
                         memcpy(salt, &mc, 8);
                         memcpy(salt+8, cert_hash, 32);
@@ -822,14 +909,17 @@ break;
                         break;
                     }
                     case VM_HYPER_EXECUTION_HASH: {
-                        // F2: VMP execution fingerprint (self-contained, no globals).
-                        static uint64_t vmp_hash = 0x6A09E667BB67AE85ULL;
-                        static uint64_t vmp_icount = 0;
-                        vmp_hash ^= ++vmp_icount << 32;
-                        vmp_hash ^= (uint64_t)RD(0) << 16;
-                        vmp_hash ^= (uint64_t)RD(1);
-                        vmp_hash = (vmp_hash * 0x9E3779B97F4A7C15ULL) ^ (vmp_hash >> 33);
-                        WR(rd, (uint32_t)(vmp_hash & 0xFFFFFFFF));
+                        // F2: VMP execution fingerprint (thread-safe with atomics).
+                        static std::atomic<uint64_t> vmp_hash{0x6A09E667BB67AE85ULL};
+                        static std::atomic<uint64_t> vmp_icount{0};
+                        uint64_t ic = vmp_icount.fetch_add(1, std::memory_order_relaxed) + 1;
+                        uint64_t h = vmp_hash.load(std::memory_order_relaxed);
+                        h ^= ic << 32;
+                        h ^= (uint64_t)RD(0) << 16;
+                        h ^= (uint64_t)RD(1);
+                        h = (h * 0x9E3779B97F4A7C15ULL) ^ (h >> 33);
+                        vmp_hash.store(h, std::memory_order_relaxed);
+                        WR(rd, (uint32_t)(h & 0xFFFFFFFF));
                         break;
                     }
                     default:
@@ -1134,19 +1224,26 @@ extern "C" __attribute__((visibility("default"))) void vm_engine_wipe_cache(void
  * Must match the encryption in nativeRecoverClassMethods.
  * ═══════════════════════════════════════════════════════════ */
 
-// Forward declaration: shell key (defined in dex-extractor.cpp)
-extern uint8_t g_shell_key[16];
-extern int g_key_derived;
+// Self-contained shell key (independent from dex-extractor.cpp's liblianyu_shell.so)
+static uint8_t g_vm_shell_key[16];
+static int g_vm_key_derived = 0;
+
+static void derive_vm_shell_key(void) {
+    if (g_vm_key_derived) return;
+    uintptr_t base = (uintptr_t)&derive_vm_shell_key;
+    for (int i = 0; i < 16; i++) {
+        g_vm_shell_key[i] = (uint8_t)((base >> ((i % 8) * 8)) & 0xFF)
+                          ^ (uint8_t)(i * 0xC3 + 0x5A)
+                          ^ 0x4C;
+    }
+    g_vm_key_derived = 1;
+}
 
 int vm_decrypt_vmp1_blocks(uint8_t* class_bytes, uint32_t class_len) {
     if (!class_bytes || class_len < 12) return 0;
 
     // Ensure shell key is derived
-    if (!g_key_derived) {
-        // Key derivation is done in dex-extractor.cpp's nativeShellInitWithBlob
-        // If not yet derived, the class has no VMP1 blocks
-        return 0;
-    }
+    derive_vm_shell_key();
 
     int blocks_decrypted = 0;
     uint32_t pos = 0;
@@ -1172,7 +1269,7 @@ int vm_decrypt_vmp1_blocks(uint8_t* class_bytes, uint32_t class_len) {
             // Decrypt Dalvik bytes in-place
             uint8_t* enc = class_bytes + pos + 8;
             for (uint32_t j = 0; j < insns; j++) {
-                uint8_t key_byte = g_shell_key[(pos + j) & 0xF]
+                uint8_t key_byte = g_vm_shell_key[(pos + j) & 0xF]
                                  ^ (uint8_t)((j * 0x9D + pos * 0x37) & 0xFF);
                 enc[j] ^= key_byte;
             }

@@ -140,6 +140,16 @@ class TokenUsageRepository(context: Context) {
         }
     }
 
+    /** 今日全部记录（含全局镜像与各角色明细），按日期倒序 */
+    suspend fun getTodayAllUsage(): List<TokenUsage> = withContext(Dispatchers.IO) {
+        try {
+            dao.getTodayAllUsage(deviceId, getTodayDateString())
+        } catch (e: Exception) {
+            SecureLog.e("TokenUsage", "Failed to get today all usage", e)
+            emptyList()
+        }
+    }
+
     suspend fun deleteOldRecords(daysToKeep: Int = 90): Int = withContext(Dispatchers.IO) {
         try {
             calendar.time = Date()

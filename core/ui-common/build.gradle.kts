@@ -41,4 +41,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.coil.compose)
     implementation(libs.androidx.core.ktx)
+    // api：玻璃组件公开 API 签名引用了 kyant Backdrop 类型，需透传给所有依赖方
+    api(libs.kyant.backdrop)
+    api(libs.kyant.capsule)
 }

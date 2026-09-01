@@ -47,4 +47,25 @@ class OpenAiSseChunkParserTest {
         assertEquals("quota exceeded", d.errorMessage)
         assertTrue(d.done)
     }
+
+    @Test
+    fun parseUsagePayload_extractsRealTokens() {
+        val json = """{"choices":[],"usage":{"prompt_tokens":1234,"completion_tokens":56,"total_tokens":1290}}"""
+        val usage = OpenAiSseChunkParser.parseUsagePayload(json)
+        assertEquals(1234L, usage?.promptTokens)
+        assertEquals(56L, usage?.completionTokens)
+    }
+
+    @Test
+    fun parseUsagePayload_returnsNullWhenAbsent() {
+        assertNull(OpenAiSseChunkParser.parseUsagePayload("""{"choices":[{"delta":{"content":"hi"}}]}"""))
+        assertNull(OpenAiSseChunkParser.parseUsagePayload("[DONE]"))
+        assertNull(OpenAiSseChunkParser.parseUsagePayload(""))
+    }
+
+    @Test
+    fun parseUsagePayload_ignoresZeroTokens() {
+        val json = """{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}"""
+        assertNull(OpenAiSseChunkParser.parseUsagePayload(json))
+    }
 }

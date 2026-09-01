@@ -535,8 +535,9 @@ fun ApiTutorialCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    @Suppress("DEPRECATION")
                     Icon(
-                        imageVector = Icons.Default.HelpOutline,
+                        imageVector = Icons.Filled.HelpOutline,
                         contentDescription = "教程",
                         tint = PetalPrimary,
                         modifier = Modifier.size(24.dp)
@@ -603,7 +604,8 @@ fun ApiTutorialCard(
                             colors = ButtonDefaults.buttonColors(containerColor = PetalPrimary),
                             shape = RoundedCornerShape(20.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                            @Suppress("DEPRECATION")
+                            Icon(imageVector = Icons.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("去DeepSeek获取免费API Key", color = AppTheme.colors.onPrimary, fontSize = 13.sp)
                         }

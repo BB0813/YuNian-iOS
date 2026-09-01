@@ -21,7 +21,6 @@ import com.lianyu.ai.feature.wechat.data.model.M1Type
 import com.lianyu.ai.feature.wechat.data.model.M2
 import com.lianyu.ai.feature.wechat.service.WeChatServiceLocator
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -54,7 +53,6 @@ class WeChatChatBridge(
         ServiceRegistry.get(WeChatDialoguePort::class.java)
             ?: throw IllegalStateException("WeChatDialoguePort not registered in ServiceRegistry")
     }
-    private val bridgeJob = SupervisorJob()
 
     suspend fun handleIncomingMessage(message: M0): String? = withContext(Dispatchers.IO) {
         val wechatUserId = message.fromUserId ?: return@withContext null
@@ -382,7 +380,6 @@ class WeChatChatBridge(
     }
 
     fun close() {
-        bridgeJob.cancel()
     }
 
     private fun extractStickerTags(text: String): Pair<String, List<StickerInfo>> {

@@ -565,6 +565,7 @@ fun GroupChatScreen(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
+                            @Suppress("DEPRECATION")
                             Icon(
                                 imageVector = Icons.Filled.Send,
                                 contentDescription = "发送",

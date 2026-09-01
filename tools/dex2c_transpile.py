@@ -1234,7 +1234,7 @@ def main():
     gen = Dex2CCodeGen(dex)
     gen.generate_output(whitelist, args.out_cpp, args.out_h)
 
-    print("\n[dex2c] ✅ Transpilation complete.")
+    print("\n[dex2c] Transpilation complete.")
 
 
 if __name__ == '__main__':

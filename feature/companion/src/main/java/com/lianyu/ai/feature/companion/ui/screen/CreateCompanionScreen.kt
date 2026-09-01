@@ -204,8 +204,8 @@ fun CreateCompanionScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (isEditMode && companionId != null) {
-            viewModel.loadCompanion(companionId)
+        if (isEditMode) {
+            viewModel.loadCompanion(companionId!!)
         }
         delay(100)
         isVisible = true

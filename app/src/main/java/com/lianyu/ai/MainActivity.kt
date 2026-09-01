@@ -199,6 +199,8 @@ class MainActivity : ComponentActivity() {
         // JobScheduler 第三层兜底保活（全设备启用：进程被杀后由系统作业拉起恢复，
         // 覆盖 WorkManager 在 Doze 下延迟的窗口；原生 Android / 国产 ROM 通用）
         scheduleIqooKeepAliveJob()
+        // AlarmManager 心跳：Doze 下唯一可靠的进程外唤醒通道（精确闹钟 + while-idle 降级）
+        KeepAliveAlarmScheduler.scheduleNext(this)
 
         appScope.launch { updateManager.checkForUpdates() }
         startMemoryMonitor()

@@ -38,4 +38,9 @@ Tap the button to start writing</string>
     <string name="mood_miss">Missing</string>
     <string name="ai_generate_diary">AI Generate Diary</string>
     <string name="ai_generating">Generating…</string>
+    <string name="diary_auto_tip">Auto-generates 1 entry daily after chats; generate manually anytime</string>
+    <string name="diary_generating">Generating…</string>
+    <string name="diary_generate_failed">Failed to generate diary. Check your network and try again</string>
+    <string name="diary_generated_title">AI-generated Diary</string>
+    <string name="memory_local_only">Memories are stored only on this device and never uploaded to any server</string>
 </resources>

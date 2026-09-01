@@ -46,10 +46,18 @@ public class StaticApkShell extends Application {
         shellStarted = SystemClock.elapsedRealtimeNanos();
         super.attachBaseContext(base);
         stageLog("attach.begin");
-        nativeAntiHookInit();
+        try {
+            nativeAntiHookInit();
+        } catch (Throwable t) {
+            Log.w(TAG, "antiHook init failed (HarmonyOS/EMUI compatibility): " + t.getClass().getSimpleName());
+        }
         antiHookDone = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.antiHook", antiHookDone - shellStarted);
-        initApkCertificate(base);
+        try {
+            initApkCertificate(base);
+        } catch (Throwable t) {
+            Log.w(TAG, "certificate init failed: " + t.getClass().getSimpleName());
+        }
         certificateDone = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.certificate", certificateDone - antiHookDone);
         // MethodRecoveryEngine is currently a no-op; skip the 5.8MB VMP blob on the
@@ -57,20 +65,46 @@ public class StaticApkShell extends Application {
         // Keep the hook for future recovery without blocking Application attach.
         vmpPayloadDone = certificateDone;
         stageLog("attach.vmpPayload.skipped");
-        loadEncryptedDex(base);
+        try {
+            loadEncryptedDex(base);
+        } catch (Throwable t) {
+            Log.e(TAG, "DEX loading failed - app cannot start: " + t.getClass().getSimpleName(), t);
+            persistAttachMetrics(base);
+            return;
+        }
         dexLoadDone = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.dexLoad", dexLoadDone - vmpPayloadDone);
-        MethodRecoveryEngine.install(base.getClassLoader());
+        try {
+            MethodRecoveryEngine.install(base.getClassLoader());
+        } catch (Throwable t) {
+            Log.w(TAG, "recovery engine install failed: " + t.getClass().getSimpleName());
+        }
         recoveryDone = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.recovery", recoveryDone - dexLoadDone);
-        nativeEnableMemoryGuard();
+        try {
+            nativeEnableMemoryGuard();
+        } catch (Throwable t) {
+            Log.w(TAG, "memory guard init failed: " + t.getClass().getSimpleName());
+        }
         memoryGuardDone = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.memoryGuard", memoryGuardDone - recoveryDone);
-        realApplication = createRealApplication(base);
+        try {
+            realApplication = createRealApplication(base);
+        } catch (Throwable t) {
+            Log.e(TAG, "real application creation failed: " + t.getClass().getSimpleName(), t);
+            persistAttachMetrics(base);
+            return;
+        }
         realAppCreated = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.realAppCreate", realAppCreated - memoryGuardDone);
         if (realApplication != null) {
-            attachRealApplication(base, realApplication);
+            try {
+                attachRealApplication(base, realApplication);
+            } catch (Throwable t) {
+                Log.e(TAG, "real application attach failed: " + t.getClass().getSimpleName(), t);
+                persistAttachMetrics(base);
+                return;
+            }
         }
         realAppAttached = SystemClock.elapsedRealtimeNanos();
         stageLog("attach.realAppAttach", realAppAttached - realAppCreated);
@@ -83,22 +117,34 @@ public class StaticApkShell extends Application {
         super.onCreate();
         long businessStarted = SystemClock.elapsedRealtimeNanos();
         stageLog("onCreate.begin", businessStarted - shellStarted);
-        // Production unique shell chain:
-        // 1) encrypted business DEX already loaded in attachBaseContext
-        // 2) run SecurityGuard preflight via G0 (business DEX)
-        // 3) only then allow real Application.onCreate / initBusiness
-        runSecurityPreflight();
+        try {
+            runSecurityPreflight();
+        } catch (Throwable t) {
+            Log.w(TAG, "security preflight failed: " + t.getClass().getSimpleName());
+        }
         long preflightDone = SystemClock.elapsedRealtimeNanos();
         stageLog("onCreate.preflight", preflightDone - businessStarted);
-        runSecurityRuntimeInit();
+        try {
+            runSecurityRuntimeInit();
+        } catch (Throwable t) {
+            Log.w(TAG, "security runtime init failed: " + t.getClass().getSimpleName());
+        }
         long runtimeDone = SystemClock.elapsedRealtimeNanos();
         stageLog("onCreate.runtime", runtimeDone - preflightDone);
         if (realApplication != null) {
-            long wmStarted = SystemClock.elapsedRealtimeNanos();
-            initializeWorkManager();
-            stageLog("onCreate.workManager", SystemClock.elapsedRealtimeNanos() - wmStarted);
+            try {
+                long wmStarted = SystemClock.elapsedRealtimeNanos();
+                initializeWorkManager();
+                stageLog("onCreate.workManager", SystemClock.elapsedRealtimeNanos() - wmStarted);
+            } catch (Throwable t) {
+                Log.w(TAG, "WorkManager init failed: " + t.getClass().getSimpleName());
+            }
             long appStarted = SystemClock.elapsedRealtimeNanos();
-            realApplication.onCreate();
+            try {
+                realApplication.onCreate();
+            } catch (Throwable t) {
+                Log.e(TAG, "real application onCreate failed: " + t.getClass().getSimpleName(), t);
+            }
             stageLog("onCreate.realApp", SystemClock.elapsedRealtimeNanos() - appStarted);
         }
         long businessDone = SystemClock.elapsedRealtimeNanos();

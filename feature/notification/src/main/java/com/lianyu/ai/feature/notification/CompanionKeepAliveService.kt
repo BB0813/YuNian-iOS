@@ -13,7 +13,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
-import androidx.work.WorkManager
 import androidx.core.app.NotificationCompat
 import com.lianyu.ai.domain.AutomationTickProvider
 import com.lianyu.ai.domain.ServiceRegistry
@@ -43,19 +42,10 @@ open class CompanionKeepAliveService : Service() {
 
     private val heartbeatRunnable = object : Runnable {
         override fun run() {
-            // 仅当没有活跃的 CompanionMessageWorker 调度时才触发新调度。
-            // enqueueUniqueWork(REPLACE) 虽然不会堆叠请求，但每次 REPLACE 会重置延迟，
-            // 频繁 schedule 会覆盖用户在 ChatDetailScreen 里设置的大间隔（如 360 分钟→30 分钟）。
-            val workMgr = WorkManager.getInstance(applicationContext)
-            val hasActive = runCatching {
-                workMgr.getWorkInfosForUniqueWork("companion_message_work").get()
-                    .any { it.state == androidx.work.WorkInfo.State.ENQUEUED ||
-                            it.state == androidx.work.WorkInfo.State.RUNNING }
-            }.getOrDefault(false)
-            if (!hasActive) {
-                CompanionMessageWorker.schedule(applicationContext)
-            }
-            handler.postDelayed(this, 60 * 60 * 1000L) // 60 分钟（原 15 分钟过于频繁）
+            // [C9 FIX] CompanionMessageWorker.schedule() 内部已处理重复调度检查，
+            // 移除主线程 getWorkInfosForUniqueWork().get() 调用，避免 ANR。
+            CompanionMessageWorker.schedule(applicationContext)
+            handler.postDelayed(this, 60 * 60 * 1000L)
         }
     }
 

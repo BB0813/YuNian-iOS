@@ -1,9 +1,12 @@
 package com.lianyu.ai.network
 
 import android.content.Context
+import com.lianyu.ai.common.AppSettingsStore
+import com.lianyu.ai.common.RemoteKeyProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ApiConfig
+import com.lianyu.ai.database.model.ApiProvider
 import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.DiaryProvider
@@ -31,6 +34,8 @@ import java.util.concurrent.TimeUnit
  */
 class DiaryService(private val context: Context) : DiaryProvider {
 
+    private val appContext = context.applicationContext
+
     companion object {
         private const val TAG = "DiaryService"
 
@@ -41,6 +46,26 @@ class DiaryService(private val context: Context) : DiaryProvider {
                 .writeTimeout(10, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(false)
                 .build()
+        }
+
+        // PARTNER（suflow.cloud）专用客户端：证书固定 + TLS 1.2+ + 请求签名
+        private val diaryPartnerClient: OkHttpClient by lazy {
+            val builder = OkHttpClient.Builder()
+            RequestSecurityInterceptor.enforceTls(builder)
+            builder
+                .addInterceptor(RequestSecurityInterceptor(shouldSignRequest = ::shouldSignRequest))
+                .certificatePinner(CertificatePins.certificatePinner)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(40, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+
+        private fun shouldSignRequest(request: okhttp3.Request): Boolean {
+            val host = request.url.host.lowercase()
+            return request.header("X-LianYu-Session")?.isNotBlank() == true ||
+                host == "api.lianyu.ai" || host.endsWith(".lianyu.ai")
         }
 
         /** 日记系统提示词 — 引导 AI 以第一人称写会话后的情感日记 */
@@ -91,8 +116,9 @@ class DiaryService(private val context: Context) : DiaryProvider {
         if (conversationText.isBlank()) return@withContext null
 
         val config = getConfig() ?: return@withContext null
-        val keys = config.getAllApiKeys()
-        if (keys.isEmpty()) return@withContext null
+        val isPartner = config.provider == ApiProvider.PARTNER
+        val keys = if (isPartner) emptyList() else resolveKeys(config)
+        if (!isPartner && keys.isEmpty()) return@withContext null
 
         val memoryHint = if (memoryContext.isNotBlank()) {
             "\n关于我和TA的一些背景记忆：\n$memoryContext\n"
@@ -121,17 +147,28 @@ class DiaryService(private val context: Context) : DiaryProvider {
             append('}')
         }
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer ${keys.first()}")
             .header("Content-Type", "application/json")
+
+        if (isPartner) {
+            // PARTNER 认证走会话头（与 AiService 一致），否则 suflow.cloud 拒绝
+            val session = RemoteKeyProvider.ensureSession(context, forceRefresh = false)
+                ?: return@withContext null
+            requestBuilder.header("X-LianYu-Session", session.token)
+            requestBuilder.header("X-LianYu-Client-Id", session.clientId)
+        } else {
+            requestBuilder.header("Authorization", "Bearer ${keys.first()}")
+        }
+
+        val request = requestBuilder
             .post(jsonBody.toRequestBody("application/json".toMediaType()))
             .build()
 
         try {
-            diaryClient.newCall(request).execute().use { response ->
+            (if (isPartner) diaryPartnerClient else diaryClient).newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    SecureLog.w(TAG, "Diary API failed: ${response.code}")
+                    SecureLog.w(TAG, "Diary API failed: ${response.code} body=${response.body?.string()?.take(200)}")
                     return@withContext null
                 }
 
@@ -158,13 +195,47 @@ class DiaryService(private val context: Context) : DiaryProvider {
     // ── 内部工具 ──
 
     private suspend fun getConfig(): ApiConfig? {
+        // 优先使用日记专用独立 API 配置（用户在设置中单独填写）
+        val store = AppSettingsStore(appContext)
+        if (store.getDiaryEnabled()) {
+            val baseUrl = store.getDiaryBaseUrl().trim().trimEnd('/')
+            val model = store.getDiaryModel().trim()
+            if (baseUrl.isNotBlank() && model.isNotBlank()) {
+                return ApiConfig(
+                    provider = ApiProvider.CUSTOM,
+                    name = "日记专用",
+                    apiKey = store.getDiaryApiKey().trim(),
+                    baseUrl = baseUrl,
+                    model = model
+                )
+            }
+            SecureLog.w(TAG, "Diary custom API enabled but baseUrl/model blank, fallback to main config")
+        }
         return apiConfigRepository.getActiveEnabledConfig()
+    }
+
+    private suspend fun resolveKeys(config: ApiConfig): List<String> {
+        val keys = config.getAllApiKeys()
+        if (keys.isNotEmpty()) return keys
+        // PARTNER（内置云端）无本地 key 时拉取远程密钥
+        if (config.provider == ApiProvider.PARTNER) {
+            val remote = runCatching {
+                RemoteKeyProvider.fetchKeysAsync(appContext)
+            }.getOrDefault(emptyList())
+            if (remote.isNotEmpty()) {
+                SecureLog.d(TAG, "Diary: resolved ${remote.size} remote partner key(s)")
+                return remote
+            }
+            SecureLog.w(TAG, "Diary: PARTNER config but remote key fetch failed")
+        }
+        return emptyList()
     }
 
     private fun normalizeBaseUrl(baseUrl: String): String {
         return baseUrl.trim().trimEnd('/')
     }
 
+    // TODO: Migrate to org.json.JSONObject for safer JSON construction
     private fun escapeJson(text: String): String {
         return text
             .replace("\\", "\\\\")

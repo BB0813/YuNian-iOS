@@ -100,6 +100,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _visionApiKey = MutableStateFlow("")
     val visionApiKey: StateFlow<String> = _visionApiKey.asStateFlow()
 
+    private val _diaryEnabled = MutableStateFlow(false)
+    val diaryEnabled: StateFlow<Boolean> = _diaryEnabled.asStateFlow()
+    private val _diaryModel = MutableStateFlow("")
+    val diaryModel: StateFlow<String> = _diaryModel.asStateFlow()
+    private val _diaryBaseUrl = MutableStateFlow("")
+    val diaryBaseUrl: StateFlow<String> = _diaryBaseUrl.asStateFlow()
+    private val _diaryApiKey = MutableStateFlow("")
+    val diaryApiKey: StateFlow<String> = _diaryApiKey.asStateFlow()
+
     private val _innerThoughtEnabled = MutableStateFlow(false)
     val innerThoughtEnabled: StateFlow<Boolean> = _innerThoughtEnabled.asStateFlow()
 
@@ -131,6 +140,30 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             appSettingsStore.visionApiKeyFlow.collect { key ->
                 _visionApiKey.value = key
+            }
+        }
+
+        viewModelScope.launch {
+            appSettingsStore.diaryEnabledFlow.collect { enabled ->
+                _diaryEnabled.value = enabled
+            }
+        }
+
+        viewModelScope.launch {
+            appSettingsStore.diaryModelFlow.collect { model ->
+                _diaryModel.value = model
+            }
+        }
+
+        viewModelScope.launch {
+            appSettingsStore.diaryBaseUrlFlow.collect { url ->
+                _diaryBaseUrl.value = url
+            }
+        }
+
+        viewModelScope.launch {
+            appSettingsStore.diaryApiKeyFlow.collect { key ->
+                _diaryApiKey.value = key
             }
         }
 
@@ -168,6 +201,52 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setVisionApiKey(key: String) {
         viewModelScope.launch {
             appSettingsStore.setVisionApiKey(key)
+        }
+    }
+
+    fun setDiaryEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsStore.setDiaryEnabled(enabled)
+        }
+    }
+
+    fun setDiaryModel(model: String) {
+        viewModelScope.launch {
+            appSettingsStore.setDiaryModel(model)
+        }
+    }
+
+    fun setDiaryBaseUrl(url: String) {
+        viewModelScope.launch {
+            appSettingsStore.setDiaryBaseUrl(url)
+        }
+    }
+
+    fun setDiaryApiKey(key: String) {
+        viewModelScope.launch {
+            appSettingsStore.setDiaryApiKey(key)
+        }
+    }
+
+    suspend fun testDiaryConnection(baseUrl: String, apiKey: String, model: String): Result<String> {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                if (baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
+                    throw IllegalArgumentException("API 地址、密钥和模型名不能为空")
+                }
+                val config = ApiConfig(
+                    provider = ApiProvider.CUSTOM,
+                    apiKey = apiKey,
+                    baseUrl = baseUrl,
+                    model = model
+                )
+                val testMessages = listOf(
+                    com.lianyu.ai.network.Message("system", "You are a helpful assistant."),
+                    com.lianyu.ai.network.Message("user", "Hi")
+                )
+                val response = aiService.callOpenAiCompatibleForTest(config, testMessages)
+                "连接成功！响应: ${response.take(50)}"
+            }
         }
     }
 

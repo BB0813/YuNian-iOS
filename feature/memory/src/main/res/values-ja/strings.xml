@@ -38,4 +38,9 @@
     <string name="mood_miss">恋しい</string>
     <string name="ai_generate_diary">AI 日記生成</string>
     <string name="ai_generating">生成中…</string>
+    <string name="diary_auto_tip">チャット後は毎日 1 件自動保存、手動生成も可能</string>
+    <string name="diary_generating">生成中…</string>
+    <string name="diary_generate_failed">日記の生成に失敗しました。ネットワークを確認して再試行してください</string>
+    <string name="diary_generated_title">AI 生成の日記</string>
+    <string name="memory_local_only">記憶はこの端末内にのみ保存され、サーバーへアップロードされません</string>
 </resources>

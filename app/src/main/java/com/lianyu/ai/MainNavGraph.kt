@@ -23,6 +23,8 @@ import kotlinx.coroutines.launch
 import com.lianyu.ai.common.PerformanceTrace
 import com.lianyu.ai.common.YandereModeManager
 import com.lianyu.ai.domain.ServiceRegistry
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.lianyu.ai.feature.automation.ui.AutomationListScreen
 import com.lianyu.ai.feature.backup.BackupScreen
 import com.lianyu.ai.feature.backup.BackupExportSelectScreen
@@ -64,10 +66,14 @@ import com.lianyu.ai.feature.settings.ui.screen.CheckUpdateScreen
 import com.lianyu.ai.feature.settings.ui.screen.ExperimentalFeaturesScreen
 import com.lianyu.ai.feature.settings.ui.screen.FrameRateScreen
 import com.lianyu.ai.feature.settings.ui.screen.LanguageScreen
+import com.lianyu.ai.feature.settings.ui.screen.McpSettingsScreen
 import com.lianyu.ai.feature.settings.ui.screen.SettingsScreen
+import com.lianyu.ai.feature.settings.ui.screen.SkillsScreen
 import com.lianyu.ai.feature.settings.ui.screen.ThemeScreen
 import com.lianyu.ai.feature.settings.ui.screen.TokenUsageScreen
 import com.lianyu.ai.feature.settings.ui.screen.TtsSettingsScreen
+import com.lianyu.ai.feature.settings.ui.screen.WorldbookScreen
+import com.lianyu.ai.feature.settings.ui.screen.WorldbookDetailScreen
 import com.lianyu.ai.feature.settings.ui.screen.YandereModeScreen
 import com.lianyu.ai.feature.wechat.ui.WeChatBindScreen
 import com.lianyu.ai.feature.wechat.ui.WeChatSettingsScreen
@@ -83,7 +89,8 @@ internal fun MainNavHost(
     bottomNavItems: List<BottomNavItem>,
     coroutineScope: kotlinx.coroutines.CoroutineScope,
     lastTabPage: Int,
-    onLastTabPageChanged: (Int) -> Unit
+    onLastTabPageChanged: (Int) -> Unit,
+    backdrop: LayerBackdrop?
 ) {
     NavHost(
         navController = navController,
@@ -100,7 +107,8 @@ internal fun MainNavHost(
                 openCompanionChat = openCompanionChat,
                 bottomNavItems = bottomNavItems,
                 coroutineScope = coroutineScope,
-                onLastTabPageChanged = onLastTabPageChanged
+                onLastTabPageChanged = onLastTabPageChanged,
+                backdrop = backdrop
             )
         }
 
@@ -275,8 +283,27 @@ internal fun MainNavHost(
         composable(MainRoute.ExperimentalFeatures.route) {
             ExperimentalFeaturesScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onYandereModeClick = { navController.navigate(MainRoute.YandereMode.route) }
+                onYandereModeClick = { navController.navigate(MainRoute.YandereMode.route) },
+                onWorldbookClick = { navController.navigate(MainRoute.Worldbook.route) },
+                onSkillsClick = { navController.navigate(MainRoute.Skills.route) },
+                onMcpClick = { navController.navigate(MainRoute.McpSettings.route) }
             )
+        }
+        composable(MainRoute.Worldbook.route) {
+            WorldbookScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToDetail = { navController.navigate(MainRoute.WorldbookDetail(it).route) }
+            )
+        }
+        composable(MainRoute.WorldbookDetail(0).route.replace("0", "{worldbookId}"), arguments = listOf(navArgument("worldbookId") { type = NavType.LongType })) {
+            val id = it.arguments?.getLong("worldbookId") ?: 0L
+            WorldbookDetailScreen(worldbookId = id, onNavigateBack = { navController.popBackStack() })
+        }
+        composable(MainRoute.Skills.route) {
+            SkillsScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(MainRoute.McpSettings.route) {
+            McpSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(MainRoute.GeneralSettings.route) {
             GeneralSettingsScreen(
@@ -398,12 +425,13 @@ internal fun MainNavHost(
 private fun MainTabPager(
     pagerState: PagerState,
     navController: NavHostController,
-    openCompanionChat: (Long) -> Unit
+    openCompanionChat: (Long) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     HorizontalPager(
         state = pagerState,
         beyondViewportPageCount = 1,
-        modifier = Modifier.fillMaxSize()
+        modifier = modifier.fillMaxSize()
     ) { page ->
         when (page) {
             0 -> HomeScreen(
@@ -444,7 +472,8 @@ private fun MainTabScreen(
     openCompanionChat: (Long) -> Unit,
     bottomNavItems: List<BottomNavItem>,
     coroutineScope: kotlinx.coroutines.CoroutineScope,
-    onLastTabPageChanged: (Int) -> Unit
+    onLastTabPageChanged: (Int) -> Unit,
+    backdrop: LayerBackdrop?
 ) {
     Box(
         modifier = Modifier
@@ -457,7 +486,12 @@ private fun MainTabScreen(
         MainTabPager(
             pagerState = pagerState,
             navController = navController,
-            openCompanionChat = openCompanionChat
+            openCompanionChat = openCompanionChat,
+            modifier = if (backdrop != null) {
+                Modifier.layerBackdrop(backdrop)
+            } else {
+                Modifier
+            }
         )
         FloatingGlassBottomNav(
             items = bottomNavItems,
@@ -471,6 +505,7 @@ private fun MainTabScreen(
                     pagerState.scrollToPage(index)
                 }
             },
+            backdrop = backdrop,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
     }

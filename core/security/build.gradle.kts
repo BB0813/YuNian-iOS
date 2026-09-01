@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+import java.util.concurrent.TimeUnit
+
 android {
     namespace = "com.lianyu.ai.security"
     compileSdk = 35
@@ -82,6 +84,7 @@ tasks.matching { it.name.startsWith("configureNdkBuild") || it.name.startsWith("
 }
 
 // Dex2C Transpiler Task — runs before ndkBuild (Release only)
+// Only runs when minification is enabled (minifyReleaseWithR8 task exists)
 val dex2cWhitelist = rootProject.file("tools/dex2c_whitelist.txt")
 val dex2cTranspiler = rootProject.file("tools/dex2c_transpile.py")
 
@@ -91,16 +94,27 @@ tasks.register("dex2cTranspile") {
 
     val dexInput = rootProject.file("app/build/intermediates/dex/release/minifyReleaseWithR8/classes.dex")
     inputs.file(dex2cWhitelist)
-    // P2-15: depend on R8 minification so DEX exists
-    dependsOn(":app:minifyReleaseWithR8")
+    // Only depend on minifyReleaseWithR8 if minification is enabled
+    // Check if minification is enabled via project property
+    val disableMinify = rootProject.providers.gradleProperty("lianyuDisableMinify")
+        .map { it.equals("true", ignoreCase = true) || it == "1" }
+        .orElse(false)
+    if (!disableMinify.get()) {
+        dependsOn(":app:minifyReleaseWithR8")
+    }
     outputs.dir(dex2cOutputDir)
     // P2-15: always run — DEX may change without whitelist changing; security-critical
     outputs.upToDateWhen { false }
 
     doLast {
         dex2cOutputDir.mkdirs()
-        if (!dexInput.exists()) {
-            logger.warn("Dex2C: classes.dex not found — transpose skipped")
+        // If minification is disabled or DEX not found, write empty stubs
+        if (disableMinify.get() || !dexInput.exists()) {
+            if (disableMinify.get()) {
+                logger.lifecycle("Dex2C: minification disabled — transpilation skipped")
+            } else {
+                logger.warn("Dex2C: classes.dex not found — transpose skipped")
+            }
             // Write empty stubs so NDK compilation doesn't fail
             dex2cOutputDir.mkdirs()
             file("$dex2cOutputDir/dex2c_methods.cpp").writeText("""
@@ -121,9 +135,27 @@ extern const uint32_t gDex2cTextCrc32;
 """.trimIndent())
             return@doLast
         }
-        // Resolve python executable: prefer project venv, then system python
+        // Resolve python executable: prefer project venv, then known installs, then system python
         val venvPython = rootProject.file(".venv/Scripts/python.exe")
-        val pythonExe = if (venvPython.exists()) venvPython.absolutePath else "python"
+        val candidates = listOf(
+            venvPython.takeIf { it.exists() }?.absolutePath,
+            "C:/Users/linruoxi/AppData/Local/Programs/Python/Python312/python.exe",
+            System.getenv("LIANYU_PYTHON"),
+            "python"
+        ).filterNotNull()
+        @Suppress("DEPRECATION")
+        val pythonExe = candidates.firstOrNull {
+            try {
+                val probe = ProcessBuilder(it, "--version")
+                    .redirectErrorStream(true)
+                    .start()
+                probe.waitFor(5, TimeUnit.SECONDS)
+                probe.exitValue() == 0
+            } catch (e: Exception) {
+                false
+            }
+        } ?: "python"
+        logger.lifecycle("Dex2C: using python = ${pythonExe}")
         val pb = ProcessBuilder(
             pythonExe, dex2cTranspiler.absolutePath, dexInput.absolutePath,
             "--whitelist", dex2cWhitelist.absolutePath,

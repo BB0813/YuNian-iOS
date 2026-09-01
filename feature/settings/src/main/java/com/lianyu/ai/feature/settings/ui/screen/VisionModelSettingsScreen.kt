@@ -616,7 +616,7 @@ fun VisionModelSettingsScreen(
 }
 
 @Composable
-private fun InfoItem(icon: String, title: String, content: String, textColor: Color, secondaryColor: Color) {
+internal fun InfoItem(icon: String, title: String, content: String, textColor: Color, secondaryColor: Color) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(text = icon, fontSize = 20.sp, modifier = Modifier.padding(top = 2.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

@@ -192,6 +192,24 @@ interface AiServiceProvider {
     }
 
     /**
+     * 生成未回复追问提醒：AI 已发消息但用户长时间未回复时，
+     * 发一条自然简短的追问催促（语气服从角色性格）。
+     *
+     * @param companion 伴侣角色信息
+     * @param recentMessages 最近聊天消息
+     * @param settings 主动消息自定义设置，null 走默认行为
+     * @return 追问内容，null 表示不发送
+     */
+    suspend fun generateFollowUpReminder(
+        companion: AiCompanionInfo,
+        recentMessages: List<AiChatMessage>,
+        settings: ProactiveMessageSettings?
+    ): String? {
+        // 默认复用主动消息生成，实现侧可覆盖以读取开关/使用追问专用提示词
+        return generateProactiveMessage(companion, recentMessages, settings)
+    }
+
+    /**
      * 使用自定义系统提示词发送消息（群聊场景）。
      *
      * @param companion 伴侣角色信息

@@ -62,12 +62,16 @@ class AutoContextManager(
     /**
      * 构建发送给 API 的消息列表。
      *
+     * 布局（缓存友好）：[system 稳定前缀] → [history] → [turnContext 本轮动态上下文] → [memory] → [最后一条 user 消息]。
+     * 易变内容（时间/阶段/话题/记忆）全部放到尾部，system + history 前缀在连续请求间保持稳定，可命中前缀缓存。
+     *
      * @param history 已排序的历史消息（按时间正序）
-     * @param systemPrompt 系统提示词（已构建完成）
+     * @param systemPrompt 系统提示词（已构建完成，应只含稳定内容）
      * @param memoryContext 记忆上下文文本
      * @param lastUserMessage 最后一条用户消息（用于 fallback）
      * @param companionNameMap 角色 ID → 名称映射（用于压缩摘要）
      * @param config 上下文配置
+     * @param turnContext 本轮动态上下文（时间/阶段/动作预算/话题锚定等易变内容，放请求尾部）
      * @return 组装好的 Message 列表
      */
     suspend fun build(
@@ -76,7 +80,8 @@ class AutoContextManager(
         memoryContext: String,
         lastUserMessage: String,
         companionNameMap: Map<Long, String> = emptyMap(),
-        config: ContextConfig
+        config: ContextConfig,
+        turnContext: String = ""
     ): List<Message> {
         // 1. 获取模型上下文窗口大小
         val contextWindow = ModelContextRegistry.getContextWindow(config.model, config.provider)
@@ -95,42 +100,56 @@ class AutoContextManager(
         val systemMessage = Message("system", systemPrompt)
         var remainingBudget = totalBudget - systemTokens
 
-        val messages = mutableListOf(systemMessage)
-
         if (remainingBudget <= 0) {
             SecureLog.w("AutoContextManager", "System prompt alone exceeds budget ($systemTokens > $totalBudget)")
             // 系统提示词太长，只发系统 + 最后用户消息
+            val messages = mutableListOf(systemMessage)
             appendLastUserMessage(messages, history, lastUserMessage)
             return messages
         }
 
-        // 4. 记忆上下文（动态预算分配）
+        // 4. 本轮动态上下文（易变，放请求尾部；预算不足时优先丢弃，保记忆与历史）
+        var turnMessage: Message? = null
+        if (turnContext.isNotBlank()) {
+            val turnTokens = TokenEstimator.estimate(turnContext)
+            if (turnTokens <= remainingBudget) {
+                turnMessage = Message("system", turnContext)
+                remainingBudget -= turnTokens
+            } else {
+                SecureLog.w("AutoContextManager", "Turn context exceeds budget, dropping it ($turnTokens > $remainingBudget)")
+            }
+        }
+
+        // 5. 记忆上下文（动态预算分配，暂存，最后追加到请求尾部）
         // 不再固定 20% 上限，而是根据实际 token 数动态分配：
         // - 如果记忆上下文较小（≤ 剩余预算的 30%），完整放入
         // - 如果记忆上下文较大（> 剩余预算的 30%），截断到 30% 预算
         //   30% 是记忆与历史之间的平衡点，确保历史消息有足够空间
         val memoryBudget = (remainingBudget * 0.3).toInt()
         val memoryTokens = TokenEstimator.estimate(memoryContext)
+        var memoryMessage: Message? = null
         if (memoryContext.isNotBlank() && memoryTokens <= memoryBudget) {
-            // 记忆上下文可以完整放入
-            messages.add(Message("system", memoryContext))
+            memoryMessage = Message("system", memoryContext)
             remainingBudget -= memoryTokens
         } else if (memoryContext.isNotBlank()) {
             // 记忆上下文过长，截断到预算内
             val truncatedMemory = truncateToTokens(memoryContext, memoryBudget)
             if (truncatedMemory.isNotBlank()) {
-                messages.add(Message("system", truncatedMemory))
+                memoryMessage = Message("system", truncatedMemory)
                 remainingBudget -= memoryBudget
                 SecureLog.d("AutoContextManager", "Memory context truncated: $memoryTokens -> $memoryBudget tokens")
             }
         }
 
-        // 5. 历史消息（使用剩余预算）
+        // 6. 历史消息（使用剩余预算）
         val historyBudget = remainingBudget
         val historyMessages = buildHistoryMessages(history, historyBudget, companionNameMap, memoryContext, systemPromptHash)
-        messages.addAll(historyMessages)
 
-        // 6. 确保最后一条是 user 消息
+        // 7. 组装：稳定 system → 历史 → 本轮上下文 → 记忆 → 最后用户消息
+        val messages = mutableListOf(systemMessage)
+        messages.addAll(historyMessages)
+        turnMessage?.let { messages.add(it) }
+        memoryMessage?.let { messages.add(it) }
         appendLastUserMessage(messages, history, lastUserMessage)
 
         SecureLog.api("CONTEXT", "AutoContext: window=$contextWindow, budget=$totalBudget, system=$systemTokens, " +

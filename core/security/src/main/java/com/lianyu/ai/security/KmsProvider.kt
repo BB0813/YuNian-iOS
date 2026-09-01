@@ -26,9 +26,7 @@ object KmsProvider {
         try {
             System.loadLibrary("lianyu_security")
         } catch (e: UnsatisfiedLinkError) {
-            throw RuntimeException(
-                "FATAL: KmsProvider — liblianyu_security.so missing", e
-            )
+            android.util.Log.e("KmsProvider", "liblianyu_security.so not found — KMS features disabled", e)
         }
     }
 

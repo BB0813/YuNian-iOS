@@ -17,6 +17,9 @@
         tools:ignore="PackageInstallPermission" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 长驻消息桥接通道（微信/QQ/保活）改用 specialUse：dataSync 类型在 Android 15 共享 6h/24h
+         预算，耗尽后 FGS 全部被杀且后台无法重启（权限无法解决）；specialUse 无系统时限。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -94,22 +97,34 @@
             android:name="com.lianyu.ai.security.SService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="虚拟恋人后台守护与定时消息调度" />
+        </service>
 
         <service
             android:name="com.lianyu.ai.feature.qqbot.service.QQBotForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="QQ 机器人长连接消息桥接" />
+        </service>
 
         <service
             android:name="com.lianyu.ai.feature.notification.CompanionKeepAliveService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="虚拟恋人后台守护与定时消息调度" />
+        </service>
 
         <!-- IQOO/OriginOS 第三层兜底保活 JobService -->
         <service
@@ -117,6 +132,11 @@
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <receiver
+            android:name="com.lianyu.ai.KeepAliveAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <receiver
             android:name="com.lianyu.ai.feature.notification.BootReceiver"

@@ -6,11 +6,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.lianyu.ai.uicommon.theme.GlassDarkBg
@@ -54,6 +55,57 @@ fun Modifier.frostedGlassNav(
         .glassBorder(isDark, shape, intensity)
         .glassEdgeHighlight(isDark, intensity)
         .glassCaustics(isDark, intensity)
+}
+
+/**
+ * 液态玻璃胶囊（导航栏 pill）— Google Liquid Glass 风格玻璃皮肤。
+ * 真实背景模糊由调用方 Haze（hazeEffect）提供，本修饰符只负责玻璃质感。
+ * 视觉层（参照 haze-glass / iOS 26 规范，保持层内无重复叠加）：
+ *   1. 半透明单一底色（模糊主导，底色只做轻度着色）
+ *   2. 顶部弧面镜面高光（前景，specular highlight）
+ *   3. fresnel 内缘提亮（边缘光）
+ *   4. 细边框
+ */
+fun Modifier.liquidGlassPill(
+    shape: Shape = RoundedCornerShape(32.dp),
+    isDark: Boolean = false,
+    intensity: Float = 1.0f
+): Modifier {
+    return this
+        .clip(shape)
+        .pillGlassBackground(isDark, intensity)
+        .pillSpecularHighlight(isDark, intensity)
+        .pillFresnelEdge(isDark, intensity)
+        .glassBorder(isDark, shape, intensity)
+}
+
+/**
+ * 外圈边缘光（edge light）— 液态玻璃标志性的 outline glow。
+ * 需绘制在与玻璃表面相同尺寸的节点上，光晕会向表面外扩散。
+ */
+fun Modifier.glassEdgeLight(isDark: Boolean, intensity: Float = 1.0f): Modifier {
+    return this.drawBehind {
+        val i = intensity.coerceIn(0f, 1.5f)
+        val width = size.width
+        val height = size.height
+        val corner = CornerRadius(height * 0.48f)
+        drawRoundRect(
+            color = if (isDark) PinkPrimary.copy(alpha = 0.045f * i)
+            else PinkPrimary.copy(alpha = 0.09f * i),
+            topLeft = Offset(0f, 0f),
+            size = Size(width, height),
+            cornerRadius = corner,
+            style = Stroke(width = height * 0.22f)
+        )
+        drawRoundRect(
+            color = if (isDark) PinkPrimary.copy(alpha = 0.11f * i)
+            else PinkPrimary.copy(alpha = 0.20f * i),
+            topLeft = Offset(0f, 0f),
+            size = Size(width, height),
+            cornerRadius = corner,
+            style = Stroke(width = height * 0.09f)
+        )
+    }
 }
 
 // ============================================================
@@ -103,8 +155,6 @@ private fun Modifier.glassBackground(isDark: Boolean, intensity: Float): Modifie
             endY = height
         )
         drawRect(brush = bottomVolume)
-
-        drawOptimizedFrostedTexture(width, height, isDark, i)
     }
 }
 
@@ -140,42 +190,121 @@ private fun Modifier.navGlassBackground(isDark: Boolean, intensity: Float): Modi
             endY = height
         )
         drawRect(brush = bottomShadow)
-
-        drawOptimizedFrostedTexture(width, height, isDark, i)
     }
 }
 
-// 优化后：从80+80条线减少到15+15条，性能提升5倍
-private fun DrawScope.drawOptimizedFrostedTexture(
-    width: Float,
-    height: Float,
-    isDark: Boolean,
-    intensity: Float
-) {
-    val step = (height / 15f).coerceAtLeast(4f)
-    var y = 0f
-    while (y < height) {
-        val alpha = if (isDark) 0.015f else 0.010f
-        drawLine(
-            color = PinkPrimary.copy(alpha = alpha * intensity),
-            start = Offset(0f, y),
-            end = Offset(width, y),
-            strokeWidth = 0.5f
-        )
-        y += step
-    }
+// ============================================================
+// 胶囊（pill）玻璃背景 - 真实模糊由 Haze 提供，这里只做轻着色
+// 单一底色 + 顶部弧面柔光 + 底部轻微体积感，不再叠加网格纹理
+// ============================================================
 
-    val vStep = (width / 15f).coerceAtLeast(8f)
-    var x = 0f
-    while (x < width) {
-        val alpha = if (isDark) 0.006f else 0.004f
-        drawLine(
-            color = PinkPrimary.copy(alpha = alpha * intensity),
-            start = Offset(x, 0f),
-            end = Offset(x, height),
-            strokeWidth = 0.3f
+private fun Modifier.pillGlassBackground(isDark: Boolean, intensity: Float): Modifier {
+    return this.drawBehind {
+        val width = size.width
+        val height = size.height
+        val i = intensity.coerceIn(0f, 1.5f)
+
+        drawRect(
+            color = if (isDark) GlassDarkBg.copy(alpha = 0.26f * i)
+            else GlassLightBg.copy(alpha = 0.16f * i)
         )
-        x += vStep
+
+        val topSheen = Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.14f * i else 0.20f * i),
+                Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.04f * i else 0.06f * i),
+                Color.Transparent
+            ),
+            startY = 0f,
+            endY = height * 0.30f
+        )
+        drawRect(brush = topSheen)
+
+        val bottomVolume = Brush.verticalGradient(
+            colors = listOf(
+                Color.Transparent,
+                Color(0xFF000000).copy(alpha = if (isDark) 0.12f * i else 0.04f * i),
+                Color(0xFF000000).copy(alpha = if (isDark) 0.24f * i else 0.09f * i)
+            ),
+            startY = height * 0.58f,
+            endY = height
+        )
+        drawRect(brush = bottomVolume)
+    }
+}
+
+// ============================================================
+// 顶部弧面镜面高光 - 液态玻璃最具辨识度的 specular highlight
+// iOS 26 风格：贴合顶缘的弧形亮带，中间亮、两端渐隐，画在内容之上
+// ============================================================
+
+private fun Modifier.pillSpecularHighlight(isDark: Boolean, intensity: Float): Modifier {
+    return this.drawWithContent {
+        drawContent()
+
+        val width = size.width
+        val height = size.height
+        val i = intensity.coerceIn(0f, 1.5f)
+
+        // 弧形亮带：窄椭圆 + 径向渐变，紧贴顶部，中心最亮
+        val specular = Brush.radialGradient(
+            colors = listOf(
+                Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.34f * i else 0.46f * i),
+                Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.14f * i else 0.20f * i),
+                Color.Transparent
+            ),
+            center = Offset(width * 0.5f, height * 0.015f),
+            radius = width * 0.46f
+        )
+        drawOval(
+            brush = specular,
+            topLeft = Offset(width * 0.13f, -height * 0.02f),
+            size = Size(width * 0.74f, height * 0.36f)
+        )
+
+        // 亮带最亮的上缘 — 单条细线
+        drawLine(
+            color = Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.22f * i else 0.32f * i),
+            start = Offset(width * 0.18f, height * 0.035f),
+            end = Offset(width * 0.82f, height * 0.035f),
+            strokeWidth = 1.1f
+        )
+    }
+}
+
+// ============================================================
+// fresnel 内缘提亮 - 边缘光：玻璃边缘一圈比内部更亮
+// 参照 haze-glass 的 fresnel ambient（边缘最多 ×1.4 亮度），用白色内描边近似
+// ============================================================
+
+private fun Modifier.pillFresnelEdge(isDark: Boolean, intensity: Float): Modifier {
+    return this.drawWithContent {
+        drawContent()
+
+        val width = size.width
+        val height = size.height
+        val i = intensity.coerceIn(0f, 1.5f)
+        val corner = CornerRadius(height * 0.48f)
+
+        val innerLight = Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.12f * i else 0.20f * i)
+        val innerLightSoft = Color(0xFFFFFFFF).copy(alpha = if (isDark) 0.05f * i else 0.08f * i)
+
+        // 内侧亮带（fresnel 主效果）
+        drawRoundRect(
+            color = innerLight,
+            topLeft = Offset(0f, 0f),
+            size = Size(width, height),
+            cornerRadius = corner,
+            style = Stroke(width = height * 0.035f)
+        )
+        // 更柔的外侧过渡
+        drawRoundRect(
+            color = innerLightSoft,
+            topLeft = Offset(0f, 0f),
+            size = Size(width, height),
+            cornerRadius = corner,
+            style = Stroke(width = height * 0.09f)
+        )
     }
 }
 
@@ -187,8 +316,8 @@ private fun Modifier.glassBorder(isDark: Boolean, shape: Shape, intensity: Float
     val i = intensity.coerceIn(0f, 1.5f)
     return this.border(
         width = 0.8.dp,
-        color = if (isDark) PinkPrimary.copy(alpha = 0.15f * i)
-        else Color(0xFF000000).copy(alpha = 0.08f * i),
+        color = if (isDark) Color(0xFFFFFFFF).copy(alpha = 0.10f * i)
+        else Color(0xFF000000).copy(alpha = 0.06f * i),
         shape = shape
     )
 }

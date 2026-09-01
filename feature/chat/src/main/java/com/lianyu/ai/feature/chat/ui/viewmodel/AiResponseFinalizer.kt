@@ -433,15 +433,45 @@ class AiResponseFinalizer(
     }
 
     /**
-     * 气泡架构（用户定稿）：AI 每次回复 = 一条气泡，不再由客户端启发式分句。
-     * 分段入口退化为「整条一条」；连发由上层 BubbleLoopRunner 多次调用产出。
+     * 气泡架构：AI 回复默认一条气泡（不做客户端语义分句）。
+     * 仅当模型输出里带有「显式消息边界」时才拆分，两类边界：
+     * 1) 换行（含空行）：模型主动分块；
+     * 2) 句末标点（。！？～!?~）：模型把多条独立消息用完整句写在同一行时（如「好呀～我每天都想你呢～」），
+     *    按句末标点拆成多条气泡——尊重模型自身的消息边界标记，非启发式语义分句。
+     * 「……」与逗号不算边界（可能是句中停顿，硬拆会产生残句）。
+     * 上限 [MAX_BUBBLES_PER_REPLY] 条，超出部分并入最后一条。
      */
     private fun splitIntoSegments(text: String): List<String> {
-        return listOf(text)
+        if (text.isBlank()) return listOf(text)
+        val fragments = mutableListOf<String>()
+        text.split(Regex("\\n+")).forEach { block ->
+            val blockText = block.trim()
+            if (!hasContent(blockText)) return@forEach
+            val sentences = blockText
+                .split(SENTENCE_BOUNDARY_REGEX)
+                .map { it.trim() }
+                .filter { hasContent(it) }
+            if (sentences.size >= 2) {
+                fragments.addAll(sentences)
+            } else {
+                fragments.add(blockText)
+            }
+        }
+        if (fragments.size <= 1) return listOf(text)
+        return if (fragments.size <= MAX_BUBBLES_PER_REPLY) {
+            fragments
+        } else {
+            fragments.take(MAX_BUBBLES_PER_REPLY - 1) +
+                listOf(fragments.drop(MAX_BUBBLES_PER_REPLY - 1).joinToString(""))
+        }
     }
 
+    /** 判断片段是否含实质内容（中英文/数字），排除纯标点/纯 `～` 之类噪声块。 */
+    private fun hasContent(s: String): Boolean =
+        s.any { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }
+
     /**
-     * Queue a sticker for this turn instead of sending it immediately.
+     * 队列一个表情包用于本轮，不立即发送。
      */
     private suspend fun sendStickerMessage(sticker: StickerInfo): Long {
         return turnState.stickerMutex.withLock {
@@ -479,4 +509,13 @@ class AiResponseFinalizer(
     // companionInfoProvider 由 ChatViewModel 注入，用于 triggerFollowUp 获取当前 companion 数据
     var companionInfoProvider: (() -> com.lianyu.ai.domain.AiCompanionInfo?)? = null
 }
+
+/** 单条 AI 回复最多拆成的气泡数（防止「发多条」请求刷出过量气泡）。 */
+private const val MAX_BUBBLES_PER_REPLY = 8
+
+/**
+ * 句末标点边界：。！？～!?~ 之后可拆新气泡。
+ * 刻意不含「…/……」——句中停顿（如「但是……我觉得」）硬拆会产生残句。
+ */
+private val SENTENCE_BOUNDARY_REGEX = Regex("(?<=[。！？～!?~])")
 

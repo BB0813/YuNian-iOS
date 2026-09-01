@@ -31,6 +31,9 @@ data class TtsConfig(
     val mimoModel: String = "mimo-v2.5-tts",
     val mimoVoiceId: String = "mimo_default",
     val mimoOutputFormat: String = "wav",
+    val mimoVoiceDesignPrompt: String = "",
+    val mimoVoiceClonePath: String = "",
+    val mimoOptimizeTextPreview: Boolean = false,
     // Custom OpenAI-compatible TTS (/v1/audio/speech)
     val customTtsUrl: String = "",
     val customTtsApiKey: String = "",
@@ -92,6 +95,9 @@ data class TtsConfig(
                 mimoOutputFormat = MiMoTtsProvider.normalizeOutputFormat(
                     prefs.getString("mimo_output_format", "wav") ?: "wav"
                 ),
+                mimoVoiceDesignPrompt = prefs.getString("mimo_voice_design_prompt", "") ?: "",
+                mimoVoiceClonePath = prefs.getString("mimo_voice_clone_path", "") ?: "",
+                mimoOptimizeTextPreview = prefs.getBoolean("mimo_optimize_text_preview", false),
                 customTtsUrl = prefs.getString("custom_tts_url", "") ?: "",
                 customTtsApiKey = prefs.getString("custom_tts_api_key", "") ?: "",
                 customTtsModel = prefs.getString("custom_tts_model", "tts-1") ?: "tts-1",
@@ -138,6 +144,9 @@ data class TtsConfig(
                     "mimo_output_format",
                     MiMoTtsProvider.normalizeOutputFormat(config.mimoOutputFormat)
                 )
+                putString("mimo_voice_design_prompt", config.mimoVoiceDesignPrompt)
+                putString("mimo_voice_clone_path", config.mimoVoiceClonePath)
+                putBoolean("mimo_optimize_text_preview", config.mimoOptimizeTextPreview)
                 putString("custom_tts_url", config.customTtsUrl)
                 putString("custom_tts_api_key", config.customTtsApiKey)
                 putString("custom_tts_model", config.customTtsModel)

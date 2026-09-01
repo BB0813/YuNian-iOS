@@ -24,6 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 微信 ilink 长轮询前台服务（S4：主监督循环 + S6 看门狗）。
@@ -43,6 +44,8 @@ open class WeChatPollingService : Service() {
     private var watchdogJob: Job? = null
     private var holdsPrimaryLease = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private val watchdogStarted = AtomicBoolean(false)
+    private val pollingStarted = AtomicBoolean(false)
 
     /** 防抖：onTimeout/onDestroy 自重启最小间隔，避免系统反复杀→重启→杀的循环 */
     @Volatile
@@ -68,6 +71,16 @@ open class WeChatPollingService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // 用户划掉任务后立即自重启：部分厂商 ROM 无视 stopWithTask=false 会顺带杀掉服务
+        runCatching {
+            if (WeChatServiceLocator.tokenStore(applicationContext).isLoggedInSync()) {
+                scheduleRestartWithDebounce()
+            }
+        }
+    }
 
     override fun onTimeout(startId: Int) {
         super.onTimeout(startId)
@@ -143,28 +156,48 @@ open class WeChatPollingService : Service() {
     }
 
     private fun startWatchdog() {
-        if (watchdogJob?.isActive == true) return
+        if (!watchdogStarted.compareAndSet(false, true)) return
         watchdogJob = serviceScope.launch {
-            while (isActive) {
-                delay(WeChatChannelRuntime.WATCHDOG_INTERVAL_MS)
-                // 巡检心跳：用于检测进程冻结 / FGS 停摆（熄屏掉线取证）
-                WeChatChannelRuntime.onWatchdogTick()
-                renewWakeLock()
-                val decision = WeChatChannelRuntime.evaluateWatchdog()
-                if (!decision.needsAction) {
-                    continue
+            try {
+                while (isActive) {
+                    delay(WeChatChannelRuntime.WATCHDOG_INTERVAL_MS)
+                    // 巡检心跳：返回距上次巡检的间隔，用于检测进程冻结 / FGS 停摆（熄屏掉线取证）
+                    val gapMs = WeChatChannelRuntime.onWatchdogTick()
+                    renewWakeLock()
+                    // 会话自愈：间隙后或到期轮换时强制重建 SDK 会话。
+                    // 服务端在无消息/断连期可能静默停投（getUpdates 返回空而非报错），
+                    // 仅重启轮询不恢复投递；重建会话（resume）重新挂上投递通道。
+                    val rebuildReason = when {
+                        gapMs > WeChatChannelRuntime.WATCHDOG_STALL_THRESHOLD_MS -> "watchdog-gap gapMs=$gapMs"
+                        WeChatChannelRuntime.shouldRotateSession() -> "session-rotate"
+                        else -> null
+                    }
+                    if (rebuildReason != null) {
+                        runCatching {
+                            WeChatServiceLocator.sdkClientManager(applicationContext)
+                                .requestForceRebuild(rebuildReason)
+                            WeChatChannelRuntime.markSessionRebuilt()
+                            Log.w(TAG, "Session rebuilt: $rebuildReason")
+                        }.onFailure { Log.w(TAG, "Session rebuild failed: ${it.message}") }
+                    }
+                    val decision = WeChatChannelRuntime.evaluateWatchdog()
+                    if (!decision.needsAction) {
+                        continue
+                    }
+                    Log.w(TAG, "Watchdog action: ${decision.reason}")
+                    WeChatDebugLog.log("[PollingService] Watchdog ACTION: ${decision.reason} forceRelease=${decision.forceReleasePrimary}")
+                    if (decision.forceReleasePrimary && holdsPrimaryLease) {
+                        // 僵死主循环：放 lease，取消旧 job，重新抢租约 poll
+                        releasePrimaryLease()
+                        pollJob?.cancel()
+                        pollJob = null
+                        startPolling()
+                    }
+                    runCatching { WeChatChannelKeeper.healIfNeeded(applicationContext) }
+                        .onFailure { Log.w(TAG, "Watchdog heal failed: ${it.message}") }
                 }
-                Log.w(TAG, "Watchdog action: ${decision.reason}")
-                WeChatDebugLog.log("[PollingService] Watchdog ACTION: ${decision.reason} forceRelease=${decision.forceReleasePrimary}")
-                if (decision.forceReleasePrimary && holdsPrimaryLease) {
-                    // 僵死主循环：放 lease，取消旧 job，重新抢租约 poll
-                    releasePrimaryLease()
-                    pollJob?.cancel()
-                    pollJob = null
-                    startPolling()
-                }
-                runCatching { WeChatChannelKeeper.healIfNeeded(applicationContext) }
-                    .onFailure { Log.w(TAG, "Watchdog heal failed: ${it.message}") }
+            } finally {
+                watchdogStarted.set(false)
             }
         }
         Log.i(TAG, "Watchdog started interval=${WeChatChannelRuntime.WATCHDOG_INTERVAL_MS}ms")
@@ -172,69 +205,73 @@ open class WeChatPollingService : Service() {
     }
 
     private fun startPolling() {
-        if (pollJob?.isActive == true) return
+        if (!pollingStarted.compareAndSet(false, true)) return
         pollJob = serviceScope.launch {
-            val claimed = WeChatChannelRuntime.claimPrimaryPoller()
-            holdsPrimaryLease = claimed
-            if (!claimed) {
-                Log.w(TAG, "Primary poller already claimed; this service instance will not poll")
-                // 若对方已 stale，看门狗/Worker 会释放；此处仍续租 CPU 等待
-                return@launch
-            }
-            Log.i(TAG, "Primary poller lease acquired")
-            WeChatDebugLog.log("[PollingService] Primary lease acquired, starting poll loop")
-
-            val repository = WeChatServiceLocator.messageRepository(applicationContext)
-            var pollCount = 0
-
-            while (isActive) {
-                if (!repository.isLoggedIn()) {
-                    Log.d(TAG, "Not logged in, stop polling")
-                    WeChatDebugLog.log("[PollingService] Not logged in, stopping")
-                    stopSelf()
+            try {
+                val claimed = WeChatChannelRuntime.claimPrimaryPoller()
+                holdsPrimaryLease = claimed
+                if (!claimed) {
+                    Log.w(TAG, "Primary poller already claimed; this service instance will not poll")
+                    // 若对方已 stale，看门狗/Worker 会释放；此处仍续租 CPU 等待
                     return@launch
                 }
+                Log.i(TAG, "Primary poller lease acquired")
+                WeChatDebugLog.log("[PollingService] Primary lease acquired, starting poll loop")
 
-                renewWakeLock()
-                pollCount++
+                val repository = WeChatServiceLocator.messageRepository(applicationContext)
+                var pollCount = 0
 
-                try {
-                    Log.d(TAG, "Polling messages...")
-                    val result = repository.pollMessages(timeoutMs = TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS)
-                    if (result.isFailure) {
-                        val error = result.exceptionOrNull()
-                        val msg = error?.message.orEmpty()
-                        Log.w(TAG, "Poll failed: $msg")
-                        WeChatDebugLog.log("[PollingService] Poll#$pollCount FAILED: $msg")
-                        WeChatChannelRuntime.onPollFailure(msg)
-                        // 失败时仍尝试 drain 出站，避免入站故障拖死 App→微信
-                        runCatching {
-                            val drained = repository.drainOutbox()
-                            if (drained > 0) Log.d(TAG, "Outbox drained $drained after poll failure")
-                        }
-                        val delayMs = WeChatChannelRuntime.nextBackoffMs(
-                            isTimeout = msg.contains("timeout", ignoreCase = true),
-                            isConnection = msg.contains("connection", ignoreCase = true),
-                        )
-                        Log.d(TAG, "Backoff ${delayMs}ms (failures=${WeChatChannelRuntime.consecutiveFailures()})")
-                        delay(delayMs)
-                    } else {
-                        WeChatChannelRuntime.onPollSuccess()
-                        val messages = result.getOrNull()?.messages.orEmpty()
-                        if (messages.isNotEmpty()) {
-                            Log.d(TAG, "Received ${messages.size} messages")
-                            WeChatDebugLog.log("[PollingService] Poll#$pollCount OK messages=${messages.size}")
-                        } else if (pollCount % 10 == 0) {
-                            WeChatDebugLog.log("[PollingService] Poll#$pollCount OK empty (heartbeat)")
-                        }
+                while (isActive) {
+                    if (!repository.isLoggedIn()) {
+                        Log.d(TAG, "Not logged in, stop polling")
+                        WeChatDebugLog.log("[PollingService] Not logged in, stopping")
+                        stopSelf()
+                        return@launch
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Polling error", e)
-                    WeChatDebugLog.log("[PollingService] Poll#$pollCount EXCEPTION: ${e.message}")
-                    WeChatChannelRuntime.onPollFailure(e.message)
-                    runCatching { repository.drainOutbox() }
-                    delay(WeChatChannelRuntime.nextBackoffMs())
+
+                    renewWakeLock()
+                    pollCount++
+
+                    try {
+                        Log.d(TAG, "Polling messages...")
+                        val result = repository.pollMessages(timeoutMs = TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS)
+                        if (result.isFailure) {
+                            val error = result.exceptionOrNull()
+                            val msg = error?.message.orEmpty()
+                            Log.w(TAG, "Poll failed: $msg")
+                            WeChatDebugLog.log("[PollingService] Poll#$pollCount FAILED: $msg")
+                            WeChatChannelRuntime.onPollFailure(msg)
+                            // 失败时仍尝试 drain 出站，避免入站故障拖死 App→微信
+                            runCatching {
+                                val drained = repository.drainOutbox()
+                                if (drained > 0) Log.d(TAG, "Outbox drained $drained after poll failure")
+                            }
+                            val delayMs = WeChatChannelRuntime.nextBackoffMs(
+                                isTimeout = msg.contains("timeout", ignoreCase = true),
+                                isConnection = msg.contains("connection", ignoreCase = true),
+                            )
+                            Log.d(TAG, "Backoff ${delayMs}ms (failures=${WeChatChannelRuntime.consecutiveFailures()})")
+                            delay(delayMs)
+                        } else {
+                            WeChatChannelRuntime.onPollSuccess()
+                            val messages = result.getOrNull()?.messages.orEmpty()
+                            if (messages.isNotEmpty()) {
+                                Log.d(TAG, "Received ${messages.size} messages")
+                                WeChatDebugLog.log("[PollingService] Poll#$pollCount OK messages=${messages.size}")
+                            } else if (pollCount % 10 == 0) {
+                                WeChatDebugLog.log("[PollingService] Poll#$pollCount OK empty (heartbeat)")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Polling error", e)
+                        WeChatDebugLog.log("[PollingService] Poll#$pollCount EXCEPTION: ${e.message}")
+                        WeChatChannelRuntime.onPollFailure(e.message)
+                        runCatching { repository.drainOutbox() }
+                        delay(WeChatChannelRuntime.nextBackoffMs())
+                    }
                 }
+            } finally {
+                pollingStarted.set(false)
             }
         }
     }
@@ -327,6 +364,10 @@ open class WeChatPollingService : Service() {
                 // 失败不致命：Worker / 看门狗 / onResume 兜底会再次拉起。
                 Log.w(TAG, "start FGS from background rejected: ${error.message}")
             }
+            // Fallback: schedule immediate Worker when FGS restart is blocked (EMUI)
+            try {
+                WeChatPollingWorker.scheduleImmediate(context)
+            } catch (_: Exception) {}
         }
 
         fun stop(context: Context) {

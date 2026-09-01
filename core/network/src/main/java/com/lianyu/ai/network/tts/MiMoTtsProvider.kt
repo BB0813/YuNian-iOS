@@ -19,10 +19,15 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * 小米 MiMo TTS。
+ * 小米 MiMo TTS（MiMo-V2.5-TTS 系列）。
+ *
+ * 官方支持三种模型（https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5）：
+ * - [MODEL_TTS]             预置精品音色合成；支持唱歌模式与风格标签
+ * - [MODEL_TTS_VOICEDESIGN] 在 user 消息中填写音色描述生成定制音色（必填）
+ * - [MODEL_TTS_VOICECLONE]  audio.voice 传 data:audio/mpeg|wav;base64 音频样本复刻音色
  *
  * MiMo 不提供 `/v1/audio/speech`，而是走 `/v1/chat/completions` + `audio` 字段。
- * 合成文本放在 assistant message；可选 user message 作为风格提示。
+ * 合成文本放在 assistant message；user message 语义随模型不同而不同。
  */
 class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -47,6 +52,11 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
     private var config: TtsConfig = TtsConfig()
 
+    @Volatile
+    private var lastError: String? = null
+
+    override fun lastError(): String? = lastError
+
     override fun updateConfig(config: TtsConfig) {
         this.config = config
     }
@@ -56,43 +66,26 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             try {
                 val apiKey = config.mimoApiKey.trim()
                 val baseUrl = normalizeBaseUrl(config.mimoBaseUrl)
-                val model = config.mimoModel.ifBlank { DEFAULT_MODEL }
+                val model = normalizeModel(config.mimoModel)
                 val outputFormat = normalizeOutputFormat(config.mimoOutputFormat)
-                val resolvedVoiceId = when {
-                    !voiceId.isNullOrBlank() && voiceId != "__custom__" -> voiceId
-                    else -> config.mimoVoiceId.takeIf { it.isNotBlank() } ?: DEFAULT_VOICE
-                }
 
                 if (apiKey.isBlank() || baseUrl.isNullOrBlank()) {
+                    lastError = "MiMo TTS 未配置（缺少 API Key 或 Base URL）"
                     SecureLog.w(TAG, "MiMo TTS not configured")
                     return@withContext null
                 }
                 if (text.isBlank()) {
+                    lastError = "合成文本为空"
                     SecureLog.w(TAG, "MiMo TTS text is blank")
                     return@withContext null
                 }
 
-                val requestBody = JSONObject().apply {
-                    put("model", model)
-                    put("audio", JSONObject().apply {
-                        put("format", outputFormat)
-                        put("voice", resolvedVoiceId)
-                    })
-                    put("messages", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("role", "user")
-                            put("content", "请将下一条 assistant 消息合成为自然中文语音。")
-                        })
-                        put(JSONObject().apply {
-                            put("role", "assistant")
-                            put("content", text)
-                        })
-                    })
-                }.toString()
+                val requestBody = buildRequestBody(model, text, voiceId, outputFormat)
+                    ?: return@withContext null
 
                 val request = Request.Builder()
                     .url("$baseUrl/chat/completions")
-                    .post(requestBody.toRequestBody("application/json".toMediaType()))
+                    .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
                     .addHeader("Content-Type", "application/json")
                     .addHeader("Authorization", "Bearer $apiKey")
                     .addHeader("api-key", apiKey)
@@ -102,16 +95,19 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 clientFor(text.length).newCall(request).execute().use { response ->
                     val body = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
+                        lastError = "HTTP ${response.code}"
                         SecureLog.e(TAG, "HTTP ${response.code}, bodyBytes=${body.length}")
                         return@withContext null
                     }
                     val audioData = extractAudioData(body)
                     if (audioData.isBlank()) {
+                        lastError = "响应缺少 audio.data 字段"
                         SecureLog.e(TAG, "response missing audio data")
                         return@withContext null
                     }
                     val audioBytes = Base64.decode(audioData, Base64.DEFAULT)
                     if (audioBytes.isEmpty()) {
+                        lastError = "解码后音频为空"
                         SecureLog.e(TAG, "decoded empty audio")
                         return@withContext null
                     }
@@ -119,22 +115,32 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                     val outputFile = File(outputDir, "mimo_${System.currentTimeMillis()}.$outputFormat")
                     outputFile.writeBytes(audioBytes)
                     if (!outputFile.exists() || outputFile.length() <= 0L) {
+                        lastError = "输出音频文件为空"
                         SecureLog.e(TAG, "output file empty")
                         return@withContext null
                     }
-                    SecureLog.i(TAG, "success bytes=${outputFile.length()} format=$outputFormat")
+                    lastError = null
+                    SecureLog.i(TAG, "success bytes=${outputFile.length()} format=$outputFormat model=$model")
                     outputFile.absolutePath
                 }
             } catch (e: Exception) {
+                lastError = e.message ?: e.javaClass.simpleName
                 SecureLog.e(TAG, "synthesis failed", e)
                 null
             }
         }
 
     override fun getVoices(): List<TtsVoice> = listOf(
-        TtsVoice("mimo_default", "mimo_default", "默认", "zh-CN", "MiMo 默认音色"),
-        TtsVoice("Chloe", "Chloe", "女", "en", "文档示例音色"),
-        TtsVoice("__custom__", "自定义 voice", "自定义", "zh-CN", "在设置页填写 voice")
+        TtsVoice("mimo_default", "MiMo-默认", "默认", "zh-CN", "中国集群为冰糖，其他集群为 Mia"),
+        TtsVoice("冰糖", "冰糖", "女", "zh-CN", "预置精品音色"),
+        TtsVoice("茉莉", "茉莉", "女", "zh-CN", "预置精品音色"),
+        TtsVoice("苏打", "苏打", "男", "zh-CN", "预置精品音色"),
+        TtsVoice("白桦", "白桦", "男", "zh-CN", "预置精品音色"),
+        TtsVoice("Mia", "Mia", "女", "en", "预置精品音色"),
+        TtsVoice("Chloe", "Chloe", "女", "en", "预置精品音色"),
+        TtsVoice("Milo", "Milo", "男", "en", "预置精品音色"),
+        TtsVoice("Dean", "Dean", "男", "en", "预置精品音色"),
+        TtsVoice("__custom__", "自定义", "自定义", "自定义", "在下方配置卡片填写 voice")
     )
 
     override suspend fun testConnection(context: Context): Boolean = withContext(Dispatchers.IO) {
@@ -146,22 +152,18 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
     private fun probeSpeech(apiKey: String, baseUrl: String): Boolean {
         return try {
-            val requestBody = JSONObject().apply {
-                put("model", config.mimoModel.ifBlank { DEFAULT_MODEL })
-                put("audio", JSONObject().apply {
-                    put("format", "wav")
-                    put("voice", config.mimoVoiceId.ifBlank { DEFAULT_VOICE })
-                })
-                put("messages", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "assistant")
-                        put("content", "测试")
-                    })
-                })
-            }.toString()
+            val model = normalizeModel(config.mimoModel)
+            val requestBody = buildRequestBody(
+                model = model,
+                text = "测试",
+                voiceId = config.mimoVoiceId.ifBlank { DEFAULT_VOICE },
+                outputFormat = "wav",
+                // 音色描述未填时用默认描述探活，避免"测试连接"被必填项卡死
+                designPromptOverride = DEFAULT_VOICE_DESIGN_PROMPT
+            ) ?: return false
             val request = Request.Builder()
                 .url("$baseUrl/chat/completions")
-                .post(requestBody.toRequestBody("application/json".toMediaType()))
+                .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("api-key", apiKey)
@@ -169,12 +171,123 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             // [TTS FIX] testConnection 用 2 字符超时（走动态函数，下限 30s）
             clientFor(2).newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
-                response.isSuccessful && extractAudioData(body).isNotBlank()
+                if (!response.isSuccessful) {
+                    lastError = "HTTP ${response.code}"
+                    return false
+                }
+                val ok = extractAudioData(body).isNotBlank()
+                if (ok) lastError = null
+                ok
             }
         } catch (e: Exception) {
+            lastError = e.message ?: e.javaClass.simpleName
             SecureLog.e(TAG, "testConnection failed", e)
             false
         }
+    }
+
+    /**
+     * 按模型构建请求体；配置缺失时写入 [lastError] 并返回 null。
+     *
+     * - 预置音色模型：user 放中文风格指令，audio.voice 放预置音色
+     * - 音色设计模型：user 必填音色描述，audio 可带 optimize_text_preview
+     * - 音色复刻模型：user 为空，audio.voice 放 data URI 音频样本
+     */
+    private fun buildRequestBody(
+        model: String,
+        text: String,
+        voiceId: String?,
+        outputFormat: String,
+        designPromptOverride: String? = null
+    ): JSONObject? {
+        return JSONObject().apply {
+            put("model", model)
+            put("messages", JSONArray().apply {
+                when (model) {
+                    MODEL_TTS_VOICEDESIGN -> {
+                        val prompt = (designPromptOverride ?: config.mimoVoiceDesignPrompt.trim()).trim()
+                        if (prompt.isBlank()) {
+                            lastError = "音色设计模型需要先在设置页填写音色描述"
+                            return null
+                        }
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", prompt)
+                        })
+                    }
+                    MODEL_TTS_VOICECLONE -> {
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", "")
+                        })
+                    }
+                    else -> {
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", "请将下一条 assistant 消息合成为自然中文语音。")
+                        })
+                    }
+                }
+                put(JSONObject().apply {
+                    put("role", "assistant")
+                    put("content", text)
+                })
+            })
+            put("audio", JSONObject().apply {
+                put("format", outputFormat)
+                when (model) {
+                    MODEL_TTS_VOICEDESIGN -> {
+                        put("optimize_text_preview", config.mimoOptimizeTextPreview)
+                    }
+                    MODEL_TTS_VOICECLONE -> {
+                        val dataUri = buildCloneVoiceDataUri() ?: return null
+                        put("voice", dataUri)
+                    }
+                    else -> {
+                        val resolvedVoiceId = when {
+                            !voiceId.isNullOrBlank() && voiceId != "__custom__" -> voiceId
+                            else -> config.mimoVoiceId.takeIf { it.isNotBlank() } ?: DEFAULT_VOICE
+                        }
+                        put("voice", resolvedVoiceId)
+                    }
+                }
+            })
+        }
+    }
+
+    /**
+     * 读取复刻用音频样本并生成 `data:{mime};base64,xxx`。
+     * 样本需 ≤ 10MB，仅支持 mp3 / wav（官方限制）。
+     */
+    private fun buildCloneVoiceDataUri(): String? {
+        val path = config.mimoVoiceClonePath.trim()
+        if (path.isBlank()) {
+            lastError = "音色复刻模型需要先在设置页选择音频样本"
+            return null
+        }
+        val file = File(path)
+        if (!file.exists() || !file.isFile) {
+            lastError = "音频样本文件不存在，请重新选择"
+            return null
+        }
+        if (file.length() <= 0L) {
+            lastError = "音频样本为空"
+            return null
+        }
+        if (file.length() > MAX_CLONE_BYTES) {
+            lastError = "音频样本超过 10MB 限制"
+            return null
+        }
+        val mime = when (file.extension.lowercase(Locale.US)) {
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            else -> {
+                lastError = "仅支持 mp3 / wav 格式的音频样本"
+                return null
+            }
+        }
+        val base64Str = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+        return "data:$mime;base64,$base64Str"
     }
 
     private fun extractAudioData(body: String): String {
@@ -187,14 +300,29 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
     companion object {
         private const val TAG = "MiMoTts"
-        private const val DEFAULT_MODEL = "mimo-v2.5-tts"
+        const val MODEL_TTS = "mimo-v2.5-tts"
+        const val MODEL_TTS_VOICEDESIGN = "mimo-v2.5-tts-voicedesign"
+        const val MODEL_TTS_VOICECLONE = "mimo-v2.5-tts-voiceclone"
+        private const val DEFAULT_MODEL = MODEL_TTS
         private const val DEFAULT_VOICE = "mimo_default"
+        private const val DEFAULT_VOICE_DESIGN_PROMPT = "清亮自然的中文女声，温柔亲切，语速适中，发音清晰。"
+        private const val MAX_CLONE_BYTES = 10 * 1024 * 1024L
         private val ALLOWED_HOSTS = setOf(
             "api.xiaomimimo.com",
             "token-plan-cn.xiaomimimo.com",
             "token-plan-sgp.xiaomimimo.com",
             "token-plan-ams.xiaomimimo.com"
         )
+
+        /** 仅官方三种模型可用，其余配置一律回退到预置音色模型。 */
+        fun normalizeModel(value: String): String {
+            val m = value.trim().lowercase(Locale.US)
+            return when (m) {
+                MODEL_TTS_VOICEDESIGN -> MODEL_TTS_VOICEDESIGN
+                MODEL_TTS_VOICECLONE -> MODEL_TTS_VOICECLONE
+                else -> MODEL_TTS
+            }
+        }
 
         fun normalizeBaseUrl(value: String): String? {
             val raw = value.trim().trimEnd('/')

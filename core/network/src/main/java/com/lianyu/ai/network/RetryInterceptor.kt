@@ -42,8 +42,9 @@ class RetryInterceptor(
                     val delay = calculateDelay(attempt)
                     SecureLog.network("RETRY", "HTTP ${response.code}, will retry in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})")
                     response.close()
-                    // 🔒 FIX: Use non-blocking Thread.sleep with explicit interruption handling
-                    //    OkHttp dispatcher threads tolerate sleep, but prefer interruptible.
+                    // NOTE: Thread.sleep() blocks the OkHttp dispatcher thread, which may
+                    //       reduce throughput under high concurrency. Consider migrating to
+                    //       a non-blocking retry mechanism (e.g., scheduled executor) in the future.
                     try {
                         Thread.sleep(delay)
                     } catch (_: InterruptedException) {
@@ -59,7 +60,7 @@ class RetryInterceptor(
                 if (attempt < maxRetries && isRetryableError(e)) {
                     val delay = calculateDelay(attempt)
                     SecureLog.network("RETRY", "${e::class.simpleName}: ${e.message}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})")
-                    // 🔒 FIX: Handle InterruptedException properly
+                    // NOTE: Thread.sleep() blocks the OkHttp dispatcher thread, same as above.
                     try {
                         Thread.sleep(delay)
                     } catch (_: InterruptedException) {

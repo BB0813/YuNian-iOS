@@ -19,6 +19,9 @@ interface DiaryDao {
     @Query("SELECT * FROM diary_entries WHERE deviceId = :deviceId ORDER BY date DESC")
     fun getAllDiaries(deviceId: String): Flow<List<DiaryEntry>>
 
+    @Query("SELECT * FROM diary_entries WHERE deviceId = :deviceId ORDER BY date DESC")
+    suspend fun getAllDiariesSync(deviceId: String): List<DiaryEntry>
+
     @Query("SELECT * FROM diary_entries WHERE companionId = :companionId AND deviceId = :deviceId ORDER BY date DESC")
     suspend fun getDiariesForCompanionSync(companionId: Long, deviceId: String): List<DiaryEntry>
 

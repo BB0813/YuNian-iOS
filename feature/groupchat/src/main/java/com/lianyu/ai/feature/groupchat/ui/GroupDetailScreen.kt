@@ -399,14 +399,12 @@ private fun GroupMemberItem(
                 fontWeight = FontWeight.Medium,
                 color = AppTheme.colors.onBackground
             )
-            if (companion.personality != null) {
-                Text(
-                    text = companion.personality,
-                    fontSize = 12.sp,
-                    color = AppTheme.colors.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
+            Text(
+                text = companion.personality,
+                fontSize = 12.sp,
+                color = AppTheme.colors.onSurfaceVariant,
+                maxLines = 1
+            )
         }
     }
 }

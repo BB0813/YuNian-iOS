@@ -23,6 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,11 +55,32 @@ import com.lianyu.ai.feature.settings.R
 @Composable
 fun ExperimentalFeaturesScreen(
     onNavigateBack: () -> Unit,
-    onYandereModeClick: () -> Unit
+    onYandereModeClick: () -> Unit,
+    onWorldbookClick: () -> Unit = {},
+    onSkillsClick: () -> Unit = {},
+    onMcpClick: () -> Unit = {}
 ) {
     val colorScheme = AppTheme.colors
 
     val features = listOf(
+        FeatureItem(
+            icon = Icons.Default.Book,
+            title = stringResource(R.string.worldbook),
+            description = stringResource(R.string.worldbook_desc),
+            onClick = onWorldbookClick
+        ),
+        FeatureItem(
+            icon = Icons.Default.AutoAwesome,
+            title = stringResource(R.string.skills_manager),
+            description = stringResource(R.string.skills_manager_desc),
+            onClick = onSkillsClick
+        ),
+        FeatureItem(
+            icon = Icons.Default.Dns,
+            title = stringResource(R.string.mcp_settings_title),
+            description = stringResource(R.string.mcp_settings_desc),
+            onClick = onMcpClick
+        ),
         FeatureItem(
             icon = Icons.Default.Science,
             title = stringResource(R.string.yandere_mode),

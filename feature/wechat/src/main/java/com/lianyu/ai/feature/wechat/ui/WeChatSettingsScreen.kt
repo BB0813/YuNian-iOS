@@ -135,6 +135,7 @@ fun WeChatSettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
+            @Suppress("DEPRECATION")
             SettingItem(
                 icon = Icons.Outlined.Message,
                 title = "消息通知",
@@ -163,6 +164,7 @@ fun WeChatSettingsScreen(
 
             HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
+            @Suppress("DEPRECATION")
             SettingItem(
                 icon = Icons.Outlined.Message,
                 title = "消息转发",
@@ -178,6 +180,7 @@ fun WeChatSettingsScreen(
             if (uiState.availableCompanions.isNotEmpty()) {
                 HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
+                @Suppress("DEPRECATION")
                 SettingItem(
                     icon = Icons.Outlined.Message,
                     title = "默认 AI 伴侣",

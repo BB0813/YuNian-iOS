@@ -325,9 +325,10 @@ extern "C" int ig_verify_all() {
     if (dex_rc > 0) failures++;
 
     if (failures > 0) {
-        IG_LOGE("!!! %d integrity check(s) FAILED — ABORTING !!!", failures);
-        kill(getpid(), SIGABRT);
-        return -1;  // unreachable
+        IG_LOGE("!!! %d integrity check(s) FAILED — security degraded !!!", failures);
+        /* Do NOT abort() — HarmonyOS/EMUI may have different file system
+         * layout causing false positives. Log and return error code instead. */
+        return -1;
     }
 
     IG_LOGI("=== All integrity checks PASSED ===");

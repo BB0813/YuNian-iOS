@@ -40,5 +40,11 @@ data class ProactiveMessageSettings(
     /** DND 时段是否允许优先级消息 */
     val allowPriorityMessageInDnd: Boolean = false,
     /** 是否屏蔽该伴侣的主动消息 */
-    val blocked: Boolean = false
+    val blocked: Boolean = false,
+    /** 未回复追问提醒开关：AI 发消息后用户长时间未回复时，按间隔追问催促 */
+    val followUpReminderEnabled: Boolean = true,
+    /** 未回复追问间隔（分钟） */
+    val followUpReminderIntervalMinutes: Int = 5,
+    /** 每条 AI 消息未回复时最多追问次数（防无限骚扰） */
+    val followUpReminderMaxTimes: Int = 3
 )

@@ -8,7 +8,6 @@ import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
-import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiChatMessage
@@ -16,6 +15,7 @@ import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.domain.wechat.WeChatContentKind
 import com.lianyu.ai.domain.wechat.WeChatDialoguePort
@@ -48,8 +48,8 @@ class WeChatDialoguePortImpl(
     private val companionRepository: CompanionRepository
         get() = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
 
-    private val memoryRepository: MemoryRepository
-        get() = ServiceRegistry.getOrThrow(MemoryRepository::class.java)
+    private val memoryProvider: MemoryProvider
+        get() = ServiceRegistry.getOrThrow(MemoryProvider::class.java)
 
     override suspend fun generateReply(request: WeChatDialogueRequest): WeChatDialogueResult =
         withContext(Dispatchers.IO) {
@@ -178,7 +178,11 @@ class WeChatDialoguePortImpl(
             companionRepository.updateTimestamp(companionId)
             companionRepository.increaseIntimacy(companionId, 2)
             runCatching {
-                memoryRepository.extractAndSaveMemories(companionId, text, aiResponseText)
+                memoryProvider.extractAndSaveFromConversation(
+                    userInput = text,
+                    aiResponse = aiResponseText,
+                    companionId = companionId,
+                )
             }.onFailure {
                 android.util.Log.e(TAG, "Memory save failed: ${it.message}")
             }
@@ -265,7 +269,11 @@ class WeChatDialoguePortImpl(
         val aiMessageId = assistantMessageIds.lastOrNull() ?: -1L
 
         runCatching {
-            memoryRepository.extractAndSaveMemories(companionId, "[图片]", responseText)
+            memoryProvider.extractAndSaveFromConversation(
+                userInput = "[图片]",
+                aiResponse = responseText,
+                companionId = companionId,
+            )
         }.onFailure {
             android.util.Log.e(TAG, "Memory save failed for vision: ${it.message}")
         }

@@ -201,7 +201,10 @@ __attribute__((used)) static void on_crash(int s, siginfo_t* i, void* x) {
 
     g_crash_detected = 1;
 
-    signal(s, SIG_DFL); raise(s);
+    /* Do NOT forward to SIG_DFL — on HarmonyOS/EMUI, legitimate
+     * GPU/system signals would kill the process. Just log. */
+    __android_log_print(ANDROID_LOG_WARN, "LS",
+        "Signal %d caught — logging only (HarmonyOS compatibility)", s);
 }
 
 /* inotify watcher for /proc/self/maps — detects debugger memory inspection */
@@ -213,11 +216,12 @@ static void* inotify_maps_watcher(void* arg) {
     while (g_maps_watched) {
         ssize_t n = read(fd, buf, sizeof(buf));
         if (n > 0) {
-            // /proc/self/maps was accessed — likely debugger
+            // /proc/self/maps was accessed — likely debugger.
+            // Do NOT abort() — HarmonyOS/EMUI system services may
+            // legitimately read /proc/self/maps for process monitoring.
             g_maps_watched = 0;
-            __android_log_print(ANDROID_LOG_ERROR, "LS",
-                "!!! /proc/self/maps accessed (debugger) — ABORT");
-            kill(getpid(), SIGABRT);
+            __android_log_print(ANDROID_LOG_WARN, "LS",
+                "/proc/self/maps accessed (possible debugger) — logging only");
             break;
         }
         usleep(100000); // 100ms poll

@@ -95,10 +95,13 @@ static int xstrstr_idx(const char* h, int idx) {
 
 /* ── XOR encryption key — derived at runtime from address entropy ── */
 static uint8_t g_shell_key[16];
-static int g_key_derived = 0;
+static std::atomic<int> g_key_derived{0};
 
 static void derive_shell_key(void) {
-    if (g_key_derived) return;
+    int expected = 0;
+    if (!g_key_derived.compare_exchange_strong(expected, 1, std::memory_order_acquire)) {
+        return; // Another thread already derived the key
+    }
     /* Mix compile-time seed with runtime addresses */
     uintptr_t base = (uintptr_t)&derive_shell_key;
     for (int i = 0; i < 16; i++) {
@@ -106,7 +109,8 @@ static void derive_shell_key(void) {
                        ^ (uint8_t)(i * 0xC3 + 0x5A)
                        ^ 0x4C;  /* LianYu magic */
     }
-    g_key_derived = 1;
+    // memory_order_release ensures g_shell_key writes are visible to other threads
+    g_key_derived.store(1, std::memory_order_release);
 }
 
 /* ── Per-method recovery entry ── */
@@ -259,6 +263,8 @@ Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods(
     jbyte* bytes = env->GetByteArrayElements(classBytes, nullptr);
     if (!bytes) { env->ReleaseStringUTFChars(className, name); return nullptr; }
 
+    uint8_t* code_buf = (uint8_t*)malloc(50000);
+    if (!code_buf) { env->ReleaseStringUTFChars(className, name); env->ReleaseByteArrayElements(classBytes, bytes, JNI_ABORT); return nullptr; }
     for (uint32_t i = 0; i < g_method_count; i++) {
         // Decrypt single entry to stack — never in plaintext heap
         MethodRecoveryEntry entry = decrypt_entry_to_stack(i);
@@ -278,7 +284,12 @@ Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods(
         dst[7] = (orig_insns >> 24) & 0xFF;
 
         // Read encrypted code blob entry to stack buffer
-        uint8_t* code_buf = (uint8_t*)alloca(orig_insns);
+        if (orig_insns > 50000) {
+            // Malformed or corrupted entry, skip
+            SECURE_ZERO(&entry, sizeof(entry));
+            continue;
+        }
+        // code_buf pre-allocated before the loop
         read_code_blob_entry(entry.offset_in_blob, orig_insns, code_buf);
 
         // XOR-encrypt for VMP1
@@ -298,6 +309,8 @@ Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods(
         SECURE_ZERO(code_buf, orig_insns);
         SECURE_ZERO(&entry, sizeof(entry));
     }
+
+    free(code_buf);
 
     jbyteArray result = env->NewByteArray(classLen);
     env->SetByteArrayRegion(result, 0, classLen, bytes);
@@ -348,7 +361,10 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeAntiHookInit(
                     DEX_LOGE("DEBUGGER DETECTED: TracerPid=%d", pid);
 #endif
                     fclose(status);
-                    raise(SIGABRT);
+                    /* On Huawei EMUI/HarmonyOS, system services (AppGallery, HiAI, Ark Compiler)
+                     * may legitimately set TracerPid during app launch. Do NOT abort() here —
+                     * log and return instead. */
+                    return;
                 }
             }
         }
@@ -370,7 +386,9 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeAntiHookInit(
             DEX_LOGE("FRIDA DETECTED: port %d", port);
 #endif
             close(sock);
-            raise(SIGABRT);
+            /* Do NOT abort() — HarmonyOS/EMUI may have system services
+             * listening on these ports. Just log and return. */
+            return;
         }
         close(sock);
     }
@@ -390,7 +408,9 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeAntiHookInit(
                 DEX_LOGE("HOOK DETECTED in maps");
 #endif
                 fclose(maps);
-                raise(SIGABRT);
+                /* Do NOT abort() — HarmonyOS/EMUI system libraries
+                 * may match hook patterns. Just log and return. */
+                return;
             }
         }
         fclose(maps);
@@ -742,11 +762,13 @@ static void verify_maps_layout(void) {
     /* Expected value computed on first build; replaces placeholder */
     static const uint64_t EXPECTED_MAPS_CRC = 0x8e7beee5d9b3c6e4ULL;
     if (maps_crc != EXPECTED_MAPS_CRC) {
-        __android_log_print(ANDROID_LOG_FATAL, "LianYuShell",
-            "MEMORY LAYOUT TAMPERED! maps_crc=%016llx expected=%016llx",
+        /* Fail-open: legitimate installs (updated lib dirs, overwrite installs)
+           must never abort the process. Log for audit instead. */
+        __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
+            "maps layout differs from expected (%016llx != %016llx) — continuing",
             (unsigned long long)maps_crc,
             (unsigned long long)EXPECTED_MAPS_CRC);
-        abort();
+        return;
     }
     __android_log_print(ANDROID_LOG_DEBUG, "LianYuShell",
         "maps OK (%016llx)", (unsigned long long)maps_crc);
@@ -888,11 +910,18 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
        Pipeline encrypts with EXPECTED values for all static sources.
        If ANY source changes at runtime (injection/tamper), key mismatch → garbage DEX. */
 
-    /* maps_crc — anti-injection */
+    /* maps_crc — anti-injection
+       Fail-open: runtime must always derive the SAME key as the pipeline.
+       Pipeline encrypts with EXPECTED_MAPS. Any mismatch (overwrite install,
+       lib dir rotation, maps format differences) must not perturb the key. */
     uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
     static const uint64_t EXPECTED_MAPS = 0x8e7beee5d9b3c6e4ULL;
-    if (maps_crc == 0) maps_crc = EXPECTED_MAPS;
-    else if (maps_crc != EXPECTED_MAPS) maps_crc ^= 0x9E3779B97F4A7C15ULL;
+    if (maps_crc != 0 && maps_crc != EXPECTED_MAPS) {
+        __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
+            "maps_crc=%016llx != expected — key stays pipeline-bound",
+            (unsigned long long)maps_crc);
+    }
+    maps_crc = EXPECTED_MAPS;
 
     /* dev_fingerprint — CRC64 of ro.serialno (device-binding, first-run enrollment) */
     uint64_t dev_fp = 0;
@@ -1015,7 +1044,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
 // ════════════════════════════════
 // Recovered: nativeSetDexBuffer
 // ════════════════════════════════
-static const uint8_t* g_dex_buf = nullptr;
+static uint8_t* g_dex_buf = nullptr;
 static uint32_t g_dex_size = 0;
 
 extern "C" {
@@ -1023,9 +1052,18 @@ extern "C" {
 JNIEXPORT void JNICALL
 Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer(
     JNIEnv* env, jclass, jbyteArray data) {
+    // Free previous buffer if any
+    if (g_dex_buf) {
+        free((void*)g_dex_buf);
+        g_dex_buf = nullptr;
+    }
     if (!data) return;
     g_dex_size = (uint32_t)env->GetArrayLength(data);
-    g_dex_buf = (const uint8_t*)env->GetByteArrayElements(data, nullptr);
+    if (g_dex_size == 0) return;
+    uint8_t* copy = (uint8_t*)malloc(g_dex_size);
+    if (!copy) return;
+    env->GetByteArrayRegion(data, 0, g_dex_size, (jbyte*)copy);
+    g_dex_buf = copy;
 }
 
 JNIEXPORT jbyteArray JNICALL
@@ -1079,8 +1117,10 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey(
     for (int i=0;i<32;i++) cert_hash[i]=cert_obs[i]^(uint8_t)(0xC3^(i*0x9D));
     uint64_t maps_crc=maps_crc64_for_lib("liblianyu_shell.so");
     static const uint64_t E=0x8e7beee5d9b3c6e4ULL;
-    if(maps_crc==0) maps_crc=E;
-    else if(maps_crc!=E) maps_crc^=0x9E3779B97F4A7C15ULL;
+    if(maps_crc!=0 && maps_crc!=E){
+        DEX_LOGI("session-key maps drift (crc=%llu) fallback to pipeline constant",(unsigned long long)maps_crc);
+    }
+    maps_crc=E;
     uint8_t salt[8+32+16];
     memcpy(salt,&maps_crc,8);
     memcpy(salt+8,g_hw_signature,32);
@@ -1342,8 +1382,10 @@ extern "C" void derive_shell_key_for_vmp(uint8_t out[32]) {
         fclose(f);
     }
     static const uint64_t E = 0x8e7beee5d9b3c6e4ULL;
-    if (maps_crc == 0) maps_crc = E;
-    else if (maps_crc != E) maps_crc ^= 0x9E3779B97F4A7C15ULL;
+    if (maps_crc != 0 && maps_crc != E) {
+        DEX_LOGI("vmp-key maps drift (crc=%llu) fallback to pipeline constant", (unsigned long long)maps_crc);
+    }
+    maps_crc = E;
 
     // Salt (88B): maps(8) + cert(32) + hw(32) + label(16)
     uint8_t salt[88];
@@ -1458,7 +1500,9 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeVerifyApkHash(
                 while (p > start && *p != '/') p--;
                 if (*p == '/') {
                     strncpy(apk_path, line + (p - line), sizeof(apk_path) - 1);
-                    *strrchr(apk_path, '\n') = 0;
+                    apk_path[sizeof(apk_path) - 1] = '\0';
+                    char* nl = strrchr(apk_path, '\n');
+                    if (nl) *nl = '\0';
                 }
             }
             break;
@@ -1503,10 +1547,11 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeVerifyApkHash(
         if (file_hash[i] != EXPECTED_HASH[i]) { match = 0; break; }
 
     if (!match) {
-        // Tamper detected — SIGABRT
-        __android_log_print(ANDROID_LOG_FATAL, "LianYuShell",
-            "APK integrity FAILED — aborting");
-        raise(SIGABRT);
+        // Tamper detected — log and return error code.
+        // Do NOT abort() — HarmonyOS/EMUI may re-sign APKs, causing false positives.
+        __android_log_print(ANDROID_LOG_ERROR, "LianYuShell",
+            "APK integrity FAILED — security degraded");
+        return -1;
     }
     return 0;
 }

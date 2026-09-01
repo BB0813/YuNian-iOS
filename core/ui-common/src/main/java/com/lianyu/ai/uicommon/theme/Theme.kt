@@ -99,25 +99,9 @@ fun LianYuTheme(
     if (!view.isInEditMode) {
         DisposableEffect(effectiveDarkTheme) {
             val window = (view.context as Activity).window
-            val navScrim = if (effectiveDarkTheme) {
-                Color(0xFF000000).copy(alpha = 0.25f)
-            } else {
-                Color(0xFFFFFFFF).copy(alpha = 0.55f)
-            }.toArgb()
-
-            // 状态栏与顶栏 chrome 同色（surface），避免深色主题顶栏/状态栏断层。
-            // 浅色主题用纯白，避免状态栏显粉。
-            window.statusBarColor = if (effectiveDarkTheme) {
-                colorScheme.surface.toArgb()
-            } else {
-                Color(0xFFFFFFFF).toArgb()
-            }
-            // 导航栏与底栏 chrome 同色，深色不再用半透明黑 scrim 造成发灰断层
-            window.navigationBarColor = if (effectiveDarkTheme) {
-                colorScheme.surface.toArgb()
-            } else {
-                navScrim
-            }
+            // 沉浸式：系统栏完全透明，主背景（Compose backdrop 捕获层）贯穿到状态栏/导航栏
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !effectiveDarkTheme
             WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !effectiveDarkTheme
             onDispose { }

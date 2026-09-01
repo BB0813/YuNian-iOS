@@ -26,6 +26,13 @@ interface AiTool {
     suspend fun execute(argumentsJson: String): String
 
     /**
+     * 工具向系统提示贡献的内容（如技能列表、可用记忆、工作区说明）。
+     * 当工具被启用时，[ToolRegistry.systemPromptSection] 会聚合所有启用工具的贡献。
+     * 默认返回空串。
+     */
+    fun systemPrompt(): String = ""
+
+    /**
      * 涉及支付/创建等副作用，执行前需用户确认。
      * 默认 false；createOrder / automation_create 等覆写为 true。
      */
@@ -89,6 +96,18 @@ object ToolRegistry {
     /** 清空全部工具（测试 / 重置用） */
     fun clear() {
         tools.clear()
+    }
+
+    /**
+     * 聚合所有已注册工具的 [AiTool.systemPrompt] 贡献，拼成一段可插入 system 的文本。
+     * 多个工具之间以空行分隔；无贡献时返回空串。
+     */
+    fun systemPromptSection(): String {
+        val parts = tools.values
+            .map { it.systemPrompt() }
+            .filter { it.isNotBlank() }
+        if (parts.isEmpty()) return ""
+        return parts.joinToString("\n\n")
     }
 
     private fun escapeJson(s: String): String =

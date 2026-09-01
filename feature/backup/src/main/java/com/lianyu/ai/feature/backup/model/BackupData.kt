@@ -20,6 +20,8 @@ import kotlinx.serialization.Serializable
  * @param memoryEntries 长期记忆（已解密）
  * @param tempMemories 短期记忆
  * @param tokenUsages Token 使用统计
+ * @param unifiedMemories 统一记忆（unified_memories 表，现代化记忆系统）
+ * @param diaries 情感日记（diary_entries 表）
  */
 @Serializable
 data class BackupData(
@@ -32,7 +34,9 @@ data class BackupData(
     val groupMessages: List<GroupMessageSnapshot>,
     val memoryEntries: List<MemoryEntrySnapshot>,
     val tempMemories: List<TempMemorySnapshot>,
-    val tokenUsages: List<TokenUsageSnapshot>
+    val tokenUsages: List<TokenUsageSnapshot>,
+    val unifiedMemories: List<UnifiedMemorySnapshot> = emptyList(),
+    val diaries: List<DiarySnapshot> = emptyList()
 )
 
 @Serializable
@@ -126,5 +130,40 @@ data class TokenUsageSnapshot(
     val totalTokens: Long = 0,
     val requestCount: Int = 0,
     val timestamp: Long,
+    val deviceId: String = ""
+)
+
+/** 统一记忆快照（unified_memories 表；embedding 不导出，导入后后台重新生成） */
+@Serializable
+data class UnifiedMemorySnapshot(
+    val id: Long,
+    val memoryType: String,
+    val scope: String,
+    val source: String = "CHAT",
+    val content: String,
+    val summary: String = "",
+    val confidence: Float = 1.0f,
+    val importance: Float = 0.5f,
+    val sourceId: Long = 0L,
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
+    val observedAt: Long = 0L,
+    val expiresAt: Long? = null,
+    val accessCount: Int = 1,
+    val tags: String = "",
+    val deviceId: String = ""
+)
+
+/** 情感日记快照（diary_entries 表） */
+@Serializable
+data class DiarySnapshot(
+    val id: Long,
+    val companionId: Long,
+    val title: String = "",
+    val content: String,
+    val mood: Int = 2,
+    val date: Long,
+    val weather: String = "",
+    val tags: String = "",
     val deviceId: String = ""
 )

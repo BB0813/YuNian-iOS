@@ -50,6 +50,9 @@ class IqooKeepAliveJobService : JobService() {
     private fun performKeepAliveCheck() {
         val context = applicationContext
 
+        // 0. 重排闹钟心跳（周期 Job 持久化，重启后必跑一次 → 覆盖闹钟不可跨重启保留的缺口）
+        KeepAliveAlarmScheduler.scheduleNext(context)
+
         // 1. 检查并尝试重启前台服务
         try {
             CompanionKeepAliveService.safeStart(context)

@@ -90,6 +90,12 @@ sealed class MainRoute(val route: String) {
     // === 自动化 ===
     object Automation : MainRoute("automation")
 
+    // === RikkaHub 移植功能（世界书/技能/MCP） ===
+    object Worldbook : MainRoute("worldbook")
+    data class WorldbookDetail(val worldbookId: Long) : MainRoute("worldbook_detail/$worldbookId")
+    object Skills : MainRoute("skills")
+    object McpSettings : MainRoute("mcp_settings")
+
     companion object {
         val mainTabRoutes = setOf("home", "contacts", "profile")
 
@@ -139,6 +145,10 @@ sealed class MainRoute(val route: String) {
             route == "coffee_token" -> CoffeeToken
             route == "coffee_order" -> CoffeeOrderQuery
             route == "automation" -> Automation
+            route == "worldbook" -> Worldbook
+            route == "skills" -> Skills
+            route == "mcp_settings" -> McpSettings
+            route?.startsWith("worldbook_detail/") == true -> WorldbookDetail(route.removePrefix("worldbook_detail/").toLongOrNull() ?: 0L)
             route?.startsWith("coffee_order/") == true -> {
                 CoffeeOrderQueryWithId(route.removePrefix("coffee_order/"))
             }

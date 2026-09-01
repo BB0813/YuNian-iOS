@@ -48,6 +48,18 @@ class AppSettingsStore(context: Context) {
         private val VISION_API_KEY_KEY = stringPreferencesKey("vision_api_key")
         private const val DEFAULT_VISION_API_KEY = ""
 
+        private val DIARY_ENABLED_KEY = booleanPreferencesKey("diary_enabled")
+        private const val DEFAULT_DIARY_ENABLED = false
+
+        private val DIARY_MODEL_KEY = stringPreferencesKey("diary_model")
+        private const val DEFAULT_DIARY_MODEL = ""
+
+        private val DIARY_BASE_URL_KEY = stringPreferencesKey("diary_base_url")
+        private const val DEFAULT_DIARY_BASE_URL = ""
+
+        private val DIARY_API_KEY_KEY = stringPreferencesKey("diary_api_key")
+        private const val DEFAULT_DIARY_API_KEY = ""
+
         private val INNER_THOUGHT_ENABLED_KEY = booleanPreferencesKey("inner_thought_enabled")
         private const val DEFAULT_INNER_THOUGHT_ENABLED = false
 
@@ -62,6 +74,8 @@ class AppSettingsStore(context: Context) {
 
         private val SHOW_TYPING_SPINNER_KEY = booleanPreferencesKey("show_typing_spinner")
         private const val DEFAULT_SHOW_TYPING_SPINNER = false
+        private val SEARCH_API_KEY_KEY = stringPreferencesKey("search_api_key")
+        private const val DEFAULT_SEARCH_API_KEY = ""
     }
 
     object VisionModels {
@@ -229,6 +243,46 @@ class AppSettingsStore(context: Context) {
         dataStore.edit { prefs -> prefs[VISION_API_KEY_KEY] = key }
     }
 
+    val diaryEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[DIARY_ENABLED_KEY] ?: DEFAULT_DIARY_ENABLED
+    }
+
+    suspend fun getDiaryEnabled(): Boolean = diaryEnabledFlow.first()
+
+    suspend fun setDiaryEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[DIARY_ENABLED_KEY] = enabled }
+    }
+
+    val diaryModelFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[DIARY_MODEL_KEY] ?: DEFAULT_DIARY_MODEL
+    }
+
+    suspend fun getDiaryModel(): String = diaryModelFlow.first()
+
+    suspend fun setDiaryModel(model: String) {
+        dataStore.edit { prefs -> prefs[DIARY_MODEL_KEY] = model }
+    }
+
+    val diaryBaseUrlFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[DIARY_BASE_URL_KEY] ?: DEFAULT_DIARY_BASE_URL
+    }
+
+    suspend fun getDiaryBaseUrl(): String = diaryBaseUrlFlow.first()
+
+    suspend fun setDiaryBaseUrl(url: String) {
+        dataStore.edit { prefs -> prefs[DIARY_BASE_URL_KEY] = url }
+    }
+
+    val diaryApiKeyFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[DIARY_API_KEY_KEY] ?: DEFAULT_DIARY_API_KEY
+    }
+
+    suspend fun getDiaryApiKey(): String = diaryApiKeyFlow.first()
+
+    suspend fun setDiaryApiKey(key: String) {
+        dataStore.edit { prefs -> prefs[DIARY_API_KEY_KEY] = key }
+    }
+
     val innerThoughtEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[INNER_THOUGHT_ENABLED_KEY] ?: DEFAULT_INNER_THOUGHT_ENABLED
     }
@@ -281,5 +335,31 @@ class AppSettingsStore(context: Context) {
 
     suspend fun setShowTypingSpinner(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[SHOW_TYPING_SPINNER_KEY] = enabled }
+    }
+
+    val searchApiKeyFlow: Flow<String> = dataStore.data.map { prefs ->
+        prefs[SEARCH_API_KEY_KEY] ?: DEFAULT_SEARCH_API_KEY
+    }
+
+    suspend fun getSearchApiKey(): String = searchApiKeyFlow.first()
+
+    suspend fun setSearchApiKey(key: String) {
+        dataStore.edit { prefs -> prefs[SEARCH_API_KEY_KEY] = key }
+    }
+
+    // Generic string preference access for dynamic configs
+    suspend fun getString(key: String): String {
+        val prefKey = stringPreferencesKey(key)
+        return dataStore.data.map { prefs -> prefs[prefKey] ?: "" }.first()
+    }
+
+    suspend fun setString(key: String, value: String) {
+        val prefKey = stringPreferencesKey(key)
+        dataStore.edit { prefs -> prefs[prefKey] = value }
+    }
+
+    suspend fun getString(key: String, defaultValue: String): String {
+        val prefKey = stringPreferencesKey(key)
+        return dataStore.data.map { prefs -> prefs[prefKey] ?: defaultValue }.first()
     }
 }

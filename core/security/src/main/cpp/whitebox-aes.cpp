@@ -174,8 +174,10 @@ void wb_aes_init(void) {
     }
 #ifdef PRODUCTION_BUILD
     if (all_zero) {
-        /* Hard abort — production builds MUST have real WB tables */
-        raise(SIGABRT);
+        /* WB-AES tables not provisioned — security degraded.
+         * Do NOT abort() — HarmonyOS/EMUI may initialize tables differently. */
+        __android_log_print(ANDROID_LOG_WARN, "WbAes",
+            "WB-AES tables not provisioned — security degraded");
     }
 #else
     (void)all_zero;

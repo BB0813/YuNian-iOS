@@ -44,6 +44,7 @@ class BackupImportService(private val context: Context) {
     }
 
     private suspend fun merge(data: BackupData) {
+        val now = System.currentTimeMillis()
         // ── 1. 联系人合并（按名称匹配）──
         val existingCompanions = db.companionDao().getAllCompanionsSync()
         val existingByName = existingCompanions.associateBy { it.name }
@@ -224,7 +225,55 @@ class BackupImportService(private val context: Context) {
                 )
             )
         }
+
+        // ── 10. 统一记忆合并（scope 关联实体 id 重映射；embedding 不导入，由后台回填）──
+        data.unifiedMemories.forEach { s ->
+            val localSourceId = when (safeEnum<MemoryScope>(s.scope)) {
+                MemoryScope.COMPANION -> companionIdMap[s.sourceId] ?: s.sourceId
+                MemoryScope.GROUP -> groupIdMap[s.sourceId] ?: s.sourceId
+                else -> s.sourceId
+            }
+            db.unifiedMemoryDao().insert(
+                MemoryRecord(
+                    id = 0,
+                    memoryType = safeEnum<MemoryType>(s.memoryType),
+                    scope = safeEnum<MemoryScope>(s.scope),
+                    source = safeEnum<MemorySource>(s.source),
+                    content = s.content,
+                    summary = s.summary,
+                    confidence = s.confidence,
+                    importance = s.importance,
+                    sourceId = localSourceId,
+                    createdAt = s.createdAt.ifZero(now),
+                    updatedAt = s.updatedAt.ifZero(now),
+                    observedAt = s.observedAt.ifZero(now),
+                    expiresAt = s.expiresAt,
+                    accessCount = s.accessCount,
+                    tags = s.tags,
+                    deviceId = deviceId
+                )
+            )
+        }
+
+        // ── 11. 情感日记合并 ──
+        data.diaries.forEach { s ->
+            db.diaryDao().insertDiary(
+                DiaryEntry(
+                    id = 0,
+                    companionId = companionIdMap[s.companionId] ?: s.companionId,
+                    title = s.title,
+                    content = s.content,
+                    mood = s.mood,
+                    date = s.date,
+                    weather = s.weather,
+                    tags = s.tags,
+                    deviceId = deviceId
+                )
+            )
+        }
     }
+
+    private fun Long.ifZero(fallback: Long): Long = if (this == 0L) fallback else this
 
     private suspend fun rebuildChatSummary(companionId: Long) {
         val last = db.messageDao().getLastMessageSync(companionId, "chat") ?: return

@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -249,7 +250,7 @@ class ChatGenerationManager private constructor(
             }
             val result = messageQueue.trySend(content)
             if (result.isSuccess) {
-                _queueDepth.value += 1
+                _queueDepth.update { it + 1 }
                 // 乐观 typing：入队即显示，不等 2.5s 合并窗口 + pipeline 校验
                 // 上一轮 AI 仍在生成时 activeRequests>0，enterLoading 不会重复置 typing
                 if (!typingState.isTyping.value) {
@@ -452,7 +453,7 @@ class ChatGenerationManager private constructor(
                     if (first.isClosed) break
                     if (first.exceptionOrNull() != null) continue
                     pending.add(first.getOrThrow())
-                    _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+                    _queueDepth.update { maxOf(0, it - 1) }
                     waitForMergeWindow = true
                 }
 
@@ -524,7 +525,7 @@ class ChatGenerationManager private constructor(
             val extra = messageQueue.tryReceive()
             if (extra.isClosed || extra.isFailure) break
             pending.add(extra.getOrThrow())
-            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+            _queueDepth.update { maxOf(0, it - 1) }
         }
     }
 
@@ -540,7 +541,7 @@ class ChatGenerationManager private constructor(
             if (result.isClosed) return
             if (result.isFailure) continue
             pending.add(result.getOrThrow())
-            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+            _queueDepth.update { maxOf(0, it - 1) }
             drainTryReceive(pending)
         }
     }
@@ -564,7 +565,7 @@ class ChatGenerationManager private constructor(
             }
             if (result.isFailure) continue
             pending.add(result.getOrThrow())
-            _queueDepth.value = maxOf(0, _queueDepth.value - 1)
+            _queueDepth.update { maxOf(0, it - 1) }
             drainTryReceive(pending)
             return true
         }
@@ -789,7 +790,8 @@ class ChatGenerationManager private constructor(
 
             val reasoningForCommit = streamResult.reasoningText
 
-            // 首条气泡：保持完整能力（流式/工具/视觉/本地模型）生成，整条作为第一条气泡落地
+            // 首条气泡：保持完整能力（流式/工具/视觉/本地模型）生成；
+            // 若模型用空行显式分隔多条独立消息（用户要求多发/逐条回应多点），deliverResponse 内会按空行拆成多条气泡连发
             val firstDelivered = responseFinalizer.deliverResponse(
                 aiContent = aiContent,
                 reasoning = reasoningForCommit,
@@ -799,10 +801,15 @@ class ChatGenerationManager private constructor(
                 reasoningStartedAtMs = requestStartedAt,
             )
 
+            // 首条（含空行拆分的全部气泡）已可见：立即关闭 loading/typing，避免后续连发链把「对方正在输入」拖住
+            exitLoading()
+            loadingReleased = true
+
             // 后续气泡：循环调用 LLM，每次调用输出一条气泡（用户定稿架构）
             // - 本地模型/视觉路径不循环（本地无 JSON 能力；视觉后续无图上下文）
             // - 首条之后的每次调用：已生成气泡以 assistant 消息追加回历史，AI 依据角色性格自决 {继续}
             // - JSON 协议约束输出格式，解析失败最多重试 3 次，仍失败则停止连发（已生成气泡保留）
+            // - 单次调用带硬超时：模型挂起/卡死不会无限拖住本轮（超时视为失败，重试后停止）
             val enableBubbleChain = imagePath == null && !isLocalModelEnabled()
             val followUpBubbles = if (enableBubbleChain) {
                 bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
@@ -814,34 +821,37 @@ class ChatGenerationManager private constructor(
                             role = com.lianyu.ai.domain.AiMessageRole.ASSISTANT,
                         )
                     }
-                    val resp = aiService.sendMessage(
-                        companion = companion.toAiCompanionInfo(),
-                        history = appendedHistory,
-                        stickerProbability = stickerProbability,
-                        ntpTimeEnabled = ntpTimeEnabled,
-                        extraSystemRules = BubbleJsonProtocol.systemRules(),
-                    )
-                    resp.content
+                    val resp = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
+                        aiService.sendMessage(
+                            companion = companion.toAiCompanionInfo(),
+                            history = appendedHistory,
+                            stickerProbability = stickerProbability,
+                            ntpTimeEnabled = ntpTimeEnabled,
+                            extraSystemRules = BubbleJsonProtocol.systemRules(),
+                        )
+                    }
+                    resp?.content.orEmpty()
                 }
             } else {
                 emptyList()
             }
 
-            // 逐条落地后续气泡，气泡间 0.8~2 秒模拟真人连发
+            // 逐条落地后续气泡，气泡间 0.8~2 秒模拟真人连发；失败不阻断本轮
             followUpBubbles.forEach { bubble ->
                 delay(800L + kotlin.random.Random.nextLong(1200L))
-                responseFinalizer.deliverResponse(
-                    aiContent = bubble,
-                    reasoning = null,
-                    userContentForMemory = null,
-                    pendingTurn = pendingTurn,
-                )
+                runCatching {
+                    responseFinalizer.deliverResponse(
+                        aiContent = bubble,
+                        reasoning = null,
+                        userContentForMemory = null,
+                        pendingTurn = pendingTurn,
+                    )
+                }.onFailure { e ->
+                    SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)
+                }
             }
 
-            // 1) 全部气泡可见后立刻 exitLoading，避免记忆/追问把「对方正在输入」拖住
-            // 2) 记忆统一用全部气泡合并文本（避免只存首条）
-            exitLoading()
-            loadingReleased = true
+            // 记忆统一用全部气泡合并文本（避免只存首条）
             val allBubbleContent = (listOf(aiContent) + followUpBubbles).joinToString("\n")
             responseFinalizer.afterDeliver(
                 firstDelivered.copy(
@@ -962,7 +972,7 @@ class ChatGenerationManager private constructor(
             appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
             appendLine("5. 不要重复同样的话。")
             appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
-            appendLine("7. 每条回复 = 一条气泡：把同一动作用一句完整口语说完并收尾；不要用空行/换行分块（连发由系统连发机制处理）。")
+            appendLine("7. 每条回复默认 = 一条气泡：把同一动作用一句完整口语说完并收尾；如果用户明确要求发多条、或你的回复由多条独立短消息组成，把每条消息写成一句完整的话并用标点（。！？～）收尾，系统会按句末标点自动拆成多条气泡连发。")
             if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
             RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
             if (stickerProbability > 0) appendLine("12. 表情包：可按语境偶尔使用[名称]格式。")

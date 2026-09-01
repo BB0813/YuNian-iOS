@@ -1,13 +1,11 @@
 package com.lianyu.ai.feature.qqbot.data
 
 import android.content.Context
-import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
-import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiChatMessage
@@ -15,6 +13,7 @@ import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiResponse
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.feature.qqbot.data.model.QQInboundEvent
 import kotlinx.coroutines.CoroutineScope
@@ -30,11 +29,12 @@ class QQBotChatBridge(
     private val tokenStore: QQBotTokenStore
 ) {
     private val database = AppDatabase.getDatabase(context)
-    private val deviceId = DeviceIdProvider.getDeviceId(context)
     private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
     private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val companionRepository = CompanionRepository(database.companionDao())
-    private val memoryRepository = MemoryRepository(database.memoryDao(), deviceId)
+    private val memoryProvider: MemoryProvider by lazy {
+        ServiceRegistry.getOrThrow(MemoryProvider::class.java)
+    }
     private val mappingManager = QQBotUserMappingManager(tokenStore, companionRepository)
     private val aiServiceProvider: AiServiceProvider by lazy {
         ServiceRegistry.get(AiServiceProvider::class.java)
@@ -44,6 +44,7 @@ class QQBotChatBridge(
     private val bridgeScope = CoroutineScope(bridgeJob + Dispatchers.IO)
 
     private var eventCollectionJob: kotlinx.coroutines.Job? = null
+    private val activeReplyJobs = Any()
 
     /**
      * 在 Service 中启动持续的事件监听与自动回复。
@@ -64,23 +65,26 @@ class QQBotChatBridge(
                 val key = qqBotRepository.getReplyKey(event)
                 // 连发合并：如果同 key 已有活跃回复 job，取消旧 job，
                 // 短暂延迟聚合后续消息（2 秒窗口），用最新事件发起回复。
-                val existingJob = qqBotRepository.getActiveReplyJob(key)
-                if (existingJob?.isActive == true) {
-                    android.util.Log.d("QQBotBridge", "Cancelling active job for $key to merge new message")
-                    existingJob.cancel()
-                    qqBotRepository.removeActiveReplyJob(key)
-                }
-                // 等待 2 秒聚合窗口，收到连发消息时会取消当前 job 重新合并
-                val currentEventText = text
-                val job = bridgeScope.launch {
-                    try {
-                        delay(2000L) // 连发聚合窗口
-                        handleIncomingEventStreaming(event)
-                    } finally {
+                val job = synchronized(activeReplyJobs) {
+                    val existingJob = qqBotRepository.getActiveReplyJob(key)
+                    if (existingJob?.isActive == true) {
+                        android.util.Log.d("QQBotBridge", "Cancelling active job for $key to merge new message")
+                        existingJob.cancel()
                         qqBotRepository.removeActiveReplyJob(key)
                     }
+                    val newJob = bridgeScope.launch {
+                        try {
+                            delay(2000L) // 连发聚合窗口
+                            handleIncomingEventStreaming(event)
+                        } finally {
+                            synchronized(activeReplyJobs) {
+                                qqBotRepository.removeActiveReplyJob(key)
+                            }
+                        }
+                    }
+                    qqBotRepository.setActiveReplyJob(key, newJob)
+                    newJob
                 }
-                qqBotRepository.setActiveReplyJob(key, job)
             }
         }
     }
@@ -202,7 +206,11 @@ class QQBotChatBridge(
             companionRepository.increaseIntimacy(companionId, 2)
             bridgeScope.launch {
                 runCatching {
-                    memoryRepository.extractAndSaveMemories(companionId, text, safeText)
+                    memoryProvider.extractAndSaveFromConversation(
+                        userInput = text,
+                        aiResponse = safeText,
+                        companionId = companionId,
+                    )
                 }
             }
 

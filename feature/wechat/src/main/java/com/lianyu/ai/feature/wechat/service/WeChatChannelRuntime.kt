@@ -35,6 +35,9 @@ object WeChatChannelRuntime {
     private val watchdogStallCount = AtomicInteger(0)
     private val lastWatchdogStallMs = AtomicLong(0L)
 
+    /** 会话轮换：定期强制重建 SDK 会话，兜底服务端静默停投（getUpdates 空响应无法区分"没消息"与"会话脱离"） */
+    private val lastSessionRebuildAtMs = AtomicLong(0L)
+
     const val BASE_BACKOFF_MS = 2_000L
     const val MAX_BACKOFF_MS = 60_000L
     const val SUCCESS_IDLE_MS = 0L
@@ -50,6 +53,9 @@ object WeChatChannelRuntime {
 
     /** 两次看门狗巡检超过该间隔即判定"停摆"（冻结/被杀），约 2.5 个周期。 */
     const val WATCHDOG_STALL_THRESHOLD_MS = 150_000L
+
+    /** 会话轮换间隔：约 20 分钟强制重建一次 SDK 会话，防服务端静默停投。 */
+    const val SESSION_REBUILD_INTERVAL_MS = 20 * 60 * 1000L
 
     /** 两次强制自愈最小间隔，防止 FGS/Worker 互踢。 */
     const val HEAL_COOLDOWN_MS = 30_000L
@@ -114,8 +120,10 @@ object WeChatChannelRuntime {
      * 看门狗每次巡检调用：记录时间戳并检测停摆。
      * 正常巡检间隔为 [WATCHDOG_INTERVAL_MS]；间隔远超阈值说明进程被冻结（vivo/iQOO 后台冻结）
      * 或 FGS 被杀后长时间无人巡检——这正是"熄屏 2 分钟掉线"的可观测信号。
+     *
+     * @return 距上次巡检的间隔（毫秒）；首次巡检返回 0
      */
-    fun onWatchdogTick(nowMs: Long = System.currentTimeMillis()) {
+    fun onWatchdogTick(nowMs: Long = System.currentTimeMillis()): Long {
         val prev = lastWatchdogTickAtMs.getAndSet(nowMs)
         if (prev > 0L) {
             val gap = nowMs - prev
@@ -124,12 +132,28 @@ object WeChatChannelRuntime {
                 lastWatchdogStallMs.set(gap)
                 SecureLog.w(TAG, "watchdog_stall gapMs=$gap count=${watchdogStallCount.get()}")
             }
+            return gap
         }
+        return 0L
     }
 
     fun watchdogStallCount(): Int = watchdogStallCount.get()
 
     fun lastWatchdogStallMs(): Long = lastWatchdogStallMs.get()
+
+    /**
+     * 是否该轮换会话：距上次强制重建超过 [SESSION_REBUILD_INTERVAL_MS]。
+     * 服务端可能在无消息期静默停投（getUpdates 返回空而非报错），
+     * 定期重建以重新挂上投递通道。
+     */
+    fun shouldRotateSession(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val last = lastSessionRebuildAtMs.get()
+        return last == 0L || nowMs - last >= SESSION_REBUILD_INTERVAL_MS
+    }
+
+    fun markSessionRebuilt(nowMs: Long = System.currentTimeMillis()) {
+        lastSessionRebuildAtMs.set(nowMs)
+    }
 
     /**
      * 是否长时间没有 poll 心跳。
@@ -244,6 +268,7 @@ object WeChatChannelRuntime {
         lastWatchdogTickAtMs.set(0L)
         watchdogStallCount.set(0)
         lastWatchdogStallMs.set(0L)
+        lastSessionRebuildAtMs.set(0L)
     }
 
     data class WatchdogDecision(

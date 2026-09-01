@@ -210,6 +210,14 @@ Java_com_lianyu_ai_common_NativeSafetyFilter_nativeBayesianPredict(
     JNIEnv* env, jclass,
     jfloatArray features, jfloatArray priors, jfloatArray likelihoods) {
     jsize numFeatures = env->GetArrayLength(features);
+    jsize numPriors = env->GetArrayLength(priors);
+    jsize numLikes = env->GetArrayLength(likelihoods);
+
+    /* Defensive dimension check — mirror the Kotlin fallback semantics
+     * (getOrElse(0.5f)) instead of OOB-reading likelihoods[i*2]. */
+    if (numFeatures <= 0 || numPriors < 2 || numLikes < numFeatures * 2) {
+        return 0.5f;
+    }
 
     jfloat* featArr = env->GetFloatArrayElements(features, nullptr);
     jfloat* priorArr = env->GetFloatArrayElements(priors, nullptr);

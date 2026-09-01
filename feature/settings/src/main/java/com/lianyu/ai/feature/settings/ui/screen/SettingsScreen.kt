@@ -112,6 +112,9 @@ import com.lianyu.ai.feature.settings.ui.viewmodel.SettingsViewModel
 import com.lianyu.ai.uicommon.theme.PetalPrimary
 import com.lianyu.ai.uicommon.theme.ThemeMode
 import com.lianyu.ai.uicommon.theme.ThemeViewModel
+import com.lianyu.ai.uicommon.component.glass.GlassPageScaffold
+import com.lianyu.ai.uicommon.component.glass.LocalPageBackdrop
+import com.lianyu.ai.uicommon.component.glass.drawGlass
 import com.lianyu.ai.common.AppSettingsStore
 import com.lianyu.ai.common.SecureLog
 import kotlinx.coroutines.delay
@@ -136,11 +139,14 @@ fun SettingsScreen(
     val testedConfigs by viewModel.testedConfigs.collectAsState()
     val visionEnabled by viewModel.visionEnabled.collectAsState()
     val visionModel by viewModel.visionModel.collectAsState()
+    val diaryEnabled by viewModel.diaryEnabled.collectAsState()
+    val diaryModel by viewModel.diaryModel.collectAsState()
     var expandedProvider by remember { mutableStateOf<ApiProvider?>(null) }
     var isVisible by remember { mutableStateOf(false) }
     var newConfigDialog by remember { mutableStateOf<ApiConfig?>(null) }
     var showProviderPicker by remember { mutableStateOf(false) }
     var showVisionModelSettings by remember { mutableStateOf(false) }
+    var showDiaryModelSettings by remember { mutableStateOf(false) }
 
     var showApiTestDialog by remember { mutableStateOf(false) }
     var apiTestResult by remember { mutableStateOf<ApiTestDialogData?>(null) }
@@ -170,6 +176,7 @@ fun SettingsScreen(
     val textTertiaryColor = colorScheme.outlineVariant
     val dividerColor = colorScheme.outline
     val cardBackground = colorScheme.surfaceVariant
+    val pageBackdrop = LocalPageBackdrop.current
 
     LaunchedEffect(Unit) {
         viewModel.refreshLocalModel()
@@ -191,25 +198,28 @@ fun SettingsScreen(
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    GlassPageScaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                // 页面背景由 GlassPageScaffold 捕获层绘制，此处透明贯穿（沉浸式）
                 .padding(top = paddingValues.calculateTopPadding())
                 .verticalScroll(rememberScrollState())
         ) {
-            // ====== Top App Bar ======
+            // ====== Top App Bar（玻璃胶囊）======
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(AppTheme.colors.surfaceVariant)
+                    .drawGlass(
+                        backdrop = pageBackdrop,
+                        shape = RoundedCornerShape(20.dp),
+                        surfaceColor = AppTheme.colors.surfaceVariant
+                    )
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -291,7 +301,11 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(AppTheme.colors.surfaceVariant)
+                        .drawGlass(
+                            backdrop = pageBackdrop,
+                            shape = RoundedCornerShape(20.dp),
+                            surfaceColor = AppTheme.colors.surfaceVariant
+                        )
                         .clickable { showVisionModelSettings = true }
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -323,6 +337,70 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = if (visionEnabled) "已启用 - ${AppSettingsStore.VisionModels.getVisionModelDisplayName(visionModel)}" else "点击配置图片识别",
+                                fontSize = 12.sp,
+                                color = textSecondaryColor
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "进入设置",
+                        tint = textSecondaryColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ====== Diary Model Settings Section ======
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(tween(400, delayMillis = 250)) +
+                        slideInVertically(tween(400, delayMillis = 250)) { it / 4 }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .drawGlass(
+                            backdrop = pageBackdrop,
+                            shape = RoundedCornerShape(20.dp),
+                            surfaceColor = AppTheme.colors.surfaceVariant
+                        )
+                        .clickable { showDiaryModelSettings = true }
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(PetalPrimaryContainer.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "📔",
+                                fontSize = 22.dp.value.sp
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = "日记模型设置",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textPrimaryColor
+                            )
+                            Text(
+                                text = if (diaryEnabled) "已启用 - ${diaryModel.ifBlank { "自定义模型" }}" else "AI 生成日记使用主 API",
                                 fontSize = 12.sp,
                                 color = textSecondaryColor
                             )
@@ -477,6 +555,13 @@ fun SettingsScreen(
     if (showVisionModelSettings) {
         VisionModelSettingsScreen(
             onNavigateBack = { showVisionModelSettings = false },
+            viewModel = viewModel
+        )
+    }
+
+    if (showDiaryModelSettings) {
+        DiaryModelSettingsScreen(
+            onNavigateBack = { showDiaryModelSettings = false },
             viewModel = viewModel
         )
     }
