@@ -16,6 +16,7 @@ import com.lianyu.ai.database.dao.CompanionDao
 import com.lianyu.ai.database.dao.ConversationSummaryDao
 import com.lianyu.ai.database.dao.DiaryDao
 import com.lianyu.ai.database.dao.KeywordDao
+import com.lianyu.ai.database.dao.LorebookDao
 import com.lianyu.ai.database.dao.MemoryDao
 import com.lianyu.ai.database.dao.MessageDao
 import com.lianyu.ai.database.dao.QuizQuestionDao
@@ -34,6 +35,8 @@ import com.lianyu.ai.database.model.ConversationSummary
 import com.lianyu.ai.database.model.DiaryEntry
 import com.lianyu.ai.database.model.FileFormat
 import com.lianyu.ai.database.model.KeywordEntity
+import com.lianyu.ai.database.model.LorebookEntity
+import com.lianyu.ai.database.model.LorebookEntryEntity
 import com.lianyu.ai.database.model.Message
 import com.lianyu.ai.database.model.MemoryCategory
 import com.lianyu.ai.database.model.MemoryEntry
@@ -73,8 +76,10 @@ import java.io.File
         MessageSearchIndex::class,
         WeChatOutboxEntity::class,
         WeChatInboxDedupeEntity::class,
+        LorebookEntity::class,
+        LorebookEntryEntity::class,
     ],
-    version = 37,
+    version = 40,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -88,6 +93,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun quizQuestionDao(): QuizQuestionDao
     abstract fun tokenUsageDao(): TokenUsageDao
     abstract fun unifiedMemoryDao(): UnifiedMemoryDao
+    abstract fun lorebookDao(): LorebookDao
     abstract fun diaryDao(): DiaryDao
     abstract fun conversationSummaryDao(): ConversationSummaryDao
     abstract fun messageDao(): MessageDao
@@ -1537,6 +1543,153 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v38: add lorebook/knowledge book tables. */
+        val MIGRATION_37_38 = object : Migration(37, 38) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE `lorebooks` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `description` TEXT NOT NULL DEFAULT '',
+                        `companionId` INTEGER,
+                        `enabled` INTEGER NOT NULL DEFAULT 1,
+                        `createdAt` INTEGER NOT NULL DEFAULT 0,
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebooks_companionId` ON `lorebooks` (`companionId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebooks_enabled` ON `lorebooks` (`enabled`)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE `lorebook_entries` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `lorebookId` INTEGER NOT NULL,
+                        `keywordsJson` TEXT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `injectionPosition` TEXT NOT NULL,
+                        `priority` INTEGER NOT NULL DEFAULT 0,
+                        `injectDepth` INTEGER,
+                        `role` TEXT NOT NULL,
+                        `caseSensitive` INTEGER NOT NULL DEFAULT 0,
+                        `scanDepth` INTEGER NOT NULL DEFAULT 10,
+                        `constantActive` INTEGER NOT NULL DEFAULT 0,
+                        `enabled` INTEGER NOT NULL DEFAULT 1,
+                        `createdAt` INTEGER NOT NULL DEFAULT 0,
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_lorebookId` ON `lorebook_entries` (`lorebookId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_enabled` ON `lorebook_entries` (`enabled`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_priority` ON `lorebook_entries` (`priority`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_injectionPosition` ON `lorebook_entries` (`injectionPosition`)")
+            }
+        }
+
+        /** v39: fix lorebook_entries column types (injectionPosition and role should be TEXT not INTEGER) */
+        val MIGRATION_38_39 = object : Migration(38, 39) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("PRAGMA foreign_keys = OFF")
+                db.execSQL(
+                    """
+                    CREATE TABLE `lorebook_entries_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `lorebookId` INTEGER NOT NULL,
+                        `keywordsJson` TEXT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `injectionPosition` TEXT NOT NULL,
+                        `priority` INTEGER NOT NULL DEFAULT 0,
+                        `injectDepth` INTEGER,
+                        `role` TEXT NOT NULL,
+                        `caseSensitive` INTEGER NOT NULL DEFAULT 0,
+                        `scanDepth` INTEGER NOT NULL DEFAULT 10,
+                        `constantActive` INTEGER NOT NULL DEFAULT 0,
+                        `enabled` INTEGER NOT NULL DEFAULT 1,
+                        `createdAt` INTEGER NOT NULL DEFAULT 0,
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `lorebook_entries_new` (
+                        `id`, `lorebookId`, `keywordsJson`, `content`, `injectionPosition`,
+                        `priority`, `injectDepth`, `role`, `caseSensitive`, `scanDepth`,
+                        `constantActive`, `enabled`, `createdAt`, `updatedAt`
+                    )
+                    SELECT
+                        `id`, `lorebookId`, `keywordsJson`, `content`,
+                        CASE
+                            WHEN `injectionPosition` = 0 THEN 'BEFORE_SYSTEM_PROMPT'
+                            WHEN `injectionPosition` = 1 THEN 'AFTER_SYSTEM_PROMPT'
+                            WHEN `injectionPosition` = 2 THEN 'TOP_OF_CHAT'
+                            WHEN `injectionPosition` = 3 THEN 'BOTTOM_OF_CHAT'
+                            WHEN `injectionPosition` = 4 THEN 'AT_DEPTH'
+                            ELSE 'BEFORE_SYSTEM_PROMPT'
+                        END,
+                        `priority`, `injectDepth`,
+                        CASE
+                            WHEN `role` = 0 THEN 'SYSTEM'
+                            WHEN `role` = 1 THEN 'USER'
+                            WHEN `role` = 2 THEN 'ASSISTANT'
+                            ELSE 'SYSTEM'
+                        END,
+                        `caseSensitive`, `scanDepth`, `constantActive`, `enabled`, `createdAt`, `updatedAt`
+                    FROM `lorebook_entries`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `lorebook_entries`")
+                db.execSQL("ALTER TABLE `lorebook_entries_new` RENAME TO `lorebook_entries`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_lorebookId` ON `lorebook_entries` (`lorebookId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_enabled` ON `lorebook_entries` (`enabled`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_priority` ON `lorebook_entries` (`priority`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_injectionPosition` ON `lorebook_entries` (`injectionPosition`)")
+                db.execSQL("PRAGMA foreign_keys = ON")
+            }
+        }
+
+        /** v40: remove FOREIGN KEY from lorebook_entries (entity doesn't define it) */
+        val MIGRATION_39_40 = object : Migration(39, 40) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("PRAGMA foreign_keys = OFF")
+                db.execSQL(
+                    """
+                    CREATE TABLE `lorebook_entries_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `lorebookId` INTEGER NOT NULL,
+                        `keywordsJson` TEXT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `injectionPosition` TEXT NOT NULL,
+                        `priority` INTEGER NOT NULL DEFAULT 0,
+                        `injectDepth` INTEGER,
+                        `role` TEXT NOT NULL,
+                        `caseSensitive` INTEGER NOT NULL DEFAULT 0,
+                        `scanDepth` INTEGER NOT NULL DEFAULT 10,
+                        `constantActive` INTEGER NOT NULL DEFAULT 0,
+                        `enabled` INTEGER NOT NULL DEFAULT 1,
+                        `createdAt` INTEGER NOT NULL DEFAULT 0,
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `lorebook_entries_new` SELECT * FROM `lorebook_entries`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `lorebook_entries`")
+                db.execSQL("ALTER TABLE `lorebook_entries_new` RENAME TO `lorebook_entries`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_lorebookId` ON `lorebook_entries` (`lorebookId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_enabled` ON `lorebook_entries` (`enabled`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_priority` ON `lorebook_entries` (`priority`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_lorebook_entries_injectionPosition` ON `lorebook_entries` (`injectionPosition`)")
+                db.execSQL("PRAGMA foreign_keys = ON")
+            }
+        }
+
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -1647,6 +1800,9 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_34_35,
             MIGRATION_35_36,
             MIGRATION_36_37,
+            MIGRATION_37_38,
+            MIGRATION_38_39,
+            MIGRATION_39_40,
         )
 
         private var lastBackupTime: Long = 0L

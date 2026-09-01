@@ -26,7 +26,8 @@ object EncryptedDatabaseWrapper {
      * On first run (no .enc file), leaves plaintext alone — Room will create/use it.
      */
     fun prepareDatabase(context: Context): Boolean {
-        val dbDir = context.applicationContext.getDatabasePath(DB_NAME).parentFile!!
+        val dbPath = context.applicationContext.getDatabasePath(DB_NAME)
+        val dbDir = dbPath.parentFile ?: context.applicationContext.filesDir
         dbDir.mkdirs()
         val encryptedFile = File(dbDir, "$DB_NAME.enc")
         val plaintextFile = File(dbDir, DB_NAME)
@@ -72,7 +73,8 @@ object EncryptedDatabaseWrapper {
      * If no planitext exists, does nothing.
      */
     fun sealDatabase(context: Context) {
-        val dbDir = context.applicationContext.getDatabasePath(DB_NAME).parentFile!!
+        val dbPath = context.applicationContext.getDatabasePath(DB_NAME)
+        val dbDir = dbPath.parentFile ?: context.applicationContext.filesDir
         val plaintextFile = File(dbDir, DB_NAME)
         val encryptedFile = File(dbDir, "$DB_NAME.enc")
 

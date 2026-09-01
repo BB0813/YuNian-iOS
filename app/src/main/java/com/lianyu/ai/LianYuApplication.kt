@@ -19,7 +19,6 @@ import com.lianyu.ai.database.repository.ApiConfigRepository
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
 import com.lianyu.ai.database.repository.GroupMessageRepository
-import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.EmbeddingProvider
 import com.lianyu.ai.database.repository.SummaryProvider
@@ -34,8 +33,12 @@ import com.lianyu.ai.domain.AiServiceProvider
 import com.lianyu.ai.domain.CoffeeOrderProvider
 import com.lianyu.ai.domain.BuiltinCloudAccessPolicy
 import com.lianyu.ai.domain.LocalModelProvider
+import com.lianyu.ai.domain.LorebookProvider
+import com.lianyu.ai.domain.McpManager
 import com.lianyu.ai.domain.MemoryProvider
+import com.lianyu.ai.domain.PlaceholderProvider
 import com.lianyu.ai.domain.ServiceRegistry
+import com.lianyu.ai.domain.SkillManager
 import com.lianyu.ai.domain.UserProfileProvider
 import com.lianyu.ai.domain.timeline.TimelinePayloadCodecRegistry
 import com.lianyu.ai.domain.timeline.TimelineStore
@@ -47,6 +50,7 @@ import com.lianyu.ai.wechat.WeChatIdentityMapPortImpl
 import com.lianyu.ai.wechat.WeChatOutboundPortImpl
 
 import com.lianyu.ai.feature.automation.data.AutomationStore
+import com.lianyu.ai.feature.chat.tools.SearchTools
 import com.lianyu.ai.feature.notification.NotificationHelper
 import com.lianyu.ai.push.PushManager
 import com.lianyu.ai.feature.wechat.service.WeChatChannelKeeper
@@ -333,6 +337,7 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         }
 
         private fun registerServiceProviders(app: Application) {
+            val appSettings = AppSettingsStore(app)
             ServiceRegistry.registerSingleton(BuiltinCloudAccessPolicy::class.java) {
                 object : BuiltinCloudAccessPolicy {
                     override fun isBuiltinCloudAccessAllowed(): Boolean {
@@ -375,9 +380,6 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             TimelinePayloadCodecRegistry.registerBuiltins()
             ServiceRegistry.registerSingleton(TimelineStore::class.java) {
                 RoomTimelineStore(database.messageDao(), database)
-            }
-            ServiceRegistry.registerSingleton(MemoryRepository::class.java) {
-                MemoryRepository(database.memoryDao(), DeviceIdProvider.getDeviceId(app))
             }
             // 语义嵌入服务（Phase 3: 本地语义检索）
             // 在 UnifiedMemoryRepository 之前注册，因为后者需要 EmbeddingProvider
@@ -431,6 +433,24 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                     ServiceRegistry.getOrThrow(SummaryProvider::class.java)
                 )
             }
+            // 占位符提供者（{{char}}、{{user}}、{{cur_date}} 等模板变量替换）
+            ServiceRegistry.registerSingleton(PlaceholderProvider::class.java) {
+                com.lianyu.ai.common.PlaceholderResolver(app)
+            }
+            // 世界书/知识书提供者
+            ServiceRegistry.registerSingleton(LorebookProvider::class.java) {
+                com.lianyu.ai.feature.worldbook.repository.WorldbookRepository(
+                    AppDatabase.getDatabase(app)
+                )
+            }
+            // 通用 MCP 管理器
+            ServiceRegistry.registerSingleton(McpManager::class.java) {
+                com.lianyu.ai.feature.mcp.McpManagerImpl(appSettings)
+            }
+            // 技能管理器
+            ServiceRegistry.registerSingleton(SkillManager::class.java) {
+                com.lianyu.ai.feature.skills.repository.SkillManagerImpl(app)
+            }
             ServiceRegistry.registerSingleton(AiServiceProvider::class.java) {
                 AiService(app)
             }
@@ -462,6 +482,22 @@ class LianYuApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // 注册记忆召回工具，供 AI 在上下文不足时主动查询统一记忆系统
             com.lianyu.ai.feature.memory.MemoryRecallTools.registerAll(
                 ServiceRegistry.getOrThrow(MemoryProvider::class.java)
+            )
+            // 注册网络搜索工具，供 AI 获取实时信息
+            com.lianyu.ai.feature.chat.tools.SearchTools.registerAll(appSettings)
+            // 注册 MCP 工具（动态发现并注册到 ToolRegistry）
+            bgScope.launch {
+                com.lianyu.ai.feature.mcp.McpToolRegistrar(
+                    ServiceRegistry.getOrThrow(McpManager::class.java)
+                ).syncTools()
+            }
+            // 注册技能工具
+            com.lianyu.ai.feature.skills.tools.registerSkillTools(
+                ServiceRegistry.getOrThrow(SkillManager::class.java)
+            )
+            // 注册对话工具（recent_chats、conversation_search）
+            com.lianyu.ai.feature.chat.tools.ConversationTools.registerAll(
+                AppDatabase.getDatabase(app)
             )
             // ── 自动化工具（AI 对话可创建/取消定时自动化） ──
             ServiceRegistry.registerSingleton(AutomationStore::class.java) {

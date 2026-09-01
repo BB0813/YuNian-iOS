@@ -33,6 +33,11 @@ object HardwareInfo {
     val isMidPerf: Boolean
         get() = tier == Tier.MEDIUM
 
+    /** backdrop 依赖 Skia `pinImages`，在 Mali GPU 上会触发 SIGSEGV。
+     *  仅 Adreno (Qualcomm) GPU 安全。MediaTek/Kirin/Exynos 均使用 Mali GPU。 */
+    val isGpuBackdropSafe: Boolean
+        get() = CpuInfo.isSnapdragon
+
     private fun detectTier(): Tier {
         return when {
             CpuInfo.isSnapdragon8GenSeries -> Tier.ULTRA

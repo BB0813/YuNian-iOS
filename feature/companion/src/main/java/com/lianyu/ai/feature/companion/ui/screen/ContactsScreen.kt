@@ -64,7 +64,11 @@ import com.lianyu.ai.database.model.CompanionEntity
 import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
 import com.lianyu.ai.database.viewmodel.CompanionListViewModel
 import com.lianyu.ai.uicommon.component.AppListItemLayout
+import com.lianyu.ai.uicommon.component.glass.GlassButton
+import com.lianyu.ai.uicommon.component.glass.LocalPageBackdrop
+import com.lianyu.ai.uicommon.component.glass.drawGlass
 import com.lianyu.ai.uicommon.theme.AppTheme
+import com.kyant.capsule.ContinuousCapsule
 import kotlinx.coroutines.launch
 
 @Composable
@@ -94,6 +98,7 @@ fun ContactsScreen(
             it.name.contains(query, ignoreCase = true)
         }
     }
+    val backdrop = LocalPageBackdrop.current
     val sortedCompanions = remember(visibleCompanions) {
         val collator = java.text.Collator.getInstance(java.util.Locale.CHINESE)
         visibleCompanions.sortedWith(compareBy(collator) { it.name })
@@ -127,15 +132,14 @@ fun ContactsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                // 列表区域透出 MainScreen 主界面背景层；顶栏单独铺不透明底
+                // 列表区域透出 MainScreen 主界面背景层（backdrop 捕获层绘制）
                 .background(Color.Transparent)
                 .padding(bottom = paddingValues.calculateBottomPadding())
         ) {
-            // 不透明顶部导航栏：标题「通讯录」/搜索框 + 两个操作图标
+            // 沉浸式顶部导航栏：无底色，背景贯穿；搜索框 + 两个玻璃胶囊按钮
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colorScheme.surface)
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 16.dp)
                     .padding(top = 4.dp, bottom = 10.dp),
@@ -168,16 +172,16 @@ fun ContactsScreen(
 
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(colorScheme.surfaceVariant)
-                                .clickable {
-                                    isSearching = !isSearching
-                                    if (!isSearching) searchQuery = ""
-                                },
-                            contentAlignment = Alignment.Center
+                        GlassButton(
+                            onClick = {
+                                isSearching = !isSearching
+                                if (!isSearching) searchQuery = ""
+                            },
+                            backdrop = backdrop,
+                            height = 36.dp,
+                            horizontalPadding = 0.dp,
+                            modifier = Modifier.size(36.dp),
+                            surfaceColor = colorScheme.surfaceVariant.copy(alpha = 0.85f)
                         ) {
                             Icon(
                                 imageVector = if (isSearching) Icons.Outlined.Close else Icons.Outlined.Search,
@@ -186,13 +190,13 @@ fun ContactsScreen(
                                 tint = colorScheme.onSurface
                             )
                         }
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(colorScheme.surfaceVariant)
-                                .clickable { onAddClick() },
-                            contentAlignment = Alignment.Center
+                        GlassButton(
+                            onClick = { onAddClick() },
+                            backdrop = backdrop,
+                            height = 36.dp,
+                            horizontalPadding = 0.dp,
+                            modifier = Modifier.size(36.dp),
+                            surfaceColor = colorScheme.surfaceVariant.copy(alpha = 0.85f)
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.PersonAdd,
@@ -330,8 +334,11 @@ fun GroupContactItem(
         endSlot = {},
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colorScheme.surfaceVariant)
+            .drawGlass(
+                backdrop = LocalPageBackdrop.current,
+                shape = ContinuousCapsule,
+                surfaceColor = colorScheme.surfaceVariant
+            )
             .padding(horizontal = 14.dp, vertical = 10.dp),
         onClick = onClick,
         slotGap = AppTheme.dimens.avatarGap
@@ -393,8 +400,11 @@ fun ContactItem(
         endSlot = {},
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colorScheme.surfaceVariant)
+            .drawGlass(
+                backdrop = LocalPageBackdrop.current,
+                shape = ContinuousCapsule,
+                surfaceColor = colorScheme.surfaceVariant
+            )
             .padding(horizontal = 14.dp, vertical = 10.dp),
         onClick = onClick,
         onLongClick = onLongClick,

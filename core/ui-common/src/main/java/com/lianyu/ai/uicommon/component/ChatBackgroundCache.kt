@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.platform.LocalContext
@@ -18,25 +19,27 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
+import java.util.HashMap
 
 object ChatBackgroundCache {
 
     // app 级后台作用域，用于预加载聊天背景图片（替代裸 Thread，获得协程取消与命名能力）
     private val preloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val cache = ConcurrentHashMap<String, Bitmap?>()
+    private val cache = HashMap<String, Bitmap?>()
     private val maxCacheSize = 3
 
     fun getCachedBitmap(key: String): Bitmap? {
-        return cache[key]
+        return synchronized(cache) { cache[key] }
     }
 
     fun loadBitmap(context: Context, key: String): Bitmap? {
-        cache[key]?.let { return it }
+        synchronized(cache) {
+            cache[key]?.let { return it }
+        }
 
         val file = getCustomBackgroundFile(context, key)
         if (file == null || !file.exists()) {
-            cache[key] = null
+            synchronized(cache) { cache[key] = null }
             return null
         }
 
@@ -54,17 +57,18 @@ object ChatBackgroundCache {
 
             val bitmap = BitmapFactory.decodeFile(file.absolutePath, options)
 
-            if (cache.size >= maxCacheSize) {
-                val oldest = cache.keys.firstOrNull()
-                if (oldest != null && oldest != key) {
-                    cache.remove(oldest)?.recycle()
+            synchronized(cache) {
+                if (cache.size >= maxCacheSize) {
+                    val oldest = cache.keys.firstOrNull()
+                    if (oldest != null && oldest != key) {
+                        cache.remove(oldest)?.recycle()
+                    }
                 }
+                cache[key] = bitmap
             }
-
-            cache[key] = bitmap
             bitmap
         } catch (_: Exception) {
-            cache[key] = null
+            synchronized(cache) { cache[key] = null }
             null
         }
     }
@@ -76,8 +80,10 @@ object ChatBackgroundCache {
     }
 
     fun clear() {
-        cache.values.forEach { it?.recycle() }
-        cache.clear()
+        synchronized(cache) {
+            cache.values.forEach { it?.recycle() }
+            cache.clear()
+        }
     }
 
     private fun calculateInSampleSize(
@@ -124,4 +130,29 @@ fun rememberBackgroundBitmap(key: String): BitmapPainter? {
     return remember(bitmap) {
         bitmap?.let { BitmapPainter(it.asImageBitmap()) }
     }
+}
+
+@Composable
+fun rememberBackgroundImageBitmap(key: String): ImageBitmap? {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    // 先从缓存同步读取
+    if (bitmap == null) {
+        bitmap = ChatBackgroundCache.getCachedBitmap(key)
+    }
+
+    // 缓存未命中时异步加载
+    LaunchedEffect(key) {
+        if (ChatBackgroundCache.getCachedBitmap(key) == null) {
+            withContext(Dispatchers.IO) {
+                ChatBackgroundCache.loadBitmap(context, key)
+            }
+            withContext(Dispatchers.Main) {
+                bitmap = ChatBackgroundCache.getCachedBitmap(key)
+            }
+        }
+    }
+
+    return remember(bitmap) { bitmap?.asImageBitmap() }
 }

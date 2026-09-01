@@ -37,4 +37,9 @@
     <string name="mood_miss">思念</string>
     <string name="ai_generate_diary">AI 生成日记</string>
     <string name="ai_generating">正在生成…</string>
+    <string name="diary_auto_tip">聊完后每天自动沉淀 1 篇，也可手动生成</string>
+    <string name="diary_generating">生成中…</string>
+    <string name="diary_generate_failed">日记生成失败，请检查网络后重试</string>
+    <string name="diary_generated_title">AI 生成的日记</string>
+    <string name="memory_local_only">记忆只存储在本地设备，不会上传到任何服务器</string>
 </resources>

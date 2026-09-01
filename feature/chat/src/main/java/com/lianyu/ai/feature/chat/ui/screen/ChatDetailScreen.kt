@@ -95,6 +95,8 @@ fun ChatDetailScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showIntervalDialog by remember { mutableStateOf(false) }
+    var showFollowUpIntervalDialog by remember { mutableStateOf(false) }
+    var showFollowUpMaxTimesDialog by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
     val colors = AppTheme.colors
@@ -253,6 +255,31 @@ fun ChatDetailScreen(
                         settingsViewModel.updateSettings { it.copy(allowFollowUpMessage = checked) }
                     }
                 )
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
+                SettingsToggleRow(
+                    title = "未回复追问提醒",
+                    subtitle = "AI 发消息后你长时间未回，会按间隔追问催促",
+                    checked = settings.followUpReminderEnabled,
+                    onCheckedChange = { checked ->
+                        settingsViewModel.updateSettings { it.copy(followUpReminderEnabled = checked) }
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
+                SettingsRow(
+                    title = "追问间隔",
+                    subtitle = intervalLabel(settings.followUpReminderIntervalMinutes),
+                    enabled = settings.followUpReminderEnabled
+                ) {
+                    showFollowUpIntervalDialog = true
+                }
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
+                SettingsRow(
+                    title = "追问次数上限",
+                    subtitle = "${settings.followUpReminderMaxTimes} 次",
+                    enabled = settings.followUpReminderEnabled
+                ) {
+                    showFollowUpMaxTimesDialog = true
+                }
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
                 SettingsToggleRow(
                     title = "显示心理活动",
@@ -424,6 +451,8 @@ fun ChatDetailScreen(
     if (showIntervalDialog) {
         IntervalInputDialog(
             currentMinutes = settings.proactiveIntervalMinutes,
+            minMinutes = 1,
+            maxMinutes = 1440,
             onDismiss = { showIntervalDialog = false },
             onConfirm = { minutes ->
                 dialogScope.launch {
@@ -431,6 +460,42 @@ fun ChatDetailScreen(
                         it.copy(proactiveIntervalMinutes = minutes)
                     }.join()
                     showIntervalDialog = false
+                }
+            }
+        )
+    }
+
+    // Follow-up interval input dialog
+    if (showFollowUpIntervalDialog) {
+        IntervalInputDialog(
+            title = "追问间隔",
+            hint = "设置AI发消息后你未回复时的追问间隔时间（分钟）",
+            currentMinutes = settings.followUpReminderIntervalMinutes,
+            minMinutes = 1,
+            maxMinutes = 120,
+            onDismiss = { showFollowUpIntervalDialog = false },
+            onConfirm = { minutes ->
+                dialogScope.launch {
+                    settingsViewModel.updateSettings {
+                        it.copy(followUpReminderIntervalMinutes = minutes)
+                    }.join()
+                    showFollowUpIntervalDialog = false
+                }
+            }
+        )
+    }
+
+    // Follow-up max times dialog
+    if (showFollowUpMaxTimesDialog) {
+        MaxTimesInputDialog(
+            currentTimes = settings.followUpReminderMaxTimes,
+            onDismiss = { showFollowUpMaxTimesDialog = false },
+            onConfirm = { times ->
+                dialogScope.launch {
+                    settingsViewModel.updateSettings {
+                        it.copy(followUpReminderMaxTimes = times)
+                    }.join()
+                    showFollowUpMaxTimesDialog = false
                 }
             }
         )
@@ -466,24 +531,24 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SettingsRow(title: String, subtitle: String? = null, onClick: () -> Unit) {
+private fun SettingsRow(title: String, subtitle: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
     val colors = AppTheme.colors
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column {
-            Text(text = title, fontSize = 15.sp, color = colors.onSurface)
+            Text(text = title, fontSize = 15.sp, color = colors.onSurface.copy(alpha = if (enabled) 1f else 0.4f))
             if (subtitle != null) {
-                Text(text = subtitle, fontSize = 13.sp, color = colors.metadataContent)
+                Text(text = subtitle, fontSize = 13.sp, color = colors.metadataContent.copy(alpha = if (enabled) 1f else 0.4f))
             }
         }
-        Text(text = "›", fontSize = 18.sp, color = colors.outline)
+        Text(text = "›", fontSize = 18.sp, color = colors.outline.copy(alpha = if (enabled) 1f else 0.4f))
     }
 }
 
@@ -604,7 +669,11 @@ private fun dndRangeLabel(settings: CompanionChatDetailSettings): String {
 
 @Composable
 private fun IntervalInputDialog(
+    title: String = "主动消息间隔",
+    hint: String = "设置AI主动发消息的最小间隔时间（分钟）",
     currentMinutes: Int,
+    minMinutes: Int,
+    maxMinutes: Int,
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit
 ) {
@@ -617,7 +686,7 @@ private fun IntervalInputDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "主动消息间隔",
+                text = title,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.onSurface
             )
@@ -625,7 +694,7 @@ private fun IntervalInputDialog(
         text = {
             Column {
                 Text(
-                    text = "设置AI主动发消息的最小间隔时间（分钟）",
+                    text = hint,
                     fontSize = 13.sp,
                     color = colors.metadataContent
                 )
@@ -646,7 +715,7 @@ private fun IntervalInputDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "范围：30~1440 分钟（0.5~24 小时），当前：${intervalLabel(currentMinutes)}",
+                    text = "范围：$minMinutes~$maxMinutes 分钟，当前：${intervalLabel(currentMinutes)}",
                     fontSize = 12.sp,
                     color = colors.metadataContent
                 )
@@ -658,12 +727,85 @@ private fun IntervalInputDialog(
                     val minutes = inputText.toIntOrNull()
                     if (minutes == null) {
                         errorText = "请输入有效数字"
-                    } else if (minutes < 30) {
-                        errorText = "最小间隔30分钟"
-                    } else if (minutes > 1440) {
-                        errorText = "最大间隔1440分钟（24小时）"
+                    } else if (minutes < minMinutes) {
+                        errorText = "最小间隔${minMinutes}分钟"
+                    } else if (minutes > maxMinutes) {
+                        errorText = "最大间隔$maxMinutes 分钟"
                     } else {
                         onConfirm(minutes)
+                    }
+                }
+            ) { Text("确定", color = colors.primary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = colors.metadataContent) }
+        },
+        containerColor = colors.surface
+    )
+}
+
+@Composable
+private fun MaxTimesInputDialog(
+    currentTimes: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    val colors = AppTheme.colors
+
+    var inputText by remember { mutableStateOf(currentTimes.toString()) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "追问次数上限",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.onSurface
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "每条AI消息未回复时最多追问几次，达到上限后不再追问",
+                    fontSize = 13.sp,
+                    color = colors.metadataContent
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { input ->
+                        inputText = input
+                        errorText = null
+                    },
+                    label = { Text("次数") },
+                    suffix = { Text("次") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = errorText != null,
+                    supportingText = errorText?.let { { Text(it, color = colors.danger) } }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "范围：1~10 次，当前：$currentTimes 次",
+                    fontSize = 12.sp,
+                    color = colors.metadataContent
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val times = inputText.toIntOrNull()
+                    if (times == null) {
+                        errorText = "请输入有效数字"
+                    } else if (times < 1) {
+                        errorText = "最少1次"
+                    } else if (times > 10) {
+                        errorText = "最多10次"
+                    } else {
+                        onConfirm(times)
                     }
                 }
             ) { Text("确定", color = colors.primary) }

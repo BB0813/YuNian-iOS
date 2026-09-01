@@ -58,4 +58,17 @@ interface SummaryProvider {
         memoryContext: String,
         purpose: SummaryPurpose
     ): String?
+
+    /**
+     * 从单轮/多轮对话中识别值得长期记住的核心记忆（重要事实、用户偏好、人物关系、重要事件）。
+     *
+     * 与 [summarize]（五维叙事摘要）不同：本方法只输出「【重要记忆】类别|内容」行，
+     * 由记忆系统解析后写入高 importance 稳定记忆。不依赖 WORKING 记忆条数阈值，
+     * 适合每轮对话后增量识别。
+     *
+     * @param conversationText 对话文本（如 "用户: xxx\nAI: yyy"）
+     * @param memoryContext    已有记忆上下文（避免重复收录）
+     * @return 含【重要记忆】段的文本；无收录内容或失败时返回 null
+     */
+    suspend fun identifyCoreMemories(conversationText: String, memoryContext: String = ""): String? = null
 }

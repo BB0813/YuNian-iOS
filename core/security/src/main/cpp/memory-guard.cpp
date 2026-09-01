@@ -29,6 +29,7 @@
 static uint64_t g_canary_value = 0;
 static volatile int g_canary_initialized = 0;
 static volatile int g_ptrace_attached = 0;
+static volatile int g_tampered = 0;
 
 /* ================================================================
  * Guard Pages
@@ -99,7 +100,9 @@ void mg_stack_canary_check(uint64_t expected) {
     if (expected != g_canary_value) {
         MG_LOGE("Stack canary mismatch! expected=%llx actual=%llx",
                 (unsigned long long)expected, (unsigned long long)g_canary_value);
-        abort(); // unrecoverable
+        /* Do NOT abort() — HarmonyOS/EMUI may have different stack layout.
+         * Log and mark as tampered instead. */
+        g_tampered = 1;
     }
 }
 
@@ -166,7 +169,6 @@ int mg_check_maps(void) {
     const char* bad_patterns[] = {
         _m0, _m1, _m2, _m3,
         _m4, _m5, _m6,
-        "virtual", "sandbox",
         NULL
     };
     for (int i = 0; bad_patterns[i] != NULL; i++) {

@@ -36,6 +36,7 @@ class AppUpdateManager(private val context: Context) {
     companion object {
         // Update URL configured per build — empty = disabled
         private const val UPDATE_API_URL = ""
+        private val json = Json { ignoreUnknownKeys = true }
     }
 
     private val okHttpClient = OkHttpClient()
@@ -86,7 +87,7 @@ class AppUpdateManager(private val context: Context) {
                     return@withContext
                 }
                 val release = try {
-                    Json { ignoreUnknownKeys = true }
+                    json
                         .decodeFromString<GitHubRelease>(body)
                 } catch (e: Exception) {
                     _updateCheckState.value = UpdateCheckState.ERROR

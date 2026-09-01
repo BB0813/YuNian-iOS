@@ -124,26 +124,26 @@ class QQBotWebSocketClient(
             val request = Request.Builder().url(gatewayUrl).build()
 
             webSocket = client.newWebSocket(request, object : WebSocketListener() {
-                override fun onOpen(ws: WebSocket, response: Response) {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
                     SecureLog.i(TAG, "WebSocket connected")
                 }
 
-                override fun onMessage(ws: WebSocket, text: String) {
+                override fun onMessage(webSocket: WebSocket, text: String) {
                     handleMessage(text)
                 }
 
-                override fun onClosing(ws: WebSocket, code: Int, reason: String) {
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     SecureLog.w(TAG, "WebSocket closing: $code $reason")
                     cleanupConnectionState()
                 }
 
-                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     SecureLog.w(TAG, "WebSocket closed: $code $reason")
                     cleanupConnectionState()
                     scheduleReconnect()
                 }
 
-                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     SecureLog.e(TAG, "WebSocket failure: ${t.message}", t)
                     cleanupConnectionState()
                     scheduleReconnect()
@@ -271,10 +271,6 @@ class QQBotWebSocketClient(
             // 无法在 WebSocket 回调中同步等待，返回 false 让重连逻辑处理
             return false
         }
-        if (token == null) {
-            SecureLog.e(TAG, "Cannot send identify: no valid token available")
-            return false
-        }
         val d = JsonObject(
             mapOf(
                 "token" to JsonPrimitive("QQBot $token"),
@@ -313,10 +309,6 @@ class QQBotWebSocketClient(
                 }
             }
             return false
-        }
-        if (token == null) {
-            SecureLog.e(TAG, "Cannot send resume: no valid token, falling back to identify")
-            return sendIdentify()
         }
         val d = JsonObject(
             mapOf(

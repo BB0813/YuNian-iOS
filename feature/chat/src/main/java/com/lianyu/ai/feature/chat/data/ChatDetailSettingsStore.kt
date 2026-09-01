@@ -33,6 +33,9 @@ data class CompanionChatDetailSettings(
     val ttsEnabled: Boolean = false, // 是否启用AI回复转语音
     val ttsProbability: Int = 50, // AI回复转语音的概率 0-100
     val ntpTimeEnabled: Boolean = false, // 是否启用NTP精确时间感知（关闭则使用设备本地时间）
+    val followUpReminderEnabled: Boolean = true, // 未回复追问提醒开关
+    val followUpReminderIntervalMinutes: Int = 5, // 未回复追问间隔（分钟）
+    val followUpReminderMaxTimes: Int = 3, // 每条AI消息未回复时最多追问次数
     val updatedAt: Long = System.currentTimeMillis()
 )
 

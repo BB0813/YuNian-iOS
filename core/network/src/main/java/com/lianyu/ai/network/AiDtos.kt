@@ -84,8 +84,15 @@ data class Message(
     val content: String? = null,
     val reasoning_content: String? = null,
     val tool_calls: List<ToolCallRaw>? = null,
-    val tool_call_id: String? = null
+    val tool_call_id: String? = null,
+    val timestamp: Long? = null,
+    val metadata: Map<String, String>? = null
 )
+
+fun Message.system(content: String): Message = Message("system", content)
+fun Message.user(content: String): Message = Message("user", content)
+fun Message.assistant(content: String): Message = Message("assistant", content)
+fun Message.tool(content: String, toolCallId: String): Message = Message("tool", content, tool_call_id = toolCallId)
 
 @Serializable
 data class ToolCallRaw(
@@ -121,7 +128,16 @@ data class ImageUrl(
 @Serializable
 data class ChatCompletionResponse(
     val choices: List<Choice>? = null,
-    val error: ErrorDetail? = null
+    val error: ErrorDetail? = null,
+    val usage: Usage? = null
+)
+
+/** OpenAI 兼容 usage（流式末尾 chunk 亦同构） */
+@Serializable
+data class Usage(
+    val prompt_tokens: Long? = null,
+    val completion_tokens: Long? = null,
+    val total_tokens: Long? = null
 )
 
 @Serializable
@@ -155,7 +171,14 @@ data class AnthropicMessage(
 @Serializable
 data class AnthropicResponse(
     val content: List<AnthropicContent>? = null,
-    val error: AnthropicError? = null
+    val error: AnthropicError? = null,
+    val usage: AnthropicUsage? = null
+)
+
+@Serializable
+data class AnthropicUsage(
+    val input_tokens: Long? = null,
+    val output_tokens: Long? = null
 )
 
 @Serializable
@@ -195,7 +218,14 @@ data class GeminiGenerationConfig(
 @Serializable
 data class GeminiResponse(
     val candidates: List<GeminiCandidate>? = null,
-    val error: GeminiError? = null
+    val error: GeminiError? = null,
+    val usageMetadata: GeminiUsageMetadata? = null
+)
+
+@Serializable
+data class GeminiUsageMetadata(
+    val promptTokenCount: Long? = null,
+    val candidatesTokenCount: Long? = null
 )
 
 @Serializable

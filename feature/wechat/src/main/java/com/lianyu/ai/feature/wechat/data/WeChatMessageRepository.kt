@@ -15,10 +15,7 @@ import com.lianyu.ai.feature.wechat.service.WeChatNotificationHelper
 import com.lianyu.ai.feature.wechat.service.WeChatServiceLocator
 import com.lianyu.ai.wechat.outbox.WeChatOutboxCoordinator
 import com.lianyu.ai.wechat.ilink.IlinkClientManager
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -33,7 +30,6 @@ class WeChatMessageRepository(
     private val tokenStore: WeChatTokenStore
 ) {
     private val appContext = context.applicationContext
-    private val processScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _incomingMessages = MutableSharedFlow<M0>(
         extraBufferCapacity = 100,
@@ -71,7 +67,6 @@ class WeChatMessageRepository(
         sdkClientManager.closeAndClear()
         WeChatServiceLocator.inboxCoordinator(appContext).cancelAll()
         com.lianyu.ai.feature.wechat.service.WeChatChannelRuntime.reset()
-        processScope.cancel()
     }
 
     /**
@@ -79,7 +74,6 @@ class WeChatMessageRepository(
      * 应在 WeChat 功能完全退出时调用。
      */
     fun destroy() {
-        processScope.cancel()
     }
 
     suspend fun pollMessages(timeoutMs: Long = TimeoutBudgets.WECHAT_POLL_TIMEOUT_MS): Result<WeChatPollResult> = withContext(Dispatchers.IO) {

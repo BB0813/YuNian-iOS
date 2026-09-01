@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lianyu.ai.feature.profile.R
+import com.lianyu.ai.uicommon.component.glass.LocalPageBackdrop
+import com.lianyu.ai.uicommon.component.glass.drawGlass
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,13 +107,17 @@ fun ProfileScreen(
             .padding(top = 48.dp)
     ) {
 
-        // === 个人信息卡片（不透明）— 头像 / 昵称 / 签名 ===
+        // === 个人信息卡片（玻璃）— 头像 / 昵称 / 签名 ===
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(colorScheme.surface)
+                .drawGlass(
+                    backdrop = LocalPageBackdrop.current,
+                    shape = RoundedCornerShape(16.dp),
+                    surfaceColor = colorScheme.surface.copy(alpha = 0.85f),
+                )
         ) {
             ProfileSectionRow(onClick = onProfileSettingsClick) {
                 Box(
@@ -174,7 +180,11 @@ fun ProfileScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(colorScheme.surface)
+                .drawGlass(
+                    backdrop = LocalPageBackdrop.current,
+                    shape = RoundedCornerShape(16.dp),
+                    surfaceColor = colorScheme.surface.copy(alpha = 0.85f),
+                )
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
@@ -255,7 +265,12 @@ internal fun SolidMenuGroup(items: List<MenuItemData>) {
     Column(
         modifier = Modifier
             .fillMaxWidth().padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(16.dp)).background(cs.surfaceVariant)
+            .clip(RoundedCornerShape(16.dp))
+            .drawGlass(
+                backdrop = LocalPageBackdrop.current,
+                shape = RoundedCornerShape(16.dp),
+                surfaceColor = cs.surfaceVariant.copy(alpha = 0.9f),
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         items.forEachIndexed { i, item -> SolidMenuItem(item.icon, item.title, item.subtitle, item.onClick, i < items.size - 1) }

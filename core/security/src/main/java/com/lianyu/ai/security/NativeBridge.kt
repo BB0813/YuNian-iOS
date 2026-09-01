@@ -10,9 +10,7 @@ object NativeBridge {
         try { System.loadLibrary("lianyu_security") }
         catch (e: UnsatisfiedLinkError) {
             tampered = true
-            throw RuntimeException(
-                "FATAL: liblianyu_security.so not found — app integrity compromised", e
-            )
+            android.util.Log.e("NativeBridge", "liblianyu_security.so not found — security features disabled", e)
         }
     }
 

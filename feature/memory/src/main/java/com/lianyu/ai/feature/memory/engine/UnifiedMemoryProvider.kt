@@ -14,9 +14,14 @@ import com.lianyu.ai.database.repository.SummaryProvider
 import com.lianyu.ai.database.repository.UnifiedMemoryRepository
 import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 统一记忆提供者 —— 现代化记忆系统的 [MemoryProvider] 实现。
@@ -43,7 +48,17 @@ class UnifiedMemoryProvider(
     companion object {
         private const val TAG = "UnifiedMemoryProvider"
             private const val DIARY_TAG = "ai_generated,conversation_summary"
+        private const val CORE_RECOGNITION_INTERVAL_MS = 3 * 60_000L
     }
+
+    /** 核心记忆识别的节流记录：scope:sourceId → 上次调用时间戳 */
+    private val lastCoreRecognition = ConcurrentHashMap<String, Long>()
+
+    /**
+     * 记忆沉淀后台作用域：embedding 回填 / AI 摘要 / 日记生成等网络调用
+     * 全部在此异步执行，不占用对话回复路径的 5s 后处理超时窗。
+     */
+    private val memoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val repository: UnifiedMemoryRepository
         private val database = AppDatabase.getDatabase(context.applicationContext)
@@ -113,6 +128,12 @@ class UnifiedMemoryProvider(
     /**
      * 从对话中提取并保存记忆。
      *
+     * 分段执行：
+     * 1. 同步快速部分（本地 DB）：WORKING 写入 + 正则稳定记忆 + 过期清理，
+     *    必须在调用方（对话后处理 5s 超时窗）内完成
+     * 2. 异步慢部分（网络）：embedding 回填、WORKING→EPISODIC AI 摘要、日记生成，
+     *    移入 [memoryScope] 后台协程，各自独立容错，不再受对话流程超时影响
+     *
      * 委托给 [UnifiedMemoryRepository.extractAndSaveMemories]，
      * 自动识别 7 种记忆类型并分别存储。
      */
@@ -122,35 +143,77 @@ class UnifiedMemoryProvider(
         companionId: Long,
         groupId: Long?
     ) {
-        runCatching {
-            val scope = if (groupId != null) MemoryScope.GROUP else MemoryScope.COMPANION
-            val sourceId = groupId ?: companionId
+        val scope = if (groupId != null) MemoryScope.GROUP else MemoryScope.COMPANION
+        val sourceId = groupId ?: companionId
 
+        // ── 1. 同步快速部分：本地写入（WORKING + 六类正则稳定记忆） ──
+        runCatching {
             repository.extractAndSaveMemories(
                 scope = scope,
                 sourceId = sourceId,
                 userInput = userInput,
                 aiResponse = aiResponse
             )
+        }.onFailure { Log.e(TAG, "提取记忆失败", it) }
 
-            if (groupId == null) {
-                generateConversationDiary(
-                    companionId = companionId,
-                    userInput = userInput,
-                    aiResponse = aiResponse
-                )
-            }
-
-            // 同时提取全局记忆（用户级偏好/事实，跨角色共享）
-            if (scope != MemoryScope.GLOBAL) {
+        // 同时提取全局记忆（用户级偏好/事实，跨角色共享）
+        if (scope != MemoryScope.GLOBAL) {
+            runCatching {
                 repository.extractAndSaveMemories(
                     scope = MemoryScope.GLOBAL,
                     sourceId = 0L,
                     userInput = userInput,
                     aiResponse = aiResponse
                 )
+            }.onFailure { Log.e(TAG, "提取全局记忆失败", it) }
+        }
+
+        // ── 2. 异步慢部分：embedding / AI 摘要 / 核心记忆识别 / 日记，独立后台协程 ──
+        memoryScope.launch {
+            runCatching { repository.postProcessMemories(scope, sourceId) }
+                .onFailure { Log.e(TAG, "记忆后处理失败", it) }
+            // 每轮对话增量识别核心记忆（3 分钟节流），不依赖 WORKING 条数阈值
+            recognizeCoreMemoriesThrottled(userInput, aiResponse, scope, sourceId)
+            if (scope != MemoryScope.GLOBAL) {
+                runCatching { repository.postProcessMemories(MemoryScope.GLOBAL, 0L) }
+                    .onFailure { Log.e(TAG, "全局记忆后处理失败", it) }
+                recognizeCoreMemoriesThrottled(userInput, aiResponse, MemoryScope.GLOBAL, 0L)
             }
-        }.onFailure { Log.e(TAG, "提取记忆失败", it) }
+            if (groupId == null) {
+                runCatching {
+                    generateConversationDiary(
+                        companionId = companionId,
+                        userInput = userInput,
+                        aiResponse = aiResponse
+                    )
+                }.onFailure { Log.e(TAG, "日记生成失败", it) }
+            }
+        }
+    }
+
+    /**
+     * 核心记忆识别（节流版）：同 scope 每 3 分钟最多一次，
+     * 把当前轮对话交给 AI 识别值得长期记住的事实/偏好/关系/事件。
+     */
+    private suspend fun recognizeCoreMemoriesThrottled(
+        userInput: String,
+        aiResponse: String,
+        scope: MemoryScope,
+        sourceId: Long
+    ) {
+        val key = "$scope:$sourceId"
+        val now = System.currentTimeMillis()
+        val last = lastCoreRecognition[key] ?: 0L
+        if (now - last < CORE_RECOGNITION_INTERVAL_MS) return
+        lastCoreRecognition[key] = now
+
+        runCatching {
+            repository.recognizeCoreMemories(
+                conversationText = "用户: $userInput\nAI: $aiResponse",
+                scope = scope,
+                sourceId = sourceId
+            )
+        }.onFailure { Log.e(TAG, "核心记忆识别失败", it) }
     }
 
     private suspend fun generateConversationDiary(
@@ -160,6 +223,17 @@ class UnifiedMemoryProvider(
     ) {
         val diaryProvider = ServiceRegistry.get(DiaryProvider::class.java) ?: return
         val companion = companionRepository.getCompanionById(companionId) ?: return
+
+        // 当天（本地时区）已自动生成过日记 → 跳过，每天最多自动沉淀 1 篇
+        val calendar = java.util.Calendar.getInstance()
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val todayStart = calendar.timeInMillis
+        val existingToday = diaryDao.getDiariesForCompanionSync(companionId, deviceId)
+            .firstOrNull { it.date in todayStart until (todayStart + 86_400_000L) && it.tags.contains(DIARY_TAG) }
+        if (existingToday != null) return
 
         val conversationSummary = buildConversationSummary(companion.name, userInput, aiResponse)
         val memoryContext = repository.buildMemoryContext(

@@ -15,6 +15,14 @@
     <string name="experimental_features_desc">探索尚未正式发布的测试功能</string>
     <string name="experimental_features_hint">以下功能处于实验阶段，可能不稳定，请谨慎开启。</string>
 
+    <!-- RikkaHub Ported Features -->
+    <string name="worldbook">世界书（知识库）</string>
+    <string name="worldbook_desc">管理触发式知识注入、关键词设定、角色世界观</string>
+    <string name="skills_manager">技能库</string>
+    <string name="skills_manager_desc">管理 AI 可加载的专业技能与操作方法</string>
+    <string name="mcp_settings_title">MCP 服务管理</string>
+    <string name="mcp_settings_desc">连接外部 MCP 服务器以扩展 AI 工具能力</string>
+
     <!-- Theme Screen -->
     <string name="theme_title">主题模式</string>
     <string name="theme_light">浅色模式</string>

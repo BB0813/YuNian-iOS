@@ -74,9 +74,15 @@ android {
             isMinifyEnabled = false
             isDebuggable = true
         }
+        // Release minification can be disabled via -PlianyuDisableMinify=true
+// Useful when Dex2C/R8 fails (exit code 9009)
+val disableMinify = providers.gradleProperty("lianyuDisableMinify")
+    .map { it.equals("true", ignoreCase = true) || it == "1" }
+    .orElse(false)
+
         release {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = true
+            isMinifyEnabled = !disableMinify.get()
             isShrinkResources = false  // Shell loads DEX from assets — must not strip
             isDebuggable = false
             proguardFiles(
@@ -165,25 +171,25 @@ tasks.register<Exec>("packageShellPayload") {
 // FIX 1: Strip plaintext classes*.dex from release APK and replace root DEX
 // with pure-Java thin shell (~KB). Business DEX is encrypted into assets/shell/*.dat.
 //
-// Default release gate:
-//   ./gradlew assembleRelease
-//     → packageThinShellRelease (auto)
-//     → promoteThinShellRelease (replaces app-release.apk)
-// Escape hatch (plain multi-MB root DEX, for debugging only):
-//   ./gradlew assembleRelease -PlianyuSkipThinShell=true
+// Default: thin shell is DISABLED (requires Android build-tools + Python + Dex2C).
+// To enable thin shell packaging:
+//   ./gradlew assembleRelease -PlianyuEnableThinShell=true
+// Requirements: Android build-tools, Python 3, Dex2C
 // Optional env:
 //   LIANYU_PYTHON                 absolute path to python.exe
 //   LIANYU_STORE_PASSWORD         release keystore password (for --sign)
 //   LIANYU_KEY_PASSWORD           release key password (for --sign)
 //   LIANYU_KEY_ALIAS              release key alias
 //   LIANYU_THIN_SHELL_SIGN=0      skip re-sign (default: sign when keystore passwords available)
+// Thin shell is ENABLED by default. To DISABLE thin shell:
+//   ./gradlew assembleRelease -PlianyuSkipThinShell=true
 val skipThinShell = providers.gradleProperty("lianyuSkipThinShell")
     .map { it.equals("true", ignoreCase = true) || it == "1" }
     .orElse(false)
 
 tasks.register("packageThinShellRelease") {
     group = "security"
-    description = "Replace release root DEX with pure-Java thin shell and encrypt business DEX into assets/shell."
+    description = "Replace release root DEX with pure-Java thin shell and encrypt business DEX into assets/shell. Requires Android build-tools + Python + Dex2C."
     dependsOn("assembleRelease")
     onlyIf { !skipThinShell.get() }
 
@@ -269,7 +275,7 @@ tasks.register("packageThinShellRelease") {
 // assembleRelease consumers never ship plaintext multi-MB root DEX by default.
 tasks.register("promoteThinShellRelease") {
     group = "security"
-    description = "Replace app-release.apk with thin-shell APK and keep plain backup."
+    description = "Replace app-release.apk with thin-shell APK and keep plain backup. Requires thin shell packaging enabled."
     dependsOn("packageThinShellRelease")
     onlyIf { !skipThinShell.get() }
 
@@ -299,8 +305,8 @@ tasks.register("promoteThinShellRelease") {
     }
 }
 
-// Wire thin-shell as the default release packaging gate.
-// Order: assembleRelease → packageThinShellRelease → promoteThinShellRelease
+// Wire thin-shell as the release packaging gate.
+// Enabled by default (skipThinShell=false). To disable: -PlianyuSkipThinShell=true
 afterEvaluate {
     if (!skipThinShell.get()) {
         tasks.named("assembleRelease").configure {
@@ -309,8 +315,9 @@ afterEvaluate {
         tasks.named("packageThinShellRelease").configure {
             finalizedBy("promoteThinShellRelease")
         }
+        logger.lifecycle("Thin shell packaging ENABLED (use -PlianyuSkipThinShell=true to disable)")
     } else {
-        logger.lifecycle("lianyuSkipThinShell=true — release will keep plaintext root DEX")
+        logger.lifecycle("lianyuSkipThinShell=true — release will keep plaintext root DEX (thin shell disabled)")
     }
 }
 
@@ -344,6 +351,9 @@ dependencies {
     implementation(project(":feature:backup"))
     implementation(project(":feature:coffee"))
     implementation(project(":feature:automation"))
+    implementation(project(":feature:worldbook"))
+    implementation(project(":feature:mcp"))
+    implementation(project(":feature:skills"))
 
     // sherpa-onnx: 离线流式语音识别，运行时由 app 模块提供
     implementation(files("libs/sherpa-onnx-1.13.3.aar"))
@@ -365,6 +375,9 @@ dependencies {
     implementation(libs.androidx.animation)
     implementation(libs.androidx.animation.core)
     implementation(libs.androidx.work.runtime.ktx)
+    // 液态玻璃：Kyant Backdrop（真实模糊/折射/高光）+ Capsule（连续圆角），与 RiseDiary 同款
+    implementation(libs.kyant.backdrop)
+    implementation(libs.kyant.capsule)
 
     // 厂商 Push SDK
     // OPPO / vivo 使用本地 aar，请从各厂商开放平台下载后放置到 app/libs

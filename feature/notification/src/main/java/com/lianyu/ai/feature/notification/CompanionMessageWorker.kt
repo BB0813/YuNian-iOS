@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.lianyu.ai.database.AppDatabase
@@ -23,13 +24,13 @@ import com.lianyu.ai.domain.ServiceRegistry
 import com.lianyu.ai.domain.wechat.WeChatProactiveSync
 import com.lianyu.ai.common.AppForegroundTracker
 import com.lianyu.ai.common.BanManager
+import com.lianyu.ai.common.ChatConstants
 import com.lianyu.ai.common.ChatDetailSettingsDataStoreProvider
 import com.lianyu.ai.common.SecureLog
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -57,7 +58,13 @@ data class ProactiveSettings(
     val dndEndMinutes: Int = 8 * 60,
     val allowLateNightMessage: Boolean = false,
     val allowPriorityMessageInDnd: Boolean = false,
-    val blocked: Boolean = false
+    val blocked: Boolean = false,
+    /** 未回复追问提醒开关 */
+    val followUpReminderEnabled: Boolean = true,
+    /** 未回复追问间隔（分钟） */
+    val followUpReminderIntervalMinutes: Int = 5,
+    /** 每条 AI 消息未回复时最多追问次数 */
+    val followUpReminderMaxTimes: Int = 3
 )
 
 class CompanionMessageWorker(
@@ -87,9 +94,12 @@ class CompanionMessageWorker(
             val companions = companionDao.getAllCompanionsSync()
             if (companions.isEmpty()) return@withContext Result.success()
 
+            // 一次性解码全部伴侣设置（DataStore 内存缓存），后续过滤/选择共用，避免重复读取
+            val settingsById = readAllCompanionSettings()
+
             // ── 筛选启用主动消息且未屏蔽的伴侣 ──
             val eligibleCompanions = companions.filter { companion ->
-                runCatching { readCompanionSettings(companion.id) }.getOrNull()?.let { settings ->
+                settingsById[companion.id]?.let { settings ->
                     settings.proactiveEnabled && !settings.blocked
                 } ?: false
             }
@@ -100,108 +110,135 @@ class CompanionMessageWorker(
                 return@withContext Result.success()
             }
 
-            // 从符合条件的伴侣中随机选一个
-            val randomCompanion = eligibleCompanions.random()
-            val settings = runCatching { readCompanionSettings(randomCompanion.id) }.getOrNull()
-                ?: ProactiveSettings()
+            val now = System.currentTimeMillis()
+            val nowCal = java.util.Calendar.getInstance()
+            val nowMinutes = nowCal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + nowCal.get(java.util.Calendar.MINUTE)
+
+            // ── 优先选择「追问到期」的伴侣 ──
+            // 随机选择会让到期追问被其它伴侣的调度不断推后（不主动/不追问的感知来源）。
+            // 先扫描一遍，优先处理 AI 最后发言、用户未回复且已过追问间隔的伴侣。
+            val dueFollowUpCompanions = eligibleCompanions.filter { companion ->
+                val s = settingsById[companion.id] ?: return@filter false
+                if (!s.followUpReminderEnabled) return@filter false
+                // 免打扰期间不追问
+                if (isInDndRange(nowMinutes, s) && !s.allowLateNightMessage) return@filter false
+                // 每日上限已满不追问
+                if (s.proactiveDailyLimit > 0 && getTodayProactiveCount(context, companion.id) >= s.proactiveDailyLimit) {
+                    return@filter false
+                }
+                val last = runCatching { messageDao.getLastMessageSync(companion.id, "chat")?.toChatMessage() }
+                    .getOrNull() ?: return@filter false
+                if (last.isFromUser) return@filter false
+                val elapsedMs = now - last.timestamp
+                // 超过最大时效（如 24 小时）不再追问，避免对久远的旧消息反复骚扰
+                if (elapsedMs >= ChatConstants.FOLLOW_UP_REMINDER_MAX_AGE_HOURS * 60L * 60L * 1000L) return@filter false
+                if (elapsedMs < s.followUpIntervalMs()) return@filter false
+                val state = readFollowUpState(context, companion.id)
+                val nudgeCount = if (state.lastNudgeMessageId == last.id) state.nudgeCount else 0
+                nudgeCount < s.maxNudgeTimes()
+            }
+
+            // 有到期的追问优先处理；否则从符合条件的伴侣中随机选一个
+            val companion = dueFollowUpCompanions.randomOrNull() ?: eligibleCompanions.random()
+            val settings = settingsById[companion.id] ?: ProactiveSettings()
+            val domainSettings = settings.toDomain()
 
             // ── 免打扰检查 ──
-            if (settings.doNotDisturbEnabled && !settings.allowPriorityMessageInDnd) {
-                val now = java.util.Calendar.getInstance()
-                val totalMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
-                val inDndRange = if (settings.dndStartMinutes > settings.dndEndMinutes) {
-                    // 跨午夜：如 23:00 ~ 08:00
-                    totalMinutes >= settings.dndStartMinutes || totalMinutes < settings.dndEndMinutes
-                } else {
-                    totalMinutes in settings.dndStartMinutes until settings.dndEndMinutes
-                }
-                if (inDndRange && !settings.allowLateNightMessage) {
-                    SecureLog.d("CompanionMessageWorker", "DND active for ${randomCompanion.name}, skip")
-                    scheduleNext(context, settings)
-                    return@withContext Result.success()
-                }
+            // 追问到期或主动消息恰逢免打扰：调度到免打扰结束时刻复查，
+            // 避免按普通间隔（可能数小时）错过 DND 结束后的追问窗口。
+            if (isInDndRange(nowMinutes, settings) && !settings.allowLateNightMessage) {
+                val minutesToDndEnd = minutesUntilDndEnd(nowMinutes, settings.dndStartMinutes, settings.dndEndMinutes)
+                SecureLog.d("CompanionMessageWorker", "DND active for ${companion.name}, retry in ${minutesToDndEnd}min")
+                scheduleWithDelay(context, minutesToDndEnd.coerceIn(1, 1440).toLong())
+                return@withContext Result.success()
             }
 
             // ── 每日上限检查（精确计数，跨天自动重置） ──
             if (settings.proactiveDailyLimit > 0) {
-                val todayCount = getTodayProactiveCount(context, randomCompanion.id)
+                val todayCount = getTodayProactiveCount(context, companion.id)
                 if (todayCount >= settings.proactiveDailyLimit) {
-                    SecureLog.d("CompanionMessageWorker", "Daily limit reached ($todayCount/${settings.proactiveDailyLimit}) for ${randomCompanion.name}")
+                    SecureLog.d("CompanionMessageWorker", "Daily limit reached ($todayCount/${settings.proactiveDailyLimit}) for ${companion.name}")
                     scheduleNext(context, settings)
                     return@withContext Result.success()
                 }
             }
 
             val recentMessages = ChatMessageCrypto.decryptFromStorage(
-                    messageDao.getRecentMessagesSync(randomCompanion.id, "chat", 10)
+                    messageDao.getRecentMessagesSync(companion.id, "chat", 10)
                         .map { it.toChatMessage() }
                 ).filterDecrypted()
 
-            // 传入自定义设置，让 shouldProactivelyMessage/generateProactiveMessage 按其行为
-            val domainSettings = settings.toDomain()
-            if (!aiServiceProvider.shouldProactivelyMessage(randomCompanion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)) {
-                scheduleNext(context, settings)
-                return@withContext Result.success()
-            }
+            // 按时间升序排序，DAO 返回的是 DESC（新→旧），必须先排序再取最后一条
+            val sortedMessages = recentMessages.sortedBy { it.timestamp }
+            val lastMessage = sortedMessages.lastOrNull()
 
-            val messageContent = aiServiceProvider.generateProactiveMessage(randomCompanion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)
+            // ── 未回复追问分支：AI 已发言、用户长时间未回复，按设定间隔追问 ──
+            if (lastMessage != null && !lastMessage.isFromUser && settings.followUpReminderEnabled) {
+                val elapsedMs = now - lastMessage.timestamp
+                // 超过最大时效（如 24 小时）不再追问，退回普通调度
+                if (elapsedMs >= ChatConstants.FOLLOW_UP_REMINDER_MAX_AGE_HOURS * 60L * 60L * 1000L) {
+                    scheduleNext(context, settings)
+                    return@withContext Result.success()
+                }
+                val state = readFollowUpState(context, companion.id)
+                // 当前最后一条就是上次追问发的消息 → 本轮仍未收到用户回复，计数延续；否则视为新一轮
+                val nudgeCount = if (state.lastNudgeMessageId == lastMessage.id) state.nudgeCount else 0
 
-            if (messageContent == null) {
-                SecureLog.w("CompanionMessageWorker", "Proactive message is null, skipping")
-                scheduleNext(context, settings)
-                return@withContext Result.success()
-            }
-
-            // 安全检查：拦截 AI 主动消息中的违规内容（仅最终防线，不累计封禁）
-            // AiService 生成时已做过 checkOutputSafety，这里只做兜底
-            val outputSafety = com.lianyu.ai.common.ContentFilter.checkOutputSafety(messageContent)
-            if (!outputSafety.isSafe) {
-                SecureLog.w("CompanionMessageWorker", "Proactive message blocked by safety filter: ${outputSafety.reason}")
-                // AI 输出违规不应累加用户封禁（见 Bug #1 根因 A3）
-                scheduleNext(context, settings)
-                return@withContext Result.success()
-            }
-
-            // 气泡架构（用户定稿）：AI 每条回复 = 一条气泡，不做客户端语义分句，整条入库+广播
-            val segments = listOf(messageContent.trim()).filter { it.isNotBlank() }
-            var totalSegmentsSent = 0
-
-            for ((index, segment) in segments.withIndex()) {
-                if (index > 0) {
-                    // 段间延迟 1~2 秒，模拟真人分段打字效果
-                    delay(Random.nextLong(1000L, 2000L))
+                if (elapsedMs >= settings.followUpIntervalMs() && nudgeCount < settings.maxNudgeTimes()) {
+                    val reminder = aiServiceProvider.generateFollowUpReminder(
+                        companion.toAiCompanionInfo(),
+                        recentMessages.toAiChatMessages(),
+                        domainSettings
+                    )
+                    val nudgeMsgId = reminder?.let { sendMessage(companion, it) }
+                    if (nudgeMsgId != null) {
+                        // 记录本次追问的消息 id，下次运行时若用户仍未回复则继续计数
+                        saveFollowUpState(context, companion.id, nudgeMsgId, nudgeCount + 1)
+                        SecureLog.d(
+                            "CompanionMessageWorker",
+                            "Follow-up reminder sent for ${companion.name}, nudge=${nudgeCount + 1}/${settings.maxNudgeTimes()}"
+                        )
+                        scheduleFollowUpNext(context, settings)
+                        return@withContext Result.success()
+                    }
+                    SecureLog.d("CompanionMessageWorker", "Follow-up reminder declined, reschedule")
                 }
 
-                val message = ChatMessage(
-                    companionId = randomCompanion.id,
-                    content = segment,
-                    isFromUser = false
-                )
-                val messageId = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
-                    .enqueueChat(message)
-                broadcastProactiveWeChatMessage(randomCompanion.id, messageId)
-                totalSegmentsSent++
+                // 未到追问时间点：按追问间隔尽快复查；追问次数已到上限：退回普通间隔
+                if (elapsedMs < settings.followUpIntervalMs()) {
+                    scheduleFollowUpNext(context, settings)
+                } else {
+                    scheduleNext(context, settings)
+                }
+                return@withContext Result.success()
             }
 
-            // 精确增加今日主动消息计数
-            if (totalSegmentsSent > 0 && settings.proactiveDailyLimit > 0) {
-                incrementTodayProactiveCount(context, randomCompanion.id, 1)
+            if (!aiServiceProvider.shouldProactivelyMessage(companion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)) {
+                scheduleNext(context, settings)
+                return@withContext Result.success()
             }
 
-            // 仅在最后一条段时推送通知，避免通知轰炸
-            if (!AppForegroundTracker.isInForeground && segments.isNotEmpty()) {
-                NotificationHelper.showCompanionMessageNotification(
-                    context,
-                    randomCompanion.name,
-                    segments.first(), // 通知显示第一条即可
-                    randomCompanion.id
-                )
-            }
+            val messageContent = aiServiceProvider.generateProactiveMessage(companion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)
+                ?: run {
+                    SecureLog.w("CompanionMessageWorker", "Proactive message is null, skipping")
+                    scheduleNext(context, settings)
+                    return@withContext Result.success()
+                }
+
+            // 入库 + 广播 + 通知（统一发送路径，内部含安全检查兜底）
+            sendMessage(companion, messageContent)
 
             scheduleNext(context, settings)
 
             Result.success()
-        } catch (_: Exception) {
+        } catch (e: IllegalStateException) {
+            SecureLog.e("CompanionMessageWorker", "Permanent failure, will not retry", e)
+            Result.failure()
+        } catch (e: SecurityException) {
+            SecureLog.e("CompanionMessageWorker", "Permission denied, will not retry", e)
+            Result.failure()
+        } catch (e: Exception) {
+            SecureLog.e("CompanionMessageWorker", "Transient failure, will retry", e)
             Result.retry()
         }
     }
@@ -212,17 +249,73 @@ class CompanionMessageWorker(
     }
 
     /**
-     * 从 DataStore 读取指定伴侣的主动消息相关设置。
+     * 统一发送一条 AI 主动消息：安全检查兜底 → 入库 → 微信同步 → 今日计数 → 通知。
+     * @return 入库后的真实消息 id；内容为空/未通过安全检查返回 null。
+     */
+    private suspend fun sendMessage(companion: com.lianyu.ai.database.model.CompanionEntity, content: String): Long? {
+        val trimmed = content.trim()
+        if (trimmed.isEmpty()) return null
+        // 安全检查：拦截 AI 主动消息中的违规内容（仅最终防线，不累计封禁）
+        val safety = com.lianyu.ai.common.ContentFilter.checkOutputSafety(trimmed)
+        if (!safety.isSafe) {
+            SecureLog.w("CompanionMessageWorker", "Proactive message blocked by safety filter: ${safety.reason}")
+            // AI 输出违规不应累加用户封禁（见 Bug #1 根因 A3）
+            return null
+        }
+        val message = ChatMessage(
+            companionId = companion.id,
+            content = trimmed,
+            isFromUser = false
+        )
+        val messageId = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
+            .enqueueChat(message)
+        broadcastProactiveWeChatMessage(companion.id, messageId)
+        incrementTodayProactiveCount(context, companion.id, 1)
+        if (!AppForegroundTracker.isInForeground) {
+            NotificationHelper.showCompanionMessageNotification(
+                context,
+                companion.name,
+                trimmed,
+                companion.id
+            )
+        }
+        return messageId
+    }
+
+    /** 是否处于免打扰时间段（不考虑 allowLateNightMessage/allowPriorityMessageInDnd 的放行语义） */
+    private fun isInDndRange(nowMinutes: Int, settings: ProactiveSettings): Boolean {
+        if (!settings.doNotDisturbEnabled || settings.allowPriorityMessageInDnd) return false
+        return if (settings.dndStartMinutes > settings.dndEndMinutes) {
+            // 跨午夜：如 23:00 ~ 08:00
+            nowMinutes >= settings.dndStartMinutes || nowMinutes < settings.dndEndMinutes
+        } else {
+            nowMinutes in settings.dndStartMinutes until settings.dndEndMinutes
+        }
+    }
+
+    /** 当前时刻到免打扰结束的分钟数（仅允许在 DND 范围内调用） */
+    private fun minutesUntilDndEnd(nowMinutes: Int, dndStartMinutes: Int, dndEndMinutes: Int): Int {
+        val dayMinutes = 24 * 60
+        return if (dndStartMinutes > dndEndMinutes) {
+            // 跨午夜：现在在 [start, 24h) → 结束于明天的 end；现在在 [0, end) → 结束于今天的 end
+            if (nowMinutes >= dndStartMinutes) (dayMinutes - nowMinutes) + dndEndMinutes
+            else dndEndMinutes - nowMinutes
+        } else {
+            dndEndMinutes - nowMinutes
+        }
+    }
+
+    /**
+     * 从 DataStore 一次性读取全部伴侣的主动消息相关设置。
      * 直接读取与 ChatDetailSettingsStore 共享的同一 DataStore，避免跨 feature 依赖。
      */
-    private suspend fun readCompanionSettings(companionId: Long): ProactiveSettings? {
+    private suspend fun readAllCompanionSettings(): Map<Long, ProactiveSettings> {
         return runCatching {
             val dataStore = ChatDetailSettingsDataStoreProvider.get(context)
             val prefs = dataStore.data.first()
-            val raw = prefs[stringPreferencesKey("companion_chat_detail_settings_map")] ?: return@runCatching null
-            val settingsMap: Map<Long, ProactiveSettings> = json.decodeFromString(raw)
-            settingsMap[companionId]
-        }.getOrNull()
+            val raw = prefs[stringPreferencesKey("companion_chat_detail_settings_map")] ?: return@runCatching emptyMap()
+            json.decodeFromString<Map<Long, ProactiveSettings>>(raw)
+        }.getOrNull() ?: emptyMap()
     }
 
     // ── 领域类型转换辅助 ──
@@ -241,7 +334,10 @@ class CompanionMessageWorker(
         dndEndMinutes = dndEndMinutes,
         allowLateNightMessage = allowLateNightMessage,
         allowPriorityMessageInDnd = allowPriorityMessageInDnd,
-        blocked = blocked
+        blocked = blocked,
+        followUpReminderEnabled = followUpReminderEnabled,
+        followUpReminderIntervalMinutes = followUpReminderIntervalMinutes,
+        followUpReminderMaxTimes = followUpReminderMaxTimes
     )
 
     private fun com.lianyu.ai.database.model.CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
@@ -264,11 +360,10 @@ class CompanionMessageWorker(
     companion object {
         private const val WORK_NAME = "companion_message_work"
 
-        /** 默认间隔兜底（当设置读取失败时使用） */
-        private const val FALLBACK_MIN_MINUTES = 30L
-        private const val FALLBACK_MAX_MINUTES = 120L
-
         private const val DAILY_COUNT_PREFS = "proactive_daily_count"
+
+        /** 未回复追问状态存储：lastNudgeMessageId + nudgeCount（按伴侣分 key） */
+        private const val FOLLOW_UP_STATE_PREFS = "proactive_followup_state"
 
         /** 获取指定伴侣今日已发主动消息数（精确计数，不取近似） */
         private fun getTodayProactiveCount(context: Context, companionId: Long): Int {
@@ -294,28 +389,56 @@ class CompanionMessageWorker(
             return "${cal.get(java.util.Calendar.YEAR)}-${cal.get(java.util.Calendar.DAY_OF_YEAR)}"
         }
 
+        private data class FollowUpState(
+            val lastNudgeMessageId: Long = -1L,
+            val nudgeCount: Int = 0
+        )
+
+        private fun readFollowUpState(context: Context, companionId: Long): FollowUpState {
+            val prefs = context.getSharedPreferences(FOLLOW_UP_STATE_PREFS, Context.MODE_PRIVATE)
+            return FollowUpState(
+                lastNudgeMessageId = prefs.getLong("last_nudge_msg_$companionId", -1L),
+                nudgeCount = prefs.getInt("nudge_count_$companionId", 0)
+            )
+        }
+
+        private fun saveFollowUpState(context: Context, companionId: Long, lastNudgeMessageId: Long, nudgeCount: Int) {
+            context.getSharedPreferences(FOLLOW_UP_STATE_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_nudge_msg_$companionId", lastNudgeMessageId)
+                .putInt("nudge_count_$companionId", nudgeCount)
+                .apply()
+        }
+
         private val networkConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
         /**
          * 外部入口：首次调度，使用默认间隔。
-         * 使用 enqueueUniqueWork + REPLACE 确保只保留最新一次调度，
-         * 消除 KeepAliveService 15min 心跳 + MainActivity 启动反复 schedule 导致的请求堆叠。
+         * 使用 enqueueUniqueWork + REPLACE 确保只保留最新一次调度。
+         *
+         * 防重置竞态（Bug #1 根因）：KeepAliveAlarmReceiver（每 8 分钟）、
+         * IqooKeepAliveJobService（每 15 分钟）、MainActivity（启动）、
+         * KeepAliveService（心跳/超时）都会调用本方法；若无保护，
+         * REPLACE 会反复取消待执行的主动消息并重置为随机 15~60 分钟延迟，
+         * 导致主动消息几乎永不触发。因此仅当没有 ENQUEUED/RUNNING 工作时才调度。
          */
         fun schedule(context: Context) {
-            val delayMinutes = Random.nextInt(FALLBACK_MIN_MINUTES.toInt(), FALLBACK_MAX_MINUTES.toInt())
+            // 查询带 500ms 超时：查询失败/超时时保守跳过（alarm 每 8 分钟会再试），
+            // 避免在 UI 线程/广播窗口内长时间阻塞，也避免破坏一个正在工作的调度。
+            val hasActiveWork = runCatching {
+                WorkManager.getInstance(context).getWorkInfosForUniqueWork(WORK_NAME)
+                    .get(500, TimeUnit.MILLISECONDS)
+                    .any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
+            }.getOrDefault(true)
+            if (hasActiveWork) return
 
-            val workRequest = OneTimeWorkRequestBuilder<CompanionMessageWorker>()
-                .setConstraints(networkConstraints)
-                .setInitialDelay(delayMinutes.toLong(), TimeUnit.MINUTES)
-                .build()
-
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                workRequest
+            val delayMinutes = Random.nextInt(
+                ChatConstants.PROACTIVE_FALLBACK_MIN_MINUTES.toInt(),
+                ChatConstants.PROACTIVE_FALLBACK_MAX_MINUTES.toInt()
             )
+            scheduleWithDelay(context, delayMinutes.toLong())
         }
 
         /**
@@ -324,14 +447,32 @@ class CompanionMessageWorker(
          */
         private fun scheduleNext(context: Context, settings: ProactiveSettings?) {
             val delayMinutes = if (settings != null && settings.proactiveIntervalMinutes > 0) {
-                // 用户手动输入的间隔优先，确保 ≥15 分钟，最大 1440 分钟（24h）
-                settings.proactiveIntervalMinutes.coerceIn(15, 1440).toLong()
+                // 用户手动输入的间隔优先，允许自定义到分钟级（≥1 分钟），最大 1440 分钟（24h）
+                settings.proactiveIntervalMinutes.coerceIn(
+                    ChatConstants.PROACTIVE_USER_MIN_INTERVAL_MINUTES,
+                    ChatConstants.PROACTIVE_USER_MAX_INTERVAL_MINUTES
+                ).toLong()
             } else {
-                val minInterval = settings?.proactiveMinIntervalMinutes?.coerceAtLeast(15) ?: FALLBACK_MIN_MINUTES.toInt()
-                val maxInterval = settings?.proactiveMaxIntervalMinutes?.coerceAtLeast(minInterval + 1) ?: FALLBACK_MAX_MINUTES.toInt()
+                val minInterval = settings?.proactiveMinIntervalMinutes
+                    ?.coerceAtLeast(ChatConstants.PROACTIVE_USER_MIN_INTERVAL_MINUTES)
+                    ?: ChatConstants.PROACTIVE_FALLBACK_MIN_MINUTES.toInt()
+                val maxInterval = settings?.proactiveMaxIntervalMinutes
+                    ?.coerceAtLeast(minInterval + 1)
+                    ?: ChatConstants.PROACTIVE_FALLBACK_MAX_MINUTES.toInt()
                 Random.nextInt(minInterval, maxInterval + 1).toLong()
             }
+            scheduleWithDelay(context, delayMinutes)
+        }
 
+        /**
+         * 未回复追问复查调度：按追问间隔尽快复查，保证追问到点即发。
+         */
+        private fun scheduleFollowUpNext(context: Context, settings: ProactiveSettings) {
+            scheduleWithDelay(context, settings.followUpIntervalMs() / 60_000L)
+        }
+
+        /** 通用调度：以指定分钟延迟重排主动消息 Worker（REPLACE，单链） */
+        private fun scheduleWithDelay(context: Context, delayMinutes: Long) {
             val workRequest = OneTimeWorkRequestBuilder<CompanionMessageWorker>()
                 .setConstraints(networkConstraints)
                 .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
@@ -349,3 +490,16 @@ class CompanionMessageWorker(
         }
     }
 }
+
+// ── 文件级扩展函数（companion object 与 doWork 共用） ──
+
+/** 未回复追问间隔（毫秒），限制在用户可调范围内 */
+private fun ProactiveSettings.followUpIntervalMs(): Long =
+    followUpReminderIntervalMinutes.coerceIn(
+        ChatConstants.FOLLOW_UP_REMINDER_MIN_INTERVAL_MINUTES,
+        ChatConstants.FOLLOW_UP_REMINDER_MAX_INTERVAL_MINUTES
+    ) * 60_000L
+
+/** 未回复追问次数上限，限制在合理范围内 */
+private fun ProactiveSettings.maxNudgeTimes(): Int =
+    followUpReminderMaxTimes.coerceIn(1, ChatConstants.FOLLOW_UP_REMINDER_MAX_TIMES_LIMIT)

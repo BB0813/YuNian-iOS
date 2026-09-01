@@ -80,3 +80,8 @@ MODULE_ARCHITECTURE.pdf
 
 # Kotlin compiler session state (should never be tracked)
 .kotlin/
+
+# Local tooling / session artifacts — never upload
+.zcode/
+.playwright-mcp/
+nul

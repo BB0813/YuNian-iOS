@@ -61,6 +61,10 @@ object OpenAiSseStreamAdapter {
             }
             val c = delta.content
             if (!c.isNullOrEmpty()) {
+                if (contentBuf.length > 50000) {
+                    failed = "回复过长，已截断"
+                    return@collect
+                }
                 contentBuf.append(c)
                 emit(AssistantStreamEvent.TextDelta(turnId = turnId, delta = c))
             }

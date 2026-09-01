@@ -34,6 +34,10 @@ class BackupExportService(private val context: Context) {
         val memoryEntries = db.memoryDao().getAllMemoriesSync(deviceId).map { it.toDecryptedSnapshot() }
         val tempMemories = db.memoryDao().getAllTempMemoriesSync(deviceId).map { it.toSnapshot() }
         val tokenUsages = db.tokenUsageDao().getAllUsageSync(deviceId).map { it.toSnapshot() }
+        val unifiedMemories = db.unifiedMemoryDao().getAllActiveSync(deviceId)
+            .filter { it.isDeleted == 0 }
+            .map { it.toSnapshot() }
+        val diaries = db.diaryDao().getAllDiariesSync(deviceId).map { it.toSnapshot() }
 
         // 读取每条选中 companion 的聊天消息（已解密）
         for (c in companions) {
@@ -63,7 +67,9 @@ class BackupExportService(private val context: Context) {
             groupMessages = groupMessages,
             memoryEntries = memoryEntries,
             tempMemories = tempMemories,
-            tokenUsages = tokenUsages
+            tokenUsages = tokenUsages,
+            unifiedMemories = unifiedMemories,
+            diaries = diaries
         )
     }
 
@@ -164,4 +170,16 @@ private fun com.lianyu.ai.database.model.TokenUsage.toSnapshot() = TokenUsageSna
     id = id, companionId = companionId, date = date, inputTokens = inputTokens,
     outputTokens = outputTokens, totalTokens = totalTokens, requestCount = requestCount,
     timestamp = timestamp, deviceId = deviceId
+)
+
+private fun com.lianyu.ai.database.model.MemoryRecord.toSnapshot() = UnifiedMemorySnapshot(
+    id = id, memoryType = memoryType.name, scope = scope.name, source = source.name,
+    content = content, summary = summary, confidence = confidence, importance = importance,
+    sourceId = sourceId, createdAt = createdAt, updatedAt = updatedAt, observedAt = observedAt,
+    expiresAt = expiresAt, accessCount = accessCount, tags = tags, deviceId = deviceId
+)
+
+private fun com.lianyu.ai.database.model.DiaryEntry.toSnapshot() = DiarySnapshot(
+    id = id, companionId = companionId, title = title, content = content, mood = mood,
+    date = date, weather = weather, tags = tags, deviceId = deviceId
 )

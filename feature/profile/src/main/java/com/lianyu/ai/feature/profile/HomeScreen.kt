@@ -1,17 +1,23 @@
 package com.lianyu.ai.feature.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -39,8 +45,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,8 +65,14 @@ import com.lianyu.ai.uicommon.theme.PinkMuted
 import com.lianyu.ai.uicommon.theme.PinkPrimary
 import com.lianyu.ai.uicommon.theme.AdaptiveSizing
 import com.lianyu.ai.uicommon.theme.rememberAdaptiveSizing
+import com.kyant.capsule.ContinuousCapsule
 import com.lianyu.ai.database.viewmodel.ChatGroupViewModel
 import com.lianyu.ai.uicommon.component.AppListItemLayout
+import com.lianyu.ai.uicommon.component.glass.GlassButton
+import com.lianyu.ai.uicommon.component.glass.LocalPageBackdrop
+import com.lianyu.ai.uicommon.component.glass.LiquidBottomTab
+import com.lianyu.ai.uicommon.component.glass.LiquidBottomTabs
+import com.lianyu.ai.uicommon.component.glass.drawGlass
 import com.lianyu.ai.uicommon.theme.AppTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -81,19 +96,19 @@ fun HomeScreen(
     var selectedTab by remember { mutableStateOf(HomeTab.ALL) }
     val adaptiveSizing = rememberAdaptiveSizing()
     val colorScheme = AppTheme.colors
+    val backdrop = LocalPageBackdrop.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // 列表区域透出 MainScreen 主界面背景层；顶栏单独铺不透明底
+            // 列表区域透出 MainScreen 主界面背景层（backdrop 捕获层绘制）
             .background(Color.Transparent)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 不透明顶部导航栏：标题「恋语」+ 两个操作图标
+            // 沉浸式顶部导航栏：无底色，背景贯穿；标题「恋语」+ 两个玻璃胶囊按钮
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colorScheme.surface)
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 16.dp)
                     .padding(top = 4.dp, bottom = 10.dp)
@@ -114,16 +129,16 @@ fun HomeScreen(
                         color = colorScheme.onSurface
                     )
 
-                    // 右侧操作按钮（2个），右对齐
+                    // 右侧操作按钮（2个玻璃胶囊），右对齐
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(colorScheme.surfaceVariant)
-                                    .clickable { onCreateGroupClick() },
-                                contentAlignment = Alignment.Center
+                            GlassButton(
+                                onClick = { onCreateGroupClick() },
+                                backdrop = backdrop,
+                                height = 36.dp,
+                                horizontalPadding = 0.dp,
+                                modifier = Modifier.size(36.dp),
+                                surfaceColor = colorScheme.surfaceVariant.copy(alpha = 0.85f)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Group,
@@ -132,13 +147,13 @@ fun HomeScreen(
                                     tint = colorScheme.onSurface
                                 )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(colorScheme.surfaceVariant)
-                                    .clickable { onAddClick() },
-                                contentAlignment = Alignment.Center
+                            GlassButton(
+                                onClick = { onAddClick() },
+                                backdrop = backdrop,
+                                height = 36.dp,
+                                horizontalPadding = 0.dp,
+                                modifier = Modifier.size(36.dp),
+                                surfaceColor = colorScheme.surfaceVariant.copy(alpha = 0.85f)
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.Person,
@@ -158,15 +173,16 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(1.dp)
-                        .background(colorScheme.outlineVariant.copy(alpha = 0.55f))
+                        .background(colorScheme.outlineVariant.copy(alpha = 0.25f))
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 胶囊标签切换
+                // 玻璃胶囊标签切换
                 HomeTabBar(
                     selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it }
+                    onTabSelected = { selectedTab = it },
+                    backdrop = backdrop
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -275,40 +291,83 @@ fun SectionTitle(
 @Composable
 fun HomeTabBar(
     selectedTab: HomeTab,
-    onTabSelected: (HomeTab) -> Unit
+    onTabSelected: (HomeTab) -> Unit,
+    backdrop: com.kyant.backdrop.Backdrop? = LocalPageBackdrop.current
 ) {
     val colorScheme = AppTheme.colors
-    val selectedBg = AppTheme.colors.primaryContainer
+    val isDark = colorScheme.background.luminance() < 0.5f
+    val contentColor = if (isDark) Color.White else Color.Black
+    val accentColor = PinkPrimary
+    val containerColor = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)
 
-    Row(
+    val tabs = HomeTab.values().toList()
+    val labels = mapOf(
+        HomeTab.ALL to "全部",
+        HomeTab.GROUP to "群聊",
+        HomeTab.FRIEND to "好友"
+    )
+    val selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0)
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(AppTheme.colors.surface)
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .height(48.dp)
+            .padding(4.dp)
+            .background(containerColor, ContinuousCapsule)
+            .border(
+                width = 0.8.dp,
+                color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f),
+                shape = ContinuousCapsule
+            )
     ) {
-        HomeTab.values().forEach { tab ->
-            val selected = selectedTab == tab
-            val label = when (tab) {
-                HomeTab.ALL -> "全部"
-                HomeTab.GROUP -> "群聊"
-                HomeTab.FRIEND -> "好友"
-            }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (selected) selectedBg else Color.Transparent)
-                    .clickable { onTabSelected(tab) }
-                    .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
-            ) {
+        val tabWidth = maxWidth / tabs.size
+        val targetOffsetX = tabWidth * selectedIndex
+        val animatedOffsetX by androidx.compose.animation.core.animateDpAsState(
+            targetValue = targetOffsetX,
+            animationSpec = androidx.compose.animation.core.tween(250)
+        )
+
+        // 选中背景指示器
+        Box(
+            modifier = Modifier
+                .width(tabWidth)
+                .height(40.dp)
+                .padding(horizontal = 4.dp)
+                .offset(x = animatedOffsetX)
+                .background(accentColor.copy(alpha = 0.18f), ContinuousCapsule)
+                .border(
+                    width = 1.dp,
+                    color = accentColor.copy(alpha = 0.5f),
+                    shape = ContinuousCapsule
+                )
+        )
+
+        // Tab 文字
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tabs.forEach { tab ->
+                val label = labels[tab] ?: ""
+                val isSelected = selectedTab == tab
+                val alpha by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (isSelected) 1f else 0.7f,
+                    animationSpec = androidx.compose.animation.core.tween(250)
+                )
                 Text(
                     text = label,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .wrapContentSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(tab) },
                     fontSize = 14.sp,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) PinkPrimary else colorScheme.onSurfaceVariant
+                    fontWeight = FontWeight.Medium,
+                    color = contentColor.copy(alpha = alpha)
                 )
             }
         }
@@ -367,8 +426,11 @@ fun GroupListItem(
         endSlot = {},
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colorScheme.surfaceVariant)
+            .drawGlass(
+                backdrop = LocalPageBackdrop.current,
+                shape = ContinuousCapsule,
+                surfaceColor = colorScheme.surfaceVariant
+            )
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         slotGap = AppTheme.dimens.avatarGap
@@ -460,8 +522,11 @@ fun ChatListItem(
         endSlot = {},
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(colorScheme.surfaceVariant)
+            .drawGlass(
+                backdrop = LocalPageBackdrop.current,
+                shape = ContinuousCapsule,
+                surfaceColor = colorScheme.surfaceVariant
+            )
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         slotGap = AppTheme.dimens.avatarGap

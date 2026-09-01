@@ -10,19 +10,18 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.lianyu.ai.common.AppForegroundTracker
-import com.lianyu.ai.common.DeviceIdProvider
 import com.lianyu.ai.database.AppDatabase
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.MessageType
 import com.lianyu.ai.database.repository.ChatRepository
 import com.lianyu.ai.database.repository.CompanionRepository
-import com.lianyu.ai.database.repository.MemoryRepository
 import com.lianyu.ai.database.repository.MessageWriteCoordinator
 import com.lianyu.ai.database.repository.filterDecrypted
 import com.lianyu.ai.domain.AiChatMessage
 import com.lianyu.ai.domain.AiCompanionInfo
 import com.lianyu.ai.domain.AiMessageType
 import com.lianyu.ai.domain.AiServiceProvider
+import com.lianyu.ai.domain.MemoryProvider
 import com.lianyu.ai.domain.ServiceRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -61,7 +60,7 @@ class AiReplyWorker(
             val database = AppDatabase.getDatabase(applicationContext)
             val companionRepository = CompanionRepository(database.companionDao())
             val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
-            val memoryRepository = MemoryRepository(database.memoryDao(), DeviceIdProvider.getDeviceId(applicationContext))
+            val memoryProvider = ServiceRegistry.getOrThrow(MemoryProvider::class.java)
 
             try {
                 val companionModel = companionRepository.getCompanionById(companionId)
@@ -98,7 +97,11 @@ class AiReplyWorker(
                     companionRepository.updateTimestamp(companionId)
                     companionRepository.increaseIntimacy(companionId, 2)
 
-                    memoryRepository.extractAndSaveMemories(companionId, userMessageContent, safeResponse)
+                    memoryProvider.extractAndSaveFromConversation(
+                        userInput = userMessageContent,
+                        aiResponse = safeResponse,
+                        companionId = companionId,
+                    )
 
                     if (!AppForegroundTracker.isInForeground) {
                         val notificationPreview = if (safeResponse.length > 50) {
@@ -116,7 +119,14 @@ class AiReplyWorker(
             }
 
             Result.success()
+        } catch (e: IllegalStateException) {
+            android.util.Log.e("AiReplyWorker", "Permanent failure, will not retry", e)
+            Result.failure()
+        } catch (e: SecurityException) {
+            android.util.Log.e("AiReplyWorker", "Permission denied, will not retry", e)
+            Result.failure()
         } catch (e: Exception) {
+            android.util.Log.e("AiReplyWorker", "Transient failure, will retry", e)
             Result.retry()
         }
     }

@@ -16,6 +16,7 @@ import com.github.wechat.ilink.sdk.core.model.MessageItem
 import com.github.wechat.ilink.sdk.core.model.SendMessageRequest
 import com.github.wechat.ilink.sdk.core.utils.RandomUtils
 import com.github.wechat.ilink.sdk.service.MessageService
+import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.wechat.wire.WireWeChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -117,7 +118,10 @@ class IlinkClientManager(
                 val account = sessionStore.getSessionAccount()
                     ?: throw IllegalStateException("未登录微信")
                 sessionStore.saveContextToken(account.accountId, toUserId, contextToken)
-                hotUpdateContextTokenLocked(sdkClient, toUserId, contextToken)
+                // 不再用 store token 覆写 SDK 池：SDK 的 UpdateService 每次轮询已用最新
+                // 入站 context_token 更新池（反编译确认 getUpdates→updateContextToken）。
+                // 用 store 旧值覆写会把新鲜池 token 回退 → 服务端 ret=-2 prepare failed
+                // （自动回复传 store token 触发回退；手动发送传 null 直接读池所以正常）。
             }
 
             sdkClient.sendText(toUserId, text)
@@ -138,7 +142,7 @@ class IlinkClientManager(
             val account = sessionStore.getSessionAccount()
                 ?: throw IllegalStateException("未登录微信")
             sessionStore.saveContextToken(account.accountId, toUserId, contextToken)
-            hotUpdateContextTokenLocked(sdkClient, toUserId, contextToken)
+            // 同上：不覆写池，sendTextItems 直接读 SDK 池的新鲜 token
         }
 
         sendTextItems(sdkClient, toUserId, texts)
@@ -158,7 +162,7 @@ class IlinkClientManager(
             val account = sessionStore.getSessionAccount()
                 ?: throw IllegalStateException("未登录微信")
             sessionStore.saveContextToken(account.accountId, toUserId, contextToken)
-            hotUpdateContextTokenLocked(sdkClient, toUserId, contextToken)
+            // 同上：不覆写池，SDK 发送用自身池的新鲜 token
         }
 
         sdkClient.sendImage(toUserId, imageBytes, fileName, description.orEmpty())
@@ -328,6 +332,7 @@ class IlinkClientManager(
             ctx.setLatestContextToken(token)
             true
         }.onFailure { e ->
+            SecureLog.w(TAG, "iLink SDK reflection failed — contextToken hot-update may be unavailable. SDK version may have changed.")
             Log.e(TAG, "hotUpdateContextToken failed for $userId", e)
         }.getOrDefault(false)
     }
@@ -348,14 +353,21 @@ class IlinkClientManager(
             ?: throw IllegalStateException("微信会话上下文缺失")
         val contextToken = context.latestContextToken?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("微信 contextToken 缺失")
-        val serviceField = ILinkClient::class.java.getDeclaredField("messageService").apply {
-            isAccessible = true
-        }
-        val messageService = serviceField.get(sdkClient) as MessageService
-        val apiClientField = MessageService::class.java.getDeclaredField("apiClient").apply {
-            isAccessible = true
-        }
-        val apiClient = apiClientField.get(messageService) as BusinessApiClient
+        // SDK version-dependent reflection: messageService and apiClient are private fields.
+        // If the SDK changes these internal names, sendTextSegments will fail.
+        val apiClient: BusinessApiClient = runCatching {
+            val serviceField = ILinkClient::class.java.getDeclaredField("messageService").apply {
+                isAccessible = true
+            }
+            val messageService = serviceField.get(sdkClient) as MessageService
+            val apiClientField = MessageService::class.java.getDeclaredField("apiClient").apply {
+                isAccessible = true
+            }
+            apiClientField.get(messageService) as BusinessApiClient
+        }.onFailure { e ->
+            SecureLog.w(TAG, "iLink SDK reflection failed — sendTextSegments may be unavailable. SDK version may have changed.")
+            Log.e(TAG, "sendTextItems reflection failed", e)
+        }.getOrThrow()
         for (text in texts) {
             val msg = SendMessageRequest.Msg(
                 toUserId,

@@ -18,19 +18,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,7 +52,6 @@ import com.lianyu.ai.database.dao.TokenUsageDao
 import com.lianyu.ai.uicommon.theme.PetalPrimary
 import com.lianyu.ai.uicommon.theme.PetalPrimaryContainer
 import com.lianyu.ai.uicommon.theme.PetalOnPrimaryContainer
-import com.lianyu.ai.uicommon.theme.PetalSurface
 import com.lianyu.ai.uicommon.theme.PetalGreen
 import com.lianyu.ai.uicommon.theme.PetalError
 
@@ -78,6 +74,7 @@ fun TokenUsageScreen(
     var weekStats: TokenUsageDao.TotalStats? by remember { mutableStateOf(null) }
     var monthStats: TokenUsageDao.TotalStats? by remember { mutableStateOf(null) }
     var historyList: List<TokenUsage> by remember { mutableStateOf(emptyList()) }
+    var todayAllUsage: List<TokenUsage> by remember { mutableStateOf(emptyList()) }
     var companionsList: List<CompanionEntity> by remember { mutableStateOf(companions) }
     var isLoading: Boolean by remember { mutableStateOf(true) }
 
@@ -92,6 +89,7 @@ fun TokenUsageScreen(
                 weekStats = repository.getWeekUsage(-1L)
                 monthStats = repository.getMonthUsage(-1L)
                 historyList = repository.getAllUsageHistory(30)
+                todayAllUsage = repository.getTodayAllUsage()
                 val companionsResult = companionRepository.getAllCompanions().first()
                 companionsList = companionsResult
             } catch (e: Exception) {
@@ -112,6 +110,18 @@ fun TokenUsageScreen(
     val textPrimaryColor = colorScheme.onSurface
     val textSecondaryColor = colorScheme.onSurfaceVariant
     val cardBg = colorScheme.surfaceVariant
+
+    val companionNameMap = remember(companionsList) {
+        companionsList.associate { it.id to it.name }
+    }
+
+    // 历史按日分组（排除全局镜像行 companionId=-1）
+    val groupedHistory = remember(historyList) {
+        historyList
+            .filter { it.companionId != -1L }
+            .groupBy { it.date }
+    }
+    val historyEntries = groupedHistory.entries.sortedByDescending { it.key }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
@@ -165,7 +175,7 @@ fun TokenUsageScreen(
                         .weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
-                    androidx.compose.material3.CircularProgressIndicator(
+                    CircularProgressIndicator(
                         modifier = Modifier.size(48.dp),
                         color = PetalPrimary
                     )
@@ -185,6 +195,23 @@ fun TokenUsageScreen(
                         textSecondaryColor = textSecondaryColor
                     )
 
+                    val todayCompanionUsage = todayAllUsage.filter { it.companionId != -1L }
+                    if (todayCompanionUsage.isNotEmpty()) {
+                        Text(
+                            text = "今日角色用量",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = textPrimaryColor
+                        )
+                        TodayCompanionRank(
+                            usages = todayCompanionUsage.sortedByDescending { it.totalTokens },
+                            companionNameMap = companionNameMap,
+                            cardBg = cardBg,
+                            textPrimaryColor = textPrimaryColor,
+                            textSecondaryColor = textSecondaryColor
+                        )
+                    }
+
                     Text(
                         text = "最近30天使用记录",
                         fontSize = 16.sp,
@@ -192,22 +219,22 @@ fun TokenUsageScreen(
                         color = textPrimaryColor
                     )
 
-                    historyList.forEachIndexed { index, usage ->
-                        UsageHistoryItem(
-                            usage = usage,
-                            isDarkTheme = isDarkTheme,
+                    historyEntries.forEachIndexed { index, (date, usages) ->
+                        DailyHistoryCard(
+                            date = date,
+                            usages = usages,
+                            companionNameMap = companionNameMap,
                             cardBg = cardBg,
                             textPrimaryColor = textPrimaryColor,
-                            textSecondaryColor = textSecondaryColor,
-                            companions = companionsList
+                            textSecondaryColor = textSecondaryColor
                         )
                         
-                        if (index < historyList.lastIndex) {
+                        if (index < historyEntries.size - 1) {
                             Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
 
-                    if (historyList.isEmpty()) {
+                    if (historyEntries.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -314,6 +341,12 @@ private fun StatsOverviewCard(
                     UsageDetailItem(label = "输入Token", value = formatTokenCount(todayUsage!!.inputTokens), color = PetalGreen, textPrimaryColor = textPrimaryColor)
                     UsageDetailItem(label = "输出Token", value = formatTokenCount(todayUsage!!.outputTokens), color = PetalPrimary, textPrimaryColor = textPrimaryColor)
                     UsageDetailItem(label = "请求次数", value = "${todayUsage!!.requestCount}", color = AppTheme.colors.primary, textPrimaryColor = textPrimaryColor)
+                    UsageDetailItem(
+                        label = "平均每次",
+                        value = if (todayUsage!!.requestCount > 0) formatTokenCount(todayUsage!!.totalTokens / todayUsage!!.requestCount) else "0",
+                        color = PetalError,
+                        textPrimaryColor = textPrimaryColor
+                    )
                 }
             }
         }
@@ -359,66 +392,155 @@ private fun UsageDetailItem(
     }
 }
 
+/** 今日各角色用量排行（横向占比条） */
 @Composable
-private fun UsageHistoryItem(
-    usage: TokenUsage,
-    isDarkTheme: Boolean,
+private fun TodayCompanionRank(
+    usages: List<TokenUsage>,
+    companionNameMap: Map<Long, String>,
     cardBg: Color,
     textPrimaryColor: Color,
-    textSecondaryColor: Color,
-    companions: List<CompanionEntity> = emptyList()
+    textSecondaryColor: Color
 ) {
-    val companionLabel = when {
-        usage.companionId == -1L -> "全局"
-        usage.companionId > 0 -> companions.find { it.id == usage.companionId }?.name ?: "已删除角色"
-        else -> "未知"
+    val total = usages.sumOf { it.totalTokens }.coerceAtLeast(1L)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(cardBg)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        usages.forEach { usage ->
+            val name = companionNameMap[usage.companionId] ?: "已删除角色"
+            val ratio = usage.totalTokens.toFloat() / total
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = name,
+                        fontSize = 13.sp,
+                        color = textPrimaryColor,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "${formatTokenCount(usage.totalTokens)} · ${(ratio * 100).toInt()}%",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = textSecondaryColor
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(textSecondaryColor.copy(alpha = 0.15f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(ratio.coerceIn(0.02f, 1f))
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(PetalPrimary.copy(alpha = 0.85f))
+                    )
+                }
+            }
+        }
     }
+}
 
-    Row(
+/** 按日分组的历史卡片：日期 + 合计 + 各角色明细 */
+@Composable
+private fun DailyHistoryCard(
+    date: String,
+    usages: List<TokenUsage>,
+    companionNameMap: Map<Long, String>,
+    cardBg: Color,
+    textPrimaryColor: Color,
+    textSecondaryColor: Color
+) {
+    val totalTokens = usages.sumOf { it.totalTokens }
+    val totalRequests = usages.sumOf { it.requestCount.toLong() }.toInt()
+    val totalInput = usages.sumOf { it.inputTokens }
+    val totalOutput = usages.sumOf { it.outputTokens }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(cardBg)
             .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = usage.date,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = textPrimaryColor
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = companionLabel,
-                fontSize = 12.sp,
-                color = textSecondaryColor
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    text = date,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = textPrimaryColor
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "$totalRequests 次请求",
+                    fontSize = 11.sp,
+                    color = textSecondaryColor
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = formatTokenCount(totalTokens),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PetalPrimary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "in:${formatTokenCount(totalInput)} out:${formatTokenCount(totalOutput)}",
+                    fontSize = 10.sp,
+                    color = textSecondaryColor
+                )
+            }
         }
 
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = formatTokenCount(usage.totalTokens),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = PetalPrimary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "${usage.requestCount}次 · in:${formatTokenCount(usage.inputTokens)} out:${formatTokenCount(usage.outputTokens)}",
-                fontSize = 10.sp,
-                color = textSecondaryColor
-            )
+        usages.sortedByDescending { it.totalTokens }.forEach { usage ->
+            val name = if (usage.companionId == -1L) "全局" else companionNameMap[usage.companionId] ?: "已删除角色"
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = name,
+                    fontSize = 12.sp,
+                    color = textSecondaryColor,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "${formatTokenCount(usage.totalTokens)} · ${usage.requestCount}次",
+                    fontSize = 12.sp,
+                    color = textSecondaryColor
+                )
+            }
         }
     }
 }
 
 private fun formatTokenCount(tokens: Long): String {
     return when {
-        tokens >= 1_000_000 -> String.format("%.1fM", tokens / 1_000_000.0)
-        tokens >= 1_000 -> String.format("%.1fK", tokens / 1_000.0)
+        tokens >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", tokens / 1_000_000.0)
+        tokens >= 10_000 -> String.format(java.util.Locale.US, "%.1fK", tokens / 1_000.0)
         else -> tokens.toString()
     }
 }

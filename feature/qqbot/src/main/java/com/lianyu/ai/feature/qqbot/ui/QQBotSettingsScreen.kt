@@ -177,6 +177,7 @@ fun QQBotSettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
+            @Suppress("DEPRECATION")
             SettingItem(
                 icon = Icons.Outlined.Message,
                 title = QQBotStrings.MSG_NOTIFY,
@@ -205,6 +206,7 @@ fun QQBotSettingsScreen(
 
             HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
+            @Suppress("DEPRECATION")
             SettingItem(
                 icon = Icons.Outlined.Message,
                 title = QQBotStrings.MSG_FORWARD,
@@ -220,6 +222,7 @@ fun QQBotSettingsScreen(
             if (uiState.availableCompanions.isNotEmpty()) {
                 HorizontalDivider(color = AppTheme.colors.outline, modifier = Modifier.padding(horizontal = 16.dp))
 
+                @Suppress("DEPRECATION")
                 SettingItem(
                     icon = Icons.Outlined.Message,
                     title = QQBotStrings.DEFAULT_COMPANION,

@@ -38,4 +38,9 @@
     <string name="mood_miss">思念</string>
     <string name="ai_generate_diary">AI 生成日記</string>
     <string name="ai_generating">正在生成…</string>
+    <string name="diary_auto_tip">聊天後每天自動沈澱 1 篇，也可手動生成</string>
+    <string name="diary_generating">生成中…</string>
+    <string name="diary_generate_failed">日記生成失敗，請檢查網路後重試</string>
+    <string name="diary_generated_title">AI 生成的日記</string>
+    <string name="memory_local_only">記憶只存儲在本地裝置，不會上傳到任何伺服器</string>
 </resources>

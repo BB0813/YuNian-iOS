@@ -102,7 +102,7 @@ class WeChatPollingWorker(
          */
         fun scheduleImmediate(context: Context) {
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                 .build()
 
             val request = OneTimeWorkRequestBuilder<WeChatPollingWorker>()

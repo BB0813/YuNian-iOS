@@ -33,6 +33,28 @@ object OpenAiSseChunkParser {
         val done: Boolean = false,
     )
 
+    /** 流式末尾 usage chunk（需请求 stream_options.include_usage=true） */
+    data class StreamUsage(
+        val promptTokens: Long,
+        val completionTokens: Long,
+    )
+
+    /**
+     * 从流式 `data:` 载荷解析 usage（OpenAI 兼容：usage.prompt_tokens / completion_tokens）。
+     * 非 usage chunk 返回 null。
+     */
+    fun parseUsagePayload(dataPayload: String): StreamUsage? {
+        val payload = dataPayload.trim()
+        if (payload.isEmpty() || payload.equals("[DONE]", ignoreCase = true)) return null
+        return runCatching {
+            val root = json.parseToJsonElement(payload).asObjectOrNull() ?: return@runCatching null
+            val usage = root["usage"].asObjectOrNull() ?: return@runCatching null
+            val input = usage["prompt_tokens"].asLongOrNull() ?: 0L
+            val output = usage["completion_tokens"].asLongOrNull() ?: 0L
+            if (input <= 0 && output <= 0) null else StreamUsage(input, output)
+        }.getOrNull()
+    }
+
     /**
      * @param dataPayload `data:` 后的原始字符串（已 trim）
      * @param reasoningFields 思考字段候选（配置字段优先）
@@ -139,6 +161,9 @@ object OpenAiSseChunkParser {
             else -> null
         }
     }
+
+    private fun JsonElement?.asLongOrNull(): Long? =
+        (this as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
 
     val DEFAULT_REASONING_FIELDS: List<String> = listOf(
         "reasoning_content",

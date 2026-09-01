@@ -125,19 +125,8 @@ class UnifiedMemoryRepository(
         )
         val newId = dao.insert(record)
 
-        // 4. 同步生成 embedding（非 WORKING 记忆）
-        // 确保新提取的记忆立即可被语义检索到，避免"刚说过的话下一句就忘了"
-        // WORKING 记忆跳过（生命周期短，不值得生成 embedding）
-        embeddingProvider?.let { provider ->
-            if (type != MemoryType.WORKING && provider.isEmbeddingSupported()) {
-                val embedding = runCatching { provider.embed(content) }.getOrNull()
-                if (embedding != null) {
-                    val modelName = provider.getEmbeddingModelName()
-                    dao.updateEmbedding(newId, provider.floatsToBytes(embedding), modelName)
-                }
-            }
-        }
-
+        // 4. embedding 由后台 postProcessMemories 异步回填（backfillEmbeddings），
+        //    不在对话写入路径同步调用网络，避免阻塞/超时对话后处理
         return newId
     }
 
@@ -289,8 +278,16 @@ class UnifiedMemoryRepository(
                 tags = "interaction-pattern"
             )
         }
+    }
 
-        // ── Phase 3: 异步补全 embedding（不阻塞对话） ──
+    /**
+     * 异步后处理：embedding 回填 + 工作记忆沉淀摘要。
+     *
+     * 包含网络调用（embedding / AI 摘要），必须在后台协程执行，
+     * 不能放在对话回复的同步路径中，否则会阻塞/超时对话后处理。
+     */
+    suspend fun postProcessMemories(scope: MemoryScope, sourceId: Long) {
+        // ── Phase 3: 异步补全 embedding ──
         if (embeddingProvider != null) {
             runCatching { backfillEmbeddings(batchSize = 5) }
         }
@@ -521,7 +518,7 @@ class UnifiedMemoryRepository(
     suspend fun summarizeAndCompress(
         scope: MemoryScope,
         sourceId: Long,
-        threshold: Int = 10,
+        threshold: Int = 5,
         compressCount: Int = 8
     ): Boolean {
         val workingCount = dao.countWorkingMemories(deviceId, scope, sourceId)
@@ -543,9 +540,15 @@ class UnifiedMemoryRepository(
         } else null
 
         // 回退到本地规则摘要（五维骨架）
-        val finalSummary = summary ?: buildLocalSummaryFallback(oldMemories)
+        var finalSummary = summary ?: buildLocalSummaryFallback(oldMemories)
 
         if (finalSummary.isBlank()) return false
+
+        // 4.1 AI 核心记忆识别：解析【重要记忆】段，写入高 importance 稳定记忆
+        //（仅 AI 摘要才有该段；本地回退摘要不解析）
+        if (summary != null) {
+            finalSummary = saveAiIdentifiedCoreMemories(summary, scope, sourceId)
+        }
 
         // 5. 存为 EPISODIC 叙事摘要记忆（content + summary 双写，保证检索/UI 都能命中）
         addMemory(
@@ -565,6 +568,73 @@ class UnifiedMemoryRepository(
         dao.softDeleteByIds(idsToDelete)
 
         return true
+    }
+
+    /**
+     * 从单轮对话增量识别核心记忆（每轮对话后异步调用，调用方负责节流）。
+     *
+     * 不依赖 WORKING 记忆条数阈值：直接把当前轮对话交给 AI，
+     * 识别值得长期记住的事实/偏好/关系/事件，写入高 importance 稳定记忆。
+     */
+    suspend fun recognizeCoreMemories(
+        conversationText: String,
+        scope: MemoryScope,
+        sourceId: Long
+    ) {
+        val provider = summaryProvider ?: return
+        if (conversationText.isBlank()) return
+        val memoryContext = buildMemoryContext(scope, sourceId, "", limit = 5)
+        val summary = provider.identifyCoreMemories(conversationText, memoryContext) ?: return
+        if (!summary.contains("【重要记忆】")) return
+        saveAiIdentifiedCoreMemories(summary, scope, sourceId)
+    }
+
+    /**
+     * 解析 AI 摘要中的「【重要记忆】」段，将重要事实/偏好/关系写入高 importance 稳定记忆，
+     * 并从叙事摘要文本中剥离该段（叙事只保留五维正文）。
+     *
+     * 行格式：【重要记忆】类别|内容（类别 ∈ 事实/偏好/关系/事件）
+     *
+     * @return 剥离后的叙事摘要文本
+     */
+    private suspend fun saveAiIdentifiedCoreMemories(summary: String, scope: MemoryScope, sourceId: Long): String {
+        val section = Regex("【重要记忆】([\\s\\S]*?)(?=【|$)").find(summary)?.groupValues?.get(1)?.trim()
+        if (section.isNullOrBlank()) return summary
+
+        section.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .take(3)
+            .forEach { line ->
+                val parts = line.split("|", limit = 2)
+                val category = parts.getOrNull(0)?.trim().orEmpty()
+                val content = parts.getOrNull(1)?.trim().orEmpty()
+                if (content.length < 2) return@forEach
+
+                val (type, importance) = when (category) {
+                    "偏好" -> MemoryType.PREFERENCE to 0.85f
+                    "关系" -> MemoryType.RELATIONSHIP to 0.85f
+                    "事件" -> MemoryType.EPISODIC to 0.7f
+                    else -> MemoryType.SEMANTIC to 0.85f
+                }
+                runCatching {
+                    addMemory(
+                        content = content,
+                        type = type,
+                        scope = scope,
+                        sourceId = sourceId,
+                        importance = importance,
+                        confidence = 0.85f,
+                        tags = "ai-identified-core",
+                        observedAt = System.currentTimeMillis()
+                    )
+                }
+            }
+
+        // 剥离【重要记忆】段，只保留叙事正文
+        return summary
+            .replace(Regex("【重要记忆】([\\s\\S]*?)(?=【|$)"), "")
+            .trim()
     }
 
     /**

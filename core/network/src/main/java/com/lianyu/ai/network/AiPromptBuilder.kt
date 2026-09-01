@@ -7,6 +7,7 @@ import com.lianyu.ai.common.RolePromptProvider
 import com.lianyu.ai.common.SecureLog
 import com.lianyu.ai.database.model.ChatMessage
 import com.lianyu.ai.database.model.CompanionEntity as CompanionModel
+import com.lianyu.ai.domain.ToolRegistry
 import com.lianyu.ai.domain.ProactiveMessageSettings
 import com.lianyu.ai.network.bubble.BubbleJsonProtocol
 import java.util.Calendar
@@ -154,18 +155,30 @@ object AiPromptBuilder {
      * 不根据「晚安/嗯/好/知道了」等关键词或短句长度硬判结束。
      * 用户是否想结束对话，交给 [buildProactiveContext] + 生成阶段结合上下文语义理解。
      */
-    fun shouldProactivelyMessage(companion: CompanionModel, recentMessages: List<ChatMessage>): Boolean {
+    fun shouldProactivelyMessage(
+        companion: CompanionModel,
+        recentMessages: List<ChatMessage>,
+        settings: ProactiveMessageSettings? = null
+    ): Boolean {
         if (recentMessages.isEmpty()) return true
 
-        val lastMessage = recentMessages.last()
+        // DAO 返回 DESC 顺序（新→旧），必须先升序再取最后一条，
+        // 否则 last() 是最旧消息，门控会判断到错误的发送者与时间。
+        val lastMessage = recentMessages.sortedBy { it.timestamp }.last()
 
-        // 最后一条是 AI 发的，不用再发（避免连发）
+        // 最后一条是 AI 发的，不用再发（避免连发；追问由 followUpReminder 独立分支处理）
         if (!lastMessage.isFromUser) return false
 
-        // 冷却：用户刚发完不久，不主动插话
+        // 冷却：用户刚发完不久，不主动插话。
+        // 冷却不超过用户设置的间隔，否则「自定义几分钟」会被 3 分钟冷却盖过（不主动的感知来源）。
+        val cooldownMs = if (settings != null && settings.proactiveIntervalMinutes > 0) {
+            minOf(ChatConstants.PROACTIVE_TIME_THRESHOLD_MINUTES, settings.proactiveIntervalMinutes) * 60 * 1000L
+        } else {
+            ChatConstants.PROACTIVE_TIME_THRESHOLD_MINUTES * 60 * 1000L
+        }
         val now = System.currentTimeMillis()
         val timeSinceLastMsg = now - lastMessage.timestamp
-        if (timeSinceLastMsg < 3 * 60 * 1000) return false
+        if (timeSinceLastMsg < cooldownMs) return false
 
         return true
     }
@@ -375,7 +388,85 @@ object AiPromptBuilder {
     }
 
     /**
-     * 统一角色 system 区块：姓名/年龄/人设/说话风格/背景/rawPrompt/自定义 systemPrompt 全部进入 system。
+     * 稳定系统提示词（缓存友好）：只含不随本轮消息变化的角色/规则内容。
+     * 时间、记忆、动作预算、话题等易变内容通过 [buildTurnContext] 放到请求尾部，
+     * 保证 [system][history] 前缀在连续请求间逐 token 一致，从而命中 DeepSeek 等提供商的前缀缓存。
+     */
+    internal fun buildStableSystemPrompt(
+        companion: CompanionModel,
+        availableStickers: List<String> = emptyList(),
+        stickerProbability: Int = 30,
+        innerThoughtEnabled: Boolean = false,
+        role: CompanionRole = CompanionRole.GIRLFRIEND,
+    ): String {
+        val persona = extractPersona(companion)
+        val roleSection = buildCompanionSystemSection(companion)
+        val metaDirective = buildString {
+            appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
+            appendLine("重要：直接回复内容，不要输出思考过程、分析、内心独白或任何元信息。禁止输出<LM_THINK>标签或类似内容。")
+        }
+        return buildString {
+            append(metaDirective)
+            appendLine()
+            appendLine(roleSection)
+            appendLine()
+            append(buildPersonaRules(persona, companion.speakingStyle, availableStickers, stickerProbability, innerThoughtEnabled, role))
+            append(ToolRegistry.systemPromptSection())
+        }
+    }
+
+    /**
+     * 本轮动态上下文（易变内容集中到请求尾部，保持稳定前缀可缓存）：
+     * 动作预算协议（按上一条用户消息条件化）、会话阶段、精确时间、环境锚冷却、动作收束。
+     */
+    internal fun buildTurnContext(
+        lastUserMessage: String = "",
+        ntpTimeEnabled: Boolean = false,
+        phase: ConversationPhase = ConversationPhase.TOPIC,
+        allowEnvAnchor: Boolean = true,
+        history: List<com.lianyu.ai.database.model.ChatMessage> = emptyList(),
+    ): String {
+        val budgetPriorityTop = "\n${AiContextTools.buildDeliveryBudgetPriority(lastUserMessage)}\n"
+        val budgetEndCap = "\n\n${AiContextTools.buildDeliveryBudgetEndCap(lastUserMessage)}\n"
+        val effectivePhase =
+            if (!allowEnvAnchor && phase == ConversationPhase.OPENING) ConversationPhase.TOPIC else phase
+        val phaseSection = "\n\n${AiContextTools.buildConversationPhaseSection(effectivePhase)}\n"
+        val timeSection = "\n${AiContextTools.buildCurrentTimeContext(ntpTimeEnabled, effectivePhase)}\n"
+        val cooldownSection = EnvAnchorCooldown.buildCooldownDirective(allowEnvAnchor).let { d ->
+            if (d.isBlank()) "" else "\n$d\n"
+        }
+        val topicSection = buildTopicContext(history)
+        return (budgetPriorityTop + phaseSection + timeSection + cooldownSection + budgetEndCap + topicSection).trim()
+    }
+
+    /**
+     * 当前话题锚定（纯本地，零网络延迟）：回显最近几轮的极简轨迹，
+     * 指示模型贴合正在聊的话题，防止话题跑偏。放在请求尾部，不影响前缀缓存。
+     */
+    internal fun buildTopicContext(history: List<com.lianyu.ai.database.model.ChatMessage>): String {
+        val recent = history.asReversed()
+            .filter { it.content.isNotBlank() }
+            .take(4)
+            .reversed()
+        if (recent.isEmpty()) return ""
+        val lines = recent.mapNotNull { msg ->
+            val text = msg.content.replace("\u200B", "").trim()
+            if (text.isBlank()) return@mapNotNull null
+            val label = if (msg.isFromUser) "我" else "你"
+            val compact = text.replace(Regex("\\s+"), "").take(60)
+            if (compact.isBlank()) null else "$label：$compact"
+        }
+        if (lines.isEmpty()) return ""
+        return buildString {
+            appendLine()
+            appendLine("=== 当前话题轨迹（最近几轮）===")
+            lines.forEach { appendLine(it) }
+            append("回复要贴合上述正在聊的话题并自然延续；除非用户明确换话题，否则不要自行跳转话题。")
+        }
+    }
+
+    /**
+     * 统一角色 system 区块：姓名/年龄/人设/说话风格/背景/rawPrompt/自定义systemPrompt 全部进入 system。
      * 聊天与主动消息共用，避免 systemPrompt 非空时丢掉结构化字段。
      */
     internal fun buildCompanionSystemSection(companion: CompanionModel): String {
@@ -527,7 +618,7 @@ ${AiContextTools.buildDeliveryBudgetRules()}
 === 表达约束 ===
 A. 长度服从动作数，不服从字数 KPI：闲聊单动作通常一句完整口语就够；解释/答问可以稍长。不要为了「写满 40–120 字」再塞第二个动作，也不要为了压字数写成半截话。整轮避免无意义长文灌水。
 B. 断句：${punctuationRule}
-C. 格式：不要用 markdown（不要#标题、不要-列表、不要```代码块）。每条回复 = 一条气泡：把同一动作一句完整说清并收尾；不需要用空行/换行分块（连发由系统连发机制处理）。短肯定/语气（嗯、好、行、哦）单独成句即可，表意完整。
+C. 格式：不要用 markdown（不要#标题、不要-列表、不要```代码块）。默认一条气泡把同一动作一句完整说清并收尾。如果用户明确要求你发多条消息、或你的回复由多条独立短消息组成（如逐条回应多个问题），把每条消息写成一句完整的话并用标点（。！？～）收尾，系统会按句末标点自动拆成多条气泡连发（每条间隔发出）。不要为凑条数硬拆同一句话。短肯定/语气（嗯、好、行、哦）单独成句即可，表意完整。
 ${innerThoughtRule}
 ${stickerRule}
 F. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。人设固定词汇只是参考，不是每句必须套用的模板。
@@ -571,6 +662,44 @@ ${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
             appendLine(buildProactiveTimeContext(allowEnvAnchor))
             appendLine()
             appendLine(buildPersonaRules(persona, companion.speakingStyle, role = role))
+        }
+    }
+
+    /**
+     * 未回复追问提醒系统提示词：AI 已发消息、用户长时间未回复时使用。
+     * 追问语气服从角色性格，短而自然，允许模型判定「不该催」并输出 [NO_PROACTIVE_MARKER]。
+     */
+    internal fun buildFollowUpReminderSystemPrompt(
+        companion: CompanionModel,
+        memoryContext: String = "",
+        settings: ProactiveMessageSettings? = null,
+        allowEnvAnchor: Boolean = true,
+    ): String {
+        val persona = extractPersona(companion)
+        val roleSection = buildCompanionSystemSection(companion)
+        val memorySection = if (memoryContext.isNotBlank()) {
+            "\n\n=== 关于用户的记忆 ===\n$memoryContext\n"
+        } else ""
+
+        return buildString {
+            appendLine(RolePromptProvider.getIdentityLine(companion.name, CompanionRole.GIRLFRIEND))
+            appendLine("你们正在微信上聊天。你刚发过消息，用户还没回复，现在是追问还是安静的抉择时刻。")
+            appendLine()
+            appendLine(roleSection)
+            append(memorySection)
+            appendLine()
+            appendLine("=== 追问纪律 ===")
+            appendLine("1. 追问短而自然（10~30字），一次一条，禁止堆叠追问、禁止复述已问过的问题。")
+            appendLine("2. 语气严格服从角色性格：黏人可撒娇催促，冷淡/傲娇可轻戳一句或装作不在意，内向可简短试探。")
+            appendLine("3. 不要替用户回答；不要说教；不要输出关心模板（吃没吃/睡没睡类）。")
+            appendLine("4. 若判断对方在忙、已休息或不想被打扰，可以不追问，让对话自然安静（输出 ${NO_PROACTIVE_MARKER}）。")
+            if (settings != null && !settings.allowFollowUpMessage) {
+                appendLine("用户偏好（软约束）：尽量少追问，除非角色性格强烈需要一句自然反问。")
+            }
+            appendLine()
+            appendLine(buildProactiveTimeContext(allowEnvAnchor))
+            appendLine()
+            appendLine(buildPersonaRules(persona, companion.speakingStyle, role = CompanionRole.GIRLFRIEND))
         }
     }
 

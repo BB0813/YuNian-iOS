@@ -204,16 +204,35 @@ object ChatConstants {
 
     // ── 主动消息 Worker ──
     /** 主动消息 Worker 首次/回退最小间隔（分钟） */
-    const val PROACTIVE_FALLBACK_MIN_MINUTES = 30L
+    const val PROACTIVE_FALLBACK_MIN_MINUTES = 15L
 
     /** 主动消息 Worker 首次/回退最大间隔（分钟） */
-    const val PROACTIVE_FALLBACK_MAX_MINUTES = 120L
+    const val PROACTIVE_FALLBACK_MAX_MINUTES = 60L
 
     /** 主动消息用户输入最小间隔（分钟） */
-    const val PROACTIVE_USER_MIN_INTERVAL_MINUTES = 15
+    const val PROACTIVE_USER_MIN_INTERVAL_MINUTES = 1
 
     /** 主动消息用户输入最大间隔（分钟，24小时） */
     const val PROACTIVE_USER_MAX_INTERVAL_MINUTES = 1440
+
+    // ── 未回复追问提醒 ──
+    /** 未回复追问默认间隔（分钟） */
+    const val FOLLOW_UP_REMINDER_DEFAULT_INTERVAL_MINUTES = 5
+
+    /** 未回复追问默认最大次数 */
+    const val FOLLOW_UP_REMINDER_DEFAULT_MAX_TIMES = 3
+
+    /** 未回复追问用户可调最小间隔（分钟） */
+    const val FOLLOW_UP_REMINDER_MIN_INTERVAL_MINUTES = 1
+
+    /** 未回复追问用户可调最大间隔（分钟） */
+    const val FOLLOW_UP_REMINDER_MAX_INTERVAL_MINUTES = 120
+
+    /** 未回复追问单轮次数上限 */
+    const val FOLLOW_UP_REMINDER_MAX_TIMES_LIMIT = 10
+
+    /** 未回复追问最大时效（小时）：AI 最后消息距今超过此时长不再追问 */
+    const val FOLLOW_UP_REMINDER_MAX_AGE_HOURS = 24
 
     // ── QQ Bot WebSocket ──
     /** QQ Bot WebSocket 心跳间隔系数（相对服务端 interval 的比例） */

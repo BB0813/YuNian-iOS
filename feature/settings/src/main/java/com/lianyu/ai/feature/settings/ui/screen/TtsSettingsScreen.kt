@@ -8,6 +8,9 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
+import java.util.Locale
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -86,6 +89,7 @@ import com.lianyu.ai.network.tts.TtsConfig
 import com.lianyu.ai.network.tts.TtsProvider
 import com.lianyu.ai.network.tts.TtsService
 import com.lianyu.ai.network.tts.TtsVoice
+import com.lianyu.ai.network.tts.MiMoTtsProvider
 import com.lianyu.ai.network.tts.ChatTtsConfig
 import com.lianyu.ai.network.tts.ChatTtsMode
 import com.lianyu.ai.network.tts.LocalTtsCatalog
@@ -103,8 +107,11 @@ import com.lianyu.ai.uicommon.theme.PetalSurfaceContainer
 import com.lianyu.ai.uicommon.theme.PetalGreen
 import com.lianyu.ai.uicommon.theme.PetalError
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 @Composable
 fun TtsSettingsScreen(
@@ -230,9 +237,13 @@ fun TtsSettingsScreen(
     var mimoBaseUrl by remember { mutableStateOf(config.mimoBaseUrl) }
     var mimoModel by remember { mutableStateOf(config.mimoModel) }
     var mimoVoiceId by remember { mutableStateOf(config.mimoVoiceId) }
+    var mimoVoiceDesignPrompt by remember { mutableStateOf(config.mimoVoiceDesignPrompt) }
+    var mimoVoiceClonePath by remember { mutableStateOf(config.mimoVoiceClonePath) }
+    var mimoOptimizeTextPreview by remember { mutableStateOf(config.mimoOptimizeTextPreview) }
     var showSfModelDropdown by remember { mutableStateOf(false) }
     var showSfRateDropdown by remember { mutableStateOf(false) }
     var showCustomFormatDropdown by remember { mutableStateOf(false) }
+    var showMimoModelDropdown by remember { mutableStateOf(false) }
 
     // 本地离线 TTS 状态
     var localTtsSpeed by remember { mutableStateOf(config.localTtsSpeed) }
@@ -316,6 +327,9 @@ fun TtsSettingsScreen(
             mimoBaseUrl = mimoBaseUrl,
             mimoModel = mimoModel,
             mimoVoiceId = mimoVoiceId,
+            mimoVoiceDesignPrompt = mimoVoiceDesignPrompt,
+            mimoVoiceClonePath = mimoVoiceClonePath,
+            mimoOptimizeTextPreview = mimoOptimizeTextPreview,
             localTtsSpeed = localTtsSpeed,
             localTtsSid = localTtsSid
         )
@@ -342,7 +356,7 @@ fun TtsSettingsScreen(
             isSynthesizing = false
             if (audioPath != null) {
                 previewAudioPath = audioPath
-                previewCacheKey = "${selectedProvider.name}|$selectedVoiceId|$sfCustomVoiceId"
+                previewCacheKey = "${selectedProvider.name}|$selectedVoiceId|$sfCustomVoiceId|$mimoModel|$mimoVoiceClonePath|$mimoVoiceDesignPrompt|$mimoOptimizeTextPreview"
                 testResult = hint
                 snackbarHostState.showSnackbar(testResult!!)
                 playPreview(audioPath)
@@ -446,22 +460,27 @@ fun TtsSettingsScreen(
                                 textSecondaryColor = textSecondaryColor
                             )
 
-                            VoiceSelectionCard(
-                                voices = voices,
-                                selectedVoiceId = selectedVoiceId,
-                                onVoiceSelect = {
-                                    selectedVoiceId = it
-                                    saveSettings()
-                                },
-                                showDropdown = showVoiceDropdown,
-                                onDropdownToggle = {
-                                    showVoiceDropdown = it
-                                    if (it) showProviderDropdown = false
-                                },
-                                cardBg = cardBg,
-                                textPrimaryColor = textPrimaryColor,
-                                textSecondaryColor = textSecondaryColor
-                            )
+                            // MiMo 非预置模型（音色设计/复刻）不走下拉音色选择
+                            if (selectedProvider != TtsProvider.MIMO ||
+                                MiMoTtsProvider.normalizeModel(mimoModel) == MiMoTtsProvider.MODEL_TTS
+                            ) {
+                                VoiceSelectionCard(
+                                    voices = voices,
+                                    selectedVoiceId = selectedVoiceId,
+                                    onVoiceSelect = {
+                                        selectedVoiceId = it
+                                        saveSettings()
+                                    },
+                                    showDropdown = showVoiceDropdown,
+                                    onDropdownToggle = {
+                                        showVoiceDropdown = it
+                                        if (it) showProviderDropdown = false
+                                    },
+                                    cardBg = cardBg,
+                                    textPrimaryColor = textPrimaryColor,
+                                    textSecondaryColor = textSecondaryColor
+                                )
+                            }
 
                             if (selectedProvider == TtsProvider.SHERPA_LOCAL) {
                                 // 本地离线 TTS 卡片（独立于 ApiKeyConfigCard，直接访问 screen 作用域）
@@ -575,6 +594,14 @@ fun TtsSettingsScreen(
                                     onMimoModelChange = { mimoModel = it },
                                     mimoVoiceId = mimoVoiceId,
                                     onMimoVoiceIdChange = { mimoVoiceId = it },
+                                    mimoVoiceDesignPrompt = mimoVoiceDesignPrompt,
+                                    onMimoVoiceDesignPromptChange = { mimoVoiceDesignPrompt = it },
+                                    mimoVoiceClonePath = mimoVoiceClonePath,
+                                    onMimoVoiceClonePathChange = { mimoVoiceClonePath = it; saveSettings() },
+                                    mimoOptimizeTextPreview = mimoOptimizeTextPreview,
+                                    onMimoOptimizeTextPreviewChange = { mimoOptimizeTextPreview = it; saveSettings() },
+                                    showMimoModelDropdown = showMimoModelDropdown,
+                                    onShowMimoModelDropdown = { showMimoModelDropdown = it },
                                     showSfModelDropdown = showSfModelDropdown,
                                     onShowSfModelDropdown = { showSfModelDropdown = it },
                                     showSfRateDropdown = showSfRateDropdown,
@@ -638,7 +665,7 @@ fun TtsSettingsScreen(
                                             return@Button
                                         }
                                         // 缓存命中（同 provider/音色/自定义音色字段）→ 直接重播，不重新合成
-                                        val cacheKey = "${selectedProvider.name}|$selectedVoiceId|$sfCustomVoiceId"
+                                        val cacheKey = "${selectedProvider.name}|$selectedVoiceId|$sfCustomVoiceId|$mimoModel|$mimoVoiceClonePath|$mimoVoiceDesignPrompt|$mimoOptimizeTextPreview"
                                         if (previewAudioPath != null && previewCacheKey == cacheKey) {
                                             testResult = "✓ 重播中…"
                                             scope.launch { snackbarHostState.showSnackbar(testResult!!) }
@@ -1101,6 +1128,14 @@ private fun ApiKeyConfigCard(
     onMimoModelChange: (String) -> Unit,
     mimoVoiceId: String,
     onMimoVoiceIdChange: (String) -> Unit,
+    mimoVoiceDesignPrompt: String,
+    onMimoVoiceDesignPromptChange: (String) -> Unit,
+    mimoVoiceClonePath: String,
+    onMimoVoiceClonePathChange: (String) -> Unit,
+    mimoOptimizeTextPreview: Boolean,
+    onMimoOptimizeTextPreviewChange: (Boolean) -> Unit,
+    showMimoModelDropdown: Boolean,
+    onShowMimoModelDropdown: (Boolean) -> Unit,
     showSfModelDropdown: Boolean,
     onShowSfModelDropdown: (Boolean) -> Unit,
     showSfRateDropdown: Boolean,
@@ -1243,7 +1278,7 @@ private fun ApiKeyConfigCard(
                 Text("语速: ${sfSpeed}", fontSize = 13.sp, color = textSecondaryColor)
                 Slider(
                     value = sfSpeed.toFloatOrNull() ?: 1.0f,
-                    onValueChange = { onSfSpeedChange(String.format("%.1f", it)) },
+                    onValueChange = { onSfSpeedChange(String.format(Locale.US, "%.1f", it)) },
                     valueRange = 0.5f..2.0f,
                     modifier = Modifier.fillMaxWidth(),
                     colors = SliderDefaults.colors(thumbColor = PetalPrimary, activeTrackColor = PetalPrimary)
@@ -1310,25 +1345,211 @@ private fun ApiKeyConfigCard(
                     textSecondaryColor = textSecondaryColor
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                TtsTextField(
-                    value = mimoModel,
-                    onValueChange = onMimoModelChange,
-                    label = "模型 (如 mimo-v2.5-tts)",
-                    isDarkTheme = isDarkTheme,
-                    dividerColor = dividerColor,
-                    textPrimaryColor = textPrimaryColor,
-                    textSecondaryColor = textSecondaryColor
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                TtsTextField(
-                    value = mimoVoiceId,
-                    onValueChange = onMimoVoiceIdChange,
-                    label = "voice (如 mimo_default / Chloe)",
-                    isDarkTheme = isDarkTheme,
-                    dividerColor = dividerColor,
-                    textPrimaryColor = textPrimaryColor,
-                    textSecondaryColor = textSecondaryColor
-                )
+                Text("模型", fontSize = 13.sp, color = textSecondaryColor)
+                Spacer(modifier = Modifier.height(4.dp))
+                Box {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppTheme.colors.surface)
+                            .clickable { onShowMimoModelDropdown(!showMimoModelDropdown) }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(mimoModel.ifBlank { "未选择" }, fontSize = 14.sp, color = textPrimaryColor)
+                        Icon(
+                            if (showMimoModelDropdown) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null, tint = textSecondaryColor, modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMimoModelDropdown,
+                        onDismissRequest = { onShowMimoModelDropdown(false) },
+                        modifier = Modifier.background(AppTheme.colors.surface)
+                    ) {
+                        listOf(
+                            MiMoTtsProvider.MODEL_TTS to "预置精品音色 · 支持唱歌模式",
+                            MiMoTtsProvider.MODEL_TTS_VOICEDESIGN to "文本描述定制音色",
+                            MiMoTtsProvider.MODEL_TTS_VOICECLONE to "音频样本复刻音色"
+                        ).forEach { (id, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label, fontSize = 13.sp) },
+                                onClick = {
+                                    onMimoModelChange(id)
+                                    onShowMimoModelDropdown(false)
+                                },
+                                leadingIcon = if (id == mimoModel) {
+                                    { Icon(Icons.Filled.Check, null, tint = PetalGreen, modifier = Modifier.size(18.dp)) }
+                                } else null
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                val mimoModelNote = when (MiMoTtsProvider.normalizeModel(mimoModel)) {
+                    MiMoTtsProvider.MODEL_TTS_VOICEDESIGN ->
+                        "通过文本描述定制音色；不支持唱歌模式、预置音色与音色复刻。"
+                    MiMoTtsProvider.MODEL_TTS_VOICECLONE ->
+                        "基于音频样本复刻音色；不支持唱歌模式、预置音色与音色设计。"
+                    else ->
+                        "支持唱歌模式（文本开头加 (唱歌) 标签）；不支持音色设计与音色复刻。"
+                }
+                Text(mimoModelNote, fontSize = 12.sp, color = textSecondaryColor)
+
+                when (MiMoTtsProvider.normalizeModel(mimoModel)) {
+                    MiMoTtsProvider.MODEL_TTS_VOICEDESIGN -> {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = mimoVoiceDesignPrompt,
+                            onValueChange = onMimoVoiceDesignPromptChange,
+                            label = { Text("音色描述（必填，1-4 句）", color = textSecondaryColor) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = PetalPrimary,
+                                unfocusedBorderColor = dividerColor,
+                                focusedContainerColor = AppTheme.colors.surface,
+                                unfocusedContainerColor = AppTheme.colors.surface,
+                                focusedTextColor = textPrimaryColor,
+                                unfocusedTextColor = textPrimaryColor
+                            ),
+                            minLines = 3,
+                            maxLines = 6
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "描述越具体越生动：性别年龄、音色质感、情绪语气、语速节奏等，支持中英文。不要写混响/回声等后期效果词，避免矛盾特征（如稚嫩童声 + 总裁气场）。",
+                            fontSize = 12.sp,
+                            color = textSecondaryColor
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("智能润色合成文本", fontSize = 13.sp, color = textPrimaryColor)
+                                Text("optimize_text_preview：让模型润色目标播报文本", fontSize = 11.sp, color = textSecondaryColor)
+                            }
+                            Switch(
+                                checked = mimoOptimizeTextPreview,
+                                onCheckedChange = onMimoOptimizeTextPreviewChange,
+                                colors = SwitchDefaults.colors(checkedTrackColor = PetalPrimary)
+                            )
+                        }
+                    }
+                    MiMoTtsProvider.MODEL_TTS_VOICECLONE -> {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        var clonePickError by remember { mutableStateOf<String?>(null) }
+                        val cloneScope = rememberCoroutineScope()
+                        val cloneLauncher = rememberLauncherForActivityResult(
+                            ActivityResultContracts.GetContent()
+                        ) { uri ->
+                            if (uri != null) {
+                                cloneScope.launch {
+                                    val outcome = withContext(Dispatchers.IO) {
+                                        val mime = context.contentResolver.getType(uri) ?: ""
+                                        val ext = when (mime) {
+                                            "audio/mpeg", "audio/mp3" -> "mp3"
+                                            "audio/wav" -> "wav"
+                                            else -> ""
+                                        }
+                                        if (ext.isEmpty()) {
+                                            return@withContext Pair(false, "仅支持 mp3 / wav 格式的音频样本")
+                                        }
+                                        val targetDir = File(context.filesDir, "tts_mimo_clone").apply { mkdirs() }
+                                        val outFile = File(targetDir, "mimo_clone_sample.$ext")
+                                        runCatching {
+                                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                                outFile.outputStream().use { out -> input.copyTo(out) }
+                                            } ?: return@withContext Pair(false, "无法读取所选文件")
+                                            if (outFile.length() <= 0L) {
+                                                outFile.delete()
+                                                return@withContext Pair(false, "音频样本为空")
+                                            }
+                                            if (outFile.length() > 10 * 1024 * 1024L) {
+                                                outFile.delete()
+                                                return@withContext Pair(false, "音频样本超过 10MB 限制")
+                                            }
+                                            Pair(true, outFile.absolutePath)
+                                        }.getOrElse { e ->
+                                            outFile.delete()
+                                            Pair(false, "复制样本失败：${e.message ?: e.javaClass.simpleName}")
+                                        }
+                                    }
+                                    if (outcome.first) {
+                                        onMimoVoiceClonePathChange(outcome.second)
+                                        clonePickError = null
+                                    } else {
+                                        clonePickError = outcome.second
+                                    }
+                                }
+                            }
+                        }
+                        Button(
+                            onClick = { cloneLauncher.launch("audio/*") },
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = PetalPrimaryContainer,
+                                contentColor = PetalOnPrimaryContainer
+                            )
+                        ) {
+                            Text(
+                                if (mimoVoiceClonePath.isBlank()) "选择音频样本" else "更换音频样本",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        if (mimoVoiceClonePath.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "✓ ${File(mimoVoiceClonePath).name}",
+                                    fontSize = 13.sp,
+                                    color = PetalGreen,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = {
+                                    onMimoVoiceClonePathChange("")
+                                    clonePickError = null
+                                }) {
+                                    Text("移除", fontSize = 12.sp, color = PetalError)
+                                }
+                            }
+                        }
+                        clonePickError?.let {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(it, fontSize = 12.sp, color = PetalError)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "支持 mp3 / wav，样本不超过 10MB。合成时读取该文件发送给 MiMo 复刻音色。",
+                            fontSize = 12.sp,
+                            color = textSecondaryColor
+                        )
+                    }
+                    else -> {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TtsTextField(
+                            value = mimoVoiceId,
+                            onValueChange = onMimoVoiceIdChange,
+                            label = "自定义 voice (可选，留空使用上方预置音色)",
+                            isDarkTheme = isDarkTheme,
+                            dividerColor = dividerColor,
+                            textPrimaryColor = textPrimaryColor,
+                            textSecondaryColor = textSecondaryColor
+                        )
+                    }
+                }
             }
             TtsProvider.OPENAI_COMPAT -> {
                 Text(
@@ -1579,10 +1800,10 @@ private fun LocalTtsConfigContent(
 
         // 速度滑动条
         Spacer(modifier = Modifier.height(4.dp))
-        Text("语速: ${String.format("%.1f", localTtsSpeed)}", fontSize = 13.sp, color = textSecondaryColor)
+        Text("语速: ${String.format(Locale.US, "%.1f", localTtsSpeed)}", fontSize = 13.sp, color = textSecondaryColor)
         Slider(
             value = localTtsSpeed,
-            onValueChange = { onLocalTtsSpeedChange(String.format("%.1f", it).toFloat()) },
+            onValueChange = { onLocalTtsSpeedChange(String.format(Locale.US, "%.1f", it).toFloat()) },
             valueRange = 0.5f..2.0f,
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(thumbColor = PetalPrimary, activeTrackColor = PetalPrimary)

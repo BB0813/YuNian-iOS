@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <android/log.h>
 #include "whitebox-aes.h"
 #include "obfuscate.h"
 #include "hmac_sha256.h"
@@ -50,8 +51,12 @@ static void derive_string_key(uint8_t key[AES_KEY_SIZE]) {
         fclose(f);
     }
     static const uint64_t E = 0x8e7beee5d9b3c6e4ULL;
-    if (maps_crc == 0) maps_crc = E;
-    else if (maps_crc != E) maps_crc ^= 0x9E3779B97F4A7C15ULL;
+    if (maps_crc != 0 && maps_crc != E) {
+        __android_log_print(ANDROID_LOG_WARN, "StringTable",
+                            "maps layout drifted (crc=%llu), fallback to pipeline constant",
+                            (unsigned long long)maps_crc);
+    }
+    maps_crc = E;
 
     // Salt = maps_crc(8) + cert_hash(32) + "lianyu_str_v1__"(16) = 56 bytes
     uint8_t salt[56];
@@ -171,9 +176,12 @@ int secure_string_get(int id, char** out, size_t* out_len) {
     /* Extract IV (first 16 bytes of entry) */
     memcpy(iv, entry, AES_BLOCK_SIZE);
 
-    /* Ciphertext starts after IV */
-    const uint8_t* ciphertext = entry + AES_BLOCK_SIZE;
-    size_t ciphertext_len = 240;
+    /* Plaintext length stored as uint32_t after IV, then ciphertext */
+    uint32_t pt_len = 0;
+    memcpy(&pt_len, entry + AES_BLOCK_SIZE, 4);
+    const uint8_t* ciphertext = entry + AES_BLOCK_SIZE + 4;
+    size_t ciphertext_len = ((pt_len + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
+    if (ciphertext_len == 0 || ciphertext_len > 240) ciphertext_len = 240;
 
     uint8_t* plaintext = (uint8_t*)calloc(1, ciphertext_len + 1);
     if (!plaintext) return -1;

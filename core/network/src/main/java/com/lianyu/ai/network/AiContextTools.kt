@@ -315,20 +315,32 @@ object AiContextTools {
     internal fun extractMemoryKeywords(memoryContext: String): Set<String> {
         if (memoryContext.isBlank()) return emptySet()
         val keywords = mutableSetOf<String>()
+
+        // 兼容旧格式：【核心记忆】/【相关记忆】分节
         val coreSection = Regex("【核心记忆[^】]*】([\\s\\S]*?)(?=【|$)").find(memoryContext)?.groupValues?.get(1) ?: ""
         val relatedSection = Regex("【相关记忆[^】]*】([\\s\\S]*?)(?=【|$)").find(memoryContext)?.groupValues?.get(1) ?: ""
 
-        listOf(coreSection, relatedSection).forEach { section ->
-            section.lines().forEach { line ->
-                val clean = line.trimStart('-', '[', ']', '【', '】', ' ').trim()
-                if (clean.length in 2..30) {
-                    keywords.add(clean.lowercase())
-                    clean.split(Regex("[，。、；：！？\\s]")).filter { it.length >= 2 }.forEach { kw ->
-                        keywords.add(kw.lowercase())
+        // 兼容新格式：统一记忆上下文每行一条 "[事实 | 3小时前] 内容"，无分节时按行解析
+        val uniformSection = if (coreSection.isBlank() && relatedSection.isBlank()) {
+            memoryContext.lines()
+                .map { it.trim().replace(Regex("^\\[[^\\]]*\\]\\s*"), "") }
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
+        } else ""
+
+        listOf(coreSection, relatedSection, uniformSection)
+            .filter { it.isNotBlank() }
+            .forEach { section ->
+                section.lines().forEach { line ->
+                    val clean = line.trimStart('-', '[', ']', '【', '】', ' ').trim()
+                    if (clean.length in 2..30) {
+                        keywords.add(clean.lowercase())
+                        clean.split(Regex("[，。、；：！？\\s]")).filter { it.length >= 2 }.forEach { kw ->
+                            keywords.add(kw.lowercase())
+                        }
                     }
                 }
             }
-        }
         return keywords.filter { it.length >= 2 }.take(50).toSet()
     }
 

@@ -15,7 +15,7 @@ class ChatTurnState {
     var stickerSentThisTurn: Boolean = false
 
     /** Sticker queued by TextProcessor but not yet persisted. Used to randomize sticker/text order. */
-    var pendingSticker: StickerInfo? = null
+    @Volatile var pendingSticker: StickerInfo? = null
 
     /** Message ID of the pending sticker to broadcast (stale sticker pattern). */
     var lastStickerMsgId: Long = -1
@@ -24,7 +24,7 @@ class ChatTurnState {
     var lastStickerContent: String = ""
 
     /** Active message-sending coroutine job, cancelled when a new message starts. */
-    var sendMessageJob: Job? = null
+    @Volatile var sendMessageJob: Job? = null
 
     /** Mutex for atomic sticker send operations. */
     val stickerMutex: Mutex = Mutex()

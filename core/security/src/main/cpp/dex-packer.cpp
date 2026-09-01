@@ -23,6 +23,7 @@
 // Dex2C integrity stub — definition in liblianyu_dex2c.so (separate SO)
 // liblianyu_security.so provides a local stub since it can't link to dex2c
 const uint32_t gDex2cTextCrc32 = 0xFFFFFFFF;
+static volatile int g_dex2c_integrity_failed = 0;
 
 #include <cstring>
 #include <cstdlib>
@@ -761,12 +762,10 @@ static void verify_dex2c_integrity(void) {
         DEX_LOGE("!!! DEX2C INTEGRITY FAILURE — .text CRC32 MISMATCH !!!");
         DEX_LOGE("!!! Expected: 0x%08X  Got: 0x%08X !!!",
                  gDex2cTextCrc32, computed_crc);
-        /* Obfuscated abort — use opaque predicate to resist patching */
-        volatile int dex2c_fail = -300;
-        if (opaque_false(dex2c_fail)) { dex2c_fail = 0; }
-        kill(getpid(), SIGABRT);
-        /* unreachable */
-        __builtin_unreachable();
+        /* Do NOT abort() — HarmonyOS/EMUI may modify loaded libraries.
+         * Log and return with integrity flag set instead. */
+        g_dex2c_integrity_failed = 1;
+        return;
     }
 
     DEX_LOGI("dex2c: integrity verification PASSED");
