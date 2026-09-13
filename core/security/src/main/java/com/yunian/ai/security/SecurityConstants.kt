@@ -71,7 +71,6 @@ object SecurityConstants {
     }
 
     object SecureStoreKeys {
-        const val AUTH_TOKEN_STORE     = "auth_store_encrypted"
         const val QQ_BOT_STORE         = "qqbot_secure_store"
         const val WECHAT_STORE         = "wechat_secure_store"
         const val DB_KEY_PREFS         = "lianyu_db_secure_prefs"
@@ -113,7 +112,6 @@ object SecurityConstants {
         validateLevel("TtsEndpoints.ALIYUN_ENDPOINT", Level.HIGH, "SECURE_STRINGS")
         validateLevel("TtsEndpoints.BAIDU_TTS", Level.HIGH, "SECURE_STRINGS")
         validateLevel("CertificatePins.PIN_GOOGLE_1", Level.HIGH, "SECURE_STRINGS")
-        validateLevel("SecureStoreKeys.AUTH_TOKEN_STORE", Level.HIGH, "SECURE_STRINGS")
         validateLevel("SecureStoreKeys.QQ_BOT_STORE", Level.HIGH, "SECURE_STRINGS")
         validateLevel("CryptoIdentifiers.YUNIAN_CHAT_KEY", Level.HIGH, "SECURE_STRINGS")
         validateLevel("CryptoIdentifiers.YUNIAN_TINK_KEK", Level.HIGH, "SECURE_STRINGS")
