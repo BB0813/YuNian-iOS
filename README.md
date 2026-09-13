@@ -304,7 +304,7 @@ cd YuNian
       <br />
       <span>🧩 功能开发</span>
       <br />
-      <sub>功能开发 · 社区运营</sub>
+      <sub>功能开发</sub>
     </td>
   </tr>
 </table>

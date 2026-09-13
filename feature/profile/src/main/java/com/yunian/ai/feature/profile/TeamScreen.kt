@@ -106,7 +106,7 @@ val teamMembers = listOf(
     TeamMember(
         name = "\u4E0B\u5317\u6CFD\u4F20\u5947",
         role = "\u529F\u80FD\u5F00\u53D1",
-        description = "\u529F\u80FD\u5F00\u53D1 \u00B7 \u793E\u533A\u8FD0\u8425",
+        description = "\u529F\u80FD\u5F00\u53D1",
         color = Color(0xFF14B8A6),
         avatarRes = R.drawable.team_xiabeize
     )
