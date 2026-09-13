@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -237,9 +238,13 @@ fun AboutScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    // 7 人预览可能超出卡宽：横滑兜底防裁切/挤压；尺寸略降保证常见屏宽全量可见
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .align(Alignment.CenterHorizontally)
+                        .padding(horizontal = 12.dp)
                 ) {
                     teamMembers.forEach { member ->
                         member.avatarRes?.let { avatarRes ->
@@ -247,7 +252,7 @@ fun AboutScreen(
                                 painter = painterResource(id = avatarRes),
                                 contentDescription = member.name,
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(36.dp)
                                     .clip(CircleShape),
                                 contentScale = ContentScale.Crop
                             )
