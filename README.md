@@ -237,15 +237,8 @@ cd YuNian
       </a>
       <br />
       <span>💻 🎨 创建者 & 全栈</span>
-    </td>
-    <td align="center">
-      <a href="#">
-        <img src="assets/contributors/xiabeize.png" width="72px" style="border-radius:50%" />
-        <br />
-        <sub><b>下北泽传奇</b></sub>
-      </a>
       <br />
-      <span>🤝 核心协作者</span>
+      <sub>架构设计 · 全栈开发</sub>
     </td>
     <td align="center">
       <a href="https://github.com/Vespera-Su">
@@ -254,18 +247,9 @@ cd YuNian
         <sub><b>祈愿小苏</b></sub>
       </a>
       <br />
-      <span>🛡️ 安全加密 · 后端</span>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/3092054815-byte">
-        <img src="assets/contributors/zhaomo.png" width="72px" style="border-radius:50%" />
-        <br />
-        <sub><b>着魔</b></sub>
-      </a>
+      <span>🛡️ 安全加密</span>
       <br />
-      <span>💕📖 恋爱教程</span>
+      <sub>JNI 安全 · 后端服务</sub>
     </td>
     <td align="center">
       <a href="https://github.com/yuansi05">
@@ -275,15 +259,40 @@ cd YuNian
       </a>
       <br />
       <span>🖼️🎙️ 多模态</span>
+      <br />
+      <sub>图像处理 · 语音识别</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center">
-      <a href="https://github.com/zzx511511">
-        <img src="assets/contributors/guyuan.png" width="72px" style="border-radius:50%" />
+      <a href="#">
         <br />
-        <sub><b>故渊</b></sub>
+        <sub><b>青思雨</b></sub>
       </a>
       <br />
-      <span>🔧 后端支持</span>
+      <span>🖥️ PC 端开发</span>
+      <br />
+      <sub>桌面客户端 · 跨平台</sub>
+    </td>
+    <td align="center">
+      <a href="#">
+        <br />
+        <sub><b>Clove.</b></sub>
+      </a>
+      <br />
+      <span>⚙️ 软件基础开发</span>
+      <br />
+      <sub>底层开发</sub>
+    </td>
+    <td align="center">
+      <a href="#">
+        <br />
+        <sub><b>寒拂晴ColdBreeze</b></sub>
+      </a>
+      <br />
+      <span>📞 功能开发</span>
+      <br />
+      <sub>语音通话 · bug修复</sub>
     </td>
   </tr>
 </table>
