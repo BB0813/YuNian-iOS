@@ -1,8 +1,8 @@
-# 恋语源码审查与修复 — 概览
+# 予念源码审查与修复 — 概览
 
 ## 完成了什么
 
-对「恋语」安卓 App 全仓（app + 16 个模块 + shell）做了深度审查，优先定位并修复了导致设备闪退与启动异常的根因，并清理了全仓 AI 风格注释。
+对「予念」安卓 App 全仓（app + 16 个模块 + shell）做了深度审查，优先定位并修复了导致设备闪退与启动异常的根因，并清理了全仓 AI 风格注释。
 
 ## 关键改动
 
@@ -62,7 +62,7 @@
 # OpenMinis 移植 — 技能自觉使用 + 设备接管工具（2026-09-09）
 
 ## 做了什么
-参考 github.com/OpenMinis/OpenMinis（已克隆至 `.workbuddy/tmp/OpenMinis`），移植其技能触发模式并新建设备工具集，全部只用恋语命名。
+参考 github.com/OpenMinis/OpenMinis（已克隆至 `.workbuddy/tmp/OpenMinis`），移植其技能触发模式并新建设备工具集，全部只用予念命名。
 
 ## 关键改动
 1. **技能索引常驻注入**（feature/skills/tools/SkillTools.kt）：新增 `SkillIndexState` + `refreshSkillIndex()`，把 assets 技能清单以 `<available_skills>` XML（名称+描述，上限 20）注入 `use_skill` 工具的系统提示词——模型从"不知道有技能"变为"看到清单、匹配即主动加载"。这是"AI 不会自觉使用技能"的根因修复。
@@ -74,7 +74,7 @@
 `:feature:skills:compileDebugKotlin :app:compileDebugKotlin` → BUILD SUCCESSFUL。
 
 ## QQ 路线结论（同步）
-OpenClaw / Hermes Agent 的 QQ 接入均为官方 QQ Bot API v2（AppID/Secret + WebSocket Gateway），"扫码"只是凭证配置向导；恋语自研客户端已是同源协议，连不上属平台配置问题（白名单/回调方式），可借鉴 OpenClaw 插件的工程实践（事件持久化、串行回复、限速、QQ 内置 ASR 语音转写、requireMention 配置）。
+OpenClaw / Hermes Agent 的 QQ 接入均为官方 QQ Bot API v2（AppID/Secret + WebSocket Gateway），"扫码"只是凭证配置向导；予念自研客户端已是同源协议，连不上属平台配置问题（白名单/回调方式），可借鉴 OpenClaw 插件的工程实践（事件持久化、串行回复、限速、QQ 内置 ASR 语音转写、requireMention 配置）。
 
 ---
 
@@ -82,7 +82,7 @@ OpenClaw / Hermes Agent 的 QQ 接入均为官方 QQ Bot API v2（AppID/Secret +
 
 ## 微信侧（对标腾讯官方 OpenClaw 微信插件 2.4.8）
 1. **IlinkDirectSender**（新建 core/wechat/ilink/）：文本发送直连官方 API，完整对齐 2.4.8 协议（iLink-App-Id / iLink-App-ClientVersion / X-WECHAT-UIN / bot_agent / message_type=2 / message_state=2），`ret!=0` 直接抛错——发送失败从"静默无反应"变为"可感知、可重试"。SDK 仅保留登录与收消息。
-2. **channel_version 动态化**：启动时从 npm registry 拉官方插件最新版本号，官方更新恋语自动跟随；离线回退 2.4.8 兜底值。
+2. **channel_version 动态化**：启动时从 npm registry 拉官方插件最新版本号，官方更新予念自动跟随；离线回退 2.4.8 兜底值。
 3. **设置页日志清理**：微信设置页"通道状态"卡片移除"最近错误原文 / 近期 Outbox 失败列表"开发遗留日志，保留健康概览。
 4. 验证：core:wechat 40 单测全过，编译全绿。
 

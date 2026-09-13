@@ -28,12 +28,12 @@
     <string name="settings_category_tools_desc">루이싱 커피 등 도구</string>
     <string name="settings_category_permissions">권한 관리</string>
     <string name="settings_category_permissions_desc">자동 시작, 배터리 화이트리스트, 알림</string>
-    <string name="settings_category_about">연어 정보</string>
+    <string name="settings_category_about">予念 정보</string>
     <string name="settings_category_about_desc">새 버전 확인</string>
     <string name="check_new_version">새 버전 확인</string>
     <string name="check_new_version_desc">사용 가능한 업데이트 확인</string>
     <string name="about_app">앱 정보</string>
-    <string name="about_app_desc">연어 - 당신의 AI 가상 연인</string>
+    <string name="about_app_desc">予念 - 당신의 AI 가상 연인</string>
     <string name="battery_whitelist">배터리 최적화 화이트리스트</string>
     <string name="battery_whitelist_desc">백그라운드 메시지가 정상 작동하도록</string>
     <string name="data_backup">데이터 백업</string>
@@ -61,14 +61,14 @@
     <string name="device_id_hint">각 기기에는 고유한 ID가 있습니다. 바인딩 후에는 다른 기기에서 사용할 수 없습니다.</string>
     <string name="back">이전으로</string>
     <string name="confirm_bind">바인딩 확인</string>
-    <string name="version_info">연어 v1.8 · 팬 그룹 전용</string>
+    <string name="version_info">予念 v1.8 · 팬 그룹 전용</string>
 
     <string name="about_title">앱 정보</string>
-    <string name="app_brand">연어</string>
+    <string name="app_brand">予念</string>
     <string name="app_slogan">YuNian - 당신의 AI 가상 연인</string>
     <string name="version">버전 1.8</string>
-    <string name="about_desc_title">연어 소개</string>
-    <string name="about_desc">연어는先進的な 대규모 언어 모델 기술을 기반으로 한 AI 가상 연인 채팅 앱입니다.</string>
+    <string name="about_desc_title">予念 소개</string>
+    <string name="about_desc">予念는先進的な 대규모 언어 모델 기술을 기반으로 한 AI 가상 연인 채팅 앱입니다.</string>
     <string name="developer">개발자</string>
     <string name="developer_douyin">TikTok: 我想天天开心</string>
     <string name="developer_hint">팔로우하여 최신 정보 얻기</string>

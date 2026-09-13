@@ -9,7 +9,7 @@ import com.yunian.ai.network.transformers.TransformerContext
 /**
  * 世界书（Lorebook）提示词注入转换器
  *
- * 对齐 rikkahub 的 PromptInjectionTransformer 设计：
+ * PromptInjectionTransformer 设计说明：
  * - 纯内容注入，不携带内部元数据（避免污染提示词）
  * - BEFORE/AFTER_SYSTEM_PROMPT 合并进系统提示词文本，而非插入独立 system 消息
  * - TOP_OF_CHAT / BOTTOM_OF_CHAT / AT_DEPTH 按条目 role 注入 user/assistant 消息，同角色合并

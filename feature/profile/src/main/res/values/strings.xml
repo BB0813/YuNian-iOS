@@ -45,7 +45,7 @@
     <string name="settings_category_tools_desc">瑞幸咖啡等工具能力</string>
     <string name="settings_category_permissions">权限管理</string>
     <string name="settings_category_permissions_desc">自启动、电池白名单、通知</string>
-    <string name="settings_category_about">关于恋语</string>
+    <string name="settings_category_about">关于予念</string>
     <string name="settings_category_about_desc">检查新版本</string>
 
     <!-- 记忆与管理 -->
@@ -83,14 +83,14 @@
 
     <!-- 关于与支持 -->
     <string name="about_app">关于应用</string>
-    <string name="about_app_desc">恋语 - 你的AI虚拟恋人</string>
+    <string name="about_app_desc">予念 - 你的AI虚拟恋人</string>
 
     <!-- Dev Team -->
     <string name="dev_team">开发团队</string>
     <string name="dev_team_desc">认识背后的开发者们</string>
     <string name="dev_team_title">开发团队</string>
-    <string name="dev_team_subtitle">感谢每一位为恋语付出的人</string>
-    <string name="dev_team_bottom">💡 欢迎加入我们，一起让恋语变得更好</string>
+    <string name="dev_team_subtitle">感谢每一位为予念付出的人</string>
+    <string name="dev_team_bottom">💡 欢迎加入我们，一起让予念变得更好</string>
 
     <!-- Support Us -->
     <string name="support_us">支持我们</string>
@@ -131,7 +131,7 @@
     <string name="originos_adaption_exact_alarm">精确闹钟权限</string>
     <string name="originos_adaption_exact_alarm_desc">前台服务超时后的兜底重启依赖</string>
     <string name="originos_adaption_guide_title">设置路径参考</string>
-    <string name="originos_adaption_guide_footer">提示：部分设置项在不同 OriginOS 版本上入口可能略有差异，如点击后无反应，请手动在「设置 → 应用管理 → 恋语」中查找对应开关。</string>
+    <string name="originos_adaption_guide_footer">提示：部分设置项在不同 OriginOS 版本上入口可能略有差异，如点击后无反应，请手动在「设置 → 应用管理 → 予念」中查找对应开关。</string>
 
     <!-- Thanks -->
     <string name="thanks_title">感谢有你</string>
@@ -163,15 +163,15 @@
     <string name="device_id_hint">每台设备拥有唯一的识别码，绑定后无法在其他设备上使用</string>
     <string name="back">返回上一步</string>
     <string name="confirm_bind">确认绑定</string>
-    <string name="version_info">恋语 v1.8 · 仅限粉丝群内部使用</string>
+    <string name="version_info">予念 v1.8 · 仅限粉丝群内部使用</string>
 
     <!-- About Screen -->
     <string name="about_title">关于应用</string>
-    <string name="app_brand">恋语</string>
+    <string name="app_brand">予念</string>
     <string name="app_slogan">YuNian - 你的AI虚拟恋人</string>
     <string name="version">版本 1.8</string>
-    <string name="about_desc_title">关于恋语</string>
-    <string name="about_desc">恋语是一款AI虚拟恋人聊天应用，基于先进的大语言模型技术，为你打造专属的虚拟伴侣体验。</string>
+    <string name="about_desc_title">关于予念</string>
+    <string name="about_desc">予念是一款AI虚拟恋人聊天应用，基于先进的大语言模型技术，为你打造专属的虚拟伴侣体验。</string>
     <string name="developer">开发者</string>
     <string name="developer_douyin">抖音：我想天天开心</string>
     <string name="developer_hint">关注开发者，获取更多AI应用资讯</string>

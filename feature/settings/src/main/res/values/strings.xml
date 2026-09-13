@@ -15,7 +15,7 @@
     <string name="experimental_features_desc">探索尚未正式发布的测试功能</string>
     <string name="experimental_features_hint">以下功能处于实验阶段，可能不稳定，请谨慎开启。</string>
 
-    <!-- RikkaHub Ported Features -->
+    <!-- Ported Features -->
     <string name="worldbook">世界书（知识库）</string>
     <string name="worldbook_desc">管理触发式知识注入、关键词设定、角色世界观</string>
     <string name="skills_manager">AI 能力中心</string>

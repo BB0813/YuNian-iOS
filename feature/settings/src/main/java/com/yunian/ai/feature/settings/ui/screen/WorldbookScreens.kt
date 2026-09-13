@@ -714,7 +714,7 @@ private fun LabeledSwitch(label: String, checked: Boolean, onCheckedChange: (Boo
 }
 
 /**
- * LazyColumn 长按拖拽排序状态（参考 rikkahub/社区通用实现）
+ * LazyColumn 长按拖拽排序状态（社区通用实现）
  * 拖动中实时换位，松手后由调用方持久化新顺序
  */
 private class DragDropState(

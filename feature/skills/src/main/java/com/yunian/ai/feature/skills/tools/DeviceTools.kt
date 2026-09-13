@@ -213,7 +213,7 @@ class DeviceNotifyTool(private val context: Context) : AiTool {
         val channelId = "lianyu_device_agent"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
-                NotificationChannel(channelId, "恋语助手通知", NotificationManager.IMPORTANCE_DEFAULT)
+                NotificationChannel(channelId, "予念助手通知", NotificationManager.IMPORTANCE_DEFAULT)
             )
         }
         val notification = NotificationCompat.Builder(context.applicationContext, channelId)

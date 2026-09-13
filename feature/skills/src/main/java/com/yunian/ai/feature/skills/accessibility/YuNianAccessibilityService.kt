@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.yunian.ai.common.SecureLog
 
 /**
- * 恋语无障碍服务：AI 控制手机的执行通道。
+ * 予念无障碍服务：AI 控制手机的执行通道。
  * 用户在系统设置中开启本服务后，AI 即可通过工具读屏、点击、滑动、执行全局导航。
  * 服务实例以进程级单例暴露给工具层；未开启时工具返回引导信息。
  */

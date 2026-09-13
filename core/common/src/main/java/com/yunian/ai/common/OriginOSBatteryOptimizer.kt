@@ -254,16 +254,16 @@ object OriginOSBatteryOptimizer {
     fun getBatteryOptimizationGuideText(): String {
         return when {
             RomUtils.isOriginOS6OrAbove() -> {
-                "设置 → 电池 → 后台耗电管理 → 找到「恋语」→ 允许后台运行 / 高耗电"
+                "设置 → 电池 → 后台耗电管理 → 找到「予念」→ 允许后台运行 / 高耗电"
             }
             RomUtils.isOriginOS3OrAbove() -> {
-                "设置 → 电池 → 后台耗电管理 → 找到「恋语」→ 允许后台高耗电"
+                "设置 → 电池 → 后台耗电管理 → 找到「予念」→ 允许后台高耗电"
             }
             RomUtils.isVivo -> {
-                "i管家 → 电池管理 → 后台高耗电 → 找到「恋语」→ 允许"
+                "i管家 → 电池管理 → 后台高耗电 → 找到「予念」→ 允许"
             }
             else -> {
-                "设置 → 电池 → 电池优化 → 找到「恋语」→ 不优化"
+                "设置 → 电池 → 电池优化 → 找到「予念」→ 不优化"
             }
         }
     }

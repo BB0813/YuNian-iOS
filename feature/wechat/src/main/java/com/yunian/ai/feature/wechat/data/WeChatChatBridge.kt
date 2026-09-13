@@ -147,7 +147,7 @@ class WeChatChatBridge(
             enqueueAndDrainText(
                 companionId = 0L,
                 wechatUserId = wechatUserId,
-                text = "还没有可用的 AI 伴侣，请先在恋语里创建一个伴侣，再回来和我聊天。",
+                text = "还没有可用的 AI 伴侣，请先在予念里创建一个伴侣，再回来和我聊天。",
             )
         }.onFailure {
             WeChatDebugLog.log("[Bridge] setup hint enqueue failed: ${it.message}")

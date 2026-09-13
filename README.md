@@ -1,10 +1,10 @@
 <p align="center">
   <picture>
-    <img src="logo/logo.png" alt="恋语 Logo" width="140" />
+    <img src="logo/logo.png" alt="予念 Logo" width="140" />
   </picture>
 </p>
 
-<h1 align="center">💕 恋语 · YuNian</h1>
+<h1 align="center">💕 予念 · YuNian</h1>
 
 <p align="center">
   <i>你的 AI 虚拟女友 — 随时随地，懂你陪伴</i>

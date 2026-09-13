@@ -256,7 +256,7 @@ S10 已完成；协议、业务和 ilink Client 均继续留在 Kotlin core。�
 
 ### 3.3 核心数据流
 
-#### A. 微信 → 恋语（入站）
+#### A. 微信 → 予念（入站）
 
 ```mermaid
 sequenceDiagram
@@ -285,7 +285,7 @@ sequenceDiagram
 - **同用户并发**：队列串行处理，**禁止**「已有 job 则丢弃」  
 - **去重键**：优先 `message_id`，次选 `(fromUserId, seq, create_time_ms, contentHash)`  
 
-#### B. 恋语 → 微信（出站 / 主动同步）
+#### B. 予念 → 微信（出站 / 主动同步）
 
 ```mermaid
 sequenceDiagram

@@ -5,5 +5,5 @@
     android:accessibilityFlags="flagDefault|flagReportViewIds|flagIncludeNotImportantViews"
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
-    android:description="@string/lianyu_accessibility_description"
+    android:description="@string/yunian_accessibility_description"
     android:notificationTimeout="100" />

@@ -28,12 +28,12 @@
     <string name="settings_category_tools_desc">瑞幸咖啡等工具能力</string>
     <string name="settings_category_permissions">權限管理</string>
     <string name="settings_category_permissions_desc">自啟動、電池白名單、通知</string>
-    <string name="settings_category_about">關於戀語</string>
+    <string name="settings_category_about">關於予念</string>
     <string name="settings_category_about_desc">檢查新版本</string>
     <string name="check_new_version">檢查新版本</string>
     <string name="check_new_version_desc">檢查可用更新</string>
     <string name="about_app">關於應用</string>
-    <string name="about_app_desc">戀語 - 你的AI虛擬戀人</string>
+    <string name="about_app_desc">予念 - 你的AI虛擬戀人</string>
     <string name="battery_whitelist">電池優化白名單</string>
     <string name="battery_whitelist_desc">確保後台消息正常推送</string>
     <string name="data_backup">資料備份</string>
@@ -61,14 +61,14 @@
     <string name="device_id_hint">每台設備擁有唯一的識別碼，綁定後無法在其他設備上使用</string>
     <string name="back">返回上一步</string>
     <string name="confirm_bind">確認綁定</string>
-    <string name="version_info">戀語 v1.8 · 僅限粉絲群內部使用</string>
+    <string name="version_info">予念 v1.8 · 僅限粉絲群內部使用</string>
 
     <string name="about_title">關於應用</string>
-    <string name="app_brand">戀語</string>
+    <string name="app_brand">予念</string>
     <string name="app_slogan">YuNian - 你的AI虛擬戀人</string>
     <string name="version">版本 1.8</string>
-    <string name="about_desc_title">關於戀語</string>
-    <string name="about_desc">戀語是一款AI虛擬戀人聊天應用，基於先進的大語言模型技術。</string>
+    <string name="about_desc_title">關於予念</string>
+    <string name="about_desc">予念是一款AI虛擬戀人聊天應用，基於先進的大語言模型技術。</string>
     <string name="developer">開發者</string>
     <string name="developer_douyin">抖音：我想天天開心</string>
     <string name="developer_hint">關注開發者，獲取更多AI應用資訊</string>
@@ -112,7 +112,7 @@
     <string name="originos_adaption_exact_alarm">精確鬧鐘權限</string>
     <string name="originos_adaption_exact_alarm_desc">前台服務超時後的兜底重啟依賴</string>
     <string name="originos_adaption_guide_title">設定路徑參考</string>
-    <string name="originos_adaption_guide_footer">提示：部分設定項在不同 OriginOS 版本上入口可能略有差異，若點擊後無反應，請手動在「設定 → 應用管理 → 戀語」中尋找對應開關。</string>
+    <string name="originos_adaption_guide_footer">提示：部分設定項在不同 OriginOS 版本上入口可能略有差異，若點擊後無反應，請手動在「設定 → 應用管理 → 予念」中尋找對應開關。</string>
 
     <!-- 角色選擇與管理 -->
     <string name="role_selection_title">選擇你的 AI 伴侶</string>
