@@ -1,5 +1,5 @@
 ---
-name: lianyu-build-pipeline
+name: yunian-build-pipeline
 description: YuNian 完整打包构建流程 — 从克隆到签名 APK，含壳、Dex2C、安全加固全链路。
 category: software-development
 ---

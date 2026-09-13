@@ -6,7 +6,7 @@ YuNian Ultimate Shell 是一套 Android APK 加固系统，通过**纯 Java 壳 
 
 ```
 ┌─────────────────────────────────────────────┐
-│  YuNian-Release.apk (76MB)                  │
+│  YuNian-release.apk (76MB)                  │
 │                                             │
 │  ┌─────────────────────────────────────┐    │
 │  │ classes.dex (7KB)                    │    │
@@ -44,8 +44,8 @@ python tools/build.py --release
 ```
 
 **输出：**
-- Debug: `app/build/outputs/apk/debug/LianYu-debug.apk`
-- Release: `app/build/outputs/apk/release/LianYu-release.apk` + 桌面快捷方式
+- Debug: `app/build/outputs/apk/debug/YuNian-debug.apk`
+- Release: `app/build/outputs/apk/release/YuNian-release.apk` + 桌面快捷方式
 
 ---
 
