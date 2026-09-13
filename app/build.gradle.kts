@@ -89,7 +89,7 @@ val disableMinify = providers.gradleProperty("yunianDisableMinify")
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            resValue("string", "app_name", "YuNian")
+            resValue("string", "app_name", "予念")
         }
     }
     sourceSets {

@@ -548,7 +548,7 @@ def main():
             print(f"  CRC32 patched + re-signed: {os.path.getsize(final)//1048576}MB")
 
     if args.release:
-        desk = os.path.join(os.environ.get("USERPROFILE",""), "Desktop", "YuNian-Release.apk")
+        desk = os.path.join(os.environ.get("USERPROFILE",""), "Desktop", "YuNian-release.apk")
         shutil.copy(final, desk)
         print(f"\n  Desktop: {desk}")
 

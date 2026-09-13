@@ -90,7 +90,13 @@ class ChatMessageStorageTest {
             linkString = ""
         )
         val encrypted = ChatMessageCrypto.encryptForStorage(sourceMessage, testKeyProvider)
-        val corrupted = encrypted.copy(content = encrypted.content.dropLast(2) + "AA")
+        // encryptForStorage 会把明文写入可搜索字段 searchContent，用于解密失败时的
+        // 明文兜底（见 ChatMessageCrypto.plaintextSearchFallback）。本用例要覆盖
+        // 「无明文兜底 → 解析失败占位符」分支，因此这里把 searchContent 一并清空。
+        val corrupted = encrypted.copy(
+            content = encrypted.content.dropLast(2) + "AA",
+            searchContent = ""
+        )
 
         val decrypted = ChatMessageCrypto.decryptFromStorage(corrupted, testKeyProvider)
 

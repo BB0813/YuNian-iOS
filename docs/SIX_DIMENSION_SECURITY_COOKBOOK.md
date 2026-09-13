@@ -1297,7 +1297,7 @@ unzip -lv app-release.apk classes.dex | grep -i defl
 ### TEST-D-01: Frida 附加
 ```
 启动 frida-server
-运行 frida -n com.lianyu -l test.js
+运行 frida -n com.yunian.ai -l test.js
 期望：应用在 3-8 秒内静默退出（无 logcat 输出）
 ```
 
@@ -1317,7 +1317,7 @@ gdbserver :5039 --attach <pid>
 ### TEST-D-04: Logcat 泄漏
 ```bash
 adb logcat -c
-adb shell am start -n com.lianyu/.MainActivity
+adb shell am start -n com.yunian.ai/.MainActivity
 # 在 Frida 运行期间
 adb logcat -d | grep -iE 'security|detect|check|score|frida'
 # 期望：零结果

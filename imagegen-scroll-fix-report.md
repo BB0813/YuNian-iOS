@@ -85,7 +85,7 @@ ChatGenerationManager.maybeTriggerImageGeneration (:980)
 | 加壳打包 | **BUILD SUCCESSFUL in 3m9s**，`[OK] thin-shell layout OK`（root classes.dex 13,444 B + 6 个加密块） |
 | 签名校验 | V3.0，SHA-256 `8d535c73c91544aa74fa7f8ce549a57852cae22bbecd9f129ac94905754bb62c`（与仓库记录一致） |
 
-产物：`dist/LianYu-release.apk`（150,696,581 B，2026-09-10 21:52）
+产物：`dist/YuNian-release.apk`（150,696,581 B，2026-09-10 21:52）
 
 ## 未覆盖 / 遗留
 
