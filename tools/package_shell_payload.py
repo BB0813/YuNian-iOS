@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Package LianYu shell payload for one-piece shell loading.
+"""Package YuNian shell payload for one-piece shell loading.
 
 The packager:
   1. Extracts classes*.dex from a signed release APK
   2. Builds a payload (DEX concatenation, then PKCS7-padded)
   3. Encrypts the payload through the configured backend
-  4. Writes the encrypted payload + manifest into assets/lianyu_shell/
+  4. Writes the encrypted payload + manifest into assets/yunian_shell/
 
 ENCRYPTION CONTRACT (must match CompositeVmpRuntime.decryptPayload):
   - Payload is PKCS7-padded to 16-byte alignment before encryption.
@@ -15,18 +15,18 @@ ENCRYPTION CONTRACT (must match CompositeVmpRuntime.decryptPayload):
   - Runtime verifies plaintext + ciphertext SHA-256 against manifest.
 
 MODES:
-  --dev          Use a standalone AES-256-CBC encryptor (requires LIANYU_PAYLOAD_KEY env).
+  --dev          Use a standalone AES-256-CBC encryptor (requires YUNIAN_PAYLOAD_KEY env).
                  NOT for production — native KMS must be used for real releases.
   --verify-only  Check that an existing payload matches the DEX in an APK. No encryption.
 
 Usage:
   # Production (requires native KMS bridge — see docs)
-  LIANYU_PAYLOAD_KEY=$(cat key.bin | base64) \\
-    python3 tools/package_shell_payload.py app-release.apk --output assets/lianyu_shell/
+  YUNIAN_PAYLOAD_KEY=$(cat key.bin | base64) \\
+    python3 tools/package_shell_payload.py app-release.apk --output assets/yunian_shell/
 
   # Dev/test with standalone AES
-  LIANYU_PAYLOAD_KEY=$(openssl rand -base64 32) \\
-    python3 tools/package_shell_payload.py app-release.apk --output assets/lianyu_shell/ --dev
+  YUNIAN_PAYLOAD_KEY=$(openssl rand -base64 32) \\
+    python3 tools/package_shell_payload.py app-release.apk --output assets/yunian_shell/ --dev
 
   # Verify existing payload
   python3 tools/package_shell_payload.py app-release.apk --verify-only
@@ -47,7 +47,7 @@ METADATA_SIZE = 16
 BLOCK_SIZE = 16
 MANIFEST_FILENAME = "shell_payload_manifest.json"
 PAYLOAD_FILENAME = "shell_payload.bin"
-ASSET_DIR = "lianyu_shell"
+ASSET_DIR = "yunian_shell"
 
 
 def pkcs7_pad(data: bytes) -> bytes:
@@ -78,16 +78,16 @@ def encrypt_dev(padded_payload: bytes, metadata: bytes) -> bytes:
     """Standalone AES-256-CBC encryptor for dev/test mode only.
 
     Uses SHA-256 of a known key as the AES key and metadata as IV.
-    If LIANYU_PAYLOAD_KEY env var is set, uses that (base64-decoded, then SHA-256).
+    If YUNIAN_PAYLOAD_KEY env var is set, uses that (base64-decoded, then SHA-256).
     Otherwise falls back to a hardcoded dev key matching KmsProvider.kt DEV_AES_KEY.
     """
     import base64
-    key_b64 = os.environ.get("LIANYU_PAYLOAD_KEY")
+    key_b64 = os.environ.get("YUNIAN_PAYLOAD_KEY")
     if key_b64:
         try:
             key_material = base64.b64decode(key_b64)
         except Exception:
-            raise SystemExit("ERROR: LIANYU_PAYLOAD_KEY must be valid base64")
+            raise SystemExit("ERROR: YUNIAN_PAYLOAD_KEY must be valid base64")
     else:
         key_material = b"LianYuOnePieceShellDevKey2025"
 
@@ -114,7 +114,7 @@ def sign_manifest_content(manifest_json: str, dev_mode: bool) -> str:
       payload = "manifest:v1:" + SHA-256(manifest_content)
       signature = AES-GCM-encrypt(payload)  (AEAD-protected)
 
-    In dev mode, uses LIANYU_PAYLOAD_KEY derived AES key.
+    In dev mode, uses YUNIAN_PAYLOAD_KEY derived AES key.
     In production, the native KMS bridge handles this.
     """
     import base64 as b64
@@ -123,7 +123,7 @@ def sign_manifest_content(manifest_json: str, dev_mode: bool) -> str:
     payload = b"manifest:v1:" + manifest_hash
 
     if dev_mode:
-        key_b64 = os.environ.get("LIANYU_PAYLOAD_KEY")
+        key_b64 = os.environ.get("YUNIAN_PAYLOAD_KEY")
         if key_b64:
             key_material = b64.b64decode(key_b64)
         else:
@@ -276,7 +276,7 @@ def verify_payload(apk_path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Package LianYu shell payload"
+        description="Package YuNian shell payload"
     )
     parser.add_argument("apk", type=Path, help="Signed release APK")
     parser.add_argument(

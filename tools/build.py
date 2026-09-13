@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""LianYu One-Click APK Builder — strips ContentProviders, injects shell DEX."""
+"""YuNian One-Click APK Builder — strips ContentProviders, injects shell DEX."""
 
 import zipfile, shutil, os, sys, subprocess, glob, re, argparse, tempfile, struct, hashlib, hmac, zlib
 
 PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHELL_SRC = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/src/com/lianyu/ai/security")
-STABLE_SHELL_SRC = os.path.join(PROJECT, "app/src/shell/java/com/lianyu/ai/security")
+SHELL_SRC = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/src/com/yunian/ai/security")
+STABLE_SHELL_SRC = os.path.join(PROJECT, "app/src/shell/java/com/yunian/ai/security")
 SHELL_WORK = os.path.join(PROJECT, "app/build/tmp/ultimate_shell")
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
 SDK = os.path.join(LOCALAPPDATA, "Android", "Sdk")
@@ -66,7 +66,7 @@ _FALLBACK_KEY = bytes([
 ])
 
 # Vivo multi-DEX: put unencrypted business DEX as classes2.dex (system auto-loads)
-VIVO_MULTIDEX = os.environ.get("LIANYU_VIVO_MULTIDEX", "").lower() in ("1", "true", "yes")
+VIVO_MULTIDEX = os.environ.get("YUNIAN_VIVO_MULTIDEX", "").lower() in ("1", "true", "yes")
 
 # Dynamically computed encryption key — populated in main()
 DEX_KEY = _FALLBACK_KEY
@@ -142,10 +142,10 @@ def phase0_wb_aes():
 
     # Try to use existing key file, otherwise generate a new one
     keyfile = os.path.join(PROJECT, ".lianyu_wb_key")
-    env_key = os.environ.get("LIANYU_WB_KEY")
+    env_key = os.environ.get("YUNIAN_WB_KEY")
 
     if env_key:
-        print("  Using LIANYU_WB_KEY from environment")
+        print("  Using YUNIAN_WB_KEY from environment")
         run([PYTHON, setup_wb, "--output", WB_TABLES_INC], timeout=60)
     elif os.path.exists(keyfile):
         print(f"  Using key from {keyfile}")
@@ -175,7 +175,7 @@ def phase0b_vmp_payload(seed_hex):
     """
     print("\n═══ Phase 0b: VMP Payload Generation ═══")
     gen_py = os.path.join(PROJECT, "tools", "gen_payload_cpp.py")
-    enc_dex = os.path.join(PROJECT, "app/src/main/assets/lianyu_shell/classes.bin")
+    enc_dex = os.path.join(PROJECT, "app/src/main/assets/yunian_shell/classes.bin")
 
     if not os.path.exists(gen_py):
         print("  WARNING: gen_payload_cpp.py not found — skipping")
@@ -363,7 +363,7 @@ def encrypt_dex(src_apk):
             print(f"  {name} → {out_name} {len(enc)//1024}KB")
 
     # Encrypt real Application class name as app_meta.bin
-    real_app_class = "com.lianyu.ai.LianYuApplication"
+    real_app_class = "com.yunian.ai.YuNianApplication"
     data = real_app_class.encode("utf-8")
     enc = dex_ctr_encrypt(data, DEX_KEY)
     open(os.path.join(work, "app_meta.bin"), "wb").write(enc)
@@ -375,7 +375,7 @@ def encrypt_dex(src_apk):
 def assemble(shell_dex, dex_dir, extra_dex_dir, repacked, variant, keystore, ks_pass, key_alias, key_pass, packed_so_dir=None):
     """Replace DEX + SOs + encrypted DEX → sign. Optionally add extra DEX for Vivo."""
     print("\n═══ Assembly ═══")
-    out = os.path.join(PROJECT, f"LianYu-v2.apk")
+    out = os.path.join(PROJECT, f"YuNian-v2.apk")
     tmp = out + ".tmp"
     shell = open(shell_dex, "rb").read()
 
@@ -445,19 +445,19 @@ def main():
                    help="Skip SO CRC32 integrity injection")
     args = p.parse_args()
     variant = "release" if args.release else "debug"
-    print(f"═══ LianYu {variant.upper()} Build ═══")
+    print(f"═══ YuNian {variant.upper()} Build ═══")
     if VIVO_MULTIDEX:
         print(f"  VIVO mode: unencrypted multi-DEX (system auto-loads)")
 
     # ── Resolve signing config (needed for VMP seed) ──
     if args.release:
         ks = os.path.join(PROJECT, "release.keystore")
-        store_pass = os.environ.get("LIANYU_STORE_PASSWORD", "")
-        key_pass = os.environ.get("LIANYU_KEY_PASSWORD", "")
-        alias = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
+        store_pass = os.environ.get("YUNIAN_STORE_PASSWORD", "")
+        key_pass = os.environ.get("YUNIAN_KEY_PASSWORD", "")
+        alias = os.environ.get("YUNIAN_KEY_ALIAS", "your_alias")
         missing = [name for name, value in [
-            ("LIANYU_STORE_PASSWORD", store_pass),
-            ("LIANYU_KEY_PASSWORD", key_pass),
+            ("YUNIAN_STORE_PASSWORD", store_pass),
+            ("YUNIAN_KEY_PASSWORD", key_pass),
         ] if not value]
         if missing:
             sys.exit(f"Release signing requires: {', '.join(missing)}")
@@ -496,7 +496,7 @@ def main():
             # APK (multi-MB business DEX) — otherwise Gradle already stripped the
             # DEX into assets/shell/*.dat and we'd re-encrypt a stub + duplicate
             # ZIP entries (ApkFormatException in apksigner).
-            gradle_cmd.extend(["-x", "lintVitalAnalyzeRelease", "-x", "lintVitalReportRelease", "-x", "lintVitalRelease", "-PlianyuSkipThinShell=true"])
+            gradle_cmd.extend(["-x", "lintVitalAnalyzeRelease", "-x", "lintVitalReportRelease", "-x", "lintVitalRelease", "-PyunianSkipThinShell=true"])
         run(gradle_cmd, timeout=600)
         gradle_apk = find_gradle_apk(variant)
 
@@ -548,7 +548,7 @@ def main():
             print(f"  CRC32 patched + re-signed: {os.path.getsize(final)//1048576}MB")
 
     if args.release:
-        desk = os.path.join(os.environ.get("USERPROFILE",""), "Desktop", "LianYu-Release.apk")
+        desk = os.path.join(os.environ.get("USERPROFILE",""), "Desktop", "YuNian-Release.apk")
         shutil.copy(final, desk)
         print(f"\n  Desktop: {desk}")
 

@@ -20,8 +20,8 @@ import re
 import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CF_PATH = os.path.join(PROJECT_ROOT, "core", "common", "src", "main", "java", "com", "lianyu", "ai", "common", "ContentFilter.kt")
-SD_PATH = os.path.join(PROJECT_ROOT, "core", "database", "src", "main", "java", "com", "lianyu", "ai", "database", "SecurityDataSeeder.kt")
+CF_PATH = os.path.join(PROJECT_ROOT, "core", "common", "src", "main", "java", "com", "yunian", "ai", "common", "ContentFilter.kt")
+SD_PATH = os.path.join(PROJECT_ROOT, "core", "database", "src", "main", "java", "com", "yunian", "ai", "database", "SecurityDataSeeder.kt")
 TXT_PATH = os.path.join(PROJECT_ROOT, "tools", "keywords_extended.txt")
 
 # Derive 32-byte key from SM3 of seed
@@ -382,7 +382,7 @@ def encrypt_txt_file():
 
 def main():
     print("=" * 60)
-    print("LianYu Keyword Obfuscator")
+    print("YuNian Keyword Obfuscator")
     print(f"Key (SM3): {_KEY.hex()[:16]}...")
     print("=" * 60)
 

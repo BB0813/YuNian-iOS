@@ -1,5 +1,5 @@
 /*
- * integrity-guard.cpp — LianYu Secondary Integrity Verification
+ * integrity-guard.cpp — YuNian Secondary Integrity Verification
  *
  * Independent of Android's APK signature check. This layer verifies:
  *   1. SO .text section integrity (CRC32 self-check)
@@ -27,7 +27,7 @@
 #include "obfuscate.h"
 #include "hmac_sha256.h"
 
-#define IG_TAG "LianYu-IG"
+#define IG_TAG "YuNian-IG"
 #ifdef PRODUCTION_BUILD
 #define IG_LOGE(...) ((void)0)
 #define IG_LOGI(...) ((void)0)

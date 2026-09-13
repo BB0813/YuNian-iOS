@@ -1,0 +1,495 @@
+diff --git a/app/src/main/java/com/yunian/ai/YuNianApplication.kt b/app/src/main/java/com/yunian/ai/YuNianApplication.kt
+index 472a80c..af09ab6 100644
+--- a/app/src/main/java/com/yunian/ai/YuNianApplication.kt
++++ b/app/src/main/java/com/yunian/ai/YuNianApplication.kt
+@@ -6,6 +6,8 @@ import android.content.res.Configuration
+ import com.yunian.ai.common.AppForegroundTracker
+ import com.yunian.ai.common.ContentFilter
+ import com.yunian.ai.common.DeviceIdProvider
++import com.yunian.ai.common.HardwareInfo
++import com.yunian.ai.common.PerformanceTrace
+ import com.yunian.ai.common.RomUtils
+ import com.yunian.ai.common.SaltStore
+ import com.yunian.ai.common.SafetyClassifier
+@@ -16,6 +18,7 @@ import com.yunian.ai.database.AppDatabase
+ import com.yunian.ai.database.DefaultCompanionSeeder
+ import com.yunian.ai.database.SecurityDataSeeder
+ import com.yunian.ai.database.repository.ApiConfigRepository
++import com.yunian.ai.database.repository.AppMetaStore
+ import com.yunian.ai.database.repository.ChatRepository
+ import com.yunian.ai.database.repository.CompanionRepository
+ import com.yunian.ai.database.repository.GroupMessageRepository
+@@ -30,8 +33,10 @@ import com.yunian.ai.common.AppSettingsStore
+ import com.yunian.ai.common.YandereModeManager
+ import com.yunian.ai.domain.CompanionProvider
+ import com.yunian.ai.domain.AiServiceProvider
++import com.yunian.ai.domain.ImageGenerationProvider
+ import com.yunian.ai.domain.CoffeeOrderProvider
+ import com.yunian.ai.domain.BuiltinCloudAccessPolicy
++import com.yunian.ai.domain.imagegen.ImageGenService
+ import com.yunian.ai.domain.LocalModelProvider
+ import com.yunian.ai.domain.LorebookProvider
+ import com.yunian.ai.domain.McpManager
+@@ -102,19 +107,26 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+             .build()
+ 
+     override fun attachBaseContext(base: Context) {
++        // 冷启动时基：进程内最早可达点（加固壳 preflight 之后、业务代码最早处）。
++        PerformanceTrace.startLaunch()
++        PerformanceTrace.markStartupStage("app_attach_begin")
+         super.attachBaseContext(base)
+     }
+ 
+         override fun onCreate() {
+-        // Global DNS resolution timeout (5s) — prevents DNS hang blocking all OkHttp calls
++        PerformanceTrace.markStartupStage("app_oncreate_begin")
++
+         java.security.Security.setProperty("networkaddress.cache.ttl", "0")
+         java.security.Security.setProperty("networkaddress.cache.negative.ttl", "0")
+         System.setProperty("sun.net.spi.nameservice.nameservers", "8.8.8.8")
+         System.setProperty("sun.net.spi.nameservice.domain", ".")
++        PerformanceTrace.markStartupStage("oncreate_props_done")
+         super.onCreate()
++        PerformanceTrace.markStartupStage("oncreate_super_done")
+         instance = this
+-        // 进程级前后台：尽早绑定，供 Worker / 微信轮询判断
++
+         AppForegroundTracker.init()
++        PerformanceTrace.markStartupStage("app_fgt_init_done")
+         initBusiness(this)
+     }
+ 
+@@ -123,28 +135,22 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+         applyStoredLanguage(this)
+     }
+ 
+-    /**
+-     * 多级内存回收：根据系统压力逐级释放缓存。
+-     * 目标设备 ≥4GB，但仍做最优适配：
+-     * - CRITICAL / LOW：清空所有重量缓存
+-     * - MODERATE / BACKGROUND：仅清 Coil 图片内存缓存
+-     */
+     override fun onTrimMemory(level: Int) {
+         super.onTrimMemory(level)
+         val imageLoader = Coil.imageLoader(this)
+         when (level) {
+-            // 系统濒临 OOM — 清空全部缓存
++
+             ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {
+                 imageLoader.memoryCache?.clear()
+                 com.yunian.ai.database.cache.MessageCache.clearAll()
+                 ChatBackgroundCache.clear()
+             }
+-            // 内存压力大 — 清除图片和背景缓存，保留消息缓存（LruCache 自有淘汰）
++
+             ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                 imageLoader.memoryCache?.clear()
+                 ChatBackgroundCache.clear()
+             }
+-            // 中等压力 / 切到后台 — 仅清理 Coil 内存缓存
++
+             ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE,
+             ComponentCallbacks2.TRIM_MEMORY_BACKGROUND,
+             ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
+@@ -158,7 +164,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+         bgScope.launch {
+             ContentFilter.destroy()
+             SaltStore.shutdown()
+-            // EncryptedDatabaseWrapper.sealDatabase(this@YuNianApplication)
++
+             AppDatabase.shutdown()
+             ChatBackgroundCache.clear()
+             com.yunian.ai.database.cache.HomeListCache.clear()
+@@ -173,19 +179,67 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+ 
+         private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+         fun initBusiness(app: Application) {
++            PerformanceTrace.markStartupStage("initbusiness_begin")
+             SaltStore.init(app)
++            PerformanceTrace.markStartupStage("ib_salt")
+             SecureLog.init(com.yunian.ai.BuildConfig.DEBUG)
++            PerformanceTrace.markStartupStage("ib_securelog")
+             applyStoredLanguage(app)
++            PerformanceTrace.markStartupStage("ib_language")
+             AiService.initialize(app)
++            PerformanceTrace.markStartupStage("ib_aiservice")
+             NtpTimeProvider.initialize(app)
++            PerformanceTrace.markStartupStage("ib_ntp")
+             clearUpdateIgnore(app)
++            PerformanceTrace.markStartupStage("ib_clear_update")
+ 
+-            // 注入应用级后台作用域，供跨越 ViewModel 生命周期的任务使用
+             com.yunian.ai.common.ApplicationScopeProvider.init(bgScope)
++            PerformanceTrace.markStartupStage("ib_scopeprovider")
++            PerformanceTrace.markStartupStage("initbusiness_sync_done")
++
++            // T02 · 预热硬件档位：把 tier 冷探测（getprop ×N + sysfs 读，典型数十毫秒）移出主线程。
++            // PageTransitions 在「转场起帧那一帧」读取 HardwareInfo.tier，若此时才首次探测会阻塞主线程；
++            // 启动即后台预热后，首次导航只命中缓存。幂等，且不改变同设备档位。
++            bgScope.launch { HardwareInfo.warmUp() }
+ 
+             bgScope.launch {
+-                registerServiceProviders(app)
+-                // 启动即修复历史头像脏数据（曾误存 cacheDir，系统清缓存后头像变白）
++                // ── 放行屏障（T01′）──────────────────────────────────────────────────────
++                //   首页唯一的硬依赖是「provider 已注册 + DB 已打开」：
++                //     · HomeViewModel 构造时 getOrThrow(CompanionRepository/ChatRepository)；
++                //     · AppDatabase.getDatabase(app) 打开 DB。
++                //   registerServiceProviders(app) 完成（或抛异常）后**立即**翻转 initialized 放行 UI，
++                //   不再与后面那串重 IO（repairUserAvatar / verifyAndRecover / seed / warm / hydrateRecent）
++                //   绑成同一个门控——原先这里白等 ~800ms 才让首页出现。
++                //   异常处理与原有语义保持一致：无论注册是否成功都放行（finally），避免 UI 永久卡 loading。
++                try {
++                    registerServiceProviders(app)
++                } catch (e: CancellationException) {
++                    throw e
++                } catch (e: Exception) {
++                    SecureLog.e("YuNianApplication", "Service initialization failed", e)
++                } finally {
++                    PerformanceTrace.markStartupStage("service_registry_ready")
++                    ServiceRegistry.markInitialized()
++                }
++
++                // ── 以下全部在「放行」之后，不再阻挡首帧 ──────────────────────────────────
++
++                // T01′：Automation 重排（原 registerServiceProviders 内的
++                //   runBlocking { AutomationStore.list() + AutomationScheduler.rescheduleAll }）
++                //   移出放行屏障，放到独立协程执行 → 不再占用屏障耗时。
++                //   保持原有执行语义（仍要执行 + runCatching + 失败上报）；
++                //   此刻 AutomationStore 已在 registerServiceProviders 中注册完毕。
++                bgScope.launch {
++                    runCatching {
++                        kotlinx.coroutines.runBlocking {
++                            val automations = ServiceRegistry.getOrThrow(AutomationStore::class.java).list()
++                            com.yunian.ai.feature.automation.AutomationScheduler.rescheduleAll(app, automations)
++                        }
++                    }.onFailure {
++                        SecureLog.e("YuNianApplication", "Automation rescheduleAll failed", it)
++                    }
++                }
++
+                 runCatching {
+                     ServiceRegistry.getOrThrow(UserRepository::class.java).repairUserAvatar(app)
+                 }.onFailure {
+@@ -193,15 +247,20 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                 }
+                 runCatching { AppDatabase.verifyAndRecover(app) }
+                     .onFailure { SecureLog.e("YuNianApplication", "Database verification failed", it) }
+-                seedDefaultCompanion(app)
+-                // 必须在 markInitialized 之前完成：MainActivity 以 ServiceRegistry 就绪为进入主界面门槛
++                // seedDefaultCompanion 内部有 Mutex 幂等保护；此处补异常隔离，
++                // 保证后续项不会因它抛异常而被跳过（与拆分前由外层 catch 兜底的行为一致）。
++                try {
++                    seedDefaultCompanion(app)
++                } catch (e: CancellationException) {
++                    throw e
++                } catch (e: Exception) {
++                    SecureLog.e("YuNianApplication", "Seed default companion failed", e)
++                }
+                 runCatching {
+                     com.yunian.ai.database.cache.HomeListCache.warm(AppDatabase.getDatabase(app))
+                 }.onFailure {
+                     SecureLog.e("YuNianApplication", "HomeListCache warm failed", it)
+                 }
+-                // 预热上次打开的聊天消息缓存，必须在 markInitialized 之前完成
+-                // 确保用户进入聊天页时 MessageCache L1 直接命中，消除首帧空白闪烁
+                 runCatching {
+                     val lastOpenedId = LastOpenedCompanionStore.get(app)
+                     if (lastOpenedId > 0L) {
+@@ -211,8 +270,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                 }.onFailure {
+                     SecureLog.e("YuNianApplication", "Pre-warm last-opened chat cache failed", it)
+                 }
+-                ServiceRegistry.markInitialized()
+-                // 主界面就绪后再后台预热最近会话消息，避免阻塞首屏
+                 bgScope.launch { warmRecentChatCaches(app) }
+                 initYandereMode(app)
+             }
+@@ -224,10 +281,13 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+             bgScope.launch { autoBackupDatabase(app) }
+             bgScope.launch { initVectorLibrary(app) }
+             ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
++            PerformanceTrace.markStartupStage("ib_safety_classifier")
+             bgScope.launch { initSafetyVerifier(app) }
+-            // 三级存储架构：注册定期数据清理任务
++
+             com.yunian.ai.database.cleanup.DataCleanupManager.schedulePeriodicCleanup(app)
++            PerformanceTrace.markStartupStage("ib_cleanup_schedule")
+             bgScope.launch { com.yunian.ai.database.cleanup.DataCleanupManager.cleanupIfNeeded(app) }
++            PerformanceTrace.markStartupStage("initbusiness_done")
+         }
+ 
+         private suspend fun initYandereMode(app: Application) {
+@@ -250,10 +310,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+             DefaultCompanionSeeder.seedIfNeeded(app)
+         }
+ 
+-        /**
+-         * 后台预热最近会话的消息 L1 缓存。
+-         * 不阻塞 markInitialized / 首屏；进入聊天页时可直接命中 MessageCache。
+-         */
+         private suspend fun warmRecentChatCaches(app: Application) {
+             runCatching {
+                 val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
+@@ -275,7 +331,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                         SecureLog.e("YuNianApplication", "hydrate chat $companionId failed", it)
+                     }
+                 }
+-                // 群聊：预热最近 1 个有摘要的群（若有）
++
+                 val groupId = AppDatabase.getDatabase(app)
+                     .conversationSummaryDao()
+                     .getSummariesByTypeSync("group")
+@@ -297,13 +353,13 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+         }
+ 
+         private suspend fun initWeChat(app: Application) {
+-            // 提前创建通知渠道，避免 OPPO/vivo 首次通知被系统折叠或延迟。
++
+             NotificationHelper.createNotificationChannel(app)
+             WeChatNotificationHelper.createChannel(app)
+             SecureLog.d("YuNianApplication", "ROM: ${RomUtils.getRomDisplayName()} ${RomUtils.romVersion}")
+-            // 初始化厂商 Push SDK，提升 OPPO / vivo / 小米 / 华为 设备的消息到达率
++
+             runCatching { PushManager.init(app) }
+-            // 登录态下统一拉起 FGS 主轮询 + WM 周期/立即兜底
++
+             runCatching { WeChatChannelKeeper.ensureRunning(app) }
+         }
+ 
+@@ -312,8 +368,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+         }
+ 
+         private fun autoBackupDatabase(app: Application) {
+-            // [M6 FIX] 备份涉及文件 IO，已从 AppDatabase.buildDatabase 主路径移除，
+-            // 在此异步执行，不阻塞首屏渲染。同时顺带清理过期备份。
++
+             runCatching { AppDatabase.autoBackupIfNeeded(app.applicationContext) }
+             runCatching { AppDatabase.clearOldBackups(app.applicationContext) }
+         }
+@@ -341,8 +396,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+             ServiceRegistry.registerSingleton(BuiltinCloudAccessPolicy::class.java) {
+                 object : BuiltinCloudAccessPolicy {
+                     override fun isBuiltinCloudAccessAllowed(): Boolean {
+-                        // Refresh the client risk tier from the native threshold
+-                        // model before deciding, so the risk gate is current.
++
+                         SecurityState.updateRiskLevel()
+                         val snap = SecurityState.snapshot()
+                         val locked = NativeBridge.zeroTrustIsLocked()
+@@ -354,8 +408,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                     }
+                 }
+             }
+-            // ── Repository 单例注册 ──
+-            // 统一 Repository 获取方式，供 QQ Bot 等跨模块消费者通过 ServiceRegistry 获取。
++
+             val database = AppDatabase.getDatabase(app)
+             ServiceRegistry.registerSingleton(CompanionRepository::class.java) {
+                 CompanionRepository(database.companionDao())
+@@ -376,26 +429,24 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                     bgScope
+                 )
+             }
+-            // 助手时间线：REASONING 等终态事件落库（与 ChatRepository 并存）
++
+             TimelinePayloadCodecRegistry.registerBuiltins()
+             ServiceRegistry.registerSingleton(TimelineStore::class.java) {
+                 RoomTimelineStore(database.messageDao(), database)
+             }
+-            // 语义嵌入服务（Phase 3: 本地语义检索）
+-            // 在 UnifiedMemoryRepository 之前注册，因为后者需要 EmbeddingProvider
++
+             ServiceRegistry.registerSingleton(EmbeddingProvider::class.java) {
+                 com.yunian.ai.network.EmbeddingService(app)
+             }
+-            // 对话摘要服务（Phase 4: 对话摘要压缩）
+-            // 在 UnifiedMemoryRepository 之前注册，因为后者需要 SummaryProvider
++
+             ServiceRegistry.registerSingleton(SummaryProvider::class.java) {
+                 com.yunian.ai.network.SummaryService(app)
+             }
+-            // 日记生成服务（AI 根据对话历史生成真人风格日记）
++
+             ServiceRegistry.registerSingleton(DiaryProvider::class.java) {
+                 com.yunian.ai.network.DiaryService(app)
+             }
+-            // 统一记忆仓库（现代化记忆系统，基于 Room unified_memories 表）
++
+             ServiceRegistry.registerSingleton(UnifiedMemoryRepository::class.java) {
+                 UnifiedMemoryRepository(
+                     AppDatabase.getDatabase(app).unifiedMemoryDao(),
+@@ -408,12 +459,11 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                 UserRepository(app)
+             }
+ 
+-            // ── 跨 feature 服务接口注册 ──
+             ServiceRegistry.registerSingleton(LocalModelProvider::class.java) {
+                 com.yunian.ai.feature.localmodel.LocalModelProviderImpl(app)
+             }
+             ServiceRegistry.registerSingleton(UserProfileProvider::class.java) {
+-                // 必须复用同一 UserRepository 单例，保证聊天页能实时收到资料变更
++
+                 com.yunian.ai.feature.profile.UserProfileProviderImpl(
+                     app,
+                     ServiceRegistry.getOrThrow(UserRepository::class.java)
+@@ -422,9 +472,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+             ServiceRegistry.registerSingleton(CompanionProvider::class.java) {
+                 com.yunian.ai.feature.companion.CompanionProviderImpl(app)
+             }
+-            // MemoryProvider：跨会话记忆上下文与提取（feature:memory 实现，core:network/feature:groupchat 消费）
+-            // 必须在 AiService 之前注册，因为 AiService.init 会通过 ServiceRegistry 获取 MemoryProvider
+-            // 使用统一记忆提供者（基于 Room unified_memories 表），替代旧的 JSON 文件版 MemoryManager
++
+             ServiceRegistry.registerSingleton(MemoryProvider::class.java) {
+                 com.yunian.ai.feature.memory.engine.UnifiedMemoryProvider(
+                     app,
+@@ -433,36 +481,46 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                     ServiceRegistry.getOrThrow(SummaryProvider::class.java)
+                 )
+             }
+-            // 占位符提供者（{{char}}、{{user}}、{{cur_date}} 等模板变量替换）
++
+             ServiceRegistry.registerSingleton(PlaceholderProvider::class.java) {
+                 com.yunian.ai.common.PlaceholderResolver(app)
+             }
+-            // 世界书/知识书提供者
++
+             ServiceRegistry.registerSingleton(LorebookProvider::class.java) {
+                 com.yunian.ai.feature.worldbook.repository.WorldbookRepository(
+                     AppDatabase.getDatabase(app)
+                 )
+             }
+-            // 通用 MCP 管理器
++
+             ServiceRegistry.registerSingleton(McpManager::class.java) {
+                 com.yunian.ai.feature.mcp.McpManagerImpl(appSettings)
+             }
+-            // 技能管理器
++
+             ServiceRegistry.registerSingleton(SkillManager::class.java) {
+                 com.yunian.ai.feature.skills.repository.SkillManagerImpl(app)
+             }
+             ServiceRegistry.registerSingleton(AiServiceProvider::class.java) {
+                 AiService(app)
+             }
+-            // S3：微信入站对话端口（app 适配现有 AI，禁止 feature:wechat 内嵌 AI 管线）
++
++            // AI 生图：独立 OkHttpClient，与聊天/流式链路隔离（生图耗时长，不共享超时）
++            ServiceRegistry.registerSingleton(ImageGenerationProvider::class.java) {
++                com.yunian.ai.network.ImageGenerationService(app)
++            }
++
++            // AI 生图编排：feature:chat 实现，微信/QQ 桥接链路通过它复用同一套判定逻辑
++            ServiceRegistry.registerSingleton(ImageGenService::class.java) {
++                com.yunian.ai.feature.chat.imagegen.ImageGenServiceImpl(app)
++            }
++
+             ServiceRegistry.registerSingleton(WeChatDialoguePort::class.java) {
+                 WeChatDialoguePortImpl(app)
+             }
+-            // S5：微信用户 ↔ 伴侣映射端口（设置页 / 通道共用）
++
+             ServiceRegistry.registerSingleton(WeChatIdentityMapPort::class.java) {
+                 WeChatIdentityMapPortImpl(app)
+             }
+-            // S6：App → 微信出站端口（替代 Broadcast 主路径）
++
+             ServiceRegistry.registerSingleton(WeChatOutboundPort::class.java) {
+                 WeChatOutboundPortImpl(app)
+             }
+@@ -470,36 +528,57 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                 YandereModeManager(app)
+             }
+ 
+-            // ── 瑞幸咖啡 MCP 工具（AI 对话可调用） ──
+-            // CoffeeOrderProvider 暴露给 feature:chat 的 AiTool 实现
++            ServiceRegistry.registerSingleton(AppMetaStore::class.java) {
++                AppMetaStore(AppDatabase.getDatabase(app).appMetaDao())
++            }
++
+             ServiceRegistry.registerSingleton(CoffeeOrderProvider::class.java) {
+                 com.yunian.ai.feature.coffee.CoffeeOrderProviderImpl(app)
+             }
+-            // 注册瑞幸工具到 ToolRegistry，供 AiService 随请求一并发给 AI
++
+             com.yunian.ai.feature.coffee.LuckinCoffeeTools.registerAll(
+                 ServiceRegistry.getOrThrow(CoffeeOrderProvider::class.java)
+             )
+-            // 注册记忆召回工具，供 AI 在上下文不足时主动查询统一记忆系统
++
+             com.yunian.ai.feature.memory.MemoryRecallTools.registerAll(
+                 ServiceRegistry.getOrThrow(MemoryProvider::class.java)
+             )
+-            // 注册网络搜索工具，供 AI 获取实时信息
++
+             com.yunian.ai.feature.chat.tools.SearchTools.registerAll(appSettings)
+-            // 注册 MCP 工具（动态发现并注册到 ToolRegistry）
++
+             bgScope.launch {
+                 com.yunian.ai.feature.mcp.McpToolRegistrar(
+                     ServiceRegistry.getOrThrow(McpManager::class.java)
+                 ).syncTools()
+             }
+-            // 注册技能工具
++
+             com.yunian.ai.feature.skills.tools.registerSkillTools(
+                 ServiceRegistry.getOrThrow(SkillManager::class.java)
+             )
+-            // 注册对话工具（recent_chats、conversation_search）
++            // 技能市场：AI 自主搜技能并安装（SkillHub 国内直连优先，GitHub/jsDelivr 兜底）
++            com.yunian.ai.feature.skills.tools.registerSkillMarketTools(
++                app,
++                ServiceRegistry.getOrThrow(SkillManager::class.java)
++            )
++            // 设备接管工具（打开应用/网页、剪贴板、闹钟、通知、电量、时间）
++            com.yunian.ai.feature.skills.tools.registerDeviceTools(app)
++            // AI 控制手机：无障碍读屏/点击/滑动（操作类需用户确认）
++            com.yunian.ai.feature.skills.tools.registerAccessibilityTools()
++            // Shizuku 特权通道状态检测
++            com.yunian.ai.feature.skills.tools.registerShizukuTools(app)
++            // 刷新技能索引：把可用技能清单注入系统提示词，AI 才会自主调用 use_skill
++            bgScope.launch {
++                runCatching {
++                    com.yunian.ai.feature.skills.tools.refreshSkillIndex(
++                        ServiceRegistry.getOrThrow(SkillManager::class.java)
++                    )
++                }.onFailure { SecureLog.e("YuNianApplication", "Skill index refresh failed", it) }
++            }
++
+             com.yunian.ai.feature.chat.tools.ConversationTools.registerAll(
+                 AppDatabase.getDatabase(app)
+             )
+-            // ── 自动化工具（AI 对话可创建/取消定时自动化） ──
++
+             ServiceRegistry.registerSingleton(AutomationStore::class.java) {
+                 com.yunian.ai.feature.automation.data.AutomationStore(app)
+             }
+@@ -507,21 +586,15 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
+                 ServiceRegistry.getOrThrow(AutomationStore::class.java),
+                 app
+             )
+-            // 自动化到点检查兜底：保活服务周期性 tick（Doze 下 WorkManager 延迟时兜底触发）
++
+             ServiceRegistry.registerSingleton(com.yunian.ai.domain.AutomationTickProvider::class.java) {
+                 com.yunian.ai.feature.automation.AutomationTickProviderImpl(app)
+             }
+-            // 启动对账：重建全部启用自动化的 WorkManager 调度
+-            runCatching {
+-                kotlinx.coroutines.runBlocking {
+-                    val automations = ServiceRegistry.getOrThrow(AutomationStore::class.java).list()
+-                    com.yunian.ai.feature.automation.AutomationScheduler.rescheduleAll(app, automations)
+-                }
+-            }.onFailure {
+-                SecureLog.e("YuNianApplication", "Automation rescheduleAll failed", it)
+-            }
+-            // markInitialized 延后到 seed + HomeListCache.warm 之后，
+-            // 保证主界面首帧即可拿到联系人/会话快照。
++
++            // T01′：原位于此处的
++            //   `runBlocking { AutomationStore.list() + AutomationScheduler.rescheduleAll(app, ...) }`
++            // 已移出「放行屏障」——改到 initBusiness 的 bgScope 中、ServiceRegistry.markInitialized()
++            // 之后的独立协程执行（保持「仍执行 + runCatching + 失败上报」语义，仅不再占用首帧前的屏障耗时）。
+         }
+ 
+         private fun clearUpdateIgnore(app: Application) {

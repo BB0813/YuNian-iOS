@@ -22,12 +22,12 @@ $gradleProps = Get-Content "$projectRoot\gradle.properties" | ForEach-Object {
 $propsHash = @{}
 foreach ($p in $gradleProps) { $propsHash[$p.Key] = $p.Value }
 
-$storePass = $env:LIANYU_STORE_PASSWORD
-if (-not $storePass) { $storePass = $propsHash["LIANYU_STORE_PASSWORD"] }
-$keyPass = $env:LIANYU_KEY_PASSWORD
-if (-not $keyPass) { $keyPass = $propsHash["LIANYU_KEY_PASSWORD"] }
-$keyAlias = $env:LIANYU_KEY_ALIAS
-if (-not $keyAlias) { $keyAlias = $propsHash["LIANYU_KEY_ALIAS"] }
+$storePass = $env:YUNIAN_STORE_PASSWORD
+if (-not $storePass) { $storePass = $propsHash["YUNIAN_STORE_PASSWORD"] }
+$keyPass = $env:YUNIAN_KEY_PASSWORD
+if (-not $keyPass) { $keyPass = $propsHash["YUNIAN_KEY_PASSWORD"] }
+$keyAlias = $env:YUNIAN_KEY_ALIAS
+if (-not $keyAlias) { $keyAlias = $propsHash["YUNIAN_KEY_ALIAS"] }
 if (-not $keyAlias) { $keyAlias = "your_alias" }
 
 Write-Host "=== APK Repack Script ===" -ForegroundColor Cyan
@@ -38,7 +38,7 @@ if (-not (Test-Path $originalApk)) { throw "Original APK not found: $originalApk
 if (-not (Test-Path $packedSecuritySo)) { throw "Packed SO not found: $packedSecuritySo" }
 if (-not (Test-Path $packedShellSo)) { throw "Packed SO not found: $packedShellSo" }
 if (-not (Test-Path $keystore)) { throw "Keystore not found: $keystore" }
-if (-not $storePass -or -not $keyPass) { throw "Signing env vars not set: LIANYU_STORE_PASSWORD / LIANYU_KEY_PASSWORD" }
+if (-not $storePass -or -not $keyPass) { throw "Signing env vars not set: YUNIAN_STORE_PASSWORD / YUNIAN_KEY_PASSWORD" }
 Write-Host "  All files verified OK" -ForegroundColor Green
 
 # 2. Create repacked APK (replace SOs, remove signing)
@@ -128,7 +128,7 @@ Write-Host "  Verifying signature..." -ForegroundColor Yellow
 
 # 5. Deploy to device
 Write-Host "[5/6] Deploying to device..." -ForegroundColor Yellow
-& $adb uninstall com.lianyu.ai 2>&1 | ForEach-Object { Write-Host "  Uninstall: $_" }
+& $adb uninstall com.yunian.ai 2>&1 | ForEach-Object { Write-Host "  Uninstall: $_" }
 & $adb install $signedApk
 if ($LASTEXITCODE -ne 0) { throw "ADB install failed" }
 Write-Host "  Install done" -ForegroundColor Green
@@ -136,7 +136,7 @@ Write-Host "  Install done" -ForegroundColor Green
 # 6. Launch and check crash
 Write-Host "[6/6] Launching app and checking crash..." -ForegroundColor Yellow
 & $adb logcat -c
-& $adb shell am start -n com.lianyu.ai/.MainActivity
+& $adb shell am start -n com.yunian.ai/.MainActivity
 Start-Sleep -Seconds 5
 
 $crashLog = & $adb logcat -d -s AndroidRuntime:E DEBUG:E libc:E 2>&1
@@ -147,7 +147,7 @@ if ($crashLog -match "FATAL EXCEPTION|SIGSEGV|signal|tombstone|CRASH") {
     Write-Host "  [OK] No crash signal detected" -ForegroundColor Green
 }
 
-$runningApp = & $adb shell pidof com.lianyu.ai 2>&1
+$runningApp = & $adb shell pidof com.yunian.ai 2>&1
 if ($runningApp -and $runningApp -match "^\d+$") {
     Write-Host "  [OK] App is running (PID: $runningApp)" -ForegroundColor Green
 } else {

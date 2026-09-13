@@ -174,13 +174,13 @@ suspend fun setYandereModeInstalledApps(enabled: Boolean)
 </queries>
 ```
 
-> 说明：参考源码使用 `QUERY_ALL_PACKAGES`，但 Google Play 对 `QUERY_ALL_PACKAGES` 审核较严。LianYu 当前主要在国内分发，保留 `queries` 方案；若后续需要更完整列表，可再补充 `QUERY_ALL_PACKAGES`。
+> 说明：参考源码使用 `QUERY_ALL_PACKAGES`，但 Google Play 对 `QUERY_ALL_PACKAGES` 审核较严。YuNian 当前主要在国内分发，保留 `queries` 方案；若后续需要更完整列表，可再补充 `QUERY_ALL_PACKAGES`。
 
 ---
 
 ## 9. UI 设计要点
 
-- 遵循 LianYu 现有 WeChat-style 暗色优先 + liquid glass 设计语言。
+- 遵循 YuNian 现有 WeChat-style 暗色优先 + liquid glass 设计语言。
 - 复用 `FrameRateScreen` 的顶部栏与卡片布局风格。
 - 设置项使用开关卡片 + 说明文案。
 - 数据预览卡片：更新时间、已安装应用数、TOP 应用列表。

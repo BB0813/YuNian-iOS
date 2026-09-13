@@ -11,8 +11,8 @@
  *   // Verify mac matches expected
  */
 
-#ifndef LIANYU_HMAC_SHA256_H
-#define LIANYU_HMAC_SHA256_H
+#ifndef YUNIAN_HMAC_SHA256_H
+#define YUNIAN_HMAC_SHA256_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -131,4 +131,4 @@ static void hmac_sha256(const uint8_t* key, size_t key_len,
 #ifdef __cplusplus
 }
 #endif
-#endif /* LIANYU_HMAC_SHA256_H */
+#endif /* YUNIAN_HMAC_SHA256_H */

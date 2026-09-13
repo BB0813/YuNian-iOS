@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═══════════════════════════════════════════
-# LianYu One-Piece Shell Release Build
+# YuNian One-Piece Shell Release Build
 # ═══════════════════════════════════════════
 # Produces an APK where:
 #   - classes.dex = FULL R8-minified DEX (all classes, obfuscated)
@@ -25,9 +25,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 KEYSTORE="${PROJECT_DIR}/release.keystore"
-STORE_PASS="${LIANYU_STORE_PASSWORD:-3498762309}"
-KEY_ALIAS="${LIANYU_KEY_ALIAS:-your_alias}"
-KEY_PASS="${LIANYU_KEY_PASSWORD:-3498762309}"
+STORE_PASS="${YUNIAN_STORE_PASSWORD:-3498762309}"
+KEY_ALIAS="${YUNIAN_KEY_ALIAS:-your_alias}"
+KEY_PASS="${YUNIAN_KEY_PASSWORD:-3498762309}"
 SDK_BT="/opt/android-sdk/build-tools/35.0.0"
 APKSIGNER="${SDK_BT}/apksigner"
 ZIPALIGN="${SDK_BT}/zipalign"
@@ -38,7 +38,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo "========================================"
-echo " LianYu One-Piece Shell Release Build"
+echo " YuNian One-Piece Shell Release Build"
 echo "========================================"
 echo ""
 
@@ -46,9 +46,9 @@ echo ""
 # Step 1: Full Release Build
 # ═══════════════════════════════════════════
 echo -e "${YELLOW}[Step 1/4] Building full release APK...${NC}"
-export LIANYU_STORE_PASSWORD="$STORE_PASS"
-export LIANYU_KEY_PASSWORD="$KEY_PASS"
-export LIANYU_KEY_ALIAS="$KEY_ALIAS"
+export YUNIAN_STORE_PASSWORD="$STORE_PASS"
+export YUNIAN_KEY_PASSWORD="$KEY_PASS"
+export YUNIAN_KEY_ALIAS="$KEY_ALIAS"
 
 ./gradlew assembleRelease --no-daemon
 
@@ -85,7 +85,7 @@ import zipfile, os
 
 src = '$FULL_APK'
 dst = '$SHELL_APK'
-payload_dir = '$PAYLOAD_OUT/lianyu_shell'
+payload_dir = '$PAYLOAD_OUT/yunian_shell'
 
 with zipfile.ZipFile(src, 'r') as zin:
     with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as zout:
@@ -105,14 +105,14 @@ with zipfile.ZipFile(src, 'r') as zin:
             if item.filename.startswith('META-INF/'):
                 continue
             # Remove stale payload
-            if item.filename.startswith('assets/lianyu_shell/') or item.filename.startswith('lianyu_shell/'):
+            if item.filename.startswith('assets/yunian_shell/') or item.filename.startswith('yunian_shell/'):
                 continue
             zout.writestr(item, zin.read(item.filename))
 
         # Inject encrypted payload (contains ALL classes for runtime loading)
         for fname in sorted(os.listdir(payload_dir)):
             fpath = os.path.join(payload_dir, fname)
-            arcname = f'assets/lianyu_shell/{fname}'
+            arcname = f'assets/yunian_shell/{fname}'
             zout.write(fpath, arcname)
             print(f'  Added {arcname} ({os.path.getsize(fpath):,} bytes)')
 
@@ -122,7 +122,7 @@ print(f'  APK size: {sz:,} bytes')
 # Verify
 with zipfile.ZipFile(dst, 'r') as z:
     dex = [n for n in z.namelist() if n.endswith('.dex')]
-    pl = [n for n in z.namelist() if 'lianyu_shell' in n]
+    pl = [n for n in z.namelist() if 'yunian_shell' in n]
     print(f'  Final DEX files: {dex}')
     print(f'  Payload assets:  {pl}')
 "
@@ -146,14 +146,14 @@ echo "========================================"
 echo " Build Complete!"
 echo "========================================"
 echo ""
-unzip -l "$FINAL" | grep -E '(classes.*\.dex|lianyu_shell/)' | while read -r l; do echo "  $l"; done
+unzip -l "$FINAL" | grep -E '(classes.*\.dex|yunian_shell/)' | while read -r l; do echo "  $l"; done
 echo ""
 du -h "$FINAL" | awk '{print "  Output: " $2 " (" $1 ")"}'
 echo ""
 echo "Architecture:"
 echo "  classes.dex (APK)    = shell bootstrap + transitive deps (plaintext, ~2MB)"
-echo "  assets/lianyu_shell/ = AES-256-CBC encrypted ALL classes"
-echo "  Runtime:             LianYuShellApplication loads from classes.dex"
+echo "  assets/yunian_shell/ = AES-256-CBC encrypted ALL classes"
+echo "  Runtime:             YuNianShellApplication loads from classes.dex"
 echo "                       → decrypts payload → InMemoryDexClassLoader"
 echo "                       → business classes available at runtime"
 echo ""

@@ -22,7 +22,7 @@
 #include "hmac_sha256.h"
 #include "device-fingerprint.h"
 
-#define DEX_LOG_TAG "LianYuShell"
+#define DEX_LOG_TAG "YuNianShell"
 #define DEX_LOGI(...) __android_log_print(ANDROID_LOG_INFO, DEX_LOG_TAG, __VA_ARGS__)
 #define DEX_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, DEX_LOG_TAG, __VA_ARGS__)
 
@@ -107,7 +107,7 @@ static void derive_shell_key(void) {
     for (int i = 0; i < 16; i++) {
         g_shell_key[i] = (uint8_t)((base >> ((i % 8) * 8)) & 0xFF)
                        ^ (uint8_t)(i * 0xC3 + 0x5A)
-                       ^ 0x4C;  /* LianYu magic */
+                       ^ 0x4C;  /* YuNian magic */
     }
     // memory_order_release ensures g_shell_key writes are visible to other threads
     g_key_derived.store(1, std::memory_order_release);
@@ -195,7 +195,7 @@ static void xor_decrypt(uint8_t* data, size_t len) {
  * ═══════════════════════════════════════════════════════════════ */
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeShellInitWithBlob(
+Java_com_yunian_ai_security_StaticApkShell_nativeShellInitWithBlob(
     JNIEnv* env, jobject thiz, jbyteArray blob) {
 
     if (g_shell_initialized.load()) return g_method_count;
@@ -250,7 +250,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeShellInitWithBlob(
  * ═══════════════════════════════════════════════════════════════ */
 extern "C"
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods(
+Java_com_yunian_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods(
     JNIEnv* env, jclass cls, jstring className, jbyteArray classBytes) {
 
     if (!g_shell_initialized.load() || !g_method_table || !g_code_blob)
@@ -324,7 +324,7 @@ Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods(
  * ═══════════════════════════════════════════════════════════════ */
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeWipeDexHeader(
+Java_com_yunian_ai_security_StaticApkShell_nativeWipeDexHeader(
     JNIEnv* env, jobject thiz, jstring apkPath) {
     const char* path = env->GetStringUTFChars(apkPath, nullptr);
     DEX_LOGI("DEX header wipe skipped (Android 14+ SELinux)");
@@ -336,7 +336,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeWipeDexHeader(
  * ═══════════════════════════════════════════════════════════════ */
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeEnableMemoryGuard(
+Java_com_yunian_ai_security_StaticApkShell_nativeEnableMemoryGuard(
     JNIEnv* env, jobject thiz) {
     DEX_LOGI("Memory guard enabled");
 }
@@ -346,7 +346,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeEnableMemoryGuard(
  * ═══════════════════════════════════════════════════════════════ */
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeAntiHookInit(
+Java_com_yunian_ai_security_StaticApkShell_nativeAntiHookInit(
     JNIEnv* env, jobject thiz) {
 
     // 1. TracerPid check — obfuscated string comparison
@@ -553,7 +553,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     }
 
     DEX_LOGI("JNI_OnLoad: registering NativeBridge stubs");
-    jclass nbClass = env->FindClass("com/lianyu/ai/security/NativeBridge");
+    jclass nbClass = env->FindClass("com/yunian/ai/security/NativeBridge");
     if (nbClass && !env->ExceptionCheck()) {
         JNINativeMethod nbMethods[] = {
             {"verifySignature", "(Landroid/content/Context;)Z", (void*)nb_verifySignature},
@@ -664,7 +664,7 @@ int shell_decrypt_vmp1_blocks(uint8_t* class_bytes, uint32_t class_len) {
 
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeDecryptVmp1Blocks(
+Java_com_yunian_ai_security_MethodRecoveryEngine_nativeDecryptVmp1Blocks(
     JNIEnv* env, jclass cls, jbyteArray classBytes) {
     if (!classBytes) return 0;
     jsize len = env->GetArrayLength(classBytes);
@@ -755,7 +755,7 @@ static int g_hw_signature_set = 0;
 static void verify_maps_layout(void) {
     uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
     if (maps_crc == 0) {
-        __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
+        __android_log_print(ANDROID_LOG_WARN, "YuNianShell",
             "maps: cannot read /proc/self/maps");
         return;
     }
@@ -764,13 +764,13 @@ static void verify_maps_layout(void) {
     if (maps_crc != EXPECTED_MAPS_CRC) {
         /* Fail-open: legitimate installs (updated lib dirs, overwrite installs)
            must never abort the process. Log for audit instead. */
-        __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
+        __android_log_print(ANDROID_LOG_WARN, "YuNianShell",
             "maps layout differs from expected (%016llx != %016llx) — continuing",
             (unsigned long long)maps_crc,
             (unsigned long long)EXPECTED_MAPS_CRC);
         return;
     }
-    __android_log_print(ANDROID_LOG_DEBUG, "LianYuShell",
+    __android_log_print(ANDROID_LOG_DEBUG, "YuNianShell",
         "maps OK (%016llx)", (unsigned long long)maps_crc);
 }
 
@@ -898,7 +898,7 @@ static int verify_apk_cert_from_meta_inf(uint8_t* out_sha256) {
  * ═══════════════════════════════════════════════════════════ */
 JNIEXPORT jbyteArray __attribute__((noinline, flatten, optimize("O0")))
 JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
+Java_com_yunian_ai_security_StaticApkShell_nativeDeriveDexKey(
     JNIEnv* env, jclass cls) {
     verify_maps_layout();
 
@@ -917,7 +917,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveDexKey(
     uint64_t maps_crc = maps_crc64_for_lib("liblianyu_shell.so");
     static const uint64_t EXPECTED_MAPS = 0x8e7beee5d9b3c6e4ULL;
     if (maps_crc != 0 && maps_crc != EXPECTED_MAPS) {
-        __android_log_print(ANDROID_LOG_WARN, "LianYuShell",
+        __android_log_print(ANDROID_LOG_WARN, "YuNianShell",
             "maps_crc=%016llx != expected — key stays pipeline-bound",
             (unsigned long long)maps_crc);
     }
@@ -1050,7 +1050,7 @@ static uint32_t g_dex_size = 0;
 extern "C" {
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer(
+Java_com_yunian_ai_security_StaticApkShell_nativeSetDexBuffer(
     JNIEnv* env, jclass, jbyteArray data) {
     // Free previous buffer if any
     if (g_dex_buf) {
@@ -1067,7 +1067,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeSetDexBuffer(
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_NativeBridge_nativeGetAadChecksums(
+Java_com_yunian_ai_security_NativeBridge_nativeGetAadChecksums(
     JNIEnv* env, jclass) {
     jbyteArray result = env->NewByteArray(16);
     if (!result) return nullptr;
@@ -1087,7 +1087,7 @@ Java_com_lianyu_ai_security_NativeBridge_nativeGetAadChecksums(
 
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeSetHardwareSignature(
+Java_com_yunian_ai_security_StaticApkShell_nativeSetHardwareSignature(
     JNIEnv* env, jclass, jbyteArray sig) {
     if (!sig) return;
     jsize len = env->GetArrayLength(sig);
@@ -1101,13 +1101,13 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeSetHardwareSignature(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeHasHardwareKey(
+Java_com_yunian_ai_security_StaticApkShell_nativeHasHardwareKey(
     JNIEnv*, jclass) {
     return g_hw_signature_set ? 1 : 0;
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey(
+Java_com_yunian_ai_security_StaticApkShell_nativeDeriveSessionKey(
     JNIEnv* env, jclass) {
     static const uint8_t cert_obs[32] = {
         0x4e,0x0d,0xa5,0x67,0x7e,0xc7,0x29,0x22,0x5f,0xbc,0x9e,0xf0,0x7a,0x73,0xf0,0x88,
@@ -1135,7 +1135,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveSessionKey(
 
 /* ═══════════ Anti-repackaging: store cert SHA-256 (pre-computed by Java) ═══════════ */
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert(
+Java_com_yunian_ai_security_StaticApkShell_nativeSetApkCert(
     JNIEnv* env, jclass, jbyteArray certHash) {
     if (!certHash) return;
     jsize len = env->GetArrayLength(certHash);
@@ -1145,7 +1145,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeSetApkCert(
     memcpy(g_actual_cert_hash, bytes, 32);
     g_actual_cert_valid = 1;
     env->ReleaseByteArrayElements(certHash, bytes, JNI_ABORT);
-    __android_log_print(ANDROID_LOG_INFO, "LianYuShell",
+    __android_log_print(ANDROID_LOG_INFO, "YuNianShell",
         "APK cert stored — anti-repackaging active");
 }
 
@@ -1233,7 +1233,7 @@ static void* dex_ctr_worker(void* arg) {
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeDecryptDex(
+Java_com_yunian_ai_security_StaticApkShell_nativeDecryptDex(
     JNIEnv* env, jclass cls, jbyteArray encrypted, jbyteArray wbKey) {
 
     jsize len = env->GetArrayLength(encrypted);
@@ -1406,7 +1406,7 @@ extern "C" void derive_shell_key_for_vmp(uint8_t out[32]) {
 /* P0-3: VMP-wrapped key derivation. Loads VMP bytecode with cert_obs
  * encoded as immediates (NOT in .rodata). Calls VM_HYPER_DERIVE_SHELL_KEY. */
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveShellKeyVmp(
+Java_com_yunian_ai_security_StaticApkShell_nativeDeriveShellKeyVmp(
     JNIEnv* env, jclass cls) {
 
     // Key derivation kept in same SO — no cross-SO VMP dependency.
@@ -1428,7 +1428,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeDeriveShellKeyVmp(
  * Debug builds are exempt.
  * ═══════════════════════════════════════════════════════════ */
 extern "C" JNIEXPORT jint JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeCheckEmulator(
+Java_com_yunian_ai_security_StaticApkShell_nativeCheckEmulator(
     JNIEnv* env, jclass cls, jboolean isDebuggable) {
 
     if (isDebuggable) return 0;  // debug builds exempt
@@ -1481,7 +1481,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeCheckEmulator(
  * hardcoded expected hash. Any tampering → SIGABRT.
  * ═══════════════════════════════════════════════════════════ */
 extern "C" JNIEXPORT jint JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeVerifyApkHash(
+Java_com_yunian_ai_security_StaticApkShell_nativeVerifyApkHash(
     JNIEnv* env, jclass cls, jboolean isDebuggable) {
 
     if (isDebuggable) return 0;
@@ -1549,7 +1549,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeVerifyApkHash(
     if (!match) {
         // Tamper detected — log and return error code.
         // Do NOT abort() — HarmonyOS/EMUI may re-sign APKs, causing false positives.
-        __android_log_print(ANDROID_LOG_ERROR, "LianYuShell",
+        __android_log_print(ANDROID_LOG_ERROR, "YuNianShell",
             "APK integrity FAILED — security degraded");
         return -1;
     }
@@ -1562,7 +1562,7 @@ uint64_t g_vmp_execution_hash = 0x6A09E667BB67AE85ULL;
 uint64_t g_vmp_instruction_count = 0;
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeGetVmpFingerprint(
+Java_com_yunian_ai_security_StaticApkShell_nativeGetVmpFingerprint(
     JNIEnv* env, jclass cls) {
     // Advancing hash: XOR with instruction count + time
     struct timespec ts;
@@ -1585,7 +1585,7 @@ static uint32_t g_attest_cert_chain_len = 0;
 static uint8_t g_hw_public_key[65] = {0};   // uncompressed EC P-256
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeStoreAttestChain(
+Java_com_yunian_ai_security_StaticApkShell_nativeStoreAttestChain(
     JNIEnv* env, jclass, jbyteArray chain) {
     jsize len = env->GetArrayLength(chain);
     if (len < 64 || len > 4096) return;
@@ -1594,13 +1594,13 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeStoreAttestChain(
         memcpy(g_attest_cert_chain, bytes, len);
         g_attest_cert_chain_len = (uint32_t)len;
         env->ReleaseByteArrayElements(chain, bytes, JNI_ABORT);
-        __android_log_print(ANDROID_LOG_INFO, "LianYuShell",
+        __android_log_print(ANDROID_LOG_INFO, "YuNianShell",
             "Attestation chain stored: %u bytes", len);
     }
 }
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeStoreHwPublicKey(
+Java_com_yunian_ai_security_StaticApkShell_nativeStoreHwPublicKey(
     JNIEnv* env, jclass, jbyteArray pubKey) {
     jsize len = env->GetArrayLength(pubKey);
     if (len != 65) return;
@@ -1612,7 +1612,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeStoreHwPublicKey(
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeGetAttestChain(
+Java_com_yunian_ai_security_StaticApkShell_nativeGetAttestChain(
     JNIEnv* env, jclass) {
     if (!g_attest_cert_chain_len) return nullptr;
     jbyteArray result = env->NewByteArray(g_attest_cert_chain_len);
@@ -1623,7 +1623,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeGetAttestChain(
 }
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeGetHwPublicKey(
+Java_com_yunian_ai_security_StaticApkShell_nativeGetHwPublicKey(
     JNIEnv* env, jclass) {
     jbyteArray result = env->NewByteArray(65);
     if (result)
@@ -1642,7 +1642,7 @@ static uint8_t g_device_fingerprint[32] = {0};
 static int g_device_fingerprint_set = 0;
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeBindDeviceFingerprint(
+Java_com_yunian_ai_security_StaticApkShell_nativeBindDeviceFingerprint(
     JNIEnv* env, jclass, jstring androidId, jstring buildSerial) {
     if (g_device_fingerprint_set) return;
     const char* id = androidId ? env->GetStringUTFChars(androidId, nullptr) : "";
@@ -1657,7 +1657,7 @@ Java_com_lianyu_ai_security_StaticApkShell_nativeBindDeviceFingerprint(
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_lianyu_ai_security_StaticApkShell_nativeHasCompletedAttestation(
+Java_com_yunian_ai_security_StaticApkShell_nativeHasCompletedAttestation(
     JNIEnv* env, jclass) {
     return g_attest_cert_chain_len > 0 ? JNI_TRUE : JNI_FALSE;
 }

@@ -2,7 +2,7 @@
 name: android_performance
 description: Android 性能优化技能 - 覆盖启动、渲染、内存、电量、网络等维度
 version: "1.0"
-author: LianYu Team
+author: YuNian Team
 tags: [android, performance, optimization, startup, memory, battery]
 requires_confirmation: false
 ---

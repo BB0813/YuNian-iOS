@@ -1,5 +1,5 @@
 /*
- * zero-trust.cpp — LianYu Zero Trust Framework Implementation
+ * zero-trust.cpp — YuNian Zero Trust Framework Implementation
  *
  * Implements the Policy Decision Point (PDP), Policy Enforcement
  * Point (PEP), trust scoring, continuous evaluation loop, and
@@ -414,30 +414,30 @@ void zero_trust_audit_log(const char* level_str, int event_code, const char* mes
     if (!g_zt_log_mid) {
         /* Cache method ID on first call */
         jclass cls = env->FindClass(
-            "com/lianyu/ai/security/AuditLogger");
+            "com/yunian/ai/security/AuditLogger");
         if (!cls) {
             /* Class not found — native-only mode */
             g_zt_jvm->DetachCurrentThread();
             return;
         }
         jclass level_cls = env->FindClass(
-            "com/lianyu/ai/security/AuditLogger$Level");
+            "com/yunian/ai/security/AuditLogger$Level");
         jclass event_cls = env->FindClass(
-            "com/lianyu/ai/security/AuditLogger$Event");
+            "com/yunian/ai/security/AuditLogger$Event");
 
         if (level_cls && event_cls) {
             /* Find enum valueOf methods */
             jmethodID level_value_of = env->GetStaticMethodID(level_cls,
-                "valueOf", "(Ljava/lang/String;)Lcom/lianyu/ai/security/AuditLogger$Level;");
+                "valueOf", "(Ljava/lang/String;)Lcom/yunian/ai/security/AuditLogger$Level;");
             jmethodID event_from_code = env->GetStaticMethodID(event_cls,
-                "fromCode", "(I)Lcom/lianyu/ai/security/AuditLogger$Event;");
+                "fromCode", "(I)Lcom/yunian/ai/security/AuditLogger$Event;");
 
             if (level_value_of && event_from_code) {
                 g_zt_log_mid = env->GetStaticMethodID(cls, "log",
-                    "(Landroid/content/Context;Lcom/lianyu/ai/security/AuditLogger$Level;"
-                    "Lcom/lianyu/ai/security/AuditLogger$Event;"
+                    "(Landroid/content/Context;Lcom/yunian/ai/security/AuditLogger$Level;"
+                    "Lcom/yunian/ai/security/AuditLogger$Event;"
                     "Ljava/lang/String;Ljava/lang/String;)"
-                    "Lcom/lianyu/ai/security/AuditLogger$Entry;");
+                    "Lcom/yunian/ai/security/AuditLogger$Entry;");
             }
         }
 
@@ -452,12 +452,12 @@ void zero_trust_audit_log(const char* level_str, int event_code, const char* mes
 
         /* Construct Event enum from code — use findClass + valueOf for int */
         jclass event_cls = env->FindClass(
-            "com/lianyu/ai/security/AuditLogger$Event");
+            "com/yunian/ai/security/AuditLogger$Event");
 
         if (level_js && message_js && event_cls) {
             /* Use the Event.values() and index into it */
             jmethodID values_mid = env->GetStaticMethodID(event_cls,
-                "values", "()[Lcom/lianyu/ai/security/AuditLogger$Event;");
+                "values", "()[Lcom/yunian/ai/security/AuditLogger$Event;");
             if (values_mid) {
                 jobjectArray events = (jobjectArray)env->CallStaticObjectMethod(
                     event_cls, values_mid);
@@ -480,7 +480,7 @@ void zero_trust_audit_log(const char* level_str, int event_code, const char* mes
                 if (target_event) {
                     jstring extra = env->NewStringUTF("");
                     env->CallStaticObjectMethod(
-                        env->FindClass("com/lianyu/ai/security/AuditLogger"),
+                        env->FindClass("com/yunian/ai/security/AuditLogger"),
                         g_zt_log_mid, g_zt_ctx, level_js, target_event,
                         message_js, extra);
                     env->DeleteLocalRef(extra);
@@ -1240,13 +1240,13 @@ void zero_trust_set_jvm(JavaVM* jvm, jobject context)
  * are the JNI entry points for the zero-trust system. */
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustEvaluate
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustEvaluate
  *
  * Called from SecurityGuard.kt when isSafe() is invoked.
  * Returns the current trust state as an integer:
  *   0 = TRUST, 1 = SUSPICIOUS, 2 = BREACH
  */
-jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustEvaluate(
+jint JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustEvaluate(
     JNIEnv* env, jclass clazz)
 {
     (void)env; (void)clazz;
@@ -1254,11 +1254,11 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustEvaluate(
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustGetState
  *
  * Returns current trust state without forcing re-evaluation.
  */
-jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState(
+jint JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustGetState(
     JNIEnv* env, jclass clazz)
 {
     (void)env; (void)clazz;
@@ -1266,11 +1266,11 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState(
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScore
  *
  * Returns the raw threat score.
  */
-jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore(
+jint JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScore(
     JNIEnv* env, jclass clazz)
 {
     (void)env; (void)clazz;
@@ -1278,13 +1278,13 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore(
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScoreBreakdown
  *
  * Returns a comma-separated list of detection items that contributed
  * to the current threat score (e.g. "root:3,emulator:2"). Used for
  * diagnostics to pinpoint the exact score source.
  */
-jstring JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown(
+jstring JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScoreBreakdown(
     JNIEnv* env, jclass clazz)
 {
     (void)clazz;
@@ -1295,7 +1295,7 @@ jstring JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakd
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustGetRiskLevel
  *
  * Returns the current client risk level derived from the raw threat
  * score using the configurable ZT_RISK_THRESHOLD_* knobs:
@@ -1304,7 +1304,7 @@ jstring JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakd
  * Sensitive-operation gates compare this tier against an allowed
  * maximum risk threshold (see SecurityState.SENSITIVE_OPS_MAX_RISK).
  */
-jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel(
+jint JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustGetRiskLevel(
     JNIEnv* env, jclass clazz)
 {
     (void)env; (void)clazz;
@@ -1312,11 +1312,11 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel(
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustIsDegraded
  *
  * Returns 1 if the system is in degraded mode (SUSPICIOUS state).
  */
-jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded(
+jint JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustIsDegraded(
     JNIEnv* env, jclass clazz)
 {
     (void)env; (void)clazz;
@@ -1324,11 +1324,11 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded(
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustIsLocked
  *
  * Returns 1 if the system is locked (BREACH state).
  */
-jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked(
+jint JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustIsLocked(
     JNIEnv* env, jclass clazz)
 {
     (void)env; (void)clazz;
@@ -1336,11 +1336,11 @@ jint JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked(
 }
 
 /**
- * JNI: Java_com_lianyu_ai_security_NativeBridge_zeroTrustInit
+ * JNI: Java_com_yunian_ai_security_NativeBridge_zeroTrustInit
  *
  * Initialize the zero-trust system. Called at app startup.
  */
-void JNICALL Java_com_lianyu_ai_security_NativeBridge_zeroTrustInit(
+void JNICALL Java_com_yunian_ai_security_NativeBridge_zeroTrustInit(
     JNIEnv* env, jclass clazz)
 {
     (void)clazz;

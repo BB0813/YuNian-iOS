@@ -6,13 +6,13 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:name="com.lianyu.ai.security.StaticApkShell"
+        android:name="com.yunian.ai.security.StaticApkShell"
         android:allowBackup="false"
         android:supportsRtl="true"
         tools:replace="android:name">
 
         <activity
-            android:name="com.lianyu.ai.MainActivity"
+            android:name="com.yunian.ai.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             tools:replace="android:exported">
@@ -36,7 +36,7 @@
                 tools:node="remove" />
         </provider>
 
-        <!-- [LINT FIX] WorkManager on-demand 初始化：LianYuApplication 实现 Configuration.Provider，
+        <!-- [LINT FIX] WorkManager on-demand 初始化：YuNianApplication 实现 Configuration.Provider，
              需移除默认 androidx.startup 初始化器，否则 release lint 报 RemoveWorkManagerInitializer -->
         <provider
             android:name="androidx.startup.InitializationProvider"
@@ -49,12 +49,12 @@
                 tools:node="remove" />
         </provider>
 
-        <activity-alias android:name="com.lianyu.ai.SplashActivity" tools:node="remove"/>
+        <activity-alias android:name="com.yunian.ai.SplashActivity" tools:node="remove"/>
 
-        <receiver android:name="com.lianyu.ai.feature.notification.BootReceiver"
+        <receiver android:name="com.yunian.ai.feature.notification.BootReceiver"
             android:enabled="true" android:exported="true"
             tools:node="remove"/>
-        <receiver android:name="com.lianyu.ai.security.SReceiver"
+        <receiver android:name="com.yunian.ai.security.SReceiver"
             tools:node="remove"/>
         <receiver android:name="com.huawei.hms.support.api.push.PushReceiver"
             tools:node="remove"/>

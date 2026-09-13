@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify LianYu APK hardening invariants before release.
+"""Verify YuNian APK hardening invariants before release.
 
 Checks:
   - APK exists and is a zip

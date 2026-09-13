@@ -195,12 +195,12 @@ def main():
         # Sign
         apksigner = BT / "apksigner.bat"
         ks = PROJECT / "release.keystore"
-        store_pass = os.environ.get("LIANYU_STORE_PASSWORD", "")
-        key_pass = os.environ.get("LIANYU_KEY_PASSWORD", "")
-        key_alias = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
+        store_pass = os.environ.get("YUNIAN_STORE_PASSWORD", "")
+        key_pass = os.environ.get("YUNIAN_KEY_PASSWORD", "")
+        key_alias = os.environ.get("YUNIAN_KEY_ALIAS", "your_alias")
         missing = [name for name, value in [
-            ("LIANYU_STORE_PASSWORD", store_pass),
-            ("LIANYU_KEY_PASSWORD", key_pass),
+            ("YUNIAN_STORE_PASSWORD", store_pass),
+            ("YUNIAN_KEY_PASSWORD", key_pass),
         ] if not value]
         if missing:
             sys.exit(f"Release signing requires: {', '.join(missing)}")

@@ -1,12 +1,12 @@
 /*
- * integrity-guard.h — LianYu Secondary Integrity Verification
+ * integrity-guard.h — YuNian Secondary Integrity Verification
  *
  * Public API for the integrity verification layer.
  * Call ig_verify_all() once at startup (before DEX load).
  */
 
-#ifndef LIANYU_INTEGRITY_GUARD_H
-#define LIANYU_INTEGRITY_GUARD_H
+#ifndef YUNIAN_INTEGRITY_GUARD_H
+#define YUNIAN_INTEGRITY_GUARD_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,4 +27,4 @@ int ig_verify_all(void);
 }
 #endif
 
-#endif /* LIANYU_INTEGRITY_GUARD_H */
+#endif /* YUNIAN_INTEGRITY_GUARD_H */

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-APK Integrity Hash Generator for LianYu Security Module
+APK Integrity Hash Generator for YuNian Security Module
 
 Usage:
     python3 generate_apk_hashes.py <path/to/release.apk> <path/to/liblianyu_security.so>

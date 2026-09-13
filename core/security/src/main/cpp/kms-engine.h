@@ -45,8 +45,8 @@
  *   6. All key destruction uses volatile + dmb sy barriers + movi neon wipe
  */
 
-#ifndef LIANYU_KMS_ENGINE_H
-#define LIANYU_KMS_ENGINE_H
+#ifndef YUNIAN_KMS_ENGINE_H
+#define YUNIAN_KMS_ENGINE_H
 
 #include <cstdint>
 #include <cstddef>
@@ -280,4 +280,4 @@ int kms_derive_session_key_tiered(int tier, uint8_t sk_out[KMS_SK_SIZE]);
 }
 #endif
 
-#endif /* LIANYU_KMS_ENGINE_H */
+#endif /* YUNIAN_KMS_ENGINE_H */

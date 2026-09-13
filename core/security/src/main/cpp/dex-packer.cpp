@@ -1,5 +1,5 @@
 /*
- * LianYu DEX Packer — Whole-DEX SM4 encryption + in-memory ClassLoader
+ * YuNian DEX Packer — Whole-DEX SM4 encryption + in-memory ClassLoader
  *
  * Runtime flow:
  *   1. Scatter key bytes from payload header (LCG — C++, randomized constants)
@@ -45,7 +45,7 @@ static volatile int g_dex2c_integrity_failed = 0;
 __attribute__((visibility("default"))) extern void* dlsym(void* handle, const char* symbol, const char* version);
 
 
-#define DEX_TAG "LianYu-DEX"
+#define DEX_TAG "YuNian-DEX"
 #ifdef PRODUCTION_BUILD
 #define DEX_LOGE(...) ((void)0)
 #define DEX_LOGI(...) ((void)0)
@@ -960,7 +960,7 @@ int dex_packer_load(JNIEnv* env, jobject ctx, const char* appClass) {
 
     /* Store globals in static fields on the caller's class for later use.
      * We use the NativeBridge class as a holder. */
-    jclass bridgeClass = env->FindClass("com/lianyu/ai/security/NativeBridge");
+    jclass bridgeClass = env->FindClass("com/yunian/ai/security/NativeBridge");
     if (!bridgeClass || env->ExceptionCheck()) {
         DEX_LOGE("load: NativeBridge class not found — can't store references");
         env->ExceptionClear();

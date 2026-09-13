@@ -6,20 +6,20 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai"
+    namespace = "com.yunian.ai"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.lianyu.ai"
+        applicationId = "com.yunian.ai"
         minSdk = 26
         targetSdk = 35
         versionCode = 20
         versionName = "1.10.5"
 
         manifestPlaceholders["developerName"] = "苏苏"
-        manifestPlaceholders["developerOrg"] = "LianYu"
+        manifestPlaceholders["developerOrg"] = "YuNian"
 
-        // Developer: 苏苏 / Organization: LianYu
+        // Developer: 苏苏 / Organization: YuNian
 
         // Force multi-DEX output
         multiDexEnabled = true
@@ -33,7 +33,7 @@ android {
         buildConfigField("String", "HARDENING_LEVEL", "\"VMPv2.0+Keystore+AES256GCM\"")
 
         testInstrumentationRunner = if (providers.gradleProperty("thinShellTestRunner").isPresent) {
-            "com.lianyu.ai.performance.JavaThinShellInstrumentation"
+            "com.yunian.ai.performance.JavaThinShellInstrumentation"
         } else {
             "androidx.test.runner.AndroidJUnitRunner"
         }
@@ -61,9 +61,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("../release.keystore")
-            storePassword = System.getenv("LIANYU_STORE_PASSWORD") ?: project.findProperty("LIANYU_STORE_PASSWORD") as String? ?: "debug_password_placeholder"
-            keyAlias = System.getenv("LIANYU_KEY_ALIAS") ?: project.findProperty("LIANYU_KEY_ALIAS") as String? ?: "your_alias"
-            keyPassword = System.getenv("LIANYU_KEY_PASSWORD") ?: project.findProperty("LIANYU_KEY_PASSWORD") as String? ?: "debug_password_placeholder"
+            storePassword = System.getenv("YUNIAN_STORE_PASSWORD") ?: project.findProperty("YUNIAN_STORE_PASSWORD") as String? ?: "debug_password_placeholder"
+            keyAlias = System.getenv("YUNIAN_KEY_ALIAS") ?: project.findProperty("YUNIAN_KEY_ALIAS") as String? ?: "your_alias"
+            keyPassword = System.getenv("YUNIAN_KEY_PASSWORD") ?: project.findProperty("YUNIAN_KEY_PASSWORD") as String? ?: "debug_password_placeholder"
             enableV3Signing = true
         }
     }
@@ -74,9 +74,9 @@ android {
             isMinifyEnabled = false
             isDebuggable = true
         }
-        // Release minification can be disabled via -PlianyuDisableMinify=true
+        // Release minification can be disabled via -PyunianDisableMinify=true
 // Useful when Dex2C/R8 fails (exit code 9009)
-val disableMinify = providers.gradleProperty("lianyuDisableMinify")
+val disableMinify = providers.gradleProperty("yunianDisableMinify")
     .map { it.equals("true", ignoreCase = true) || it == "1" }
     .orElse(false)
 
@@ -89,7 +89,7 @@ val disableMinify = providers.gradleProperty("lianyuDisableMinify")
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            resValue("string", "app_name", "LianYu")
+            resValue("string", "app_name", "YuNian")
         }
     }
     sourceSets {
@@ -118,7 +118,7 @@ val isWindows = System.getProperty("os.name").lowercase().contains("windows")
 // Prefer a real Python interpreter. WindowsApps store stubs often fail.
 fun resolvePythonExecutable(): String {
     val candidates = mutableListOf<String>()
-    System.getenv("LIANYU_PYTHON")?.let { candidates += it }
+    System.getenv("YUNIAN_PYTHON")?.let { candidates += it }
     if (isWindows) {
         val localAppData = System.getenv("LOCALAPPDATA") ?: ""
         val userProfile = System.getenv("USERPROFILE") ?: ""
@@ -146,16 +146,16 @@ fun resolvePythonExecutable(): String {
 
 val pythonExecutable = resolvePythonExecutable()
 
-val shellPayloadAssetsDir = layout.projectDirectory.dir("src/main/assets/lianyu_shell")
+val shellPayloadAssetsDir = layout.projectDirectory.dir("src/main/assets/yunian_shell")
 val unsignedReleaseApk = layout.buildDirectory.file("outputs/apk/release/app-release-unsigned.apk")
 val releaseApk = layout.buildDirectory.file("outputs/apk/release/app-release.apk")
 val thinShellReleaseApk = layout.buildDirectory.file("outputs/apk/release/app-release-thin-shell.apk")
 
 tasks.register<Exec>("packageShellPayload") {
     group = "security"
-    description = "Encrypt release classes*.dex into in-repo one-piece shell payload assets. Requires LIANYU_SHELL_PAYLOAD_KEY for CI smoke packaging; production should use native KMS-compatible exporter."
+    description = "Encrypt release classes*.dex into in-repo one-piece shell payload assets. Requires YUNIAN_SHELL_PAYLOAD_KEY for CI smoke packaging; production should use native KMS-compatible exporter."
     dependsOn("assembleRelease")
-    onlyIf { providers.environmentVariable("LIANYU_SHELL_PAYLOAD_KEY").orNull != null }
+    onlyIf { providers.environmentVariable("YUNIAN_SHELL_PAYLOAD_KEY").orNull != null }
     inputs.file(unsignedReleaseApk)
     outputs.dir(shellPayloadAssetsDir)
     commandLine(
@@ -173,17 +173,17 @@ tasks.register<Exec>("packageShellPayload") {
 //
 // Default: thin shell is DISABLED (requires Android build-tools + Python + Dex2C).
 // To enable thin shell packaging:
-//   ./gradlew assembleRelease -PlianyuEnableThinShell=true
+//   ./gradlew assembleRelease -PyunianEnableThinShell=true
 // Requirements: Android build-tools, Python 3, Dex2C
 // Optional env:
-//   LIANYU_PYTHON                 absolute path to python.exe
-//   LIANYU_STORE_PASSWORD         release keystore password (for --sign)
-//   LIANYU_KEY_PASSWORD           release key password (for --sign)
-//   LIANYU_KEY_ALIAS              release key alias
-//   LIANYU_THIN_SHELL_SIGN=0      skip re-sign (default: sign when keystore passwords available)
+//   YUNIAN_PYTHON                 absolute path to python.exe
+//   YUNIAN_STORE_PASSWORD         release keystore password (for --sign)
+//   YUNIAN_KEY_PASSWORD           release key password (for --sign)
+//   YUNIAN_KEY_ALIAS              release key alias
+//   YUNIAN_THIN_SHELL_SIGN=0      skip re-sign (default: sign when keystore passwords available)
 // Thin shell is ENABLED by default. To DISABLE thin shell:
-//   ./gradlew assembleRelease -PlianyuSkipThinShell=true
-val skipThinShell = providers.gradleProperty("lianyuSkipThinShell")
+//   ./gradlew assembleRelease -PyunianSkipThinShell=true
+val skipThinShell = providers.gradleProperty("yunianSkipThinShell")
     .map { it.equals("true", ignoreCase = true) || it == "1" }
     .orElse(false)
 
@@ -206,13 +206,13 @@ tasks.register("packageThinShellRelease") {
     outputs.file(envelopeOut)
 
     // Prefer env; fall back to gradle.properties project properties for local release.
-    val storePass = providers.environmentVariable("LIANYU_STORE_PASSWORD")
-        .orElse(providers.provider { project.findProperty("LIANYU_STORE_PASSWORD")?.toString() ?: "" })
-    val keyPass = providers.environmentVariable("LIANYU_KEY_PASSWORD")
-        .orElse(providers.provider { project.findProperty("LIANYU_KEY_PASSWORD")?.toString() ?: "" })
-    val keyAlias = providers.environmentVariable("LIANYU_KEY_ALIAS")
-        .orElse(providers.provider { project.findProperty("LIANYU_KEY_ALIAS")?.toString() ?: "your_alias" })
-    val signOverride = providers.environmentVariable("LIANYU_THIN_SHELL_SIGN").orNull
+    val storePass = providers.environmentVariable("YUNIAN_STORE_PASSWORD")
+        .orElse(providers.provider { project.findProperty("YUNIAN_STORE_PASSWORD")?.toString() ?: "" })
+    val keyPass = providers.environmentVariable("YUNIAN_KEY_PASSWORD")
+        .orElse(providers.provider { project.findProperty("YUNIAN_KEY_PASSWORD")?.toString() ?: "" })
+    val keyAlias = providers.environmentVariable("YUNIAN_KEY_ALIAS")
+        .orElse(providers.provider { project.findProperty("YUNIAN_KEY_ALIAS")?.toString() ?: "your_alias" })
+    val signOverride = providers.environmentVariable("YUNIAN_THIN_SHELL_SIGN").orNull
     val shouldSign = when (signOverride?.lowercase()) {
         "0", "false", "no" -> false
         "1", "true", "yes" -> true
@@ -306,7 +306,7 @@ tasks.register("promoteThinShellRelease") {
 }
 
 // Wire thin-shell as the release packaging gate.
-// Enabled by default (skipThinShell=false). To disable: -PlianyuSkipThinShell=true
+// Enabled by default (skipThinShell=false). To disable: -PyunianSkipThinShell=true
 afterEvaluate {
     if (!skipThinShell.get()) {
         tasks.named("assembleRelease").configure {
@@ -315,9 +315,9 @@ afterEvaluate {
         tasks.named("packageThinShellRelease").configure {
             finalizedBy("promoteThinShellRelease")
         }
-        logger.lifecycle("Thin shell packaging ENABLED (use -PlianyuSkipThinShell=true to disable)")
+        logger.lifecycle("Thin shell packaging ENABLED (use -PyunianSkipThinShell=true to disable)")
     } else {
-        logger.lifecycle("lianyuSkipThinShell=true — release will keep plaintext root DEX (thin shell disabled)")
+        logger.lifecycle("yunianSkipThinShell=true — release will keep plaintext root DEX (thin shell disabled)")
     }
 }
 
@@ -361,7 +361,6 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)

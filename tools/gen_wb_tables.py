@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-White-Box AES-256 Table Generator for LianYu — CORRECTED
+White-Box AES-256 Table Generator for YuNian — CORRECTED
 
 Generates C header with pre-computed lookup tables embedding
 the AES-256 key. Run at build time to produce wb_tables.inc.

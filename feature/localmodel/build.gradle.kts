@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.android.library)}
 
 android {
-    namespace = "com.lianyu.ai.feature.localmodel"
+    namespace = "com.yunian.ai.feature.localmodel"
     compileSdk = 35
 
     defaultConfig {

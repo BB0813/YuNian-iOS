@@ -1,9 +1,10 @@
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
-    namespace = "com.lianyu.ai.wechat"
+    namespace = "com.yunian.ai.wechat"
     compileSdk = 35
 
     defaultConfig {
@@ -25,10 +26,8 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:database"))
     implementation(libs.kotlinx.coroutines.core)
-    implementation(libs.wechat.ilink.sdk) {
-        exclude(group = "ch.qos.logback", module = "logback-classic")
-        exclude(group = "ch.qos.logback", module = "logback-core")
-    }
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
 }

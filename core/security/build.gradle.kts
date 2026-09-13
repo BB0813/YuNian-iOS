@@ -5,7 +5,7 @@ plugins {
 import java.util.concurrent.TimeUnit
 
 android {
-    namespace = "com.lianyu.ai.security"
+    namespace = "com.yunian.ai.security"
     compileSdk = 35
     ndkVersion = "30.0.14904198"
 
@@ -96,7 +96,7 @@ tasks.register("dex2cTranspile") {
     inputs.file(dex2cWhitelist)
     // Only depend on minifyReleaseWithR8 if minification is enabled
     // Check if minification is enabled via project property
-    val disableMinify = rootProject.providers.gradleProperty("lianyuDisableMinify")
+    val disableMinify = rootProject.providers.gradleProperty("yunianDisableMinify")
         .map { it.equals("true", ignoreCase = true) || it == "1" }
         .orElse(false)
     if (!disableMinify.get()) {
@@ -140,7 +140,7 @@ extern const uint32_t gDex2cTextCrc32;
         val candidates = listOf(
             venvPython.takeIf { it.exists() }?.absolutePath,
             "C:/Users/linruoxi/AppData/Local/Programs/Python/Python312/python.exe",
-            System.getenv("LIANYU_PYTHON"),
+            System.getenv("YUNIAN_PYTHON"),
             "python"
         ).filterNotNull()
         @Suppress("DEPRECATION")

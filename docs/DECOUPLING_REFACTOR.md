@@ -1,4 +1,4 @@
-# LianYu 解耦重构文档
+# YuNian 解耦重构文档
 
 > 重构日期：2026-06-24
 > 重构范围：基础设施层（ServiceRegistry 升级 + 依赖注入改造 + Repository 单例化）
@@ -36,7 +36,7 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    :app (入口层)                         │
-│  LianYuApplication                                      │
+│  YuNianApplication                                      │
 │  ├── ServiceRegistry 绑定（组合根）                      │
 │  ├── Repository 单例注册                                │
 │  └── Provider 实现绑定                                  │
@@ -108,7 +108,7 @@ feature 模块通过 ServiceRegistry.getOrThrow() 获取依赖
 
 ### 3.1 ServiceRegistry（核心 DI 容器）
 
-**位置**：`core/domain/src/main/java/com/lianyu/ai/domain/ServiceRegistry.kt`
+**位置**：`core/domain/src/main/java/com/yunian/ai/domain/ServiceRegistry.kt`
 
 **职责**：轻量级手动依赖注入注册中心，消除 feature→feature 的 project() 依赖。
 
@@ -170,10 +170,10 @@ object ServiceRegistry {
 
 ## 4. 使用示例
 
-### 4.1 注册服务（在 LianYuApplication 中）
+### 4.1 注册服务（在 YuNianApplication 中）
 
 ```kotlin
-// 文件：app/src/main/java/com/lianyu/ai/LianYuApplication.kt
+// 文件：app/src/main/java/com/yunian/ai/YuNianApplication.kt
 private fun registerServiceProviders(app: Application) {
     // Repository 单例
     ServiceRegistry.registerSingleton(CompanionRepository::class.java) {
@@ -255,7 +255,7 @@ fun testChatViewModel() {
 | 文件 | 改动 |
 |------|------|
 | `core/domain/.../ServiceRegistry.kt` | 升级为线程安全 + singleton/factory 双语义 + getOrThrow |
-| `app/.../LianYuApplication.kt` | 注册 7 个 Repository 单例 + 4 个 Provider 单例 + AiService 具体类 |
+| `app/.../YuNianApplication.kt` | 注册 7 个 Repository 单例 + 4 个 Provider 单例 + AiService 具体类 |
 
 ### 5.2 AiService 统一获取（消除 8 处直接 new）
 
@@ -320,8 +320,8 @@ AiService 原为 2835 行的上帝类，本次拆分为 4 个纯函数工具类�
 | AiContextTools 去重 | 删除 7 方法 + 1 data class，替换 10 处调用 | -138 行 |
 | AiPromptBuilder 去重 | 删除 7 private + 3 public 委托，替换 10 处调用 | -391 行 |
 | 删除死代码 | `extractDirectReply` + `findEchoEndIndex` | -68 行 |
-| 提取 ResponsePostProcessor | `stripThinkingContent` + `ensureNotHtml`，替换 8 处调用 | 新增 [ResponsePostProcessor.kt](file:///h:/lianyu/core/network/src/main/java/com/lianyu/ai/network/ResponsePostProcessor.kt) |
-| 提取 ImageHelper | `encodeImageToBase64` + `getImageMimeType`，替换 2 处调用 | 新增 [ImageHelper.kt](file:///h:/lianyu/core/network/src/main/java/com/lianyu/ai/network/ImageHelper.kt) |
+| 提取 ResponsePostProcessor | `stripThinkingContent` + `ensureNotHtml`，替换 8 处调用 | 新增 [ResponsePostProcessor.kt](file:///h:/lianyu/core/network/src/main/java/com/yunian/ai/network/ResponsePostProcessor.kt) |
+| 提取 ImageHelper | `encodeImageToBase64` + `getImageMimeType`，替换 2 处调用 | 新增 [ImageHelper.kt](file:///h:/lianyu/core/network/src/main/java/com/yunian/ai/network/ImageHelper.kt) |
 
 纯函数工具类从 2 个增至 4 个：`AiContextTools` / `AiPromptBuilder` / `ResponsePostProcessor` / `ImageHelper`。
 
@@ -367,7 +367,7 @@ core:common/memory/ 包含完整的跨会话记忆引擎（MemoryManager 单例 
 |------|--------|--------|
 | `core/network/AiService.kt` | `MemoryManager.getInstance(appContext)` 直接调用 | `ServiceRegistry.getOrThrow(MemoryProvider::class.java)` |
 | `feature/groupchat/GroupChatViewModel.kt` | `MemoryManager.getInstance(getApplication())` 直接调用 | `ServiceRegistry.getOrThrow(MemoryProvider::class.java)` |
-| `app/LianYuApplication.kt` | — | 注册 `MemoryProvider` 单例（`MemoryManager.getInstance(app)`） |
+| `app/YuNianApplication.kt` | — | 注册 `MemoryProvider` 单例（`MemoryManager.getInstance(app)`） |
 
 **接口定义**（`core:domain/MemoryProvider`）：
 - `initialize()` — 加载持久化记忆
@@ -427,13 +427,13 @@ core:ui-common/component/ 中部分组件仅被单一 feature 使用，迁移至
 
 1. 在 `settings.gradle.kts` 注册模块
 2. 在 `app/build.gradle.kts` 添加依赖
-3. 如需跨 feature 通信，在 `core/domain` 定义接口，在 feature 实现，在 `LianYuApplication.registerServiceProviders` 绑定
+3. 如需跨 feature 通信，在 `core/domain` 定义接口，在 feature 实现，在 `YuNianApplication.registerServiceProviders` 绑定
 4. ViewModel/Worker 通过 `ServiceRegistry.getOrThrow()` 获取依赖
 
 ### 7.2 新增 Repository
 
 1. 在 `core/database/repository/` 定义 Repository 类
-2. 在 `LianYuApplication.registerServiceProviders` 注册单例
+2. 在 `YuNianApplication.registerServiceProviders` 注册单例
 3. 消费方通过 `ServiceRegistry.getOrThrow(XxxRepository::class.java)` 获取
 
 ### 7.3 独立提取模块测试

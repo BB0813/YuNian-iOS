@@ -2,14 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <service
-            android:name="com.lianyu.ai.security.SWechatPollingService"
+            android:name="com.yunian.ai.security.SWechatPollingService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
 
         <receiver
-            android:name="com.lianyu.ai.security.SWechatBootReceiver"
+            android:name="com.yunian.ai.security.SWechatBootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>

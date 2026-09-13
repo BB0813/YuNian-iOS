@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-build_shell_apk.py — LianYu 三代壳完整构造流水线
+build_shell_apk.py — YuNian 三代壳完整构造流水线
 
 Phase 1: Gradle 构建 Release APK
 Phase 2: 提取 DEX → 生成壳载荷 (code_items.bin + shell_payload.bin)
@@ -26,9 +26,9 @@ ANDROID_JAR = SDK / "platforms" / "android-34" / "android.jar"
 CPP_DIR = PROJECT / "core" / "security" / "src" / "main" / "cpp"
 APK_OUT = PROJECT / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
 KEYSTORE = PROJECT / "release.keystore"
-STORE_PASS = os.environ.get("LIANYU_STORE_PASSWORD", "")
-KEY_PASS = os.environ.get("LIANYU_KEY_PASSWORD", "")
-KEY_ALIAS = os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
+STORE_PASS = os.environ.get("YUNIAN_STORE_PASSWORD", "")
+KEY_PASS = os.environ.get("YUNIAN_KEY_PASSWORD", "")
+KEY_ALIAS = os.environ.get("YUNIAN_KEY_ALIAS", "your_alias")
 SHELL_SRC = PROJECT / "app" / "build" / "tmp" / "shell_src"
 SHELL_CLASSES = PROJECT / "app" / "build" / "tmp" / "shell_classes"
 MINIMAL_DEX = PROJECT / "app" / "build" / "tmp" / "minimal_dex_out"
@@ -56,9 +56,9 @@ def phase1_gradle(skip=False):
         return APK_OUT if APK_OUT.exists() else None
     env = os.environ.copy()
     env.update({k: v for k, v in [
-        ("LIANYU_STORE_PASSWORD", STORE_PASS),
-        ("LIANYU_KEY_PASSWORD", KEY_PASS),
-        ("LIANYU_KEY_ALIAS", KEY_ALIAS),
+        ("YUNIAN_STORE_PASSWORD", STORE_PASS),
+        ("YUNIAN_KEY_PASSWORD", KEY_PASS),
+        ("YUNIAN_KEY_ALIAS", KEY_ALIAS),
     ] if v})
     for d in ["core/security/build", "core/security/.cxx", "app/build/outputs/apk/release"]:
         p = PROJECT / d
@@ -81,7 +81,7 @@ def phase1_gradle(skip=False):
 # ═══════════════════════════════════════════════════════
 def phase2_payload(apk_path):
     step("Phase 2: Shell Payload (code_items.bin + shell_payload.bin)")
-    assets = PROJECT / "app" / "src" / "main" / "assets" / "lianyu_shell"
+    assets = PROJECT / "app" / "src" / "main" / "assets" / "yunian_shell"
     assets.mkdir(parents=True, exist_ok=True)
 
     # 2a: Extract code_items (function extraction)
@@ -270,14 +270,14 @@ def get_cert_crc32() -> int:
 
 # ═══════════════════════════════════════════════════════
 def main():
-    parser = argparse.ArgumentParser(description="LianYu 三代壳完整流水线")
+    parser = argparse.ArgumentParser(description="YuNian 三代壳完整流水线")
     parser.add_argument("--clean", action="store_true", help="清空构建缓存")
     parser.add_argument("--skip-gradle", action="store_true", help="跳过 Gradle 构建")
     args = parser.parse_args()
 
     missing = [name for name, value in [
-        ("LIANYU_STORE_PASSWORD", STORE_PASS),
-        ("LIANYU_KEY_PASSWORD", KEY_PASS),
+        ("YUNIAN_STORE_PASSWORD", STORE_PASS),
+        ("YUNIAN_KEY_PASSWORD", KEY_PASS),
     ] if not value]
     if missing:
         sys.exit(f"Release signing requires: {', '.join(missing)}")

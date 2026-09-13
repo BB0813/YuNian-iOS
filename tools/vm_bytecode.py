@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LianYu VM Bytecode Compiler — Assembly → Bytecode.
+YuNian VM Bytecode Compiler — Assembly → Bytecode.
 
 Compiles VM assembly (.vmasm) into bytecode (.bin) and C header (.inc).
 
@@ -159,7 +159,7 @@ def format_c_array(data, name="g_vm_program"):
 
 def generate_example():
     """Generate a VM assembly example: AES MixColumns on one column."""
-    return """# LianYu VM Assembly Example
+    return """# YuNian VM Assembly Example
 # AES MixColumns: one column
 # Input: r1 = b0, r2 = b1, r3 = b2, r4 = b3
 # Output: r5-r8 = mixed column

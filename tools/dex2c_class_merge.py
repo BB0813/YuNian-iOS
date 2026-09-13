@@ -125,9 +125,9 @@ class ClassMergeTranspiler:
     def read_whitelist(self, path: str) -> Dict[str, List[str]]:
         """Parse whitelist. Returns {class_name: [method_names]}.
         Supports:
-          @class com.lianyu.ai.security.KmsProvider   → all methods
-          @class com.lianyu.ai.security.KmsProvider:encryptWithMetadata,decryptWithMetadata  → specific methods
-          com.lianyu.ai.security.KmsProvider.encryptWithMetadata  → legacy single method
+          @class com.yunian.ai.security.KmsProvider   → all methods
+          @class com.yunian.ai.security.KmsProvider:encryptWithMetadata,decryptWithMetadata  → specific methods
+          com.yunian.ai.security.KmsProvider.encryptWithMetadata  → legacy single method
         """
         groups = {}
         with open(path) as f:
@@ -230,7 +230,7 @@ class ClassMergeTranspiler:
         lines.append('#include <cstdlib>')
         lines.append('#include <android/log.h>')
         lines.append('')
-        lines.append('#define D2C_TAG "LianYu-Dex2C"')
+        lines.append('#define D2C_TAG "YuNian-Dex2C"')
         lines.append('#define D2C_LOGI(...) __android_log_print(ANDROID_LOG_INFO, D2C_TAG, __VA_ARGS__)')
         lines.append('#define D2C_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, D2C_TAG, __VA_ARGS__)')
         lines.append('')
@@ -326,12 +326,12 @@ class ClassMergeTranspiler:
         """Generate Java stub classes that call the merged native."""
         lines = []
         lines.append('// Auto-generated Dex2C stubs — class-level merged dispatch')
-        lines.append('package com.lianyu.ai.security;')
+        lines.append('package com.yunian.ai.security;')
         lines.append('')
         lines.append('import android.util.Log;')
         lines.append('')
         lines.append('public class VmpDex2cDispatcher {')
-        lines.append('    private static final String TAG = "LianYu-Dex2C";')
+        lines.append('    private static final String TAG = "YuNian-Dex2C";')
         lines.append('')
 
         for class_name, method_filter in groups.items():

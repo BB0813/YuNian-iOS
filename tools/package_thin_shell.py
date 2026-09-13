@@ -17,11 +17,11 @@ This is the production packaging step that turns a normal Gradle APK
 Usage:
   python tools/package_thin_shell.py \\
       --apk app/build/outputs/apk/release/app-release.apk \\
-      --out LianYu-thin-shell.apk \\
+      --out YuNian-thin-shell.apk \\
       --sign
 
 Environment (for --sign release keystore):
-  LIANYU_STORE_PASSWORD / LIANYU_KEY_PASSWORD / LIANYU_KEY_ALIAS
+  YUNIAN_STORE_PASSWORD / YUNIAN_KEY_PASSWORD / YUNIAN_KEY_ALIAS
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import zipfile
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent
-STABLE_SHELL_SRC = PROJECT / "app" / "src" / "shell" / "java" / "com" / "lianyu" / "ai" / "security"
+STABLE_SHELL_SRC = PROJECT / "app" / "src" / "shell" / "java" / "com" / "yunian" / "ai" / "security"
 SHELL_WORK = PROJECT / "app" / "build" / "tmp" / "thin_shell"
 LOCALAPPDATA = Path(os.environ.get("LOCALAPPDATA", ""))
 SDK = Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or (LOCALAPPDATA / "Android" / "Sdk"))
@@ -248,9 +248,9 @@ def encrypt_business_dex(apk_path: Path, dex_key: bytes) -> dict[str, bytes]:
             assets[f"assets/shell/{out_name}"] = enc
             print(f"  {name} ({len(data):,} B) → assets/shell/{out_name} ({len(enc):,} B)")
 
-    real_app = b"com.lianyu.ai.LianYuApplication"
+    real_app = b"com.yunian.ai.YuNianApplication"
     assets["assets/shell/app_meta.bin"] = encrypt_ctr(real_app, dex_key)
-    print(f"  app_meta.bin → com.lianyu.ai.LianYuApplication")
+    print(f"  app_meta.bin → com.yunian.ai.YuNianApplication")
     return assets
 
 
@@ -327,24 +327,24 @@ def sign_apk(apk_path: Path, keystore: Path, store_pass: str, key_pass: str, ali
 
 
 ALLOWED_ROOT_CLASSES = {
-    "Lcom/lianyu/ai/security/StaticApkShell;",
-    "Lcom/lianyu/ai/security/SActivity;",
-    "Lcom/lianyu/ai/security/MethodRecoveryEngine;",
+    "Lcom/yunian/ai/security/StaticApkShell;",
+    "Lcom/yunian/ai/security/SActivity;",
+    "Lcom/yunian/ai/security/MethodRecoveryEngine;",
 }
 
 # String markers that must NOT appear in root shell DEX.
 # Note: shell may legitimately contain the real Application class name string
-# ("com.lianyu.ai.LianYuApplication") for reflection bootstrap — do not ban that.
+# ("com.yunian.ai.YuNianApplication") for reflection bootstrap — do not ban that.
 FORBIDDEN_ROOT_MARKERS = (
-    "Lcom/lianyu/ai/LianYuApplication;",
-    "Lcom/lianyu/ai/MainActivity;",
+    "Lcom/yunian/ai/YuNianApplication;",
+    "Lcom/yunian/ai/MainActivity;",
     "Lkotlin/",
     "Lkotlinx/",
     "Landroidx/compose",
-    "Lcom/lianyu/ai/feature/",
-    "Lcom/lianyu/ai/network/AiService;",
-    "Lcom/lianyu/ai/database/AppDatabase;",
-    "Lcom/lianyu/ai/security/LianYuShellApplication;",
+    "Lcom/yunian/ai/feature/",
+    "Lcom/yunian/ai/network/AiService;",
+    "Lcom/yunian/ai/database/AppDatabase;",
+    "Lcom/yunian/ai/security/YuNianShellApplication;",
 )
 
 
@@ -375,7 +375,7 @@ def list_root_dex_classes(apk_path: Path) -> list[str]:
         classes: list[str] = []
         for line in text.splitlines():
             line = line.strip()
-            # Class descriptor  : 'Lcom/lianyu/ai/security/StaticApkShell;'
+            # Class descriptor  : 'Lcom/yunian/ai/security/StaticApkShell;'
             if "Class descriptor" in line and "'" in line:
                 desc = line.split("'", 1)[1].rsplit("'", 1)[0]
                 classes.append(desc)
@@ -475,12 +475,12 @@ def verify_thin_shell(apk_path: Path, max_shell_bytes: int = 64 * 1024) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Package LianYu thin-shell APK")
+    p = argparse.ArgumentParser(description="Package YuNian thin-shell APK")
     p.add_argument("--apk", required=True, help="Input Gradle APK path")
     p.add_argument("--out", required=True, help="Output thin-shell APK path")
     p.add_argument("--sign", action="store_true", help="Re-sign output APK")
     p.add_argument("--release-key", action="store_true",
-                   help="Use release keystore + LIANYU_* env for key derivation/signing")
+                   help="Use release keystore + YUNIAN_* env for key derivation/signing")
     p.add_argument("--keystore", default="", help="Keystore path override")
     p.add_argument("--store-pass", default="", help="Keystore password override")
     p.add_argument("--key-pass", default="", help="Key password override")
@@ -504,11 +504,11 @@ def main() -> None:
     use_release = bool(args.release_key)
     if use_release:
         keystore = Path(args.keystore or (PROJECT / "release.keystore"))
-        store_pass = args.store_pass or os.environ.get("LIANYU_STORE_PASSWORD", "")
-        key_pass = args.key_pass or os.environ.get("LIANYU_KEY_PASSWORD", "")
-        alias = args.alias or os.environ.get("LIANYU_KEY_ALIAS", "your_alias")
+        store_pass = args.store_pass or os.environ.get("YUNIAN_STORE_PASSWORD", "")
+        key_pass = args.key_pass or os.environ.get("YUNIAN_KEY_PASSWORD", "")
+        alias = args.alias or os.environ.get("YUNIAN_KEY_ALIAS", "your_alias")
         if args.sign and (not store_pass or not key_pass):
-            sys.exit("Release signing requires LIANYU_STORE_PASSWORD and LIANYU_KEY_PASSWORD")
+            sys.exit("Release signing requires YUNIAN_STORE_PASSWORD and YUNIAN_KEY_PASSWORD")
     else:
         keystore = Path(args.keystore or (Path.home() / ".android" / "debug.keystore"))
         store_pass = args.store_pass or "android"

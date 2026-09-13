@@ -24,8 +24,8 @@ D8 = BT / "d8.bat"
 APKSIGNER = BT / "apksigner.bat"
 APKTOOL = PROJECT / "tools" / "apktool.jar"
 KEYSTORE = PROJECT / "release.keystore"
-STORE_PASS = os.environ.get("LIANYU_STORE_PASSWORD", "")
-KEY_PASS = os.environ.get("LIANYU_KEY_PASSWORD", "")
+STORE_PASS = os.environ.get("YUNIAN_STORE_PASSWORD", "")
+KEY_PASS = os.environ.get("YUNIAN_KEY_PASSWORD", "")
 KS_ALIAS = "your_alias"
 
 SHELL_SRC = PROJECT / "app/build/tmp/ultimate_shell/src"
@@ -144,7 +144,7 @@ def phase0_generate_payload():
     print("\n═══ Phase 0: VMP Payload Generation ═══")
     gen_py = PROJECT / "tools" / "gen_payload_cpp.py"
     # Input: encrypted DEX from previous build's assets
-    enc_dex = PROJECT / "app/src/main/assets/lianyu_shell/classes.bin"
+    enc_dex = PROJECT / "app/src/main/assets/yunian_shell/classes.bin"
     if not enc_dex.exists():
         print("  Skipped — no encrypted DEX found (run with --generate-payload later)")
         return
@@ -213,16 +213,16 @@ def phase4_apktool():
 
     # Move LAUNCHER intent-filter from SActivity to MainActivity
     mf = re.sub(
-        r'(<activity[^>]*android:name="com\.lianyu\.ai\.security\.SActivity"[^>]*>)\s*<intent-filter>.*?</intent-filter>',
+        r'(<activity[^>]*android:name="com\.yunian\.ai\.security\.SActivity"[^>]*>)\s*<intent-filter>.*?</intent-filter>',
         r'\1', mf, flags=re.DOTALL
     )
     mf = mf.replace(
-        '<activity android:exported="false" android:hardwareAccelerated="true" android:launchMode="singleTask" android:name="com.lianyu.ai.MainActivity"',
-        '<activity android:exported="true" android:hardwareAccelerated="true" android:launchMode="singleTask" android:name="com.lianyu.ai.MainActivity"'
+        '<activity android:exported="false" android:hardwareAccelerated="true" android:launchMode="singleTask" android:name="com.yunian.ai.MainActivity"',
+        '<activity android:exported="true" android:hardwareAccelerated="true" android:launchMode="singleTask" android:name="com.yunian.ai.MainActivity"'
     )
     # Fix self-closing tag → open/close with intent-filter
     mf = re.sub(
-        r'(<activity[^>]*android:name="com\.lianyu\.ai\.MainActivity"[^>]*)/>',
+        r'(<activity[^>]*android:name="com\.yunian\.ai\.MainActivity"[^>]*)/>',
         r'\1>\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN"/>\n                <category android:name="android.intent.category.LAUNCHER"/>\n            </intent-filter>\n        </activity>',
         mf
     )
@@ -231,7 +231,7 @@ def phase4_apktool():
     # Add meta-data for potential real_app_class override
     if '<meta-data android:name="real_application_class"' not in mf:
         mf = mf.replace('<uses-native-library',
-            '<meta-data android:name="real_application_class" android:value="com.lianyu.ai.LianYuApplication"/>\n        <uses-native-library', 1)
+            '<meta-data android:name="real_application_class" android:value="com.yunian.ai.YuNianApplication"/>\n        <uses-native-library', 1)
     print("  Added real_application_class meta-data")
 
     manifest.write_text(mf, encoding='utf-8')
@@ -330,12 +330,12 @@ def phase6_patch_crc32():
 
 def main():
     print("=" * 60)
-    print("LianYu Ultimate Shell — 一键构建")
+    print("YuNian Ultimate Shell — 一键构建")
     print("=" * 60)
 
     missing = [name for name, value in [
-        ("LIANYU_STORE_PASSWORD", STORE_PASS),
-        ("LIANYU_KEY_PASSWORD", KEY_PASS),
+        ("YUNIAN_STORE_PASSWORD", STORE_PASS),
+        ("YUNIAN_KEY_PASSWORD", KEY_PASS),
     ] if not value]
     if missing:
         sys.exit(f"Release signing requires: {', '.join(missing)}")

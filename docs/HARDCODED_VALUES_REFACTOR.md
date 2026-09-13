@@ -6,12 +6,12 @@
 
 | 文件 | 用途 | 示例常量 |
 |---|---|---|
-| [core/common/ChatConstants.kt](../core/common/src/main/java/com/lianyu/ai/common/ChatConstants.kt) | 聊天分页、批量、上下文、延迟、文本处理、主动消息、AI 后处理 | `PAGE_SIZE`、`DEFAULT_CONTEXT_LIMIT`、`AI_REPLY_BROADCAST_DELAY_MS`、`REPETITION_MIN_TEXT_LENGTH`、`PROACTIVE_FALLBACK_MIN_MINUTES`、`POST_PROCESS_MAX_SENTENCES` 等 |
-| [core/common/ConcurrencyConstants.kt](../core/common/src/main/java/com/lianyu/ai/common/ConcurrencyConstants.kt) | 有界线程池 | `INTERRUPTIBLE_EXECUTOR_CORE_POOL_SIZE`、`INTERRUPTIBLE_EXECUTOR_MAXIMUM_POOL_SIZE`、`INTERRUPTIBLE_EXECUTOR_WORK_QUEUE_CAPACITY` |
-| [core/common/AiModelConstants.kt](../core/common/src/main/java/com/lianyu/ai/common/AiModelConstants.kt) | 设置页模型选择、测试消息 | `TEST_SYSTEM_MESSAGE`、`TEST_USER_MESSAGE`、`CHAT_MODEL_KEYWORDS`、`EXCLUDED_MODEL_KEYWORDS` |
-| [core/network/NetworkConstants.kt](../core/network/src/main/java/com/lianyu/ai/network/NetworkConstants.kt) | 网络超时、连接池、OpenAI 兼容路径、TTS/下载/调试日志 | `DEFAULT_READ_TIMEOUT_SECONDS`、`OPENAI_CHAT_COMPLETIONS_PATH`、`CONNECTION_POOL_MAX_IDLE`、`DEBUG_LOG_TIMEOUT_SECONDS` |
-| [core/security/SecurityConstants.kt](../core/security/src/main/java/com/lianyu/ai/security/SecurityConstants.kt) | 安全相关种子/密钥 | `LEGACY_CHAT_MESSAGE_KEY_SEED` |
-| [core/security/ChatMessageKeyProvider.kt](../core/security/src/main/java/com/lianyu/ai/security/ChatMessageKeyProvider.kt) | 封装 legacy key 生成逻辑 | `getLegacyFallbackKey()` |
+| [core/common/ChatConstants.kt](../core/common/src/main/java/com/yunian/ai/common/ChatConstants.kt) | 聊天分页、批量、上下文、延迟、文本处理、主动消息、AI 后处理 | `PAGE_SIZE`、`DEFAULT_CONTEXT_LIMIT`、`AI_REPLY_BROADCAST_DELAY_MS`、`REPETITION_MIN_TEXT_LENGTH`、`PROACTIVE_FALLBACK_MIN_MINUTES`、`POST_PROCESS_MAX_SENTENCES` 等 |
+| [core/common/ConcurrencyConstants.kt](../core/common/src/main/java/com/yunian/ai/common/ConcurrencyConstants.kt) | 有界线程池 | `INTERRUPTIBLE_EXECUTOR_CORE_POOL_SIZE`、`INTERRUPTIBLE_EXECUTOR_MAXIMUM_POOL_SIZE`、`INTERRUPTIBLE_EXECUTOR_WORK_QUEUE_CAPACITY` |
+| [core/common/AiModelConstants.kt](../core/common/src/main/java/com/yunian/ai/common/AiModelConstants.kt) | 设置页模型选择、测试消息 | `TEST_SYSTEM_MESSAGE`、`TEST_USER_MESSAGE`、`CHAT_MODEL_KEYWORDS`、`EXCLUDED_MODEL_KEYWORDS` |
+| [core/network/NetworkConstants.kt](../core/network/src/main/java/com/yunian/ai/network/NetworkConstants.kt) | 网络超时、连接池、OpenAI 兼容路径、TTS/下载/调试日志 | `DEFAULT_READ_TIMEOUT_SECONDS`、`OPENAI_CHAT_COMPLETIONS_PATH`、`CONNECTION_POOL_MAX_IDLE`、`DEBUG_LOG_TIMEOUT_SECONDS` |
+| [core/security/SecurityConstants.kt](../core/security/src/main/java/com/yunian/ai/security/SecurityConstants.kt) | 安全相关种子/密钥 | `LEGACY_CHAT_MESSAGE_KEY_SEED` |
+| [core/security/ChatMessageKeyProvider.kt](../core/security/src/main/java/com/yunian/ai/security/ChatMessageKeyProvider.kt) | 封装 legacy key 生成逻辑 | `getLegacyFallbackKey()` |
 
 ## 2. 主要替换清单
 
@@ -25,8 +25,8 @@
 | `OpenAiProvider.kt` | `"/chat/completions"` | `NetworkConstants.OPENAI_CHAT_COMPLETIONS_PATH` |
 | `AliyunTtsProvider.kt` 等 TTS Provider | 各厂商 endpoint、path、超时 | `NetworkConstants.ALIYUN_TTS_ENDPOINT`、`NetworkConstants.XUNFEI_TTS_PATH` 等 |
 | `QQBotApiClient.kt` / `QQBotWebSocketClient.kt` | QQ Bot URL、心跳间隔、重连延迟 | `ChatConstants.QQ_BOT_*` |
-| `DebugLogReporter.kt` | 固定日志服务器地址 | 默认常量 + 环境变量 `LIANYU_DEBUG_LOG_URL` 覆盖 |
-| `LianYuApplication.kt` | `"8.8.8.8"` DNS | `NetworkConstants.DNS_SERVER` |
+| `DebugLogReporter.kt` | 固定日志服务器地址 | 默认常量 + 环境变量 `YUNIAN_DEBUG_LOG_URL` 覆盖 |
+| `YuNianApplication.kt` | `"8.8.8.8"` DNS | `NetworkConstants.DNS_SERVER` |
 
 ### 2.2 聊天/上下文硬编码值
 
@@ -67,7 +67,7 @@
 
 | 原位置 | 原硬编码值 | 替换后 |
 |---|---|---|
-| `gradle.properties` | 明文签名密码 | 移除，改为通过环境变量 `LIANYU_STORE_PASSWORD` / `LIANYU_KEY_PASSWORD` 或 `project.findProperty` 注入 |
+| `gradle.properties` | 明文签名密码 | 移除，改为通过环境变量 `YUNIAN_STORE_PASSWORD` / `YUNIAN_KEY_PASSWORD` 或 `project.findProperty` 注入 |
 | `app/build.gradle.kts` | `debug` 使用 release 签名配置 | `debug` 使用默认 `debug` 签名配置，`release` 仍使用 release 签名配置 |
 
 ## 3. 验证结果

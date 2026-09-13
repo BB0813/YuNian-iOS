@@ -18,8 +18,8 @@
     <!-- RikkaHub Ported Features -->
     <string name="worldbook">世界书（知识库）</string>
     <string name="worldbook_desc">管理触发式知识注入、关键词设定、角色世界观</string>
-    <string name="skills_manager">技能库</string>
-    <string name="skills_manager_desc">管理 AI 可加载的专业技能与操作方法</string>
+    <string name="skills_manager">AI 能力中心</string>
+    <string name="skills_manager_desc">无障碍控制手机、Shizuku、技能安装与设备工具</string>
     <string name="mcp_settings_title">MCP 服务管理</string>
     <string name="mcp_settings_desc">连接外部 MCP 服务器以扩展 AI 工具能力</string>
 

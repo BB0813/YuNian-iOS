@@ -12,20 +12,20 @@
 
 ## File Structure
 
-- Modify `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt`
+- Modify `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt`
   - Respect `CUSTOM.formatHint` when testing connections.
   - Prevent OpenAI `/models` fetch for custom Anthropic-compatible mode.
   - Improve model fetch state handling so errors are visible and stale results clear correctly.
-- Modify `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/SettingsScreen.kt`
+- Modify `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/SettingsScreen.kt`
   - Fix the main API edit dialog model area so the fetch button is visible before models exist.
   - Disable/hide model fetch when `CUSTOM.formatHint == "anthropic"` and show manual-model guidance.
-- Modify `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/PetalApiCards.kt`
+- Modify `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/PetalApiCards.kt`
   - Apply the same fixes to the active Petal API card edit dialog, which is the primary settings UI path.
-- Modify `core/network/src/main/java/com/lianyu/ai/network/AiService.kt`
+- Modify `core/network/src/main/java/com/yunian/ai/network/AiService.kt`
   - Use `formatHint` in custom chat/proactive/custom-system dispatch paths, not only in unused `providerFor`.
-- Modify `core/network/src/test/java/com/lianyu/ai/network/RequestSecurityInterceptorTest.kt`
+- Modify `core/network/src/test/java/com/yunian/ai/network/RequestSecurityInterceptorTest.kt`
   - Repair broken signer test stubs so the network test source set can compile.
-- Create or modify `core/network/src/test/java/com/lianyu/ai/network/CustomApiProtocolDispatchTest.kt`
+- Create or modify `core/network/src/test/java/com/yunian/ai/network/CustomApiProtocolDispatchTest.kt`
   - Add focused unit tests for custom protocol decision helpers introduced in `AiService`.
 
 ---
@@ -33,7 +33,7 @@
 ### Task 1: Repair Existing Network Unit Test Compilation
 
 **Files:**
-- Modify: `core/network/src/test/java/com/lianyu/ai/network/RequestSecurityInterceptorTest.kt:18-75`
+- Modify: `core/network/src/test/java/com/yunian/ai/network/RequestSecurityInterceptorTest.kt:18-75`
 
 - [ ] **Step 1: Update signer stubs to return `RequestSignature`**
 
@@ -111,7 +111,7 @@ Expected: `BUILD SUCCESSFUL` or a new unrelated compile error. If a new unrelate
 - [ ] **Step 4: Commit test repair**
 
 ```bash
-git add core/network/src/test/java/com/lianyu/ai/network/RequestSecurityInterceptorTest.kt
+git add core/network/src/test/java/com/yunian/ai/network/RequestSecurityInterceptorTest.kt
 git commit -m "test(network): repair request security interceptor tests"
 ```
 
@@ -120,18 +120,18 @@ git commit -m "test(network): repair request security interceptor tests"
 ### Task 2: Add Protocol Decision Helpers and Tests
 
 **Files:**
-- Modify: `core/network/src/main/java/com/lianyu/ai/network/AiService.kt`
-- Create: `core/network/src/test/java/com/lianyu/ai/network/CustomApiProtocolDispatchTest.kt`
+- Modify: `core/network/src/main/java/com/yunian/ai/network/AiService.kt`
+- Create: `core/network/src/test/java/com/yunian/ai/network/CustomApiProtocolDispatchTest.kt`
 
 - [ ] **Step 1: Add failing tests for custom protocol helpers**
 
-Create `core/network/src/test/java/com/lianyu/ai/network/CustomApiProtocolDispatchTest.kt`:
+Create `core/network/src/test/java/com/yunian/ai/network/CustomApiProtocolDispatchTest.kt`:
 
 ```kotlin
-package com.lianyu.ai.network
+package com.yunian.ai.network
 
-import com.lianyu.ai.database.model.ApiConfig
-import com.lianyu.ai.database.model.ApiProvider
+import com.yunian.ai.database.model.ApiConfig
+import com.yunian.ai.database.model.ApiProvider
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -179,7 +179,7 @@ class CustomApiProtocolDispatchTest {
 Run:
 
 ```bash
-./gradlew :core:network:testDebugUnitTest --tests "com.lianyu.ai.network.CustomApiProtocolDispatchTest"
+./gradlew :core:network:testDebugUnitTest --tests "com.yunian.ai.network.CustomApiProtocolDispatchTest"
 ```
 
 Expected: FAIL because `AiService.usesAnthropicProtocol` and `AiService.supportsOpenAiModelList` do not exist.
@@ -204,7 +204,7 @@ fun supportsOpenAiModelList(config: ApiConfig): Boolean {
 Run:
 
 ```bash
-./gradlew :core:network:testDebugUnitTest --tests "com.lianyu.ai.network.CustomApiProtocolDispatchTest"
+./gradlew :core:network:testDebugUnitTest --tests "com.yunian.ai.network.CustomApiProtocolDispatchTest"
 ```
 
 Expected: PASS.
@@ -212,7 +212,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit helper tests and implementation**
 
 ```bash
-git add core/network/src/main/java/com/lianyu/ai/network/AiService.kt core/network/src/test/java/com/lianyu/ai/network/CustomApiProtocolDispatchTest.kt
+git add core/network/src/main/java/com/yunian/ai/network/AiService.kt core/network/src/test/java/com/yunian/ai/network/CustomApiProtocolDispatchTest.kt
 git commit -m "fix(network): add custom api protocol decision helpers"
 ```
 
@@ -221,8 +221,8 @@ git commit -m "fix(network): add custom api protocol decision helpers"
 ### Task 3: Route Custom Anthropic Configs Through Anthropic Calls
 
 **Files:**
-- Modify: `core/network/src/main/java/com/lianyu/ai/network/AiService.kt`
-- Modify: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt`
+- Modify: `core/network/src/main/java/com/yunian/ai/network/AiService.kt`
+- Modify: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt`
 
 - [ ] **Step 1: Update `SettingsViewModel.testConnection()` dispatch**
 
@@ -280,7 +280,7 @@ val rawResponse = if (usesAnthropicProtocol(config)) {
 Run:
 
 ```bash
-rg "ApiProvider\.CUSTOM|usesAnthropicProtocol|callOpenAiCompatible" core/network/src/main/java/com/lianyu/ai/network/AiService.kt feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt -n
+rg "ApiProvider\.CUSTOM|usesAnthropicProtocol|callOpenAiCompatible" core/network/src/main/java/com/yunian/ai/network/AiService.kt feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt -n
 ```
 
 Expected: any remaining `ApiProvider.CUSTOM` dispatch should either be in provider lists that are not protocol-sensitive or be guarded by `usesAnthropicProtocol(config)`.
@@ -298,7 +298,7 @@ Expected: `BUILD SUCCESSFUL`.
 - [ ] **Step 7: Commit protocol routing**
 
 ```bash
-git add core/network/src/main/java/com/lianyu/ai/network/AiService.kt feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt
+git add core/network/src/main/java/com/yunian/ai/network/AiService.kt feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt
 git commit -m "fix(api): route custom anthropic configs correctly"
 ```
 
@@ -307,7 +307,7 @@ git commit -m "fix(api): route custom anthropic configs correctly"
 ### Task 4: Make Model Fetch Protocol-Aware in ViewModel
 
 **Files:**
-- Modify: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt`
+- Modify: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt`
 
 - [ ] **Step 1: Add early protocol guard to `fetchModels()`**
 
@@ -373,7 +373,7 @@ Expected: `BUILD SUCCESSFUL`.
 - [ ] **Step 5: Commit model fetch guard**
 
 ```bash
-git add feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt
+git add feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/viewmodel/SettingsViewModel.kt
 git commit -m "fix(settings): make model fetch protocol aware"
 ```
 
@@ -382,7 +382,7 @@ git commit -m "fix(settings): make model fetch protocol aware"
 ### Task 5: Fix Main Settings Dialog Model Fetch UI
 
 **Files:**
-- Modify: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/SettingsScreen.kt:778-1017`
+- Modify: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/SettingsScreen.kt:778-1017`
 
 - [ ] **Step 1: Add protocol state variables in `ApiConfigEditDialog()`**
 
@@ -557,7 +557,7 @@ Expected: `BUILD SUCCESSFUL`.
 - [ ] **Step 6: Commit main dialog UI fix**
 
 ```bash
-git add feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/SettingsScreen.kt
+git add feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/SettingsScreen.kt
 git commit -m "fix(settings): show custom api model fetch action"
 ```
 
@@ -566,7 +566,7 @@ git commit -m "fix(settings): show custom api model fetch action"
 ### Task 6: Fix Petal API Card Dialog Model Fetch UI
 
 **Files:**
-- Modify: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/PetalApiCards.kt:167-438`
+- Modify: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/PetalApiCards.kt:167-438`
 
 - [ ] **Step 1: Add protocol state variables**
 
@@ -618,7 +618,7 @@ Expected: `BUILD SUCCESSFUL`.
 - [ ] **Step 6: Commit Petal dialog UI fix**
 
 ```bash
-git add feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/PetalApiCards.kt
+git add feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/PetalApiCards.kt
 git commit -m "fix(settings): update petal custom api model fetch ui"
 ```
 
@@ -634,7 +634,7 @@ git commit -m "fix(settings): update petal custom api model fetch ui"
 Run:
 
 ```bash
-./gradlew :core:network:testDebugUnitTest --tests "com.lianyu.ai.network.CustomApiProtocolDispatchTest" --tests "com.lianyu.ai.network.RequestSecurityInterceptorTest"
+./gradlew :core:network:testDebugUnitTest --tests "com.yunian.ai.network.CustomApiProtocolDispatchTest" --tests "com.yunian.ai.network.RequestSecurityInterceptorTest"
 ```
 
 Expected: `BUILD SUCCESSFUL`.

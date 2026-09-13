@@ -1,7 +1,7 @@
 # 恋语 GDPR / 等保三级 合规自评
 
 > 评估日期：2026-06-13
-> 评估范围：恋语 Android 客户端 (com.lianyu.ai)
+> 评估范围：恋语 Android 客户端 (com.yunian.ai)
 
 ---
 

@@ -42,7 +42,7 @@
 | 路径 | 说明 |
 |------|------|
 | `app/.../wechat/WeChatDialoguePortImpl.kt` | 安全过滤 / 落库 / AI / 记忆；返回 `WeChatDialogueResult` |
-| `LianYuApplication` | `ServiceRegistry.registerSingleton(WeChatDialoguePort)` |
+| `YuNianApplication` | `ServiceRegistry.registerSingleton(WeChatDialoguePort)` |
 | `WeChatChatBridge` | 仅映射 / CDN / Outbox / 表情；经 DialoguePort 生成回复 |
 | `WeChatDialogueResult.assistantMessageId` | 可选助手消息 id，供 Outbox source / 内容回写 |
 
@@ -313,7 +313,7 @@ sequenceDiagram
 
 ### 3.4 domain 端口（S0 已落文件）
 
-实现位置：`core/domain/src/main/java/com/lianyu/ai/domain/wechat/`
+实现位置：`core/domain/src/main/java/com/yunian/ai/domain/wechat/`
 
 | 文件 | 内容 |
 |------|------|
@@ -325,7 +325,7 @@ sequenceDiagram
 
 映射实现：`core/wechat/.../map/*`（Wire / Legacy M0 字段桥 / SIMPLE 分段）。
 
-绑定位置（**S3 已完成**）：`LianYuApplication` / `ServiceRegistry` → `WeChatDialoguePortImpl`；Bridge 经 `ServiceRegistry.get(WeChatDialoguePort)` 调用。
+绑定位置（**S3 已完成**）：`YuNianApplication` / `ServiceRegistry` → `WeChatDialoguePortImpl`；Bridge 经 `ServiceRegistry.get(WeChatDialoguePort)` 调用。
 
 ### 3.5 持久化草案
 

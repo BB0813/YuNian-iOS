@@ -14,19 +14,19 @@ import struct, hashlib, zlib, sys, os
 # ═══════════════════════════════════════
 
 SHELL_CLASSES = [
-    {"name": "Lcom/lianyu/ai/security/StaticApkShell;", "super": "Landroid/app/Application;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/StaticApkShell;", "super": "Landroid/app/Application;", "access": 0x0001,
      "methods": [
          ("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00]),
          ("attachBaseContext", "V", "LLandroid/content/Context;", 0x0004, [0x70,0x10,0x02,0x00,0x00,0x00, 0x0E,0x00]),
          ("onCreate", "V", "L", 0x0001, [0x0E,0x00]),
      ]},
-    {"name": "Lcom/lianyu/ai/security/LianYuShellApplication;", "super": "Landroid/app/Application;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/YuNianShellApplication;", "super": "Landroid/app/Application;", "access": 0x0001,
      "methods": [
          ("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00]),
          ("attachBaseContext", "V", "LLandroid/content/Context;", 0x0004, [0x70,0x10,0x02,0x00,0x00,0x00, 0x0E,0x00]),
          ("onCreate", "V", "L", 0x0001, [0x0E,0x00]),
      ]},
-    {"name": "Lcom/lianyu/ai/security/NativeBridge;", "super": "Ljava/lang/Object;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/NativeBridge;", "super": "Ljava/lang/Object;", "access": 0x0001,
      "methods": [
          ("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00]),
          ("nativeShellInitWithBlob", "V", "[BL", 0x0109, None),  # native
@@ -35,27 +35,27 @@ SHELL_CLASSES = [
          ("nativeAntiHookInit", "V", "L", 0x0109, None),
          ("nativeRecoverClassMethods", "V", "[BL", 0x0109, None),
      ]},
-    {"name": "Lcom/lianyu/ai/security/MethodRecoveryEngine;", "super": "Ljava/lang/Object;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/MethodRecoveryEngine;", "super": "Ljava/lang/Object;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},
-    {"name": "Lcom/lianyu/ai/security/VmpDex2cDispatcher;", "super": "Ljava/lang/Object;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/VmpDex2cDispatcher;", "super": "Ljava/lang/Object;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},
-    {"name": "Lcom/lianyu/ai/security/G0;", "super": "Landroid/app/Activity;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/G0;", "super": "Landroid/app/Activity;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},
-    {"name": "Lcom/lianyu/ai/security/SActivity;", "super": "Landroid/app/Activity;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/SActivity;", "super": "Landroid/app/Activity;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},
-    {"name": "Lcom/lianyu/ai/security/SReceiver;", "super": "Landroid/content/BroadcastReceiver;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/SReceiver;", "super": "Landroid/content/BroadcastReceiver;", "access": 0x0001,
      "methods": [
          ("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00]),
          ("onReceive", "V", "LLandroid/content/Context;Landroid/content/Intent;", 0x0001, [0x0E,0x00]),
      ]},
-    {"name": "Lcom/lianyu/ai/security/SService;", "super": "Landroid/app/Service;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/SService;", "super": "Landroid/app/Service;", "access": 0x0001,
      "methods": [
          ("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00]),
          ("onBind", "Landroid/os/IBinder;", "LLandroid/content/Intent;", 0x0001, [0x11,0x00]),
      ]},
-    {"name": "Lcom/lianyu/ai/security/OnePieceShellGate;", "super": "Ljava/lang/Object;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/security/OnePieceShellGate;", "super": "Ljava/lang/Object;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},
-    {"name": "Lcom/lianyu/ai/MainActivity;", "super": "Landroid/app/Activity;", "access": 0x0001,
+    {"name": "Lcom/yunian/ai/MainActivity;", "super": "Landroid/app/Activity;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},
     {"name": "Landroidx/core/content/FileProvider;", "super": "Landroid/content/ContentProvider;", "access": 0x0001,
      "methods": [("<init>", "V", "L", 0x10001, [0x70,0x10,0x01,0x00,0x00,0x00, 0x0E,0x00])]},

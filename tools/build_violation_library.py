@@ -59,7 +59,7 @@ PUBLIC_WORDS = {
 }
 
 # ── Step 1: 合并 ContentFilter 关键词 ──
-FILTER_KT = PROJECT / "core/common/src/main/java/com/lianyu/ai/common/ContentFilter.kt"
+FILTER_KT = PROJECT / "core/common/src/main/java/com/yunian/ai/common/ContentFilter.kt"
 content = FILTER_KT.read_text(encoding="utf-8")
 buf, cur, raw_sections = [], None, {}
 for line in content.split("\n"):

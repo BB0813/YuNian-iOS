@@ -1,5 +1,5 @@
 # ================================================================
-# LianYu Release Build Script (PowerShell) — 完整加固构建流程
+# YuNian Release Build Script (PowerShell) — 完整加固构建流程
 # ================================================================
 # 这个脚本执行完整的 release 构建，包括：
 #   1. 生成白盒AES表（使用真正的随机密钥）
@@ -27,7 +27,7 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 Set-Location $ProjectDir
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "LianYu Release Build — Hardened" -ForegroundColor Cyan
+Write-Host "YuNian Release Build — Hardened" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 # Step 1: Generate White-Box AES tables

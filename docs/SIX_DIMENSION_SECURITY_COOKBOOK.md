@@ -1,4 +1,4 @@
-# LianYu 六维安全架构 — DEX2C·VMP·虚拟化深度技术白皮书
+# YuNian 六维安全架构 — DEX2C·VMP·虚拟化深度技术白皮书
 
 > **性质：** 本文档阐述恋语安全架构的底层技术原理——DEX2C 字节码转译、VMP 虚拟化引擎、零信任桥接层——以及它们如何协同实现「静态分析不可破，动态调试检测链路完整，root 防御机制有效」。
 > **目标读者：** 安全研究员、逆向工程师、加固方案设计者。
@@ -257,15 +257,15 @@ def _generate_control_flow(self, instructions):
 
 ```
 # tools/dex2c_whitelist.txt — DEX2C 转译白名单
-com.lianyu.ai.security.NativeBridge.nativeShellInit
-com.lianyu.ai.security.NativeBridge.nativeDecryptPayload
-com.lianyu.ai.security.KmsProvider.deriveKeyMaterial
-com.lianyu.ai.security.SecurityGuard.verifySignature
-com.lianyu.ai.security.CompositeVmpRuntime.execute
-com.lianyu.ai.security.DexFragmentLoader.loadShellFragment
-com.lianyu.ai.security.DynamicClassLoader.findClass
-com.lianyu.ai.security.MethodRecoveryEngine.recoverMethod
-com.lianyu.ai.security.VmpDex2cDispatcher.dispatch
+com.yunian.ai.security.NativeBridge.nativeShellInit
+com.yunian.ai.security.NativeBridge.nativeDecryptPayload
+com.yunian.ai.security.KmsProvider.deriveKeyMaterial
+com.yunian.ai.security.SecurityGuard.verifySignature
+com.yunian.ai.security.CompositeVmpRuntime.execute
+com.yunian.ai.security.DexFragmentLoader.loadShellFragment
+com.yunian.ai.security.DynamicClassLoader.findClass
+com.yunian.ai.security.MethodRecoveryEngine.recoverMethod
+com.yunian.ai.security.VmpDex2cDispatcher.dispatch
 ```
 
 **白名单选择原则：**
@@ -286,7 +286,7 @@ com.lianyu.ai.security.VmpDex2cDispatcher.dispatch
 
 // 转译后 (C++):
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_security_NativeBridge_nativeDecryptPayload(
+Java_com_yunian_ai_security_NativeBridge_nativeDecryptPayload(
     JNIEnv* env, jobject thiz, jbyteArray encrypted, jbyteArray key) {
     // ... 转译后的方法体
 }
@@ -332,7 +332,7 @@ DEX2C 转译后的 C++ 代码：
 
 ```cpp
 extern "C" JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_NativeBridge_nativeDecryptPayload(
+Java_com_yunian_ai_security_NativeBridge_nativeDecryptPayload(
     JNIEnv* env, jobject thiz, jbyteArray encrypted, jint length, jbyteArray key) {
 
     jbyte* enc = env->GetByteArrayElements(encrypted, nullptr);
@@ -1006,7 +1006,7 @@ static int xstrstr(const char* h, const uint8_t* ob, size_t ob_len, uint8_t key)
 
 ### 5.2.2 符号表剥离
 
-- `version-script-shell.map` 限制动态符号导出：仅 `JNI_OnLoad` 和 `Java_com_lianyu_ai_security_*`
+- `version-script-shell.map` 限制动态符号导出：仅 `JNI_OnLoad` 和 `Java_com_yunian_ai_security_*`
 - 编译选项 `-fvisibility=hidden` 隐藏所有内部符号
 - `strip --strip-all` 移除所有调试符号
 
@@ -1274,7 +1274,7 @@ nm -D liblianyu_security.so | grep Java_
 
 ### TEST-S-03: jadx 类名搜索
 ```
-用 jadx 打开 APK，搜索 'com.lianyu.ai.security'
+用 jadx 打开 APK，搜索 'com.yunian.ai.security'
 期望：零结果（13 个安全类名全部混淆）
 ```
 
@@ -1398,4 +1398,4 @@ adb logcat -d | grep -iE 'security|detect|check|score|frida'
 
 > **版本：** 3.0.0 — 深度技术白皮书
 > **最后更新：** 2025-01
-> **维护者：** LianYu Security Team
+> **维护者：** YuNian Security Team

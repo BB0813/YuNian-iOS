@@ -65,7 +65,7 @@
 
     <string name="about_title">アプリについて</string>
     <string name="app_brand">恋語</string>
-    <string name="app_slogan">LianYu - あなたのAIバーチャル恋人</string>
+    <string name="app_slogan">YuNian - あなたのAIバーチャル恋人</string>
     <string name="version">バージョン 1.8</string>
     <string name="about_desc_title">恋語について</string>
     <string name="about_desc">恋語は先進的な大規模言語モデル技術に基づくAIバーチャル恋人チャットアプリです。</string>
@@ -112,7 +112,7 @@
     <string name="originos_adaption_exact_alarm">正確なアラーム権限</string>
     <string name="originos_adaption_exact_alarm_desc">フォアグラウンドサービスのタイムアウト後の再起動フォールバックに必要</string>
     <string name="originos_adaption_guide_title">設定パス参考</string>
-    <string name="originos_adaption_guide_footer">ヒント: OriginOS のバージョンによって項目の場所が異なる場合があります。タップしても反応しない場合は、設定 → アプリ → LianYu から手動で確認してください。</string>
+    <string name="originos_adaption_guide_footer">ヒント: OriginOS のバージョンによって項目の場所が異なる場合があります。タップしても反応しない場合は、設定 → アプリ → YuNian から手動で確認してください。</string>
 
     <!-- ロール選択と管理 -->
     <string name="role_selection_title">AI パートナーを選ぶ</string>

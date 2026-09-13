@@ -17,7 +17,7 @@ Usage:
     python3 tools/setup_wb_key.py --generate
 
     # 使用已有密钥（从环境变量读取）
-    LIANYU_WB_KEY=hex:abcd... python3 tools/setup_wb_key.py
+    YUNIAN_WB_KEY=hex:abcd... python3 tools/setup_wb_key.py
 
     # 使用本地密钥文件
     python3 tools/setup_wb_key.py --keyfile ~/.lianyu_wb_key
@@ -41,9 +41,9 @@ def generate_random_key() -> bytes:
 def save_key_to_env_file(key: bytes, filepath: str):
     """保存密钥到本地环境文件（不提交到 git）。"""
     with open(filepath, 'w') as f:
-        f.write(f"# LianYu White-Box AES Master Key\n")
+        f.write(f"# YuNian White-Box AES Master Key\n")
         f.write(f"# NEVER commit this file to version control!\n")
-        f.write(f"LIANYU_WB_KEY=hex:{key.hex()}\n")
+        f.write(f"YUNIAN_WB_KEY=hex:{key.hex()}\n")
     os.chmod(filepath, 0o600)
     print(f"[+] Key saved to {filepath}")
     print(f"[!] IMPORTANT: Add {filepath} to .gitignore!")
@@ -89,7 +89,7 @@ def main():
     key = None
 
     # 1. 尝试从环境变量读取密钥
-    env_key = os.environ.get('LIANYU_WB_KEY')
+    env_key = os.environ.get('YUNIAN_WB_KEY')
     if env_key:
         if env_key.startswith('hex:'):
             key = bytes.fromhex(env_key[4:])
@@ -101,7 +101,7 @@ def main():
     elif os.path.exists(args.keyfile):
         with open(args.keyfile, 'r') as f:
             for line in f:
-                if line.startswith('LIANYU_WB_KEY=hex:'):
+                if line.startswith('YUNIAN_WB_KEY=hex:'):
                     key = bytes.fromhex(line.strip().split('hex:')[1])
                     print(f"[*] Key loaded from {args.keyfile}")
                     break
@@ -114,7 +114,7 @@ def main():
     else:
         print("ERROR: No key found.")
         print("Options:")
-        print("  1. Set LIANYU_WB_KEY environment variable")
+        print("  1. Set YUNIAN_WB_KEY environment variable")
         print("  2. Create a key file with --keyfile")
         print("  3. Generate a new key with --generate")
         sys.exit(1)

@@ -219,7 +219,7 @@ def main():
     print(f"\n📋 Next steps:")
     print(f"   1. Rebuild native library (./gradlew assembleRelease)")
     print(f"   2. The encrypted DEX ({size} bytes) is now in liblianyu_security.so")
-    print(f"   3. At runtime, LianYuShellApplication calls NativeBridge.nativeLoadPayload()")
+    print(f"   3. At runtime, YuNianShellApplication calls NativeBridge.nativeLoadPayload()")
     print(f"   4. dex_packer_decrypt() → SM4 decrypt → CRC32 verify → InMemoryDexClassLoader")
 
 

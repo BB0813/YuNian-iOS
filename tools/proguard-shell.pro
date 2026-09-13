@@ -5,35 +5,35 @@
 # ═══════════════════════════════════════════
 # 1. Shell entry points (Application + Activities)
 # ═══════════════════════════════════════════
--keep public class com.lianyu.ai.security.StaticApkShell {
+-keep public class com.yunian.ai.security.StaticApkShell {
     public protected *;
     native <methods>;
 }
--keep public class com.lianyu.ai.security.StaticApkShell$*
--keep public class com.lianyu.ai.security.NativeBridge {
+-keep public class com.yunian.ai.security.StaticApkShell$*
+-keep public class com.yunian.ai.security.NativeBridge {
     public protected *;
     native <methods>;
 }
--keep public class com.lianyu.ai.security.G0 {
+-keep public class com.yunian.ai.security.G0 {
     public protected *;
 }
--keep public class com.lianyu.ai.security.MethodRecoveryEngine {
+-keep public class com.yunian.ai.security.MethodRecoveryEngine {
     public protected *;
     native <methods>;
 }
--keep public class com.lianyu.ai.security.SActivity { *; }
--keep public class com.lianyu.ai.security.SService { *; }
--keep public class com.lianyu.ai.security.SReceiver { *; }
+-keep public class com.yunian.ai.security.SActivity { *; }
+-keep public class com.yunian.ai.security.SService { *; }
+-keep public class com.yunian.ai.security.SReceiver { *; }
 
 # Manifest components
--keep public class com.lianyu.ai.MainActivity { *; }
--keep public class com.lianyu.ai.feature.notification.BootReceiver { *; }
--keep public class com.lianyu.ai.feature.notification.CompanionKeepAliveService { *; }
--keep public class com.lianyu.ai.feature.qqbot.service.QQBotForegroundService { *; }
--keep public class com.lianyu.ai.push.receiver.VivoPushReceiver { *; }
--keep public class com.lianyu.ai.push.service.HuaweiPushService { *; }
--keep public class com.lianyu.ai.push.service.OppoPushService { *; }
--keep public class com.lianyu.ai.push.service.OppoPushServiceLegacy { *; }
+-keep public class com.yunian.ai.MainActivity { *; }
+-keep public class com.yunian.ai.feature.notification.BootReceiver { *; }
+-keep public class com.yunian.ai.feature.notification.CompanionKeepAliveService { *; }
+-keep public class com.yunian.ai.feature.qqbot.service.QQBotForegroundService { *; }
+-keep public class com.yunian.ai.push.receiver.VivoPushReceiver { *; }
+-keep public class com.yunian.ai.push.service.HuaweiPushService { *; }
+-keep public class com.yunian.ai.push.service.OppoPushService { *; }
+-keep public class com.yunian.ai.push.service.OppoPushServiceLegacy { *; }
 
 # ═══════════════════════════════════════════
 # 2. Kotlin runtime — CRITICAL for shell to work

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ================================================================
-# LianYu Release Build Script — 完整加固构建流程
+# YuNian Release Build Script — 完整加固构建流程
 # ================================================================
 # Steps:
 #   1. 生成白盒AES表
@@ -25,7 +25,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 echo "========================================"
-echo "LianYu Release Build — One-Piece Shell"
+echo "YuNian Release Build — One-Piece Shell"
 echo "========================================"
 
 # Parse arguments
@@ -92,9 +92,9 @@ echo "[Step 5/9] Rebuilding with integrity hashes..."
 # ── Step 6: Package encrypted shell payload ──
 echo ""
 echo "[Step 6/9] Packaging encrypted shell payload..."
-if [ -z "$LIANYU_PAYLOAD_KEY" ]; then
-    echo "[!] LIANYU_PAYLOAD_KEY not set — generating ephemeral dev key"
-    export LIANYU_PAYLOAD_KEY=$(openssl rand -base64 32)
+if [ -z "$YUNIAN_PAYLOAD_KEY" ]; then
+    echo "[!] YUNIAN_PAYLOAD_KEY not set — generating ephemeral dev key"
+    export YUNIAN_PAYLOAD_KEY=$(openssl rand -base64 32)
 fi
 python3 tools/package_shell_payload.py "$APK_PATH" \
     --output app/src/main/assets --dev
@@ -112,9 +112,9 @@ python3 tools/strip_metadata.py "$STRIPPED_APK"
 python3 tools/split_dex.py \
     --apk "$STRIPPED_APK" --splits 4 \
     --keystore "${KEYSTORE:-../release.keystore}" \
-    --storepass "${LIANYU_STORE_PASSWORD:-3498762309}" \
-    --keyalias "${LIANYU_KEY_ALIAS:-your_alias}" \
-    --keypass "${LIANYU_KEY_PASSWORD:-3498762309}"
+    --storepass "${YUNIAN_STORE_PASSWORD:-3498762309}" \
+    --keyalias "${YUNIAN_KEY_ALIAS:-your_alias}" \
+    --keypass "${YUNIAN_KEY_PASSWORD:-3498762309}"
 
 # ── Step 9: Re-sign final APK ──
 echo ""
@@ -123,9 +123,9 @@ cp "$STRIPPED_APK" "$APK_PATH"
 if command -v apksigner &> /dev/null && [ -f "../release.keystore" ]; then
     apksigner sign \
         --ks ../release.keystore \
-        --ks-pass pass:"${LIANYU_STORE_PASSWORD:-3498762309}" \
-        --ks-key-alias "${LIANYU_KEY_ALIAS:-your_alias}" \
-        --key-pass pass:"${LIANYU_KEY_PASSWORD:-3498762309}" \
+        --ks-pass pass:"${YUNIAN_STORE_PASSWORD:-3498762309}" \
+        --ks-key-alias "${YUNIAN_KEY_ALIAS:-your_alias}" \
+        --key-pass pass:"${YUNIAN_KEY_PASSWORD:-3498762309}" \
         --v1-signing-enabled false \
         --v2-signing-enabled true \
         --v3-signing-enabled true \

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.companion"
+    namespace = "com.yunian.ai.feature.companion"
     compileSdk = 35
 
     defaultConfig {
@@ -39,6 +39,5 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
 }

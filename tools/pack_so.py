@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LianYu SO Packer — ELF .text Encryption with Decrypt Stub Injection
+YuNian SO Packer — ELF .text Encryption with Decrypt Stub Injection
 
 Reads a compiled .so file, encrypts the .text section, and injects a
 position-independent ARM64/ARM32 decrypt stub that runs before JNI_OnLoad.
@@ -10,7 +10,7 @@ Usage:
     python3 tools/pack_so.py --input liblianyu_security.so --output liblianyu_security.packed.so
 
     # Pack with explicit key
-    LIANYU_SO_KEY=hex:00112233445566778899aabbccddeeff python3 tools/pack_so.py -i in.so -o out.so
+    YUNIAN_SO_KEY=hex:00112233445566778899aabbccddeeff python3 tools/pack_so.py -i in.so -o out.so
 
     # Pack all ABIs from APK
     python3 tools/pack_so.py --apk app-release.apk --output-apk app-release-packed.apk
@@ -79,8 +79,8 @@ def generate_random_key() -> bytes:
 
 
 def derive_key_from_env() -> Optional[bytes]:
-    """Read encryption key from LIANYU_SO_KEY environment variable."""
-    env_key = os.environ.get('LIANYU_SO_KEY')
+    """Read encryption key from YUNIAN_SO_KEY environment variable."""
+    env_key = os.environ.get('YUNIAN_SO_KEY')
     if not env_key:
         return None
     if env_key.startswith('hex:'):
@@ -182,7 +182,7 @@ def compile_decrypt_stub_asm(project_root: str, is_64bit: bool) -> bytes:
     if not ndk_path or not os.path.isdir(ndk_path):
         raise RuntimeError(
             "Android NDK not found. Set ANDROID_NDK_HOME or install NDK.\n"
-            "Fallback: set LIANYU_NDK_AS to point to the assembler directly."
+            "Fallback: set YUNIAN_NDK_AS to point to the assembler directly."
         )
 
     # Find the assembler
@@ -203,7 +203,7 @@ def compile_decrypt_stub_asm(project_root: str, is_64bit: bool) -> bytes:
 
     # Fallback: check env
     if not as_path:
-        as_path = os.environ.get('LIANYU_NDK_AS')
+        as_path = os.environ.get('YUNIAN_NDK_AS')
     if not as_path:
         # Final fallback: use system assembler (may not work for cross-compile)
         as_path = 'as'
@@ -693,7 +693,7 @@ def pack_apk(input_apk: str, output_apk: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='LianYu SO Packer — Encrypt .text and inject decrypt stub')
+        description='YuNian SO Packer — Encrypt .text and inject decrypt stub')
     parser.add_argument('--input', '-i', help='Input .so file')
     parser.add_argument('--output', '-o', help='Output .so file')
     parser.add_argument('--apk', help='Input APK file (pack all SOs inside)')

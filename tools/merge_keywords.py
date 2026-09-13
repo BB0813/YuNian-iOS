@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 PROJECT = Path(r"C:\Users\27194\Desktop\LianYu-feature-ai-persona-tools-optimization")
-FILTER_KT = PROJECT / "core/common/src/main/java/com/lianyu/ai/common/ContentFilter.kt"
+FILTER_KT = PROJECT / "core/common/src/main/java/com/yunian/ai/common/ContentFilter.kt"
 WORDS_FILE = PROJECT / "tools/keywords_extended.txt"
 
 

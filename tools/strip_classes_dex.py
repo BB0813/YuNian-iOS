@@ -31,17 +31,17 @@ SMALI_URL = f"https://bitbucket.org/JesusFreke/smali/downloads/smali-{SMALI_VERS
 
 # Business packages to strip from classes.dex
 STRIP_PACKAGES = [
-    "com/lianyu/ai/database",
-    "com/lianyu/ai/feature",
-    "com/lianyu/ai/network",
-    "com/lianyu/ai/uicommon",
+    "com/yunian/ai/database",
+    "com/yunian/ai/feature",
+    "com/yunian/ai/network",
+    "com/yunian/ai/uicommon",
 ]
 
 # Individual classes to strip
 STRIP_CLASSES = [
-    "Lcom/lianyu/ai/LianYuApplication;",
-    "Lcom/lianyu/ai/MainActivity;",
-    "Lcom/lianyu/ai/internal/DexPadding;",
+    "Lcom/yunian/ai/YuNianApplication;",
+    "Lcom/yunian/ai/MainActivity;",
+    "Lcom/yunian/ai/internal/DexPadding;",
 ]
 
 # R classes are KEPT — resource IDs only, no business logic
@@ -133,7 +133,7 @@ def main() -> None:
     output = args.output or args.apk.parent / f"{args.apk.stem}_stripped.apk"
 
     print("=" * 60)
-    print("LianYu DEX Stripper — One-Piece Shell")
+    print("YuNian DEX Stripper — One-Piece Shell")
     print("=" * 60)
 
     baksmali_jar, smali_jar = ensure_jars(args.cache_dir)

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.common"
+    namespace = "com.yunian.ai.common"
     compileSdk = 35
 
     defaultConfig {
@@ -30,4 +30,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
 }

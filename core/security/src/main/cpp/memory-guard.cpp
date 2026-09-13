@@ -1,5 +1,5 @@
 /*
- * memory-guard.cpp — LianYu Memory Protection Layer Implementation
+ * memory-guard.cpp — YuNian Memory Protection Layer Implementation
  */
 
 #include "memory-guard.h"
@@ -17,11 +17,11 @@
 #include "obfuscate.h"
 #include "obfuscated_strings.h"
 
-#define MG_LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, "LianYu-MG", __VA_ARGS__)
+#define MG_LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, "YuNian-MG", __VA_ARGS__)
 #ifdef PRODUCTION_BUILD
 #define MG_LOGE(...) ((void)0)
 #else
-#define MG_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "LianYu-MG", __VA_ARGS__)
+#define MG_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "YuNian-MG", __VA_ARGS__)
 #endif
 
 #pragma GCC visibility push(hidden)

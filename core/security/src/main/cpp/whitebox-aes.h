@@ -1,5 +1,5 @@
-#ifndef LIANYU_WHITEBOX_AES_H
-#define LIANYU_WHITEBOX_AES_H
+#ifndef YUNIAN_WHITEBOX_AES_H
+#define YUNIAN_WHITEBOX_AES_H
 
 #include <cstdint>
 #include <cstddef>
@@ -91,4 +91,4 @@ int wb_aes_is_obfuscated(void);
 }
 #endif
 
-#endif /* LIANYU_WHITEBOX_AES_H */
+#endif /* YUNIAN_WHITEBOX_AES_H */

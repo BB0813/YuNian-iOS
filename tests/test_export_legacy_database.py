@@ -104,7 +104,7 @@ class LegacyDatabaseExportTest(unittest.TestCase):
 
     def test_exports_master_v9_database_to_json_with_redacted_api_keys_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "lianyu_database"
+            db_path = Path(tmp) / "yunian_database"
             out_path = Path(tmp) / "export.json"
             self.create_master_v9_database(db_path)
 
@@ -120,7 +120,7 @@ class LegacyDatabaseExportTest(unittest.TestCase):
 
     def test_can_export_api_keys_when_explicitly_allowed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "lianyu_database"
+            db_path = Path(tmp) / "yunian_database"
             out_path = Path(tmp) / "export.json"
             self.create_master_v9_database(db_path)
 

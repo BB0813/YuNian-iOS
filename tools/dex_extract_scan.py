@@ -51,7 +51,7 @@ def encrypt(data):
 
 def main():
     apk = sys.argv[1] if len(sys.argv) > 1 else "app/build/outputs/apk/release/app-release.apk"
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else "app/src/main/assets/lianyu_shell"
+    out_dir = sys.argv[2] if len(sys.argv) > 2 else "app/src/main/assets/yunian_shell"
     os.makedirs(out_dir, exist_ok=True)
     
     with zipfile.ZipFile(apk, 'r') as zf:

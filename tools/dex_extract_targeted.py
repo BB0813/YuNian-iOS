@@ -11,14 +11,14 @@ import struct, sys, os, zipfile, re
 KEY = bytes([0x4C,0x69,0x61,0x6E,0x59,0x75,0x53,0x68,0x65,0x6C,0x6C,0x4B,0x65,0x79,0x32,0x35])
 # Match by class short name (inside DEX descriptor or string table)
 TARGETS = [
-    b'Lcom/lianyu/ai/security/NativeBridge;',
-    b'Lcom/lianyu/ai/security/KmsProvider;',
-    b'Lcom/lianyu/ai/security/SecurityGuard;',
-    b'Lcom/lianyu/ai/security/CompositeVmpRuntime;',
-    b'Lcom/lianyu/ai/security/DexFragmentLoader;',
-    b'Lcom/lianyu/ai/security/DynamicClassLoader;',
-    b'Lcom/lianyu/ai/security/MethodRecoveryEngine;',
-    b'Lcom/lianyu/ai/security/VmpDex2cDispatcher;',
+    b'Lcom/yunian/ai/security/NativeBridge;',
+    b'Lcom/yunian/ai/security/KmsProvider;',
+    b'Lcom/yunian/ai/security/SecurityGuard;',
+    b'Lcom/yunian/ai/security/CompositeVmpRuntime;',
+    b'Lcom/yunian/ai/security/DexFragmentLoader;',
+    b'Lcom/yunian/ai/security/DynamicClassLoader;',
+    b'Lcom/yunian/ai/security/MethodRecoveryEngine;',
+    b'Lcom/yunian/ai/security/VmpDex2cDispatcher;',
 ]
 TARGETS_SHORT = [b'NativeBridge', b'KmsProvider', b'SecurityGuard',
                  b'CompositeVmpRuntime', b'DexFragmentLoader', b'DynamicClassLoader',
@@ -51,7 +51,7 @@ def find_class_offsets(dex, targets):
 
 def main():
     apk = sys.argv[1] if len(sys.argv) > 1 else "app/build/outputs/apk/release/app-release.apk"
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else "app/src/main/assets/lianyu_shell"
+    out_dir = sys.argv[2] if len(sys.argv) > 2 else "app/src/main/assets/yunian_shell"
     os.makedirs(out_dir, exist_ok=True)
 
     with zipfile.ZipFile(apk, 'r') as zf:

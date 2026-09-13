@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Strip ALL non-shell classes from a DEX file, keeping only:
-  - com/lianyu/ai/security/**  (shell/security bootstrap)
+  - com/yunian/ai/security/**  (shell/security bootstrap)
   - Android/Kotlin framework classes needed by the shell
   - R$ and BuildConfig classes (resources)
 
@@ -18,39 +18,39 @@ BAKSMALI = Path.home() / ".cache" / "lianyu_tools" / "baksmali-2.5.2.jar"
 SMALI = Path.home() / ".cache" / "lianyu_tools" / "smali-2.5.2.jar"
 
 # Business packages to STRIP (everything else is kept).
-# All non-com.lianyu.ai classes (AndroidX, Kotlin, OkHttp, Room, Compose, etc.)
+# All non-com.yunian.ai classes (AndroidX, Kotlin, OkHttp, Room, Compose, etc.)
 # are implicitly kept — they're framework/library dependencies.
 BUSINESS_PACKAGES = [
-    "com/lianyu/ai/feature",
-    "com/lianyu/ai/network",
-    "com/lianyu/ai/database",
-    "com/lianyu/ai/uicommon",
-    "com/lianyu/ai/common",
-    "com/lianyu/ai/internal",
+    "com/yunian/ai/feature",
+    "com/yunian/ai/network",
+    "com/yunian/ai/database",
+    "com/yunian/ai/uicommon",
+    "com/yunian/ai/common",
+    "com/yunian/ai/internal",
 ]
 
-# Packages under com/lianyu/ai to ALWAYS KEEP (not stripped even if in BUSINESS_PACKAGES)
+# Packages under com/yunian/ai to ALWAYS KEEP (not stripped even if in BUSINESS_PACKAGES)
 KEEP_PACKAGES = [
-    "com/lianyu/ai/security",
+    "com/yunian/ai/security",
 ]
 
 # Individual classes to KEEP (full smali path without .smali)
 # These are the shell bootstrap classes that must survive stripping.
 SHELL_CLASSES = [
     # Application entry (manifest references this class by name)
-    "com/lianyu/ai/security/LianYuShellApplication",
+    "com/yunian/ai/security/YuNianShellApplication",
     # R classes (resource IDs needed by the shell)
-    "com/lianyu/ai/R",
+    "com/yunian/ai/R",
     # BuildConfig
-    "com/lianyu/ai/BuildConfig",
+    "com/yunian/ai/BuildConfig",
     # Shell-facing shim classes that reference business classes via ::class.java
     # These must survive stripping so ART can resolve them during verification
-    "com/lianyu/ai/MainActivity",
-    "com/lianyu/ai/feature/notification/CompanionKeepAliveService",
-    "com/lianyu/ai/feature/notification/BootReceiver",
-    "com/lianyu/ai/feature/wechat/service/WeChatBootReceiver",
-    "com/lianyu/ai/feature/wechat/service/WeChatPollingService",
-    "com/lianyu/ai/feature/wechat/service/WeChatProactiveMessageReceiver",
+    "com/yunian/ai/MainActivity",
+    "com/yunian/ai/feature/notification/CompanionKeepAliveService",
+    "com/yunian/ai/feature/notification/BootReceiver",
+    "com/yunian/ai/feature/wechat/service/WeChatBootReceiver",
+    "com/yunian/ai/feature/wechat/service/WeChatPollingService",
+    "com/yunian/ai/feature/wechat/service/WeChatProactiveMessageReceiver",
 ]
 
 
@@ -78,12 +78,12 @@ def main():
         shell_refs = set()  # set of smali paths the shell depends on
         
         # Find shell smali files (classes we definitely keep)
-        shell_dir = smali_dir / "com" / "lianyu" / "ai" / "security"
+        shell_dir = smali_dir / "com" / "yunian" / "ai" / "security"
         shell_files = list(shell_dir.rglob("*.smali")) if shell_dir.exists() else []
         # Also check the root app package for shell shims (SActivity, SReceiver, etc.)
-        app_root = smali_dir / "com" / "lianyu" / "ai"
+        app_root = smali_dir / "com" / "yunian" / "ai"
         for f in app_root.rglob("*.smali") if app_root.exists() else []:
-            if any(kw in str(f) for kw in ["LianYuShellApplication", "SActivity", "SService",
+            if any(kw in str(f) for kw in ["YuNianShellApplication", "SActivity", "SService",
                    "SReceiver", "SWechatBootReceiver", "SWechatPollingService",
                    "SWechatProactiveMessageReceiver", "OnePieceShellGate",
                    "CompositeVmpRuntime", "DexFragmentLoader"]):

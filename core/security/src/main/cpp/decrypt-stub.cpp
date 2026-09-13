@@ -157,7 +157,7 @@ raw_log_init() {
     if (g_log_fd >= 0) return;
     // O_WRONLY=1, O_CREAT=0100(64), O_TRUNC=01000(512) → flags=577
     // mode=0666(438)
-    g_log_fd = (int)raw_openat("/data/data/com.lianyu.ai/d2.log", 577, 438);
+    g_log_fd = (int)raw_openat("/data/data/com.yunian.ai/d2.log", 577, 438);
     if (g_log_fd < 0)
         g_log_fd = (int)raw_openat("/data/local/tmp/d2.log", 577, 438);
     if (g_log_fd < 0)

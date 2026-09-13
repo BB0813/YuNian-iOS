@@ -4,7 +4,7 @@
   </picture>
 </p>
 
-<h1 align="center">💕 恋语 · LianYu</h1>
+<h1 align="center">💕 恋语 · YuNian</h1>
 
 <p align="center">
   <i>你的 AI 虚拟女友 — 随时随地，懂你陪伴</i>
@@ -75,7 +75,7 @@ graph TB
     subgraph app["<b>📱 app · 应用入口</b>"]
         direction LR
         MainActivity["MainActivity"]
-        Application["LianYuApplication"]
+        Application["YuNianApplication"]
     end
 
     subgraph feature["<b>🎯 feature · 功能模块 × 8</b>"]
@@ -137,11 +137,11 @@ graph TB
 ## 📦 项目结构
 
 ```
-LianYu/
+YuNian/
 ├── app/                              # 📱 应用入口（聚合所有模块）
 │   ├── src/main/
 │   │   ├── java/…/MainActivity.kt     # 主 Activity + 底部导航
-│   │   ├── java/…/LianYuApplication.kt # Application 初始化
+│   │   ├── java/…/YuNianApplication.kt # Application 初始化
 │   │   └── AndroidManifest.xml
 │   └── build.gradle.kts
 │
@@ -208,7 +208,7 @@ LianYu/
 ```bash
 # 克隆
 git clone https://github.com/linruoxi666/LianYu.git
-cd LianYu
+cd YuNian
 
 # Debug 构建
 ./gradlew assembleDebug
@@ -299,5 +299,5 @@ cd LianYu
 ---
 
 <p align="center">
-  <sub>Made with ❤️ by LianYu Team</sub>
+  <sub>Made with ❤️ by YuNian Team</sub>
 </p>

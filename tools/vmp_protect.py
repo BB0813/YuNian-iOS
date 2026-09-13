@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LianYu VMP Protector — Generate VM Bytecode for Native Functions
+YuNian VMP Protector — Generate VM Bytecode for Native Functions
 
 Reads a compiled .so file, selects critical security functions, and:
 1. Disassembles each target function into VM bytecode
@@ -55,13 +55,13 @@ def _ensure_elftools():
 # Functions to virtualize: (symbol_name, friendly_name, bytecode_var_prefix)
 TARGET_FUNCTIONS = [
     # KMS crypto functions (kms-engine.cpp)
-    ("Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt",
+    ("Java_com_yunian_ai_security_KmsProvider_nativeEncrypt",
      "nativeEncrypt", "g_vmp_nativeEncrypt"),
-    ("Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt",
+    ("Java_com_yunian_ai_security_KmsProvider_nativeDecrypt",
      "nativeDecrypt", "g_vmp_nativeDecrypt"),
-    ("Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2",
+    ("Java_com_yunian_ai_security_KmsProvider_nativeEncryptV2",
      "nativeEncryptV2", "g_vmp_nativeEncryptV2"),
-    ("Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2",
+    ("Java_com_yunian_ai_security_KmsProvider_nativeDecryptV2",
      "nativeDecryptV2", "g_vmp_nativeDecryptV2"),
 
     # Signature verification (native-bridge.cpp)
@@ -71,7 +71,7 @@ TARGET_FUNCTIONS = [
     ("mg_ptrace_self_attach", "mg_ptrace_self_attach", "g_vmp_ptrace_attach"),
 
     # Dex2C stubs (generated/dex2c_methods.cpp)
-    ("Java_com_lianyu_ai_security_VmpDex2cDispatcher_nativeVerifySignature",
+    ("Java_com_yunian_ai_security_VmpDex2cDispatcher_nativeVerifySignature",
      "nativeVerifySignature", "g_vmp_verify_signature"),
 ]
 
@@ -277,7 +277,7 @@ def generate_vm_wrapper_c(func_name: str, symbol_name: str,
 
     The wrapper replaces the original function body via binary patching.
     """
-    friendly = func_name.replace('Java_com_lianyu_ai_security_', '')
+    friendly = func_name.replace('Java_com_yunian_ai_security_', '')
 
     return f'''// ── VMP Wrapper: {friendly} ──────────────────────────────────────
 // Original symbol: {symbol_name}
@@ -596,7 +596,7 @@ def vmp_protect_apk(apk_path: str, output_apk: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='LianYu VMP Protector — Bytecode generation for native functions')
+        description='YuNian VMP Protector — Bytecode generation for native functions')
     parser.add_argument('--so', help='Input .so file to protect')
     parser.add_argument('--apk', help='Input APK to protect (all SOs inside)')
     parser.add_argument('--output-apk', help='Output APK path')

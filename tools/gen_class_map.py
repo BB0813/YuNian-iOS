@@ -8,7 +8,7 @@ assigns each class to one of N fragments, encrypts each class individually
 
 Usage:
     python gen_class_map.py --apk app-release.apk --key <hex-key> \
-        --output assets/lianyu_shell/class_map.bin
+        --output assets/yunian_shell/class_map.bin
 
 Binary format of class_map.bin (before outer encryption):
     [classCount:4 (LE)]
@@ -228,10 +228,10 @@ def assign_fragment(class_name: str) -> int:
     """
     Assign a class to a fragment (0-3) based on its package.
 
-    Fragment 0: shell/bootstrap classes (com.lianyu.ai.security, com.lianyu.ai.shell)
-    Fragment 1: network + crypto (com.lianyu.ai.network, com.lianyu.ai.security.kms)
-    Fragment 2: UI/business (com.lianyu.ai.ui, com.lianyu.ai.feature.*, com.lianyu.ai.companion)
-    Fragment 3: AI dialog core (com.lianyu.ai.chat, com.lianyu.ai.ai, com.lianyu.ai.memory)
+    Fragment 0: shell/bootstrap classes (com.yunian.ai.security, com.yunian.ai.shell)
+    Fragment 1: network + crypto (com.yunian.ai.network, com.yunian.ai.security.kms)
+    Fragment 2: UI/business (com.yunian.ai.ui, com.yunian.ai.feature.*, com.yunian.ai.companion)
+    Fragment 3: AI dialog core (com.yunian.ai.chat, com.yunian.ai.ai, com.yunian.ai.memory)
 
     Returns fragment index (0-3).
     """
@@ -266,8 +266,8 @@ def main():
         help="Hex-encoded 16-byte encryption key (32 hex chars)"
     )
     parser.add_argument(
-        "--output", default="assets/lianyu_shell/class_map.bin",
-        help="Output path for class_map.bin (default: assets/lianyu_shell/class_map.bin)"
+        "--output", default="assets/yunian_shell/class_map.bin",
+        help="Output path for class_map.bin (default: assets/yunian_shell/class_map.bin)"
     )
     parser.add_argument(
         "--fragment-dir", default=None,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Export LianYu legacy/master SQLite database content to JSON.
+Export YuNian legacy/master SQLite database content to JSON.
 
 This is an offline, standalone operator tool. It reads a copied database file
 from a workstation/server and writes a JSON snapshot. It does not integrate
@@ -137,9 +137,9 @@ def export_legacy_database(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export a copied LianYu legacy/master SQLite database to JSON."
+        description="Export a copied YuNian legacy/master SQLite database to JSON."
     )
-    parser.add_argument("database", type=Path, help="Path to copied lianyu_database SQLite file")
+    parser.add_argument("database", type=Path, help="Path to copied yunian_database SQLite file")
     parser.add_argument("--output", "-o", type=Path, required=True, help="Output JSON path")
     parser.add_argument(
         "--include-secrets",

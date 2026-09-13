@@ -1,5 +1,5 @@
-#ifndef LIANYU_SM_CIPHER_H
-#define LIANYU_SM_CIPHER_H
+#ifndef YUNIAN_SM_CIPHER_H
+#define YUNIAN_SM_CIPHER_H
 
 #include <cstdint>
 #include <cstddef>
@@ -298,4 +298,4 @@ void sm3_hmac(const uint8_t* key, size_t keylen,
 }
 #endif
 
-#endif /* LIANYU_SM_CIPHER_H */
+#endif /* YUNIAN_SM_CIPHER_H */

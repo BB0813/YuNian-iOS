@@ -2,7 +2,7 @@
 name: code_review
 description: 代码审查技能 - 提供系统性的代码审查方法论和检查清单
 version: "1.0"
-author: LianYu Team
+author: YuNian Team
 tags: [code-review, best-practices, quality]
 requires_confirmation: false
 ---

@@ -65,7 +65,7 @@
 
     <string name="about_title">앱 정보</string>
     <string name="app_brand">연어</string>
-    <string name="app_slogan">LianYu - 당신의 AI 가상 연인</string>
+    <string name="app_slogan">YuNian - 당신의 AI 가상 연인</string>
     <string name="version">버전 1.8</string>
     <string name="about_desc_title">연어 소개</string>
     <string name="about_desc">연어는先進的な 대규모 언어 모델 기술을 기반으로 한 AI 가상 연인 채팅 앱입니다.</string>
@@ -112,7 +112,7 @@
     <string name="originos_adaption_exact_alarm">정확한 알람 권한</string>
     <string name="originos_adaption_exact_alarm_desc">포그라운드 서비스 시간 초과 후 재시작 폴백에 필요</string>
     <string name="originos_adaption_guide_title">설정 경로 참조</string>
-    <string name="originos_adaption_guide_footer">팁: OriginOS 버전에 따라 일부 항목의 경로가 다를 수 있습니다. 반응이 없으면 설정 → 앱 → LianYu에서 수동으로 확인하세요.</string>
+    <string name="originos_adaption_guide_footer">팁: OriginOS 버전에 따라 일부 항목의 경로가 다를 수 있습니다. 반응이 없으면 설정 → 앱 → YuNian에서 수동으로 확인하세요.</string>
 
     <!-- 역할 선택 및 관리 -->
     <string name="role_selection_title">AI 파트너 선택</string>

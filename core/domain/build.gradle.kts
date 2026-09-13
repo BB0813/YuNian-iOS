@@ -9,7 +9,7 @@ dependencies {
 }
 
 android {
-    namespace = "com.lianyu.ai.domain"
+    namespace = "com.yunian.ai.domain"
     compileSdk = 35
     defaultConfig { minSdk = 26 }
 }

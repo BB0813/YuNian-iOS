@@ -1,5 +1,5 @@
 /**
- * string-table.cpp — Encrypted string table for LianYu security.
+ * string-table.cpp — Encrypted string table for YuNian security.
  *
  * Stores sensitive strings (API URLs, OAuth identifiers, crypto constants) as
  * AES-256-CBC ciphertext in .rodata. Strings are decrypted on demand and the

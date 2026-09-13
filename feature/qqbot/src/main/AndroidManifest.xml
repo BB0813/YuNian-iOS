@@ -6,7 +6,7 @@
 
     <application>
         <service
-            android:name="com.lianyu.ai.feature.qqbot.service.QQBotForegroundService"
+            android:name="com.yunian.ai.feature.qqbot.service.QQBotForegroundService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />

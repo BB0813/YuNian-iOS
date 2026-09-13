@@ -1,4 +1,4 @@
-# LianYu 项目热点分析脚本
+# YuNian 项目热点分析脚本
 # 用法: python hot_spot_analyzer.py [项目路径]
 
 import os, sys, subprocess, re, json
@@ -13,7 +13,7 @@ def run(cmd):
     return result.stdout.strip()
 
 print("=" * 60)
-print("LianYu 项目热点分析")
+print("YuNian 项目热点分析")
 print("=" * 60)
 
 # 1. Git 提交热点 —— 最频繁修改的文件
