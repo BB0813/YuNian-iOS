@@ -295,6 +295,18 @@ cd YuNian
       <sub>语音通话 · bug修复</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center">
+      <a href="#">
+        <br />
+        <sub><b>下北泽传奇</b></sub>
+      </a>
+      <br />
+      <span>🧩 功能开发</span>
+      <br />
+      <sub>功能开发 · 社区运营</sub>
+    </td>
+  </tr>
 </table>
 
 > 💡 欢迎提交 Issue 参与讨论，或提交 Pull Request 贡献代码！
