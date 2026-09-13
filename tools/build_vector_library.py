@@ -21,7 +21,7 @@ import struct
 from collections import Counter, defaultdict
 from pathlib import Path
 
-PROJECT = Path(r"C:\Users\27194\Desktop\LianYu-feature-ai-persona-tools-optimization")
+PROJECT = Path(r"C:\Users\27194\Desktop\YuNian-feature-ai-persona-tools-optimization")
 FILTER_KT = PROJECT / "core/common/src/main/java/com/yunian/ai/common/ContentFilter.kt"
 WORDS_FILE = PROJECT / "tools/keywords_extended.txt"
 OUTPUT = PROJECT / "app/src/main/assets/safety/violation_vectors.bin"

@@ -3,7 +3,7 @@ import math, re, struct, time
 from collections import Counter
 from pathlib import Path
 
-PROJECT = Path(r"C:\Users\27194\Desktop\LianYu-feature-ai-persona-tools-optimization")
+PROJECT = Path(r"C:\Users\27194\Desktop\YuNian-feature-ai-persona-tools-optimization")
 OUTPUT = PROJECT / "app/src/main/assets/safety/violation_library.bin"
 LEVEL_ORDER = ["LOW", "MEDIUM", "HIGH", "SEVERE", "CRITICAL", "EXTREME"]
 

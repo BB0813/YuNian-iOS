@@ -2,7 +2,7 @@
 """Generate Java stubs for ALL merged-manifest classes and dex them."""
 import xml.etree.ElementTree as ET, subprocess, sys, os, shutil, re
 
-PROJECT = r"C:\Users\27194\Desktop\LianYu"
+PROJECT = r"C:\Users\27194\Desktop\YuNian"
 SDK = os.path.join(os.environ["LOCALAPPDATA"], "Android", "Sdk")
 ANDROID_JAR = os.path.join(SDK, "platforms", "android-34", "android.jar")
 BT = sorted(os.listdir(os.path.join(SDK, "build-tools")))[-1]

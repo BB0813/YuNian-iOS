@@ -4,7 +4,7 @@ import math, struct, re
 from collections import Counter
 from pathlib import Path
 
-BIN_PATH = Path(r"C:\Users\27194\Desktop\LianYu-feature-ai-persona-tools-optimization\app\src\main\assets\safety\violation_library.bin")
+BIN_PATH = Path(r"C:\Users\27194\Desktop\YuNian-feature-ai-persona-tools-optimization\app\src\main\assets\safety\violation_library.bin")
 LEVEL_ORDER = ["LOW", "MEDIUM", "HIGH", "SEVERE", "CRITICAL", "EXTREME"]
 LEVEL_NAMES = {"LOW": "轻度", "MEDIUM": "中度", "HIGH": "高度", "SEVERE": "严重", "CRITICAL": "极严重", "EXTREME": "极端"}
 

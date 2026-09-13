@@ -60,7 +60,7 @@ def analyze(path, label):
             print(f'  Section header table is BEFORE .text')
 
 if __name__ == '__main__':
-    base = r'c:\Users\27194\Desktop\LianYu'
+    base = r'c:\Users\27194\Desktop\YuNian'
 
     # Original unpacked SO
     orig = base + r'\core\security\build\intermediates\cxx\Release\1d71203t\obj\local\arm64-v8a\liblianyu_shell.so'

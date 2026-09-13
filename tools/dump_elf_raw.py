@@ -163,7 +163,7 @@ def analyze_phdr(path, label):
         print(f'\n--- Section headers out of bounds (e_shoff=0x{e_shoff:X}, need 0x{e_shoff + e_shnum * e_shentsize:X}, file size={len(data)}) ---')
 
 if __name__ == '__main__':
-    base = r'c:\Users\27194\Desktop\LianYu'
+    base = r'c:\Users\27194\Desktop\YuNian'
 
 
     # Shell SO

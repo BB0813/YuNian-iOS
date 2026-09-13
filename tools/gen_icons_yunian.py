@@ -29,7 +29,8 @@ from PIL import Image, ImageDraw
 # Repository root = parent of this script's directory (tools/).
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DEFAULT_SOURCE = r"E:\微信文件\RikkaHub_1789274606228.png"
+# Vendored source artwork (repo-relative, CWD-independent). Override with --source.
+DEFAULT_SOURCE = os.path.join(REPO_ROOT, "tools", "icons", "yunian_icon_source.png")
 
 # Density bucket -> launcher icon edge length in pixels.
 MIPMAP_SIZES = {
