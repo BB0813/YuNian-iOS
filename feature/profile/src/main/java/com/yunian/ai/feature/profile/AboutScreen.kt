@@ -53,6 +53,70 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.res.stringResource
 import com.yunian.ai.feature.profile.R
 
+/** 开源项目条目：名称 + 一句用途说明 */
+private data class OssItem(val name: String, val desc: String)
+
+/** 开源项目分组：分类标题 + 条目列表 */
+private data class OssCategory(val title: String, val items: List<OssItem>)
+
+/** 「关于应用」页展示的开源项目致谢清单（按分类分组） */
+private val ossCategories = listOf(
+    OssCategory(
+        title = "参考与移植",
+        items = listOf(
+            OssItem("RikkaHub", "世界书、提示词处理与工具循环等实现的重要参考"),
+            OssItem("Shizuku", "提供 ADB 特权授权通道（技能与自动化能力）")
+        )
+    ),
+    OssCategory(
+        title = "界面与体验",
+        items = listOf(
+            OssItem("Jetpack Compose", "声明式 UI 框架"),
+            OssItem("Material Design 3", "设计组件与主题"),
+            OssItem("Kyant Backdrop / Capsule", "液态玻璃效果"),
+            OssItem("Haze", "模糊与毛玻璃效果"),
+            OssItem("Coil", "图片加载"),
+            OssItem("Lottie", "动效"),
+            OssItem("IconSax Icons", "图标库")
+        )
+    ),
+    OssCategory(
+        title = "AI 与语音",
+        items = listOf(
+            OssItem("LiteRT-LM（Google AI Edge LiteRT）", "本地大模型推理"),
+            OssItem("sherpa-onnx", "语音识别（ONNX Runtime）")
+        )
+    ),
+    OssCategory(
+        title = "网络通信",
+        items = listOf(
+            OssItem("OkHttp、Retrofit（Square）", "HTTP 客户端"),
+            OssItem("Ktor Client", "网络客户端"),
+            OssItem("Model Context Protocol SDK", "模型上下文协议")
+        )
+    ),
+    OssCategory(
+        title = "数据与安全",
+        items = listOf(
+            OssItem("Room", "本地数据库"),
+            OssItem("DataStore", "偏好与配置存储"),
+            OssItem("Tink（Google）", "加密库"),
+            OssItem("AndroidX Security-Crypto", "加密存储"),
+            OssItem("AndroidX / WorkManager / Navigation", "系统组件"),
+            OssItem("Accompanist SystemUiController", "系统 UI 控制")
+        )
+    ),
+    OssCategory(
+        title = "其他工具",
+        items = listOf(
+            OssItem("kotlinx.serialization / kotlinx.coroutines", "序列化与协程"),
+            OssItem("ZXing", "二维码/条码识别"),
+            OssItem("org.json", "JSON 处理"),
+            OssItem("retrofit2-kotlinx-serialization-converter（JakeWharton）", "序列化转换器")
+        )
+    )
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
@@ -214,6 +278,49 @@ fun AboutScreen(
                 FeatureItem(stringResource(R.string.feature_edit), stringResource(R.string.feature_edit_desc))
             }
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            AboutCard() {
+                Text(
+                    text = stringResource(R.string.opensource_title),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    ),
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "感谢这些优秀的开源项目与社区",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 12.sp
+                    ),
+                    color = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                ossCategories.forEach { category ->
+                    Text(
+                        text = "▸ ${category.title}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp
+                        ),
+                        color = colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
+                    )
+                    category.items.forEach { item ->
+                        OssItemRow(item)
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
@@ -285,6 +392,28 @@ fun FeatureItem(title: String, description: String) {
         )
         Text(
             text = description,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontSize = 11.sp
+            ),
+            color = colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun OssItemRow(item: OssItem) {
+    val colorScheme = AppTheme.colors
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(
+            text = item.name,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp
+            ),
+            color = colorScheme.onSurface
+        )
+        Text(
+            text = item.desc,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontSize = 11.sp
             ),

@@ -184,6 +184,7 @@
     <string name="feature_edit">虚拟恋人编辑</string>
     <string name="feature_edit_desc">随时修改恋人的人设和性格</string>
     <string name="view_agreement">查看用户协议与免责声明</string>
+    <string name="opensource_title">开源项目</string>
 
     <!-- 角色选择与管理 -->
     <string name="role_selection_title">选择你的 AI 伴侣</string>

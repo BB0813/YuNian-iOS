@@ -82,6 +82,7 @@
     <string name="feature_ui_desc">Elegant visual design</string>
     <string name="feature_edit">Companion Editor</string>
     <string name="feature_edit_desc">Edit personality anytime</string>
+    <string name="opensource_title">Open Source Projects</string>
     <string name="view_agreement">View User Agreement</string>
 
     <!-- Thanks -->
