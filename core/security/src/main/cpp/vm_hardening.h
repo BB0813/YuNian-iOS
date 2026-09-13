@@ -8,8 +8,8 @@
  *   4. Anti-singlestep: randomized instruction timing
  */
 
-#ifndef LIANYU_VM_HARDENING_H
-#define LIANYU_VM_HARDENING_H
+#ifndef YUNIAN_VM_HARDENING_H
+#define YUNIAN_VM_HARDENING_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -222,4 +222,4 @@ static inline int vm_stack_canary_check(const uint32_t* stack, uint32_t canary_s
 }
 #endif
 
-#endif /* LIANYU_VM_HARDENING_H */
+#endif /* YUNIAN_VM_HARDENING_H */

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.memory"
+    namespace = "com.yunian.ai.feature.memory"
     compileSdk = 35
 
     defaultConfig {
@@ -40,5 +40,4 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
-    implementation(libs.androidx.compose.material.icons.extended)
 }

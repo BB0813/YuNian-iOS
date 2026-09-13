@@ -36,7 +36,7 @@ static int read_varint(const uint8_t* buf, int maxLen, uint64_t* out) {
 extern "C" {
 
 JNIEXPORT jbyteArray JNICALL
-Java_com_lianyu_ai_common_NativeCodec_encodeVarints(
+Java_com_yunian_ai_common_NativeCodec_encodeVarints(
     JNIEnv* env, jclass, jlongArray values) {
     jsize n = env->GetArrayLength(values);
     jlong* arr = env->GetLongArrayElements(values, nullptr);
@@ -53,7 +53,7 @@ Java_com_lianyu_ai_common_NativeCodec_encodeVarints(
 }
 
 JNIEXPORT jlongArray JNICALL
-Java_com_lianyu_ai_common_NativeCodec_decodeVarints(
+Java_com_yunian_ai_common_NativeCodec_decodeVarints(
     JNIEnv* env, jclass, jbyteArray data) {
     jsize len = env->GetArrayLength(data);
     jbyte* buf = env->GetByteArrayElements(data, nullptr);
@@ -79,7 +79,7 @@ Java_com_lianyu_ai_common_NativeCodec_decodeVarints(
 // ============================================================
 
 JNIEXPORT jobject JNICALL
-Java_com_lianyu_ai_common_NativeCodec_resizeBitmap(
+Java_com_yunian_ai_common_NativeCodec_resizeBitmap(
     JNIEnv* env, jclass, jobject bitmap, jint newWidth, jint newHeight) {
     AndroidBitmapInfo info;
     if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return nullptr;

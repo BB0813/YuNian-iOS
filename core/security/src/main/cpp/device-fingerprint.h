@@ -10,8 +10,8 @@
  * NEVER abort() on mismatch — legitimate users' devices change.
  */
 
-#ifndef LIANYU_DEVICE_FINGERPRINT_H
-#define LIANYU_DEVICE_FINGERPRINT_H
+#ifndef YUNIAN_DEVICE_FINGERPRINT_H
+#define YUNIAN_DEVICE_FINGERPRINT_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-#define DFTAG "LianYu-FP"
+#define DFTAG "YuNian-FP"
 #define DFLOGI(...) __android_log_print(ANDROID_LOG_INFO, DFTAG, __VA_ARGS__)
 #define DFLOGW(...) __android_log_print(ANDROID_LOG_WARN, DFTAG, __VA_ARGS__)
 
@@ -186,4 +186,4 @@ int df_get_level(void) {
 #ifdef __cplusplus
 }
 #endif
-#endif /* LIANYU_DEVICE_FINGERPRINT_H */
+#endif /* YUNIAN_DEVICE_FINGERPRINT_H */

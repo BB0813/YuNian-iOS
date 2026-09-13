@@ -14,7 +14,7 @@
 - 结果：用户发消息后，最长可能要等 15 分钟才能收到并自动回复。
 
 **相关代码**：
-- `feature/wechat/src/main/java/com/lianyu/ai/feature/wechat/service/WeChatPollingWorker.kt:50-51`
+- `feature/wechat/src/main/java/com/yunian/ai/feature/wechat/service/WeChatPollingWorker.kt:50-51`
 
 **修复方向**：
 - 新增一个 `ForegroundService`（或 `Service + startForeground`），在绑定微信后启动，内部用长轮询/ WebSocket 实时拉取消息。
@@ -30,7 +30,7 @@
 - 结果：前台时收到微信消息，自动回复可能不触发。
 
 **相关代码**：
-- `feature/wechat/src/main/java/com/lianyu/ai/feature/wechat/data/WeChatMessageRepository.kt:129-144`
+- `feature/wechat/src/main/java/com/yunian/ai/feature/wechat/data/WeChatMessageRepository.kt:129-144`
 
 **修复方向**：
 - 前台消息也应该被消费处理。可以在 `Application` 或某个常驻组件中订阅 `incomingMessages`，统一调度 `WeChatAiReplyWorker`。
@@ -50,8 +50,8 @@
 - 结果：用户发送图片/语音/文件时，bot 无法解析内容；bot 也无法发送非文本消息。
 
 **相关代码**：
-- `feature/wechat/src/main/java/com/lianyu/ai/feature/wechat/data/WeChatMessageRepository.kt:161-215`
-- `feature/wechat/src/main/java/com/lianyu/ai/feature/wechat/data/model/IlinkModels.kt:69-109`
+- `feature/wechat/src/main/java/com/yunian/ai/feature/wechat/data/WeChatMessageRepository.kt:161-215`
+- `feature/wechat/src/main/java/com/yunian/ai/feature/wechat/data/model/IlinkModels.kt:69-109`
 
 **修复方向**：
 - 扩展 `sendXxxMessage()` 系列方法，支持图片/语音/文件/视频。
@@ -68,7 +68,7 @@
 - "主动转发 AI 消息到微信"也依赖这个映射，如果映射不对，转发就会发给错误的微信用户。
 
 **相关代码**：
-- `feature/wechat/src/main/java/com/lianyu/ai/feature/wechat/data/WeChatUserMappingManager.kt`
+- `feature/wechat/src/main/java/com/yunian/ai/feature/wechat/data/WeChatUserMappingManager.kt`
 
 **修复方向**：
 - 在 `WeChatSettingsScreen` 或新增 `WeChatUserMappingScreen` 中展示映射列表。
@@ -89,8 +89,8 @@
   - 亲密度调度这套逻辑目前没有真正接入主流程。
 
 **相关代码**：
-- `feature/notification/src/main/java/com/lianyu/ai/feature/notification/CompanionMessageWorker.kt:97-118`
-- `feature/wechat/src/main/java/com/lianyu/ai/feature/wechat/ui/WeChatSettingsScreen.kt`
+- `feature/notification/src/main/java/com/yunian/ai/feature/notification/CompanionMessageWorker.kt:97-118`
+- `feature/wechat/src/main/java/com/yunian/ai/feature/wechat/ui/WeChatSettingsScreen.kt`
 
 **修复方向**：
 - 在 `WeChatSettingsScreen`（或全局设置页）增加：
@@ -108,7 +108,7 @@
 - "自动消息 → 微信转发"这条完整链路也缺少端到端测试。
 
 **相关代码**：
-- `feature/wechat/src/test/java/com/lianyu/ai/feature/wechat/data/WeChatIncomingMessagePolicyTest.kt`（可能为空或未注册到测试任务）
+- `feature/wechat/src/test/java/com/yunian/ai/feature/wechat/data/WeChatIncomingMessagePolicyTest.kt`（可能为空或未注册到测试任务）
 
 **修复方向**：
 - 为 `WeChatMessageRepository`、`WeChatUserMappingManager`、`IlinkClient` 等核心类编写单元测试。

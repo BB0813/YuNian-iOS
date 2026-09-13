@@ -79,7 +79,7 @@ Day 3: 完整性测试 (TEST 7.1-7.3, 8.1-8.4)
 产出：app-release-shell-signed.apk (~10MB 壳 DEX)
 验证：
   - classes.dex ≤ 50KB
-  - jadx 搜索 com.lianyu.ai.security → 0 结果
+  - jadx 搜索 com.yunian.ai.security → 0 结果
   - DEX STORED 模式
   - JNI 导出 ≤ 5
 

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.chat"
+    namespace = "com.yunian.ai.feature.chat"
     compileSdk = 35
 
     defaultConfig {
@@ -41,7 +41,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
     // sherpa-onnx: 离线语音识别引擎 (v1.13.3)

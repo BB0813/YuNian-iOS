@@ -1,10 +1,10 @@
 ---
 name: lianyu-build-pipeline
-description: LianYu 完整打包构建流程 — 从克隆到签名 APK，含壳、Dex2C、安全加固全链路。
+description: YuNian 完整打包构建流程 — 从克隆到签名 APK，含壳、Dex2C、安全加固全链路。
 category: software-development
 ---
 
-# LianYu 完整构建流水线
+# YuNian 完整构建流水线
 
 覆盖从零到签名 APK 的全部步骤：环境准备、源码配置、Native 编译、壳构建、安全加固、Dex2C 转译、签名验证。
 
@@ -28,7 +28,7 @@ category: software-development
 git clone -b main-dev --depth 1 git@github.com:linruoxi666/LianYu.git LianYu-maindev
 
 # 方式 B: 解压用户提供的 zip
-unzip LianYu-main-dev.zip -d LianYu-maindev
+unzip YuNian-main-dev.zip -d LianYu-maindev
 ```
 
 ### 2.2 SDK 路径
@@ -49,17 +49,17 @@ cp /path/to/Realy_release.keystore ./release.keystore
 ```python
 # execute_code
 with open('gradle.properties', 'a') as f:
-    f.write('LIANYU_STORE_PASSWORD=34987...\n')
-    f.write('LIANYU_KEY_ALIAS=your_alias\n')
-    f.write('LIANYU_KEY_PASSWORD=34987...\n')
+    f.write('YUNIAN_STORE_PASSWORD=34987...\n')
+    f.write('YUNIAN_KEY_ALIAS=your_alias\n')
+    f.write('YUNIAN_KEY_PASSWORD=34987...\n')
 ```
 
 ### 2.4 环境变量（可选，推荐 gradle.properties）
 
 ```bash
-export LIANYU_STORE_PASSWORD="3498762309"
-export LIANYU_KEY_ALIAS="your_alias"
-export LIANYU_KEY_PASSWORD="3498762309"
+export YUNIAN_STORE_PASSWORD="3498762309"
+export YUNIAN_KEY_ALIAS="your_alias"
+export YUNIAN_KEY_PASSWORD="3498762309"
 ```
 
 ## 三、源码准备
@@ -102,25 +102,25 @@ main-dev 分支缺少以下类（需从 `LianYu-feature-security-six-dimensions`
 
 | 文件 | 路径 |
 |------|------|
-| KmsProvider.kt | `core/security/src/main/java/com/lianyu/ai/security/` |
+| KmsProvider.kt | `core/security/src/main/java/com/yunian/ai/security/` |
 | SecurityOrchestrator.kt | 同上 |
 | Sm4Cipher.kt | 同上 |
 | CompositeVmpRuntime.kt | 同上 |
 | SecurityGuard.kt | 同上 |
 
 ```bash
-cp LianYu-security/.../core/security/src/main/java/com/lianyu/ai/security/{KmsProvider,SecurityOrchestrator,Sm4Cipher,CompositeVmpRuntime,SecurityGuard}.kt \
-   LianYu-maindev/core/security/src/main/java/com/lianyu/ai/security/
+cp LianYu-security/.../core/security/src/main/java/com/yunian/ai/security/{KmsProvider,SecurityOrchestrator,Sm4Cipher,CompositeVmpRuntime,SecurityGuard}.kt \
+   LianYu-maindev/core/security/src/main/java/com/yunian/ai/security/
 ```
 
 ### 3.3 ProGuard keep 规则
 
 在 `app/proguard-rules.pro` 添加：
 ```
--keep class com.lianyu.ai.security.SecurityOrchestrator { *; }
--keep class com.lianyu.ai.security.Sm4Cipher { *; }
--keep class com.lianyu.ai.security.CompositeVmpRuntime { *; }
--keep class com.lianyu.ai.security.SecurityGuard { *; }
+-keep class com.yunian.ai.security.SecurityOrchestrator { *; }
+-keep class com.yunian.ai.security.Sm4Cipher { *; }
+-keep class com.yunian.ai.security.CompositeVmpRuntime { *; }
+-keep class com.yunian.ai.security.SecurityGuard { *; }
 ```
 
 ## 四、Native 编译配置
@@ -149,8 +149,8 @@ ndk {
 {
     global:
         JNI_OnLoad;
-        Java_com_lianyu_ai_security_StaticApkShell_*;
-        Java_com_lianyu_ai_security_MethodRecoveryEngine_*;
+        Java_com_yunian_ai_security_StaticApkShell_*;
+        Java_com_yunian_ai_security_MethodRecoveryEngine_*;
     local:
         *;
 };
@@ -167,7 +167,7 @@ ndk {
         lianyu_text_size;
         lianyu_text_decrypt_ptr;
         kms_provider_register_natives;
-        Java_com_lianyu_ai_common_NativeSafetyFilter_*;
+        Java_com_yunian_ai_common_NativeSafetyFilter_*;
     local:
         *;
 };
@@ -271,9 +271,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 
 ```bash
 # 在 git-bash 中
-export LIANYU_STORE_PASSWORD="3498762309"
-export LIANYU_KEY_ALIAS="your_alias"
-export LIANYU_KEY_PASSWORD="3498762309"
+export YUNIAN_STORE_PASSWORD="3498762309"
+export YUNIAN_KEY_ALIAS="your_alias"
+export YUNIAN_KEY_PASSWORD="3498762309"
 
 rm -rf core/security/build app/build/outputs/apk/debug
 
@@ -323,11 +323,11 @@ $NDK_NM -D <path/to/liblianyu_shell.so>
 期望输出：
 ```
 T JNI_OnLoad
-T Java_com_lianyu_ai_security_StaticApkShell_nativeShellInitWithBlob
-T Java_com_lianyu_ai_security_StaticApkShell_nativeWipeDexHeader
-T Java_com_lianyu_ai_security_StaticApkShell_nativeEnableMemoryGuard
-T Java_com_lianyu_ai_security_StaticApkShell_nativeAntiHookInit
-T Java_com_lianyu_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods
+T Java_com_yunian_ai_security_StaticApkShell_nativeShellInitWithBlob
+T Java_com_yunian_ai_security_StaticApkShell_nativeWipeDexHeader
+T Java_com_yunian_ai_security_StaticApkShell_nativeEnableMemoryGuard
+T Java_com_yunian_ai_security_StaticApkShell_nativeAntiHookInit
+T Java_com_yunian_ai_security_MethodRecoveryEngine_nativeRecoverClassMethods
 ```
 
 ### 8.3 APK 结构审计
@@ -359,7 +359,7 @@ $NDK_NM -D <path/to/liblianyu_security.so> | grep -i placeholder
 `dex2c_registry.h` 中改为 `extern const`（见第五章 5.2 注意事项）。
 
 ### Q: `UnsatisfiedLinkError` 在 StaticApkShell 方法上
-检查 `version-script-shell.map` 是否包含 `Java_com_lianyu_ai_security_StaticApkShell_*`。
+检查 `version-script-shell.map` 是否包含 `Java_com_yunian_ai_security_StaticApkShell_*`。
 
 ### Q: JNI_OnLoad 不存在于动态符号表
 检查 `Android.mk` 壳 SO 的 `LOCAL_LDFLAGS` 是否有 `-Wl,-u,JNI_OnLoad`。

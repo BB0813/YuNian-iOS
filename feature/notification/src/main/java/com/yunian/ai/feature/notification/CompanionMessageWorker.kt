@@ -1,0 +1,463 @@
+package com.yunian.ai.feature.notification
+
+import android.content.Context
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.yunian.ai.database.AppDatabase
+import com.yunian.ai.database.model.ChatMessage
+import com.yunian.ai.database.model.MessageType
+import com.yunian.ai.database.repository.ChatMessageCrypto
+import com.yunian.ai.database.repository.MessageWriteCoordinator
+import com.yunian.ai.database.repository.filterDecrypted
+import com.yunian.ai.domain.AiServiceProvider
+import com.yunian.ai.domain.AiCompanionInfo
+import com.yunian.ai.domain.AiChatMessage
+import com.yunian.ai.domain.AiMessageType
+import com.yunian.ai.domain.ProactiveMessageSettings
+import com.yunian.ai.domain.ServiceRegistry
+import com.yunian.ai.domain.imagegen.ImageGenProtocol
+import com.yunian.ai.domain.wechat.WeChatProactiveSync
+import com.yunian.ai.common.AppForegroundTracker
+import com.yunian.ai.common.BanManager
+import com.yunian.ai.common.ChatConstants
+import com.yunian.ai.common.ChatDetailSettingsDataStoreProvider
+import com.yunian.ai.common.SecureLog
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.util.concurrent.TimeUnit
+import kotlin.random.Random
+
+@Serializable
+data class ProactiveSettings(
+    val proactiveEnabled: Boolean = true,
+
+    val proactiveIntervalMinutes: Int = 180,
+    val proactiveMinIntervalMinutes: Int = 60,
+    val proactiveMaxIntervalMinutes: Int = 720,
+    val proactiveDailyLimit: Int = 6,
+
+    val allowNewTopic: Boolean = true,
+
+    val allowFollowUpMessage: Boolean = true,
+    val doNotDisturbEnabled: Boolean = false,
+    val dndStartMinutes: Int = 23 * 60,
+    val dndEndMinutes: Int = 8 * 60,
+    val allowLateNightMessage: Boolean = false,
+    val allowPriorityMessageInDnd: Boolean = false,
+    val blocked: Boolean = false,
+
+    val followUpReminderEnabled: Boolean = true,
+
+    val followUpReminderIntervalMinutes: Int = 5,
+
+    val followUpReminderMaxTimes: Int = 3
+)
+
+class CompanionMessageWorker(
+    private val context: Context,
+    params: WorkerParameters
+) : CoroutineWorker(context, params) {
+
+    private val aiServiceProvider: AiServiceProvider by lazy {
+        ServiceRegistry.get(AiServiceProvider::class.java)
+            ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
+    }
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        try {
+            if (BanManager.isBanned(context)) {
+                SecureLog.d("CompanionMessageWorker", "User is banned, skip proactive message")
+                return@withContext Result.success()
+            }
+
+            val database = AppDatabase.getDatabase(context)
+            val companionDao = database.companionDao()
+            val messageDao = database.messageDao()
+
+            val companions = companionDao.getAllCompanionsSync()
+            if (companions.isEmpty()) return@withContext Result.success()
+
+            val settingsById = readAllCompanionSettings()
+
+            val eligibleCompanions = companions.filter { companion ->
+                settingsById[companion.id]?.let { settings ->
+                    settings.proactiveEnabled && !settings.blocked
+                } ?: false
+            }
+
+            if (eligibleCompanions.isEmpty()) {
+                SecureLog.d("CompanionMessageWorker", "No eligible companions (all disabled/blocked), reschedule")
+                scheduleNext(context, null)
+                return@withContext Result.success()
+            }
+
+            val now = System.currentTimeMillis()
+            val nowCal = java.util.Calendar.getInstance()
+            val nowMinutes = nowCal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + nowCal.get(java.util.Calendar.MINUTE)
+
+            val dueFollowUpCompanions = eligibleCompanions.filter { companion ->
+                val s = settingsById[companion.id] ?: return@filter false
+                if (!s.followUpReminderEnabled) return@filter false
+
+                if (isInDndRange(nowMinutes, s) && !s.allowLateNightMessage) return@filter false
+
+                if (s.proactiveDailyLimit > 0 && getTodayProactiveCount(context, companion.id) >= s.proactiveDailyLimit) {
+                    return@filter false
+                }
+                // 排除工具调用卡片（TOOL_ACTIVITY）：卡片是本轮最后落库的消息，
+                // 不能当作「最后一条对话消息」参与追问判定（否则会干扰 isFromUser/时间/计数判断）。
+                val last = runCatching {
+                    messageDao.getRecentMessagesSync(companion.id, "chat", 10)
+                        .map { it.toChatMessage() }
+                        .filter { it.type != MessageType.TOOL_ACTIVITY }
+                        .maxByOrNull { it.timestamp }
+                }
+                    .getOrNull() ?: return@filter false
+                if (last.isFromUser) return@filter false
+                val elapsedMs = now - last.timestamp
+
+                if (elapsedMs >= ChatConstants.FOLLOW_UP_REMINDER_MAX_AGE_HOURS * 60L * 60L * 1000L) return@filter false
+                if (elapsedMs < s.followUpIntervalMs()) return@filter false
+                val state = readFollowUpState(context, companion.id)
+                val nudgeCount = if (state.lastNudgeMessageId == last.id) state.nudgeCount else 0
+                nudgeCount < s.maxNudgeTimes()
+            }
+
+            val companion = dueFollowUpCompanions.randomOrNull() ?: eligibleCompanions.random()
+            val settings = settingsById[companion.id] ?: ProactiveSettings()
+            val domainSettings = settings.toDomain()
+
+            if (isInDndRange(nowMinutes, settings) && !settings.allowLateNightMessage) {
+                val minutesToDndEnd = minutesUntilDndEnd(nowMinutes, settings.dndStartMinutes, settings.dndEndMinutes)
+                SecureLog.d("CompanionMessageWorker", "DND active for ${companion.name}, retry in ${minutesToDndEnd}min")
+                scheduleWithDelay(context, minutesToDndEnd.coerceIn(1, 1440).toLong())
+                return@withContext Result.success()
+            }
+
+            if (settings.proactiveDailyLimit > 0) {
+                val todayCount = getTodayProactiveCount(context, companion.id)
+                if (todayCount >= settings.proactiveDailyLimit) {
+                    SecureLog.d("CompanionMessageWorker", "Daily limit reached ($todayCount/${settings.proactiveDailyLimit}) for ${companion.name}")
+                    scheduleNext(context, settings)
+                    return@withContext Result.success()
+                }
+            }
+
+            val recentMessages = ChatMessageCrypto.decryptFromStorage(
+                    messageDao.getRecentMessagesSync(companion.id, "chat", 10)
+                        .map { it.toChatMessage() }
+                )
+                .filterDecrypted()
+                // 工具调用卡片（TOOL_ACTIVITY）是本轮最后落库的消息，若不剔除会被当作
+                // assistant 文本喂给主动问候/追问模型，污染上下文。此处直接走 DAO，
+                // 绕过了 ChatRepository.getRecentMessagesSync 的过滤，需自行剔除。
+                .filter { it.type != MessageType.TOOL_ACTIVITY }
+
+            val sortedMessages = recentMessages.sortedBy { it.timestamp }
+            val lastMessage = sortedMessages.lastOrNull()
+
+            if (lastMessage != null && !lastMessage.isFromUser && settings.followUpReminderEnabled) {
+                val elapsedMs = now - lastMessage.timestamp
+
+                if (elapsedMs >= ChatConstants.FOLLOW_UP_REMINDER_MAX_AGE_HOURS * 60L * 60L * 1000L) {
+                    scheduleNext(context, settings)
+                    return@withContext Result.success()
+                }
+                val state = readFollowUpState(context, companion.id)
+
+                val nudgeCount = if (state.lastNudgeMessageId == lastMessage.id) state.nudgeCount else 0
+
+                if (elapsedMs >= settings.followUpIntervalMs() && nudgeCount < settings.maxNudgeTimes()) {
+                    val reminder = aiServiceProvider.generateFollowUpReminder(
+                        companion.toAiCompanionInfo(),
+                        recentMessages.toAiChatMessages(),
+                        domainSettings
+                    )
+                    val nudgeMsgId = reminder?.let { sendMessage(companion, it) }
+                    if (nudgeMsgId != null) {
+
+                        saveFollowUpState(context, companion.id, nudgeMsgId, nudgeCount + 1)
+                        SecureLog.d(
+                            "CompanionMessageWorker",
+                            "Follow-up reminder sent for ${companion.name}, nudge=${nudgeCount + 1}/${settings.maxNudgeTimes()}"
+                        )
+                        scheduleFollowUpNext(context, settings)
+                        return@withContext Result.success()
+                    }
+                    SecureLog.d("CompanionMessageWorker", "Follow-up reminder declined, reschedule")
+                }
+
+                if (elapsedMs < settings.followUpIntervalMs()) {
+                    scheduleFollowUpNext(context, settings)
+                } else {
+                    scheduleNext(context, settings)
+                }
+                return@withContext Result.success()
+            }
+
+            if (!aiServiceProvider.shouldProactivelyMessage(companion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)) {
+                scheduleNext(context, settings)
+                return@withContext Result.success()
+            }
+
+            val messageContent = aiServiceProvider.generateProactiveMessage(companion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)
+                ?: run {
+                    SecureLog.w("CompanionMessageWorker", "Proactive message is null, skipping")
+                    scheduleNext(context, settings)
+                    return@withContext Result.success()
+                }
+
+            sendMessage(companion, messageContent)
+
+            scheduleNext(context, settings)
+
+            Result.success()
+        } catch (e: IllegalStateException) {
+            SecureLog.e("CompanionMessageWorker", "Permanent failure, will not retry", e)
+            Result.failure()
+        } catch (e: SecurityException) {
+            SecureLog.e("CompanionMessageWorker", "Permission denied, will not retry", e)
+            Result.failure()
+        } catch (e: Exception) {
+            SecureLog.e("CompanionMessageWorker", "Transient failure, will retry", e)
+            Result.retry()
+        }
+    }
+
+    private fun broadcastProactiveWeChatMessage(companionId: Long, messageId: Long) {
+        WeChatProactiveSync.enqueue(companionId, messageId)
+        SecureLog.d("CompanionMessageWorker", "Enqueue WeChat proactive message, companionId=$companionId, messageId=$messageId")
+    }
+
+    private suspend fun sendMessage(companion: com.yunian.ai.database.model.CompanionEntity, content: String): Long? {
+        val trimmed = content.trim()
+        if (trimmed.isEmpty()) return null
+
+        val safety = com.yunian.ai.common.ContentFilter.checkOutputSafety(trimmed)
+        if (!safety.isSafe) {
+            SecureLog.w("CompanionMessageWorker", "Proactive message blocked by safety filter: ${safety.reason}")
+
+            return null
+        }
+        // 主动消息同样可能夹带生图标签/画面描述：落库前统一清洗
+        val clean = ImageGenProtocol.sanitizeForDisplay(trimmed).ifBlank { trimmed }
+        val message = ChatMessage(
+            companionId = companion.id,
+            content = clean,
+            isFromUser = false
+        )
+        val messageId = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
+            .enqueueChat(message)
+        broadcastProactiveWeChatMessage(companion.id, messageId)
+        incrementTodayProactiveCount(context, companion.id, 1)
+        if (!AppForegroundTracker.isInForeground) {
+            NotificationHelper.showCompanionMessageNotification(
+                context,
+                companion.name,
+                clean,
+                companion.id
+            )
+        }
+        return messageId
+    }
+
+    private fun isInDndRange(nowMinutes: Int, settings: ProactiveSettings): Boolean {
+        if (!settings.doNotDisturbEnabled || settings.allowPriorityMessageInDnd) return false
+        return if (settings.dndStartMinutes > settings.dndEndMinutes) {
+
+            nowMinutes >= settings.dndStartMinutes || nowMinutes < settings.dndEndMinutes
+        } else {
+            nowMinutes in settings.dndStartMinutes until settings.dndEndMinutes
+        }
+    }
+
+    private fun minutesUntilDndEnd(nowMinutes: Int, dndStartMinutes: Int, dndEndMinutes: Int): Int {
+        val dayMinutes = 24 * 60
+        return if (dndStartMinutes > dndEndMinutes) {
+
+            if (nowMinutes >= dndStartMinutes) (dayMinutes - nowMinutes) + dndEndMinutes
+            else dndEndMinutes - nowMinutes
+        } else {
+            dndEndMinutes - nowMinutes
+        }
+    }
+
+    private suspend fun readAllCompanionSettings(): Map<Long, ProactiveSettings> {
+        return runCatching {
+            val dataStore = ChatDetailSettingsDataStoreProvider.get(context)
+            val prefs = dataStore.data.first()
+            val raw = prefs[stringPreferencesKey("companion_chat_detail_settings_map")] ?: return@runCatching emptyMap()
+            json.decodeFromString<Map<Long, ProactiveSettings>>(raw)
+        }.getOrNull() ?: emptyMap()
+    }
+
+    private fun ProactiveSettings.toDomain() = ProactiveMessageSettings(
+        proactiveEnabled = proactiveEnabled,
+        proactiveIntervalMinutes = proactiveIntervalMinutes,
+        proactiveMinIntervalMinutes = proactiveMinIntervalMinutes,
+        proactiveMaxIntervalMinutes = proactiveMaxIntervalMinutes,
+        proactiveDailyLimit = proactiveDailyLimit,
+        allowNewTopic = allowNewTopic,
+        allowFollowUpMessage = allowFollowUpMessage,
+        doNotDisturbEnabled = doNotDisturbEnabled,
+        dndStartMinutes = dndStartMinutes,
+        dndEndMinutes = dndEndMinutes,
+        allowLateNightMessage = allowLateNightMessage,
+        allowPriorityMessageInDnd = allowPriorityMessageInDnd,
+        blocked = blocked,
+        followUpReminderEnabled = followUpReminderEnabled,
+        followUpReminderIntervalMinutes = followUpReminderIntervalMinutes,
+        followUpReminderMaxTimes = followUpReminderMaxTimes
+    )
+
+    private fun com.yunian.ai.database.model.CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
+        id = id, name = name, personality = personality,
+        age = age, backstory = backstory, speakingStyle = speakingStyle,
+        systemPrompt = systemPrompt
+    )
+
+    private fun com.yunian.ai.database.model.ChatMessage.toAiChatMessage() = AiChatMessage(
+        isFromUser = isFromUser, content = content, timestamp = timestamp,
+        type = when (type) {
+            MessageType.IMAGE -> AiMessageType.IMAGE
+            else -> AiMessageType.TEXT
+        },
+        companionId = companionId
+    )
+
+    private fun List<com.yunian.ai.database.model.ChatMessage>.toAiChatMessages() = map { it.toAiChatMessage() }
+
+    companion object {
+        private const val WORK_NAME = "companion_message_work"
+
+        private const val DAILY_COUNT_PREFS = "proactive_daily_count"
+
+        private const val FOLLOW_UP_STATE_PREFS = "proactive_followup_state"
+
+        private fun getTodayProactiveCount(context: Context, companionId: Long): Int {
+            val prefs = context.getSharedPreferences(DAILY_COUNT_PREFS, Context.MODE_PRIVATE)
+            val today = todayKey()
+            val storedDate = prefs.getString("date_$companionId", null)
+            return if (storedDate == today) prefs.getInt("count_$companionId", 0) else 0
+        }
+
+        private fun incrementTodayProactiveCount(context: Context, companionId: Long, delta: Int) {
+            val prefs = context.getSharedPreferences(DAILY_COUNT_PREFS, Context.MODE_PRIVATE)
+            val today = todayKey()
+            val count = getTodayProactiveCount(context, companionId) + delta
+            prefs.edit()
+                .putString("date_$companionId", today)
+                .putInt("count_$companionId", count)
+                .apply()
+        }
+
+        private fun todayKey(): String {
+            val cal = java.util.Calendar.getInstance()
+            return "${cal.get(java.util.Calendar.YEAR)}-${cal.get(java.util.Calendar.DAY_OF_YEAR)}"
+        }
+
+        private data class FollowUpState(
+            val lastNudgeMessageId: Long = -1L,
+            val nudgeCount: Int = 0
+        )
+
+        private fun readFollowUpState(context: Context, companionId: Long): FollowUpState {
+            val prefs = context.getSharedPreferences(FOLLOW_UP_STATE_PREFS, Context.MODE_PRIVATE)
+            return FollowUpState(
+                lastNudgeMessageId = prefs.getLong("last_nudge_msg_$companionId", -1L),
+                nudgeCount = prefs.getInt("nudge_count_$companionId", 0)
+            )
+        }
+
+        private fun saveFollowUpState(context: Context, companionId: Long, lastNudgeMessageId: Long, nudgeCount: Int) {
+            context.getSharedPreferences(FOLLOW_UP_STATE_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_nudge_msg_$companionId", lastNudgeMessageId)
+                .putInt("nudge_count_$companionId", nudgeCount)
+                .apply()
+        }
+
+        private val networkConstraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        fun schedule(context: Context) {
+
+            val hasActiveWork = runCatching {
+                WorkManager.getInstance(context).getWorkInfosForUniqueWork(WORK_NAME)
+                    .get(500, TimeUnit.MILLISECONDS)
+                    .any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
+            }.getOrDefault(true)
+            if (hasActiveWork) return
+
+            val delayMinutes = Random.nextInt(
+                ChatConstants.PROACTIVE_FALLBACK_MIN_MINUTES.toInt(),
+                ChatConstants.PROACTIVE_FALLBACK_MAX_MINUTES.toInt()
+            )
+            scheduleWithDelay(context, delayMinutes.toLong())
+        }
+
+        private fun scheduleNext(context: Context, settings: ProactiveSettings?) {
+            val delayMinutes = if (settings != null && settings.proactiveIntervalMinutes > 0) {
+
+                settings.proactiveIntervalMinutes.coerceIn(
+                    ChatConstants.PROACTIVE_USER_MIN_INTERVAL_MINUTES,
+                    ChatConstants.PROACTIVE_USER_MAX_INTERVAL_MINUTES
+                ).toLong()
+            } else {
+                val minInterval = settings?.proactiveMinIntervalMinutes
+                    ?.coerceAtLeast(ChatConstants.PROACTIVE_USER_MIN_INTERVAL_MINUTES)
+                    ?: ChatConstants.PROACTIVE_FALLBACK_MIN_MINUTES.toInt()
+                val maxInterval = settings?.proactiveMaxIntervalMinutes
+                    ?.coerceAtLeast(minInterval + 1)
+                    ?: ChatConstants.PROACTIVE_FALLBACK_MAX_MINUTES.toInt()
+                Random.nextInt(minInterval, maxInterval + 1).toLong()
+            }
+            scheduleWithDelay(context, delayMinutes)
+        }
+
+        private fun scheduleFollowUpNext(context: Context, settings: ProactiveSettings) {
+            scheduleWithDelay(context, settings.followUpIntervalMs() / 60_000L)
+        }
+
+        private fun scheduleWithDelay(context: Context, delayMinutes: Long) {
+            val workRequest = OneTimeWorkRequestBuilder<CompanionMessageWorker>()
+                .setConstraints(networkConstraints)
+                .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
+        }
+
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        }
+    }
+}
+
+private fun ProactiveSettings.followUpIntervalMs(): Long =
+    followUpReminderIntervalMinutes.coerceIn(
+        ChatConstants.FOLLOW_UP_REMINDER_MIN_INTERVAL_MINUTES,
+        ChatConstants.FOLLOW_UP_REMINDER_MAX_INTERVAL_MINUTES
+    ) * 60_000L
+
+private fun ProactiveSettings.maxNudgeTimes(): Int =
+    followUpReminderMaxTimes.coerceIn(1, ChatConstants.FOLLOW_UP_REMINDER_MAX_TIMES_LIMIT)

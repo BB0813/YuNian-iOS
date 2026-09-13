@@ -1,4 +1,4 @@
-# LianYu (恋语) 安全模块及核心业务代码评审报告
+# YuNian (恋语) 安全模块及核心业务代码评审报告
 
 ## 项目概述
 - **项目**: LianYu-feature-security-six-dimensions
@@ -21,7 +21,7 @@
 **问题:**
 - `core:network` 直接依赖 `core:security` (NativeBridge, SecurityState) 和 `core:database` (AppDatabase)
   - 网络层的安全拦截器耦合了安全模块的具体实现，不利于替换安全策略
-- `:app` 模块中存在 `app/.../security/` 包（LianYuShellApplication、StaticApkShell 等），
+- `:app` 模块中存在 `app/.../security/` 包（YuNianShellApplication、StaticApkShell 等），
   与 `core:security` 形成逻辑上的重复命名空间
 - `core:common` 的 `ContentFilter` 依赖 `core:database` 的关键词注入，
   但 `core:common` 不应该依赖 `core:database`，形成了隐式反向依赖
@@ -76,7 +76,7 @@ MK (Master Key)    —— 嵌入白盒 AES 表，永不在 RAM
 - TokenUsageRepository、ChatRepository 等使用 suspend 函数
 
 **问题:**
-- `LianYuApplication.initWeChat()` 中使用了 `runBlocking { tokenStore.isLoggedIn() }`
+- `YuNianApplication.initWeChat()` 中使用了 `runBlocking { tokenStore.isLoggedIn() }`
   — 在 Application.onCreate() 主线程上阻塞调用协程，可能导致 ANR（虽然 isLoggedIn 通常很快）
 - `StaticApkShell` 中有同样的 `runBlocking` 调用
 - 没有全局 CoroutineExceptionHandler，native crash 可能导致协程静默失败
@@ -111,7 +111,7 @@ MK (Master Key)    —— 嵌入白盒 AES 表，永不在 RAM
 | dev AES key 明文存在源码中 | KmsProvider | 中(有debug guard) |
 | `|| true` 恒真表达式 | CompositeVmpRuntime | 中 |
 | Companion object 臃肿 (2531行) | AiService | 低 |
-| 硬编码包名 "com.lianyu.ai" | HardwareKeyAttestor | 低 |
+| 硬编码包名 "com.yunian.ai" | HardwareKeyAttestor | 低 |
 | XOR 混淆替代真正加密 (OBF_KEY) | ContentFilter, SecurityDataSeeder | 中 |
 
 ### 2.5 线程安全 ★★★★☆
@@ -129,14 +129,14 @@ MK (Master Key)    —— 嵌入白盒 AES 表，永不在 RAM
 ### 3.1 主线程阻塞 ★★★☆☆
 
 **问题:**
-- `LianYuApplication.attachBaseContext()` 中调用 `G0.b(this)` → `SecurityGuard.productionPreflight()`，
+- `YuNianApplication.attachBaseContext()` 中调用 `G0.b(this)` → `SecurityGuard.productionPreflight()`，
   该函数执行多个 native 完整性检查 (签名、DEX、SO、资源)、VMP 锚点验证，
   是 Application 启动链路的主线程阻塞点
 - `MainActivity.onCreate()` 中扫描 `display.supportedModes` 找最佳刷新率，在主线程执行
 - `runBlocking` 在 Application.onCreate() 中（虽然操作本身轻量）
 
 **优点:**
-- `LianYuApplication.onCreate()` 将 DB 备份、默认数据种子、背景预加载、安全数据初始化等
+- `YuNianApplication.onCreate()` 将 DB 备份、默认数据种子、背景预加载、安全数据初始化等
   都放到后台线程执行
 - AiService 正确使用 `Dispatchers.IO`
 
@@ -154,7 +154,7 @@ MK (Master Key)    —— 嵌入白盒 AES 表，永不在 RAM
 
 ### 3.3 内存泄漏风险 ★★★★☆
 
-- `LianYuApplication.instance` 是静态引用，但指向 Application 本身，无泄漏风险
+- `YuNianApplication.instance` 是静态引用，但指向 Application 本身，无泄漏风险
 - `AiService` 持有 `appContext = context.applicationContext`，正确
 - `MainActivity.appScope = CoroutineScope(Dispatchers.Main)` — 未在 onDestroy 中 cancel，
   可能导致 Activity 销毁后协程仍在运行
@@ -211,7 +211,7 @@ ZT检查 → 获取atomic_lock → KMS派生DK → BK盲化 → WB-AES-CBC加密
 
 ### 4.4 VMP 壳保护 ★★★☆☆
 
-- LianYuShellApplication 通过反射注入 InMemoryDexClassLoader
+- YuNianShellApplication 通过反射注入 InMemoryDexClassLoader
 - 直接操作 `LoadedApk.mClassLoader` 字段 (Android 内部 API)
 - 反射设置 `ApplicationInfo.classLoader`、`ContextWrapper.mBase`
 - **高风险**: 这些反射操作严重依赖 Android 内部实现，OS 版本升级可能导致崩溃

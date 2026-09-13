@@ -1,4 +1,4 @@
-# LianYu Release APK 安全审计报告
+# YuNian Release APK 安全审计报告
 > 日期: 2026-06-15 | 目标: app-release.apk 90.5MB | 环境: 模拟器 x86_64 API35
 
 ## 1. 签名校验 ✅

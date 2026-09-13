@@ -166,14 +166,14 @@ static float bayesian_predict(
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_lianyu_ai_common_NativeSafetyFilter_nativeAcBuild(
+Java_com_yunian_ai_common_NativeSafetyFilter_nativeAcBuild(
     JNIEnv* env, jclass, jobjectArray keywords, jintArray levels) {
     auto* ac = ac_from_java(env, keywords, levels);
     return reinterpret_cast<jlong>(ac);
 }
 
 JNIEXPORT jobjectArray JNICALL
-Java_com_lianyu_ai_common_NativeSafetyFilter_nativeAcSearch(
+Java_com_yunian_ai_common_NativeSafetyFilter_nativeAcSearch(
     JNIEnv* env, jclass, jstring text, jlong acPtr) {
     auto* ac = reinterpret_cast<ACAutomaton*>(acPtr);
     if (!ac) return nullptr;
@@ -184,7 +184,7 @@ Java_com_lianyu_ai_common_NativeSafetyFilter_nativeAcSearch(
 
     auto matches = ac_search(ac, textStr);
 
-    jclass matchCls = env->FindClass("com/lianyu/ai/common/NativeSafetyFilter$AcMatch");
+    jclass matchCls = env->FindClass("com/yunian/ai/common/NativeSafetyFilter$AcMatch");
     jmethodID ctor = env->GetMethodID(matchCls, "<init>", "(ILjava/lang/String;I)V");
     jobjectArray result = env->NewObjectArray(matches.size(), matchCls, nullptr);
 
@@ -200,13 +200,13 @@ Java_com_lianyu_ai_common_NativeSafetyFilter_nativeAcSearch(
 }
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_common_NativeSafetyFilter_nativeAcFree(
+Java_com_yunian_ai_common_NativeSafetyFilter_nativeAcFree(
     JNIEnv*, jclass, jlong acPtr) {
     delete reinterpret_cast<ACAutomaton*>(acPtr);
 }
 
 JNIEXPORT jfloat JNICALL
-Java_com_lianyu_ai_common_NativeSafetyFilter_nativeBayesianPredict(
+Java_com_yunian_ai_common_NativeSafetyFilter_nativeBayesianPredict(
     JNIEnv* env, jclass,
     jfloatArray features, jfloatArray priors, jfloatArray likelihoods) {
     jsize numFeatures = env->GetArrayLength(features);

@@ -1,5 +1,5 @@
 /*
- * LianYu Virtual Machine — Custom Bytecode Interpreter
+ * YuNian Virtual Machine — Custom Bytecode Interpreter
  *
  * The VM implements a RISC-like virtual processor with:
  *   - 16 general-purpose 32-bit registers
@@ -93,8 +93,8 @@ int sig_verify_bridge(void) {
 #define VM_LOGE(...) ((void)0)
 #define VM_LOGV(...) ((void)0)
 #else
-#define VM_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "LianYu-VM", __VA_ARGS__)
-#define VM_LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, "LianYu-VM", __VA_ARGS__)
+#define VM_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "YuNian-VM", __VA_ARGS__)
+#define VM_LOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, "YuNian-VM", __VA_ARGS__)
 #endif
 
 // ═══════════════════════════════════════════════════════════
@@ -1311,7 +1311,7 @@ static volatile uint32_t g_vmp_fingerprint = 0;
    - Session instruction count (mod 256)
    CRC32 of these 3 fields is the fingerprint. */
 JNIEXPORT jint JNICALL
-Java_com_lianyu_ai_security_NativeBridge_nativeGetVmpFingerprint(
+Java_com_yunian_ai_security_NativeBridge_nativeGetVmpFingerprint(
     JNIEnv*, jclass) {
     return (jint)g_vmp_fingerprint;
 }

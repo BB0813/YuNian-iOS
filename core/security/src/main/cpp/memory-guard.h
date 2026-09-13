@@ -1,5 +1,5 @@
 /*
- * memory-guard.h — LianYu Memory Protection Layer
+ * memory-guard.h — YuNian Memory Protection Layer
  *
  * Protects sensitive memory regions from reading/dumping.
  * Designed for Android NDK with Linux kernel APIs.
@@ -14,8 +14,8 @@
  * Thread-safety: Not reentrant. Call from main thread only.
  */
 
-#ifndef LIANYU_MEMORY_GUARD_H
-#define LIANYU_MEMORY_GUARD_H
+#ifndef YUNIAN_MEMORY_GUARD_H
+#define YUNIAN_MEMORY_GUARD_H
 
 #include <cstdint>
 #include <cstddef>
@@ -120,4 +120,4 @@ void mg_ptrace_self_detach(void);
 }
 #endif
 
-#endif /* LIANYU_MEMORY_GUARD_H */
+#endif /* YUNIAN_MEMORY_GUARD_H */

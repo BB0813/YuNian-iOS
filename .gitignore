@@ -31,7 +31,7 @@ core/security/src/main/cpp/.backup_*/
 core/security/src/main/cpp/obj/
 app/src/main/obj/
 app/src/main/jniLibs/
-app/src/main/assets/lianyu_shell/
+app/src/main/assets/yunian_shell/
 *.o
 *.o.d
 linker.list

@@ -1,5 +1,5 @@
-#ifndef LIANYU_VM_ENGINE_H
-#define LIANYU_VM_ENGINE_H
+#ifndef YUNIAN_VM_ENGINE_H
+#define YUNIAN_VM_ENGINE_H
 
 #include <cstdint>
 #include <cstddef>
@@ -1590,4 +1590,4 @@ int vm_security_checkpoint(VMState* vm);
 }
 #endif
 
-#endif /* LIANYU_VM_ENGINE_H */
+#endif /* YUNIAN_VM_ENGINE_H */

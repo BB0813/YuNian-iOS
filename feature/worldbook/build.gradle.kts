@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.worldbook"
+    namespace = "com.yunian.ai.feature.worldbook"
     compileSdk = 35
 
     defaultConfig {
@@ -39,7 +39,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)

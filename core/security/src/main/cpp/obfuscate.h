@@ -1,4 +1,4 @@
-/* obfuscate.h — LianYu native code obfuscation macros
+/* obfuscate.h — YuNian native code obfuscation macros
  *
  * Provides compiler-independent obfuscation primitives that work with
  * any standard clang/LLVM (no OLLVM plugin required).
@@ -14,8 +14,8 @@
  * When OLLVM is available, add -mllvm -fla -mllvm -bcf -mllvm -sub in Android.mk.
  */
 
-#ifndef LIANYU_OBFUSCATE_H
-#define LIANYU_OBFUSCATE_H
+#ifndef YUNIAN_OBFUSCATE_H
+#define YUNIAN_OBFUSCATE_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -127,4 +127,4 @@ static inline void obf_blind_bytes(uint8_t* buf, size_t len, uint32_t seed) {
 }
 #endif
 
-#endif // LIANYU_OBFUSCATE_H
+#endif // YUNIAN_OBFUSCATE_H

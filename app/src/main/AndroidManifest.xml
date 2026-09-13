@@ -21,6 +21,7 @@
          预算，耗尽后 FGS 全部被杀且后台无法重启（权限无法解决）；specialUse 无系统时限。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"
@@ -40,6 +41,15 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+
+    <!-- 病娇模式：Android 11+ 包可见性。未声明 <queries> 时 getInstalledApplications()
+         只会返回本应用自身，导致已安装应用列表为空、病娇模式永远无法生成上下文提示。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <!-- 瑞幸咖啡：定位附近门店 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -64,7 +74,7 @@
         android:largeHeap="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LianYu"
+        android:theme="@style/Theme.YuNian"
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
 
@@ -84,7 +94,7 @@
 
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.lianyu.fileprovider"
+            android:authorities="${applicationId}.yunian.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true"
             tools:ignore="TypoInNamespace">
@@ -94,7 +104,7 @@
         </provider>
 
         <service
-            android:name="com.lianyu.ai.security.SService"
+            android:name="com.yunian.ai.security.SService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse"
@@ -105,7 +115,7 @@
         </service>
 
         <service
-            android:name="com.lianyu.ai.feature.qqbot.service.QQBotForegroundService"
+            android:name="com.yunian.ai.feature.qqbot.service.QQBotForegroundService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse"
@@ -116,7 +126,7 @@
         </service>
 
         <service
-            android:name="com.lianyu.ai.feature.notification.CompanionKeepAliveService"
+            android:name="com.yunian.ai.feature.notification.CompanionKeepAliveService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse"
@@ -134,12 +144,12 @@
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <receiver
-            android:name="com.lianyu.ai.KeepAliveAlarmReceiver"
+            android:name="com.yunian.ai.KeepAliveAlarmReceiver"
             android:enabled="true"
             android:exported="false" />
 
         <receiver
-            android:name="com.lianyu.ai.feature.notification.BootReceiver"
+            android:name="com.yunian.ai.feature.notification.BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -148,7 +158,7 @@
         </receiver>
 
         <receiver
-            android:name="com.lianyu.ai.security.SReceiver"
+            android:name="com.yunian.ai.security.SReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -160,14 +170,14 @@
             android:name=".security.SActivity"
             android:exported="true"
             android:hardwareAccelerated="true"
-            android:theme="@style/Theme.LianYu"
+            android:theme="@style/Theme.YuNian"
             android:windowSoftInputMode="adjustResize"/>
 
         <activity
             android:name=".MainActivity"
             android:exported="false"
             android:hardwareAccelerated="true"
-            android:theme="@style/Theme.LianYu"
+            android:theme="@style/Theme.YuNian"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize" />
 

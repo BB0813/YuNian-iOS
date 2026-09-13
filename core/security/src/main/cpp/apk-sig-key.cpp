@@ -33,7 +33,7 @@ static jboolean get_apk_signature_bytes(JNIEnv* env, jobject ctx,
     jclass pm_cls = env->GetObjectClass(pm);
     jmethodID get_pkg_info = env->GetMethodID(pm_cls, "getPackageInfo",
         "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;");
-    jstring pkg = env->NewStringUTF("com.lianyu.ai");
+    jstring pkg = env->NewStringUTF("com.yunian.ai");
     jobject pkg_info = env->CallObjectMethod(pm, get_pkg_info,
         pkg, (jint)0x00000040);
     env->DeleteLocalRef(pm_cls);

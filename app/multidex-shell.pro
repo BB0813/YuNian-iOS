@@ -1,31 +1,31 @@
-# Multi-dex keep file for LianYu One-Piece Shell
+# Multi-dex keep file for YuNian One-Piece Shell
 # Forces shell/security classes into the main DEX (classes.dex).
 # All other classes (business, UI, features) go to secondary DEX files.
 # Those secondary DEX files are then encrypted as shell payload.
 
 # Shell Application entry point
--keep class com.lianyu.ai.security.LianYuShellApplication { *; }
--keep class com.lianyu.ai.security.OnePieceShellGate { *; }
+-keep class com.yunian.ai.security.YuNianShellApplication { *; }
+-keep class com.yunian.ai.security.OnePieceShellGate { *; }
 
 # Security gates (G0 facade, CompositeVmpRuntime)
--keep class com.lianyu.ai.security.G0 { *; }
--keep class com.lianyu.ai.security.CompositeVmpRuntime { *; }
+-keep class com.yunian.ai.security.G0 { *; }
+-keep class com.yunian.ai.security.CompositeVmpRuntime { *; }
 
 # DEX fragment loader
--keep class com.lianyu.ai.security.DexFragmentLoader { *; }
+-keep class com.yunian.ai.security.DexFragmentLoader { *; }
 
 # KMS (native crypto)
--keep class com.lianyu.ai.security.KmsProvider { *; }
--keep class com.lianyu.ai.security.NativeBridge { *; }
+-keep class com.yunian.ai.security.KmsProvider { *; }
+-keep class com.yunian.ai.security.NativeBridge { *; }
 
 # Security state and guard
--keep class com.lianyu.ai.security.SecurityState { *; }
--keep class com.lianyu.ai.security.SecurityGuard { *; }
+-keep class com.yunian.ai.security.SecurityState { *; }
+-keep class com.yunian.ai.security.SecurityGuard { *; }
 
 # Manifest integrity (AEAD)
--keep class com.lianyu.ai.security.TinkAeadProvider { *; }
+-keep class com.yunian.ai.security.TinkAeadProvider { *; }
 
 # Attestation / audit
--keep class com.lianyu.ai.security.HardwareKeyAttestor { *; }
--keep class com.lianyu.ai.security.AttestationDataParser { *; }
--keep class com.lianyu.ai.security.SecureStrings { *; }
+-keep class com.yunian.ai.security.HardwareKeyAttestor { *; }
+-keep class com.yunian.ai.security.AttestationDataParser { *; }
+-keep class com.yunian.ai.security.SecureStrings { *; }

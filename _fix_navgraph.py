@@ -1,6 +1,6 @@
 import re, os
 
-path = r'C:\Users\27194\Desktop\LianYu\app\src\main\java\com\lianyu\ai\MainNavGraph.kt'
+path = r'C:\Users\27194\Desktop\LianYu\app\src\main\java\com\yunian\ai\MainNavGraph.kt'
 with open(path, 'r', encoding='utf-8') as f:
     content = f.read()
 

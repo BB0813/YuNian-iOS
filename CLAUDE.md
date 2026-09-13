@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LianYu (恋语) is an Android AI companion app built with Kotlin and Jetpack Compose. It uses a **feature-based modular architecture** with 16 Gradle modules: 1 `:app` entry, 9 `feature:*` modules, 6 `core:*` modules, and 1 `:shell` JVM test module.
+YuNian (恋语) is an Android AI companion app built with Kotlin and Jetpack Compose. It uses a **feature-based modular architecture** with 16 Gradle modules: 1 `:app` entry, 9 `feature:*` modules, 6 `core:*` modules, and 1 `:shell` JVM test module.
 
 ## Build Commands
 
@@ -12,7 +12,7 @@ LianYu (恋语) is an Android AI companion app built with Kotlin and Jetpack Com
 # Debug build
 ./gradlew assembleDebug
 
-# Release build (requires release.keystore and env vars LIANYU_STORE_PASSWORD / LIANYU_KEY_PASSWORD)
+# Release build (requires release.keystore and env vars YUNIAN_STORE_PASSWORD / YUNIAN_KEY_PASSWORD)
 ./gradlew assembleRelease
 
 # Check module dependencies
@@ -37,7 +37,7 @@ Gradle wrapper uses a Tencent mirror (`mirrors.cloud.tencent.com/gradle/gradle-9
 ```
 
 **Critical rules:**
-- `:app` is lightweight — only `LianYuApplication`, `MainActivity`, Compose navigation routes, and `ServiceRegistry` bindings. No business logic, ViewModels, or Repositories.
+- `:app` is lightweight — only `YuNianApplication`, `MainActivity`, Compose navigation routes, and `ServiceRegistry` bindings. No business logic, ViewModels, or Repositories.
 - Feature modules **must not** depend on other feature modules. Cross-feature communication uses `ServiceRegistry` via `core:domain` interfaces, or `core:database` for data.
 - Core modules **must not** depend on feature modules.
 - `core:domain` has zero dependencies — it defines only interfaces and data classes.
@@ -50,7 +50,7 @@ Gradle wrapper uses a Tencent mirror (`mirrors.cloud.tencent.com/gradle/gradle-9
 1. Create module directory under `core/` or `feature/` with `build.gradle.kts`.
 2. **Register it** in `settings.gradle.kts` (`include(":feature:newfeature")`).
 3. **Add dependency** in `app/build.gradle.kts`.
-4. **Add navigation route** in `app/src/main/java/com/lianyu/ai/MainActivity.kt`.
+4. **Add navigation route** in `app/src/main/java/com/yunian/ai/MainActivity.kt`.
 
 ### Navigation Routes
 
@@ -80,7 +80,7 @@ Pass arguments via navigation path parameters, not global state.
 ### Cross-Feature Communication (`core:domain`)
 
 - Shared interfaces (`LocalModelProvider`, `UserProfileProvider`, `CompanionProvider`) — consumed by feature modules.
-- `ServiceRegistry` in `app/LianYuApplication.kt` binds implementations, eliminating feature→feature dependencies.
+- `ServiceRegistry` in `app/YuNianApplication.kt` binds implementations, eliminating feature→feature dependencies.
 
 ### Network (`core:network`)
 
@@ -118,7 +118,7 @@ Pass arguments via navigation path parameters, not global state.
 - **JDK**: 17 (project points to `D:\\and studio\\jbr` on Windows)
 - **AGP**: 9.2.1
 - **Gradle**: 9.4.1
-- Release signing config expects `release.keystore` in the project root and environment variables `LIANYU_STORE_PASSWORD` / `LIANYU_KEY_PASSWORD`.
+- Release signing config expects `release.keystore` in the project root and environment variables `YUNIAN_STORE_PASSWORD` / `YUNIAN_KEY_PASSWORD`.
 - Version catalog is in `gradle/libs.versions.toml`.
 
 ### Environment Constraints (Do Not Modify)

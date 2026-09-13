@@ -30,12 +30,12 @@
     <string name="settings_category_tools_desc">Luckin Coffee and other tools</string>
     <string name="settings_category_permissions">Permissions</string>
     <string name="settings_category_permissions_desc">Auto-start, battery whitelist, notifications</string>
-    <string name="settings_category_about">About LianYu</string>
+    <string name="settings_category_about">About YuNian</string>
     <string name="settings_category_about_desc">Check for updates</string>
     <string name="check_new_version">Check for Updates</string>
     <string name="check_new_version_desc">Check available updates</string>
     <string name="about_app">About</string>
-    <string name="about_app_desc">LianYu - Your AI Virtual Companion</string>
+    <string name="about_app_desc">YuNian - Your AI Virtual Companion</string>
     <string name="battery_whitelist">Battery Optimization</string>
     <string name="battery_whitelist_desc">Ensure background messages work</string>
     <string name="data_backup">Data Backup</string>
@@ -63,14 +63,14 @@
     <string name="device_id_hint">Each device has a unique ID. Once bound, cannot be used on other devices.</string>
     <string name="back">Back</string>
     <string name="confirm_bind">Confirm Binding</string>
-    <string name="version_info">LianYu v1.8 · For fan group only</string>
+    <string name="version_info">YuNian v1.8 · For fan group only</string>
 
     <string name="about_title">About</string>
-    <string name="app_brand">LianYu</string>
-    <string name="app_slogan">LianYu - Your AI Virtual Companion</string>
+    <string name="app_brand">YuNian</string>
+    <string name="app_slogan">YuNian - Your AI Virtual Companion</string>
     <string name="version">Version 1.8</string>
-    <string name="about_desc_title">About LianYu</string>
-    <string name="about_desc">LianYu is an AI virtual companion chat app based on advanced LLM technology.</string>
+    <string name="about_desc_title">About YuNian</string>
+    <string name="about_desc">YuNian is an AI virtual companion chat app based on advanced LLM technology.</string>
     <string name="developer">Developer</string>
     <string name="developer_douyin">TikTok: 我想天天开心</string>
     <string name="developer_hint">Follow for more AI app updates</string>
@@ -114,7 +114,7 @@
     <string name="originos_adaption_exact_alarm">Exact Alarm Permission</string>
     <string name="originos_adaption_exact_alarm_desc">Required for restart fallback after foreground-service timeout</string>
     <string name="originos_adaption_guide_title">Settings Path Reference</string>
-    <string name="originos_adaption_guide_footer">Tip: Some options may differ across OriginOS versions. If a tap does nothing, open Settings → Apps → LianYu manually.</string>
+    <string name="originos_adaption_guide_footer">Tip: Some options may differ across OriginOS versions. If a tap does nothing, open Settings → Apps → YuNian manually.</string>
 
     <!-- Role Selection & Management -->
     <string name="role_selection_title">Choose Your AI Companion</string>

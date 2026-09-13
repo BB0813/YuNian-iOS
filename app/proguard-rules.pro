@@ -1,5 +1,5 @@
 # ================================================================
-# LianYu ProGuard/R8 Rules — Production Release
+# YuNian ProGuard/R8 Rules — Production Release
 # ================================================================
 
 # -overloadaggressively  # REMOVED: breaks Kotlin metadata → R8 produces invalid bytecode → SIGABRT
@@ -11,8 +11,8 @@
 -packageobfuscationdictionary proguard-dictionary.txt
 
 # Prevent -repackageclasses from moving Dex2C-whitelisted classes out of
-# com.lianyu.ai.security — transpiler matches by FQN (com.lianyu.ai.security.KmsProvider.decryptWithMetadata)
--keeppackagenames com.lianyu.ai.security
+# com.yunian.ai.security — transpiler matches by FQN (com.yunian.ai.security.KmsProvider.decryptWithMetadata)
+-keeppackagenames com.yunian.ai.security
 
 # Kotlin metadata: R8 must be able to parse these for correct optimization
 -keep class kotlin.Metadata { *; }
@@ -21,69 +21,69 @@
 
 # One-Piece Shell: only keep JNI/manifest entry classes whose names must be stable.
 # All other security/* classes are now obfuscated — their names are not visible in DEX strings.
--keep class com.lianyu.ai.security.NativeBridge { *; }
--keep class com.lianyu.ai.security.KmsProvider { *; }
--keep class com.lianyu.ai.security.StaticApkShell { *; }
--keep class com.lianyu.ai.security.LianYuShellApplication { *; }
--keep class com.lianyu.ai.security.G0 { *; }
--keep class com.lianyu.ai.security.SecurityState { *; }
--keep class com.lianyu.ai.security.SActivity { *; }
--keep class com.lianyu.ai.security.SReceiver { *; }
--keep class com.lianyu.ai.security.SService { *; }
--keep class com.lianyu.ai.security.VmpDex2cDispatcher { *; }
--keep class com.lianyu.ai.security.SecurityOrchestrator { *; }
--keep class com.lianyu.ai.security.Sm4Cipher { *; }
--keep class com.lianyu.ai.security.CompositeVmpRuntime { *; }
--keep class com.lianyu.ai.security.SecurityGuard { *; }
+-keep class com.yunian.ai.security.NativeBridge { *; }
+-keep class com.yunian.ai.security.KmsProvider { *; }
+-keep class com.yunian.ai.security.StaticApkShell { *; }
+-keep class com.yunian.ai.security.YuNianShellApplication { *; }
+-keep class com.yunian.ai.security.G0 { *; }
+-keep class com.yunian.ai.security.SecurityState { *; }
+-keep class com.yunian.ai.security.SActivity { *; }
+-keep class com.yunian.ai.security.SReceiver { *; }
+-keep class com.yunian.ai.security.SService { *; }
+-keep class com.yunian.ai.security.VmpDex2cDispatcher { *; }
+-keep class com.yunian.ai.security.SecurityOrchestrator { *; }
+-keep class com.yunian.ai.security.Sm4Cipher { *; }
+-keep class com.yunian.ai.security.CompositeVmpRuntime { *; }
+-keep class com.yunian.ai.security.SecurityGuard { *; }
 # Thin-shell Java entry reflects these names after InMemoryDexClassLoader merge.
 # Kotlin `object` methods are instance methods on INSTANCE (not @JvmStatic).
--keepclassmembers class com.lianyu.ai.security.G0 {
-    public static final com.lianyu.ai.security.G0 INSTANCE;
+-keepclassmembers class com.yunian.ai.security.G0 {
+    public static final com.yunian.ai.security.G0 INSTANCE;
     public <methods>;
 }
--keepclassmembers class com.lianyu.ai.security.SecurityState {
-    public static final com.lianyu.ai.security.SecurityState INSTANCE;
+-keepclassmembers class com.yunian.ai.security.SecurityState {
+    public static final com.yunian.ai.security.SecurityState INSTANCE;
     public <methods>;
 }
 
 # P2-15: 阻止 R8 内联 Dex2C 白名单方法，确保转译器能找到字节码
 # 使用 <methods> 匹配所有方法（ProGuard 不支持 *** 通配符）
--keepclassmembers class com.lianyu.ai.security.KmsProvider {
+-keepclassmembers class com.yunian.ai.security.KmsProvider {
     <methods>;
 }
--keepclassmembers class com.lianyu.ai.security.SecurityOrchestrator {
+-keepclassmembers class com.yunian.ai.security.SecurityOrchestrator {
     <methods>;
 }
--keepclassmembers class com.lianyu.ai.security.Sm4Cipher {
+-keepclassmembers class com.yunian.ai.security.Sm4Cipher {
     <methods>;
 }
--keepclassmembers class com.lianyu.ai.security.CompositeVmpRuntime {
+-keepclassmembers class com.yunian.ai.security.CompositeVmpRuntime {
     <methods>;
 }
--keepclassmembers class com.lianyu.ai.security.SecurityGuard {
+-keepclassmembers class com.yunian.ai.security.SecurityGuard {
     <methods>;
 }
--keepclassmembers class com.lianyu.ai.security.VmpDex2cDispatcher {
+-keepclassmembers class com.yunian.ai.security.VmpDex2cDispatcher {
     <methods>;
 }
 
 # Strip Android logging in release builds.
 # EXCEPTION: SecureLog.critical() uses Log.wtf — keep the class intact.
--keep class com.lianyu.ai.common.SecureLog { *; }
--keep class com.lianyu.ai.common.RemoteKeyProvider { *; }
--keep class com.lianyu.ai.network.CertificatePins { *; }
+-keep class com.yunian.ai.common.SecureLog { *; }
+-keep class com.yunian.ai.common.RemoteKeyProvider { *; }
+-keep class com.yunian.ai.network.CertificatePins { *; }
 
 # 🔒 ServiceRegistry: reflection-based register()/get() — must survive obfuscation
--keep class com.lianyu.ai.domain.ServiceRegistry { *; }
--keepclassmembers class com.lianyu.ai.domain.ServiceRegistry {
+-keep class com.yunian.ai.domain.ServiceRegistry { *; }
+-keepclassmembers class com.yunian.ai.domain.ServiceRegistry {
     public static <methods>;
 }
 
 # 🔒 feature:notification: CompanionKeepAliveService + BootReceiver declared in AndroidManifest
--keep class com.lianyu.ai.feature.notification.** { *; }
+-keep class com.yunian.ai.feature.notification.** { *; }
 
-# 🔒 Push: PushManager imported in LianYuApplication, routes to vendor Push SDKs
--keep class com.lianyu.ai.push.PushManager { *; }
+# 🔒 Push: PushManager imported in YuNianApplication, routes to vendor Push SDKs
+-keep class com.yunian.ai.push.PushManager { *; }
 
 # kotlinx.serialization: preserve serializers for reflection-based adapter lookup
 -keepattributes *Annotation*, InnerClasses, EnclosingMethod
@@ -94,11 +94,11 @@
 -keepclasseswithmembers class kotlinx.serialization.json.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
--keep,includedescriptorclasses class com.lianyu.ai.**$$serializer { *; }
--keepclassmembers class com.lianyu.ai.** {
+-keep,includedescriptorclasses class com.yunian.ai.**$$serializer { *; }
+-keepclassmembers class com.yunian.ai.** {
     *** Companion;
 }
--keepclasseswithmembers class com.lianyu.ai.** {
+-keepclasseswithmembers class com.yunian.ai.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
@@ -106,27 +106,26 @@
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);
     public static int d(...);
-    public static int i(...);
     public static int w(...);
     public static int e(...);
 }
 
 # Android manifest entry points must stay loadable by class name.
 # R8 updates manifest class references when obfuscation renames them.
--keep class com.lianyu.ai.LianYuApplication { *; }
--keep class com.lianyu.ai.MainActivity { *; }
--keep class com.lianyu.ai.security.NativeBridge { *; }
+-keep class com.yunian.ai.YuNianApplication { *; }
+-keep class com.yunian.ai.MainActivity { *; }
+-keep class com.yunian.ai.security.NativeBridge { *; }
 -keep,allowobfuscation class * extends android.app.Service { *; }
 -keep,allowobfuscation class * extends android.content.BroadcastReceiver { *; }
 -keep,allowobfuscation class * extends androidx.work.Worker { *; }
 -keep,allowobfuscation class * extends androidx.work.CoroutineWorker { *; }
 
 # JNI entry points: NativeBridge is registered by native code via
-# FindClass("com/lianyu/ai/security/NativeBridge") + RegisterNatives, and
-# KmsProvider uses Java_com_lianyu_ai_security_KmsProvider_* exported JNI
+# FindClass("com/yunian/ai/security/NativeBridge") + RegisterNatives, and
+# KmsProvider uses Java_com_yunian_ai_security_KmsProvider_* exported JNI
 # symbols. Keep class names, member names, and descriptors intact.
--keep,includedescriptorclasses class com.lianyu.ai.security.NativeBridge { *; }
--keep,includedescriptorclasses class com.lianyu.ai.security.KmsProvider { *; }
+-keep,includedescriptorclasses class com.yunian.ai.security.NativeBridge { *; }
+-keep,includedescriptorclasses class com.yunian.ai.security.KmsProvider { *; }
 
 # ================================================================
 # Google AI Edge LiteRT-LM (litertlm-android) — CRITICAL
@@ -161,9 +160,9 @@
 -keep,includedescriptorclasses class com.k2fsa.sherpa.onnx.** { *; }
 
 # Room: keep annotations and generated metadata, but allow class/interface names to be obfuscated.
--keep,allowobfuscation class com.lianyu.ai.database.AppDatabase { *; }
--keep,allowobfuscation @androidx.room.Entity class com.lianyu.ai.database.model.** { *; }
--keep,allowobfuscation interface com.lianyu.ai.database.dao.** { *; }
+-keep,allowobfuscation class com.yunian.ai.database.AppDatabase { *; }
+-keep,allowobfuscation @androidx.room.Entity class com.yunian.ai.database.model.** { *; }
+-keep,allowobfuscation interface com.yunian.ai.database.dao.** { *; }
 -keep class androidx.room.** { *; }
 -keep @androidx.room.Dao interface *
 -keepclassmembers,allowobfuscation class * {
@@ -173,9 +172,9 @@
 -dontwarn androidx.room.paging.**
 
 # Retrofit interfaces and HTTP annotations.
--keep,allowobfuscation interface com.lianyu.ai.network.OpenAiApi { *; }
--keep,allowobfuscation interface com.lianyu.ai.network.AnthropicApi { *; }
--keep,allowobfuscation interface com.lianyu.ai.network.GeminiApi { *; }
+-keep,allowobfuscation interface com.yunian.ai.network.OpenAiApi { *; }
+-keep,allowobfuscation interface com.yunian.ai.network.AnthropicApi { *; }
+-keep,allowobfuscation interface com.yunian.ai.network.GeminiApi { *; }
 -keepclassmembers,allowshrinking,allowobfuscation interface * {
     @retrofit2.http.* <methods>;
 }
@@ -196,7 +195,6 @@
 }
 
 # Third-party SDKs that use reflection/native loading.
--keep class com.github.wechat.ilink.sdk.** { *; }
 -keep class com.fasterxml.jackson.** { *; }
 -dontwarn com.fasterxml.jackson.**
 -dontwarn org.slf4j.**
@@ -224,13 +222,13 @@
 
 # WeChat module — keep initialization path intact; R8 aggressive optimizations
 # (mergeinterfacesaggressively/overloadaggressively) corrupt static initializers
-# in these classes, causing SIGABRT on startup (LianYuApplication.initWeChat).
--keep class com.lianyu.ai.feature.wechat.** { *; }
--keep class com.lianyu.ai.feature.wechat.data.** { *; }
--keep class com.lianyu.ai.feature.wechat.service.** { *; }
+# in these classes, causing SIGABRT on startup (YuNianApplication.initWeChat).
+-keep class com.yunian.ai.feature.wechat.** { *; }
+-keep class com.yunian.ai.feature.wechat.data.** { *; }
+-keep class com.yunian.ai.feature.wechat.service.** { *; }
 
 # DEX padding — must survive R8 to push method count past 64K, forcing multi-dex
--keep class com.lianyu.ai.internal.DexPadding { *; }
+-keep class com.yunian.ai.internal.DexPadding { *; }
 
 # Android framework conventions.
 -keepclassmembers class * implements android.os.Parcelable {
@@ -239,7 +237,7 @@
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
--keep class com.lianyu.ai.R$* { *; }
+-keep class com.yunian.ai.R$* { *; }
 
 # Enum converters need value lookup; names are persisted in Room values.
 -keepclassmembers enum * {
@@ -268,14 +266,14 @@
 # ═══════════════════════════════════════════════════════════════
 
 # Keep shell bootstrapping classes (in shell DEX, referenced by manifest)
--keep class com.lianyu.ai.security.StaticApkShell { *; }
--keep class com.lianyu.ai.security.SActivity { *; }
--keep class com.lianyu.ai.security.MethodRecoveryEngine { *; }
--keep class com.lianyu.ai.security.G0 { *; }
+-keep class com.yunian.ai.security.StaticApkShell { *; }
+-keep class com.yunian.ai.security.SActivity { *; }
+-keep class com.yunian.ai.security.MethodRecoveryEngine { *; }
+-keep class com.yunian.ai.security.G0 { *; }
 
 # Keep MainActivity (manifest LAUNCHER → must be resolvable by ClassLoader)
--keep class com.lianyu.ai.MainActivity { *; }
--keep class com.lianyu.ai.LianYuApplication { *; }
+-keep class com.yunian.ai.MainActivity { *; }
+-keep class com.yunian.ai.YuNianApplication { *; }
 
 # Keep all native method declarations
 -keepclasseswithmembernames class * {

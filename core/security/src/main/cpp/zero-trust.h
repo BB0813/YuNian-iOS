@@ -1,8 +1,8 @@
 /*
- * zero-trust.h — LianYu Zero Trust Framework
+ * zero-trust.h — YuNian Zero Trust Framework
  *
  * Policy Decision Point (PDP) and Policy Enforcement Point (PEP)
- * for the LianYu Android security subsystem.
+ * for the YuNian Android security subsystem.
  *
  * This header defines the interface for:
  *   - Trust score evaluation
@@ -17,8 +17,8 @@
  * No mutexes on the fast path.
  */
 
-#ifndef LIANYU_ZERO_TRUST_H
-#define LIANYU_ZERO_TRUST_H
+#ifndef YUNIAN_ZERO_TRUST_H
+#define YUNIAN_ZERO_TRUST_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -113,7 +113,7 @@ typedef enum {
  * ================================================================== */
 
 /**
- * LianYu module identifiers for micro-segmentation.
+ * YuNian module identifiers for micro-segmentation.
  * Used by PEP to determine inter-module access policies.
  */
 typedef enum {
@@ -154,7 +154,7 @@ typedef enum {
 
 /**
  * Initialize the zero-trust system.
- * Must be called once at app startup (LianYuApplication.onCreate).
+ * Must be called once at app startup (YuNianApplication.onCreate).
  * Sets initial state to ZT_BREACH (default deny) until evaluate() passes.
  *
  * Thread-safety: NOT thread-safe. Call once from main thread.
@@ -414,4 +414,4 @@ void zero_trust_audit_log(const char* level_str, int event_code, const char* mes
 } /* extern "C" */
 #endif
 
-#endif /* LIANYU_ZERO_TRUST_H */
+#endif /* YUNIAN_ZERO_TRUST_H */

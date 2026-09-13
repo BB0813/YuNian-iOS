@@ -44,7 +44,7 @@
 #include <android/log.h>
 #include <unistd.h>
 
-#define WB_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "LianYuWhiteBox", __VA_ARGS__)
+#define WB_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "YuNianWhiteBox", __VA_ARGS__)
 
 /* Integrity state */
 static volatile int g_wb_inited = 0;

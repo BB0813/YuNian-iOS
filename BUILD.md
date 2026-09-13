@@ -1,12 +1,12 @@
-# LianYu Ultimate Shell — 构建与架构文档
+# YuNian Ultimate Shell — 构建与架构文档
 
 ## 概述
 
-LianYu Ultimate Shell 是一套 Android APK 加固系统，通过**纯 Java 壳 + Native SO + VMP 虚拟化**实现对业务逻辑的全方位保护。
+YuNian Ultimate Shell 是一套 Android APK 加固系统，通过**纯 Java 壳 + Native SO + VMP 虚拟化**实现对业务逻辑的全方位保护。
 
 ```
 ┌─────────────────────────────────────────────┐
-│  LianYu-Release.apk (76MB)                  │
+│  YuNian-Release.apk (76MB)                  │
 │                                             │
 │  ┌─────────────────────────────────────┐    │
 │  │ classes.dex (7KB)                    │    │
@@ -116,7 +116,7 @@ Gradle APK
     apksigner sign (V3 签名)
               │
               ▼
-    LianYu-release.apk ✓
+    YuNian-release.apk ✓
 ```
 
 ---
@@ -255,7 +255,7 @@ MainActivity.onCreate()
 ## 目录结构
 
 ```
-LianYu/
+YuNian/
 ├── tools/
 │   ├── build.py                 ← 一键构建脚本
 │   ├── build_ultimate_shell.py  ← 旧版（兼容）
@@ -269,7 +269,7 @@ LianYu/
 │   │   ├── vm-engine.cpp        ← VMP 引擎
 │   │   ├── native-bridge.cpp    ← JNI 桥
 │   │   └── ...
-│   └── java/com/lianyu/ai/security/
+│   └── java/com/yunian/ai/security/
 │       ├── SecurityGuard.kt     ← 安全门
 │       ├── HardwareKeyAttestation.kt ← TEE
 │       └── ...

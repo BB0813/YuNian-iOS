@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 LianYu 中实现全局病娇模式，通过读取本地应用使用统计与已安装应用列表，在单聊和群聊中按概率注入病娇语气上下文。
+**Goal:** 在 YuNian 中实现全局病娇模式，通过读取本地应用使用统计与已安装应用列表，在单聊和群聊中按概率注入病娇语气上下文。
 
 **架构：** `YandereModeManager` 统一负责数据收集、缓存、Prompt 构建，放在 `core:common` 供 settings/chat/groupchat 消费；`AppSettingsStore` 存储开关与细分配置；`feature:settings` 提供实验性功能入口与病娇模式设置页；`ChatViewModel` / `GroupChatViewModel` 在构建系统 Prompt 时注入病娇上下文。
 
@@ -14,17 +14,17 @@
 
 | 文件 | 操作 | 职责 |
 |------|------|------|
-| `core/common/src/main/java/com/lianyu/ai/common/AppSettingsStore.kt` | 修改 | 新增病娇模式 DataStore Key 与读写方法 |
-| `core/common/src/main/java/com/lianyu/ai/common/YandereModeManager.kt` | 新建 | 数据收集、缓存、Prompt 构建、触发控制 |
+| `core/common/src/main/java/com/yunian/ai/common/AppSettingsStore.kt` | 修改 | 新增病娇模式 DataStore Key 与读写方法 |
+| `core/common/src/main/java/com/yunian/ai/common/YandereModeManager.kt` | 新建 | 数据收集、缓存、Prompt 构建、触发控制 |
 | `feature/settings/src/main/res/values/strings.xml` | 修改 | 新增病娇模式相关文案 |
-| `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/ExperimentalFeaturesScreen.kt` | 新建 | 实验性功能列表页 |
-| `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/YandereModeScreen.kt` | 新建 | 病娇模式设置页 |
-| `app/src/main/java/com/lianyu/ai/MainRoute.kt` | 修改 | 新增 `experimental_features`、`yandere_mode` 路由 |
-| `app/src/main/java/com/lianyu/ai/MainScreen.kt` | 修改 | 注册新路由并传入 ViewModel/Manager |
-| `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/GeneralSettingsScreen.kt` | 修改 | 增加「实验性功能」入口 |
-| `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt` | 修改 | 在本地模型与远程模型 Prompt 构建处注入病娇上下文 |
-| `feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/GroupChatViewModel.kt` | 修改 | 在群聊 Prompt 构建处注入病娇上下文 |
-| `app/src/main/java/com/lianyu/ai/LianYuApplication.kt` | 修改 | 注册 `YandereModeManager` 单例 |
+| `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/ExperimentalFeaturesScreen.kt` | 新建 | 实验性功能列表页 |
+| `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/YandereModeScreen.kt` | 新建 | 病娇模式设置页 |
+| `app/src/main/java/com/yunian/ai/MainRoute.kt` | 修改 | 新增 `experimental_features`、`yandere_mode` 路由 |
+| `app/src/main/java/com/yunian/ai/MainScreen.kt` | 修改 | 注册新路由并传入 ViewModel/Manager |
+| `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/GeneralSettingsScreen.kt` | 修改 | 增加「实验性功能」入口 |
+| `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt` | 修改 | 在本地模型与远程模型 Prompt 构建处注入病娇上下文 |
+| `feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/GroupChatViewModel.kt` | 修改 | 在群聊 Prompt 构建处注入病娇上下文 |
+| `app/src/main/java/com/yunian/ai/YuNianApplication.kt` | 修改 | 注册 `YandereModeManager` 单例 |
 | `app/src/main/AndroidManifest.xml` | 修改 | 声明 `PACKAGE_USAGE_STATS` 与 `queries` |
 
 ---
@@ -32,7 +32,7 @@
 ## Task 1: 扩展 AppSettingsStore
 
 **Files:**
-- Modify: `core/common/src/main/java/com/lianyu/ai/common/AppSettingsStore.kt`
+- Modify: `core/common/src/main/java/com/yunian/ai/common/AppSettingsStore.kt`
 
 - [ ] **Step 1: 在 companion object 中新增 Key 与默认值**
 
@@ -86,7 +86,7 @@ suspend fun setYandereModeInstalledApps(enabled: Boolean) {
 - [ ] **Step 3: 提交**
 
 ```bash
-git add core/common/src/main/java/com/lianyu/ai/common/AppSettingsStore.kt
+git add core/common/src/main/java/com/yunian/ai/common/AppSettingsStore.kt
 git commit -m "feat(yandere): add DataStore prefs for yandere mode"
 ```
 
@@ -95,12 +95,12 @@ git commit -m "feat(yandere): add DataStore prefs for yandere mode"
 ## Task 2: 创建 YandereModeManager
 
 **Files:**
-- Create: `core/common/src/main/java/com/lianyu/ai/common/YandereModeManager.kt`
+- Create: `core/common/src/main/java/com/yunian/ai/common/YandereModeManager.kt`
 
 - [ ] **Step 1: 创建数据类与 Manager 骨架**
 
 ```kotlin
-package com.lianyu.ai.common
+package com.yunian.ai.common
 
 import android.app.AppOpsManager
 import android.app.usage.UsageStatsManager
@@ -339,7 +339,7 @@ class YandereModeManager(private val context: Context) {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add core/common/src/main/java/com/lianyu/ai/common/YandereModeManager.kt
+git add core/common/src/main/java/com/yunian/ai/common/YandereModeManager.kt
 git commit -m "feat(yandere): add YandereModeManager for usage stats and prompt"
 ```
 
@@ -419,14 +419,14 @@ git commit -m "feat(yandere): add yandere mode string resources"
 ## Task 5: 创建 ExperimentalFeaturesScreen
 
 **Files:**
-- Create: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/ExperimentalFeaturesScreen.kt`
+- Create: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/ExperimentalFeaturesScreen.kt`
 
 - [ ] **Step 1: 实现实验性功能列表页**
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
 
-package com.lianyu.ai.feature.settings.ui.screen
+package com.yunian.ai.feature.settings.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -466,7 +466,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.lianyu.ai.feature.settings.R
+import com.yunian.ai.feature.settings.R
 
 @Composable
 fun ExperimentalFeaturesScreen(
@@ -601,7 +601,7 @@ private fun FeatureCard(
 - [ ] **Step 2: 提交**
 
 ```bash
-git add feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/ExperimentalFeaturesScreen.kt
+git add feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/ExperimentalFeaturesScreen.kt
 git commit -m "feat(yandere): add ExperimentalFeaturesScreen"
 ```
 
@@ -610,14 +610,14 @@ git commit -m "feat(yandere): add ExperimentalFeaturesScreen"
 ## Task 6: 创建 YandereModeScreen
 
 **Files:**
-- Create: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/YandereModeScreen.kt`
+- Create: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/YandereModeScreen.kt`
 
 - [ ] **Step 1: 实现病娇模式设置页**
 
 ```kotlin
 @file:OptIn(ExperimentalMaterial3Api::class)
 
-package com.lianyu.ai.feature.settings.ui.screen
+package com.yunian.ai.feature.settings.ui.screen
 
 import android.content.Intent
 import android.net.Uri
@@ -673,9 +673,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.lianyu.ai.common.AppSettingsStore
-import com.lianyu.ai.common.YandereModeManager
-import com.lianyu.ai.feature.settings.R
+import com.yunian.ai.common.AppSettingsStore
+import com.yunian.ai.common.YandereModeManager
+import com.yunian.ai.feature.settings.R
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -1154,7 +1154,7 @@ private fun formatDuration(millis: Long): String {
 - [ ] **Step 2: 提交**
 
 ```bash
-git add feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/YandereModeScreen.kt
+git add feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/YandereModeScreen.kt
 git commit -m "feat(yandere): add YandereModeScreen"
 ```
 
@@ -1163,7 +1163,7 @@ git commit -m "feat(yandere): add YandereModeScreen"
 ## Task 7: 新增路由
 
 **Files:**
-- Modify: `app/src/main/java/com/lianyu/ai/MainRoute.kt`
+- Modify: `app/src/main/java/com/yunian/ai/MainRoute.kt`
 
 - [ ] **Step 1: 在 MainRoute 中追加两个路由**
 
@@ -1186,7 +1186,7 @@ route == "yandere_mode" -> YandereMode
 - [ ] **Step 3: 提交**
 
 ```bash
-git add app/src/main/java/com/lianyu/ai/MainRoute.kt
+git add app/src/main/java/com/yunian/ai/MainRoute.kt
 git commit -m "feat(yandere): add experimental features and yandere mode routes"
 ```
 
@@ -1195,8 +1195,8 @@ git commit -m "feat(yandere): add experimental features and yandere mode routes"
 ## Task 8: 注册导航并添加通用设置入口
 
 **Files:**
-- Modify: `app/src/main/java/com/lianyu/ai/MainScreen.kt`
-- Modify: `feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/GeneralSettingsScreen.kt`
+- Modify: `app/src/main/java/com/yunian/ai/MainScreen.kt`
+- Modify: `feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/GeneralSettingsScreen.kt`
 
 ### 8.1 MainScreen.kt
 
@@ -1205,7 +1205,7 @@ git commit -m "feat(yandere): add experimental features and yandere mode routes"
 在 imports 区域添加：
 
 ```kotlin
-import com.lianyu.ai.common.YandereModeManager
+import com.yunian.ai.common.YandereModeManager
 ```
 
 - [ ] **Step 2: 在 NavHost 中注册新路由**
@@ -1221,7 +1221,7 @@ composable(MainRoute.ExperimentalFeatures.route) {
 }
 composable(MainRoute.YandereMode.route) {
     val yandereModeManager = remember {
-        com.lianyu.ai.domain.ServiceRegistry.getOrThrow(YandereModeManager::class.java)
+        com.yunian.ai.domain.ServiceRegistry.getOrThrow(YandereModeManager::class.java)
     }
     YandereModeScreen(
         onNavigateBack = { navController.popBackStack() },
@@ -1233,7 +1233,7 @@ composable(MainRoute.YandereMode.route) {
 - [ ] **Step 3: 提交**
 
 ```bash
-git add app/src/main/java/com/lianyu/ai/MainScreen.kt
+git add app/src/main/java/com/yunian/ai/MainScreen.kt
 git commit -m "feat(yandere): register experimental features and yandere mode navigation"
 ```
 
@@ -1277,7 +1277,7 @@ composable(MainRoute.GeneralSettings.route) {
 - [ ] **Step 7: 提交**
 
 ```bash
-git add feature/settings/src/main/java/com/lianyu/ai/feature/settings/ui/screen/GeneralSettingsScreen.kt app/src/main/java/com/lianyu/ai/MainScreen.kt
+git add feature/settings/src/main/java/com/yunian/ai/feature/settings/ui/screen/GeneralSettingsScreen.kt app/src/main/java/com/yunian/ai/MainScreen.kt
 git commit -m "feat(yandere): add experimental features entry in general settings"
 ```
 
@@ -1286,14 +1286,14 @@ git commit -m "feat(yandere): add experimental features entry in general setting
 ## Task 9: 在 ChatViewModel 注入病娇 Prompt
 
 **Files:**
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt`
 
 - [ ] **Step 1: 导入 YandereModeManager 与 AppSettingsStore 方法**
 
 确认已有 `AppSettingsStore` 导入。添加：
 
 ```kotlin
-import com.lianyu.ai.common.YandereModeManager
+import com.yunian.ai.common.YandereModeManager
 ```
 
 - [ ] **Step 2: 在 ChatViewModel 中获取 YandereModeManager**
@@ -1306,7 +1306,7 @@ private val yandereModeManager = ServiceRegistry.getOrThrow(YandereModeManager::
 
 - [ ] **Step 3: 在 generateWithLocalModel 中注入病娇上下文**
 
-在 `generateWithLocalModel` 的 `systemPrompt` 构建中，在 `appendLine(com.lianyu.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled))` 之前追加：
+在 `generateWithLocalModel` 的 `systemPrompt` 构建中，在 `appendLine(com.yunian.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled))` 之前追加：
 
 ```kotlin
             val yandereContext = buildYandereContext()
@@ -1350,12 +1350,12 @@ private val yandereModeManager = ServiceRegistry.getOrThrow(YandereModeManager::
 ## Task 10: 在 GroupChatViewModel 注入病娇 Prompt
 
 **Files:**
-- Modify: `feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/GroupChatViewModel.kt`
+- Modify: `feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/GroupChatViewModel.kt`
 
 - [ ] **Step 1: 导入 YandereModeManager**
 
 ```kotlin
-import com.lianyu.ai.common.YandereModeManager
+import com.yunian.ai.common.YandereModeManager
 ```
 
 - [ ] **Step 2: 在 ViewModel 中获取 Manager 与 Store**
@@ -1386,7 +1386,7 @@ private suspend fun buildYandereContextForGroup(): String {
 - [ ] **Step 4: 提交**
 
 ```bash
-git add feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/GroupChatViewModel.kt
+git add feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/GroupChatViewModel.kt
 git commit -m "feat(yandere): inject yandere context in group chat"
 ```
 
@@ -1395,7 +1395,7 @@ git commit -m "feat(yandere): inject yandere context in group chat"
 ## Task 11: 修改 AiService 支持额外系统 Prompt
 
 **Files:**
-- Modify: `core/network/src/main/java/com/lianyu/ai/network/AiService.kt`
+- Modify: `core/network/src/main/java/com/yunian/ai/network/AiService.kt`
 
 - [ ] **Step 1: 找到 `sendMessage` 方法签名并添加参数**
 
@@ -1432,7 +1432,7 @@ val systemPrompt = buildString {
 - [ ] **Step 4: 提交**
 
 ```bash
-git add core/network/src/main/java/com/lianyu/ai/network/AiService.kt
+git add core/network/src/main/java/com/yunian/ai/network/AiService.kt
 git commit -m "feat(yandere): support extra system prompt in AiService"
 ```
 
@@ -1441,7 +1441,7 @@ git commit -m "feat(yandere): support extra system prompt in AiService"
 ## Task 12: 完成 ChatViewModel 远程路径注入
 
 **Files:**
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt`
 
 - [ ] **Step 1: 在 `startAiResponse` 中计算病娇上下文并传入 AiService**
 
@@ -1479,7 +1479,7 @@ aiService.sendMessageWithImage(
 - [ ] **Step 4: 提交**
 
 ```bash
-git add feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt
+git add feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt
 git commit -m "feat(yandere): inject yandere context into single chat AI calls"
 ```
 
@@ -1488,12 +1488,12 @@ git commit -m "feat(yandere): inject yandere context into single chat AI calls"
 ## Task 13: 注册 YandereModeManager 单例
 
 **Files:**
-- Modify: `app/src/main/java/com/lianyu/ai/LianYuApplication.kt`
+- Modify: `app/src/main/java/com/yunian/ai/YuNianApplication.kt`
 
 - [ ] **Step 1: 导入 YandereModeManager**
 
 ```kotlin
-import com.lianyu.ai.common.YandereModeManager
+import com.yunian.ai.common.YandereModeManager
 ```
 
 - [ ] **Step 2: 在 `registerServiceProviders` 中注册单例**
@@ -1509,7 +1509,7 @@ ServiceRegistry.registerSingleton(YandereModeManager::class.java) {
 - [ ] **Step 3: 提交**
 
 ```bash
-git add app/src/main/java/com/lianyu/ai/LianYuApplication.kt
+git add app/src/main/java/com/yunian/ai/YuNianApplication.kt
 git commit -m "feat(yandere): register YandereModeManager singleton"
 ```
 

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.network"
+    namespace = "com.yunian.ai.network"
     compileSdk = 35
 
     defaultConfig {
@@ -22,6 +22,12 @@ android {
 
     kotlin {
         jvmToolchain(17)
+    }
+
+    // 测试基建（QA）：被测代码（SecureLog → android.util.Log）在 JVM 单测中需要
+    // 返回默认值而非抛出 "not mocked"，否则任何日志路径都会使单测失败。
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 

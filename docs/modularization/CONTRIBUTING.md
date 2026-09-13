@@ -1,4 +1,4 @@
-# 恋语 (LianYu) 贡献者指南
+# 恋语 (YuNian) 贡献者指南
 
 > 欢迎加入恋语开源项目！本文档将帮助你快速上手，参与模块化开发。
 
@@ -61,7 +61,7 @@
 ## 项目结构速览
 
 ```
-LianYu/
+YuNian/
 ├── app/                    ← 应用入口（Application + 导航）
 ├── core/                   ← 共享能力层
 │   ├── common/            ← 工具类
@@ -108,7 +108,7 @@ LianYu/
 2. 克隆你的 Fork 到本地：
    ```bash
    git clone https://github.com/你的用户名/LianYu.git
-   cd LianYu
+   cd YuNian
    ```
 
 ### 第二步：创建分支
@@ -127,7 +127,7 @@ git checkout -b feature/chat-voice-message
 
 ```bash
 # 例如修改聊天功能
-cd feature/chat/src/main/java/com/lianyu/ai/feature/chat
+cd feature/chat/src/main/java/com/yunian/ai/feature/chat
 ```
 
 ### 第四步：开发并测试
@@ -328,8 +328,8 @@ docs: 更新模块化架构文档
    ```
 
 3. 包名是否正确？
-   - Feature 模块: `com.lianyu.ai.feature.xxx`
-   - Core 模块: `com.lianyu.ai.xxx`
+   - Feature 模块: `com.yunian.ai.feature.xxx`
+   - Core 模块: `com.yunian.ai.xxx`
 
 ### Q: 如何运行单个模块的测试？
 

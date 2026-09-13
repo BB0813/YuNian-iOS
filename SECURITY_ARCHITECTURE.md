@@ -1,4 +1,4 @@
-# LianYu 安全架构重构任务文档
+# YuNian 安全架构重构任务文档
 
 ## 架构总览
 
@@ -364,11 +364,11 @@ plain XOR BK                        (metadata从密文头部提取)
 **修正方案**:
 1. `StubApp.kt` 从 `:shell` 移至 `app/src/main/java/com/stub/`
 2. 移除未实现的 `external fun interface13/14/15`
-3. 改为透传代理 — 反射调用 `LianYuApplication.attach()` 并转发生命周期事件
+3. 改为透传代理 — 反射调用 `YuNianApplication.attach()` 并转发生命周期事件
 4. 删除 `Bridge.kt`（仅含 external 声明，无实现）
 5. `proguard-rules.pro` 添加 `-keep class com.stub.StubApp`
 
-**验证**: V2324A (Android 16) 设备安装启动成功，`LianYuApplication.onCreate()` 正常执行，
+**验证**: V2324A (Android 16) 设备安装启动成功，`YuNianApplication.onCreate()` 正常执行，
 Locale zh-CN 初始化正常，无 `UnsatisfiedLinkError`。
 
 **后续**: native 层壳功能（DEX 解密、签名校验、反调试）由 `StaticApkShell` +

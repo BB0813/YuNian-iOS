@@ -23,8 +23,8 @@ param(
 $ErrorActionPreference = "Stop"
 $exitCode = 0
 
-$AppDatabasePath = Join-Path $ProjectRoot "core\database\src\main\java\com\lianyu\ai\database\AppDatabase.kt"
-$SchemaDir = Join-Path $ProjectRoot "core\database\schemas\com.lianyu.ai.database.AppDatabase"
+$AppDatabasePath = Join-Path $ProjectRoot "core\database\src\main\java\com\yunian\ai\database\AppDatabase.kt"
+$SchemaDir = Join-Path $ProjectRoot "core\database\schemas\com.yunian.ai.database.AppDatabase"
 $LockedVersion = 22
 
 Write-Host "=== Database Schema Lock Check ===" -ForegroundColor Cyan
@@ -87,8 +87,8 @@ $lockedSchemaPath = Join-Path $SchemaDir "$LockedVersion.json"
 if (Test-Path $lockedSchemaPath) {
     Push-Location $ProjectRoot
     try {
-        $gitDiff = git diff --name-only -- "core/database/schemas/com.lianyu.ai.database.AppDatabase/$LockedVersion.json" 2>$null
-        $gitStaged = git diff --cached --name-only -- "core/database/schemas/com.lianyu.ai.database.AppDatabase/$LockedVersion.json" 2>$null
+        $gitDiff = git diff --name-only -- "core/database/schemas/com.yunian.ai.database.AppDatabase/$LockedVersion.json" 2>$null
+        $gitStaged = git diff --cached --name-only -- "core/database/schemas/com.yunian.ai.database.AppDatabase/$LockedVersion.json" 2>$null
         if ($gitDiff -or $gitStaged) {
             Write-Host "  FAIL: Locked schema v$LockedVersion.json has uncommitted changes" -ForegroundColor Red
             Write-Host "  Entity definitions must NOT be modified (no new columns, no type changes)." -ForegroundColor Red

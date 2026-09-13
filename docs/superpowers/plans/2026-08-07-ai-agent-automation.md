@@ -12,7 +12,7 @@
 
 - **Room AppDatabase v19 保持不变**：禁止新增 Entity/DAO/Migration。自动化存储一律走 DataStore。
 - **feature 模块禁止依赖其他 feature 模块**（AGENTS.md）：`feature:automation` 通知自建渠道，不复用 `feature:notification` 的 `NotificationHelper`。
-- 工具注册统一在 `LianYuApplication.registerServiceProviders`（app 启动时一次）。
+- 工具注册统一在 `YuNianApplication.registerServiceProviders`（app 启动时一次）。
 - 新增超时常量必须进 `core/common/.../TimeoutBudgets.kt`，禁止硬编码。
 - 伴侣聊天消息写入前必须过 `ContentFilter.checkOutputSafety`（对齐 `CompanionMessageWorker`，AI 输出违规不累计用户封禁）。
 - 架构最小变更：不修改 `feature:notification` 保活/心跳/`CompanionMessageWorker` 调度逻辑。
@@ -24,9 +24,9 @@
 ### Task 1: 核心契约扩展（TimeoutBudgets + AiTool 接口）
 
 **Files:**
-- Modify: `core/common/src/main/java/com/lianyu/ai/common/TimeoutBudgets.kt`
-- Modify: `core/domain/src/main/java/com/lianyu/ai/domain/AiTool.kt`
-- Test: `core/domain/src/test/java/com/lianyu/ai/domain/AiToolDefaultTest.kt`（若 core:domain 无 src/test，则跳过，由后续任务编译验证覆盖）
+- Modify: `core/common/src/main/java/com/yunian/ai/common/TimeoutBudgets.kt`
+- Modify: `core/domain/src/main/java/com/yunian/ai/domain/AiTool.kt`
+- Test: `core/domain/src/test/java/com/yunian/ai/domain/AiToolDefaultTest.kt`（若 core:domain 无 src/test，则跳过，由后续任务编译验证覆盖）
 
 **Interfaces:**
 - Consumes: 无
@@ -34,7 +34,7 @@
 
 - [ ] **Step 1: 在 TimeoutBudgets 增加确认超时**
 
-在 `core/common/src/main/java/com/lianyu/ai/common/TimeoutBudgets.kt` 的「=== 分岔点硬限制 ===」之前新增：
+在 `core/common/src/main/java/com/yunian/ai/common/TimeoutBudgets.kt` 的「=== 分岔点硬限制 ===」之前新增：
 
 ```kotlin
     // === AI 工具确认卡片 ===
@@ -43,7 +43,7 @@
 
 - [ ] **Step 2: 给 AiTool 接口增加带默认值的成员**
 
-在 `core/domain/src/main/java/com/lianyu/ai/domain/AiTool.kt` 的 `suspend fun execute(argumentsJson: String): String` 之后新增：
+在 `core/domain/src/main/java/com/yunian/ai/domain/AiTool.kt` 的 `suspend fun execute(argumentsJson: String): String` 之后新增：
 
 ```kotlin
     /**
@@ -67,7 +67,7 @@ Expected: BUILD SUCCESSFUL（默认值保证现有实现无需改动）
 - [ ] **Step 4: Commit**
 
 ```bash
-git add core/common/src/main/java/com/lianyu/ai/common/TimeoutBudgets.kt core/domain/src/main/java/com/lianyu/ai/domain/AiTool.kt
+git add core/common/src/main/java/com/yunian/ai/common/TimeoutBudgets.kt core/domain/src/main/java/com/yunian/ai/domain/AiTool.kt
 git commit -m "feat(agent): AiTool 增加 requiresConfirmation 与 summarizeArguments 默认实现"
 ```
 
@@ -78,9 +78,9 @@ git commit -m "feat(agent): AiTool 增加 requiresConfirmation 与 summarizeArgu
 **Files:**
 - Create: `feature/automation/build.gradle.kts`
 - Create: `feature/automation/src/main/AndroidManifest.xml`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationDataStoreProvider.kt`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/Automation.kt`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationStore.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationDataStoreProvider.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/Automation.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationStore.kt`
 - Modify: `settings.gradle.kts`（`include(":feature:automation")`）
 - Modify: `app/build.gradle.kts`（`implementation(project(":feature:automation"))`）
 
@@ -112,7 +112,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.automation"
+    namespace = "com.yunian.ai.feature.automation"
     compileSdk = 35
 
     defaultConfig {
@@ -166,10 +166,10 @@ dependencies {
 
 - [ ] **Step 4: 创建 DataStore Provider**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationDataStoreProvider.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationDataStoreProvider.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation.data
+package com.yunian.ai.feature.automation.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
@@ -191,10 +191,10 @@ object AutomationDataStoreProvider {
 
 - [ ] **Step 5: 创建数据模型**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/Automation.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/Automation.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation.data
+package com.yunian.ai.feature.automation.data
 
 import kotlinx.serialization.Serializable
 
@@ -218,10 +218,10 @@ data class Automation(
 
 - [ ] **Step 6: 创建 AutomationStore**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationStore.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationStore.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation.data
+package com.yunian.ai.feature.automation.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
@@ -305,8 +305,8 @@ git commit -m "feat(automation): 新模块 + 数据模型 + DataStore 存储（�
 ### Task 3: AutomationSchedulePolicy（纯函数）+ 单元测试
 
 **Files:**
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationSchedulePolicy.kt`
-- Test: `feature/automation/src/test/java/com/lianyu/ai/feature/automation/AutomationSchedulePolicyTest.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationSchedulePolicy.kt`
+- Test: `feature/automation/src/test/java/com/yunian/ai/feature/automation/AutomationSchedulePolicyTest.kt`
 
 **Interfaces:**
 - Consumes: `Automation`、`AutomationType`（Task 2）
@@ -314,14 +314,14 @@ git commit -m "feat(automation): 新模块 + 数据模型 + DataStore 存储（�
 
 - [ ] **Step 1: 写失败测试**
 
-创建 `feature/automation/src/test/java/com/lianyu/ai/feature/automation/AutomationSchedulePolicyTest.kt`：
+创建 `feature/automation/src/test/java/com/yunian/ai/feature/automation/AutomationSchedulePolicyTest.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationSchedulePolicy
-import com.lianyu.ai.feature.automation.data.AutomationType
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
+import com.yunian.ai.feature.automation.data.AutomationType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -421,15 +421,15 @@ class AutomationSchedulePolicyTest {
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.lianyu.ai.feature.automation.AutomationSchedulePolicyTest" -i`
+Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.yunian.ai.feature.automation.AutomationSchedulePolicyTest" -i`
 Expected: FAIL（`AutomationSchedulePolicy` 不存在，编译错误）
 
 - [ ] **Step 3: 实现纯函数**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationSchedulePolicy.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationSchedulePolicy.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation.data
+package com.yunian.ai.feature.automation.data
 
 import java.util.Calendar
 
@@ -479,13 +479,13 @@ object AutomationSchedulePolicy {
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.lianyu.ai.feature.automation.AutomationSchedulePolicyTest"`
+Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.yunian.ai.feature.automation.AutomationSchedulePolicyTest"`
 Expected: 5 tests PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add feature/automation/src/main/java/com/lianyu/ai/feature/automation/data/AutomationSchedulePolicy.kt feature/automation/src/test
+git add feature/automation/src/main/java/com/yunian/ai/feature/automation/data/AutomationSchedulePolicy.kt feature/automation/src/test
 git commit -m "feat(automation): 下次触发时刻纯函数 + 单测（ONCE/DAILY/WEEKLY）"
 ```
 
@@ -494,9 +494,9 @@ git commit -m "feat(automation): 下次触发时刻纯函数 + 单测（ONCE/DAI
 ### Task 4: AutomationNotifier + AutomationFireWorker + AutomationScheduler
 
 **Files:**
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationNotifier.kt`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationFireWorker.kt`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationScheduler.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationNotifier.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationFireWorker.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationScheduler.kt`
 
 **Interfaces:**
 - Consumes: `AutomationStore`、`AutomationSchedulePolicy`、`TimeoutBudgets`（Task 1/2/3）、`MessageWriteCoordinator`（core:database）、`ContentFilter`（core:common）
@@ -507,10 +507,10 @@ git commit -m "feat(automation): 下次触发时刻纯函数 + 单测（ONCE/DAI
 
 - [ ] **Step 1: 创建 AutomationNotifier（自建通知渠道）**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationNotifier.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationNotifier.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -518,7 +518,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
-import com.lianyu.ai.feature.automation.R
+import com.yunian.ai.feature.automation.R
 
 /**
  * 自动化到点通知（自建渠道，feature 间禁止互相依赖）。
@@ -571,20 +571,20 @@ Run: `ls feature/automation/src/main/res 2>/dev/null || echo "NO_RES"`
 
 - [ ] **Step 3: 创建 AutomationFireWorker**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationFireWorker.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationFireWorker.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.lianyu.ai.common.ContentFilter
-import com.lianyu.ai.common.SecureLog
-import com.lianyu.ai.database.model.ChatMessage
-import com.lianyu.ai.database.repository.MessageWriteCoordinator
-import com.lianyu.ai.feature.automation.data.AutomationSchedulePolicy
-import com.lianyu.ai.feature.automation.data.AutomationStore
+import com.yunian.ai.common.ContentFilter
+import com.yunian.ai.common.SecureLog
+import com.yunian.ai.database.model.ChatMessage
+import com.yunian.ai.database.repository.MessageWriteCoordinator
+import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
+import com.yunian.ai.feature.automation.data.AutomationStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -601,7 +601,7 @@ class AutomationFireWorker(
         if (!automation.enabled) return@withContext Result.success()
 
         // 循环类先算下次触发并重排（ONCE 不重排）
-        if (automation.type != com.lianyu.ai.feature.automation.data.AutomationType.ONCE) {
+        if (automation.type != com.yunian.ai.feature.automation.data.AutomationType.ONCE) {
             val next = AutomationSchedulePolicy.nextTriggerAtMillis(automation, System.currentTimeMillis())
             if (next != null) {
                 val updated = automation.copy(triggerAtMillis = next)
@@ -617,7 +617,7 @@ class AutomationFireWorker(
         val outputSafety = ContentFilter.checkOutputSafety(automation.message)
         if (outputSafety.isSafe) {
             runCatching {
-                com.lianyu.ai.domain.ServiceRegistry
+                com.yunian.ai.domain.ServiceRegistry
                     .getOrThrow(MessageWriteCoordinator::class.java)
                     .enqueueChat(
                         ChatMessage(
@@ -642,17 +642,17 @@ class AutomationFireWorker(
 
 - [ ] **Step 4: 创建 AutomationScheduler**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationScheduler.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationScheduler.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
 import android.content.Context
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationSchedulePolicy
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
 import java.util.concurrent.TimeUnit
 
 object AutomationScheduler {
@@ -692,7 +692,7 @@ Expected: BUILD SUCCESSFUL
 - [ ] **Step 6: Commit**
 
 ```bash
-git add feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationNotifier.kt feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationFireWorker.kt feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationScheduler.kt
+git add feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationNotifier.kt feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationFireWorker.kt feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationScheduler.kt
 git commit -m "feat(automation): 到点通知 + 聊天消息 + WorkManager 调度"
 ```
 
@@ -701,10 +701,10 @@ git commit -m "feat(automation): 到点通知 + 聊天消息 + WorkManager 调�
 ### Task 5: AutomationTools（AiTool 实现）+ 纯逻辑测试 + app 注册
 
 **Files:**
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationToolLogic.kt`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationTools.kt`
-- Test: `feature/automation/src/test/java/com/lianyu/ai/feature/automation/AutomationToolLogicTest.kt`
-- Modify: `app/src/main/java/com/lianyu/ai/LianYuApplication.kt`（注册 Store + Tools + 启动重建调度）
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationToolLogic.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationTools.kt`
+- Test: `feature/automation/src/test/java/com/yunian/ai/feature/automation/AutomationToolLogicTest.kt`
+- Modify: `app/src/main/java/com/yunian/ai/YuNianApplication.kt`（注册 Store + Tools + 启动重建调度）
 
 **Interfaces:**
 - Consumes: `Automation`、`AutomationStore`、`AutomationScheduler`、`AutomationType`、`AiTool`（Task 1/2/4）
@@ -715,13 +715,13 @@ git commit -m "feat(automation): 到点通知 + 聊天消息 + WorkManager 调�
 
 - [ ] **Step 1: 写失败测试**
 
-创建 `feature/automation/src/test/java/com/lianyu/ai/feature/automation/AutomationToolLogicTest.kt`：
+创建 `feature/automation/src/test/java/com/yunian/ai/feature/automation/AutomationToolLogicTest.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationType
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -789,18 +789,18 @@ class AutomationToolLogicTest {
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.lianyu.ai.feature.automation.AutomationToolLogicTest"`
+Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.yunian.ai.feature.automation.AutomationToolLogicTest"`
 Expected: FAIL（`AutomationToolLogic` 不存在）
 
 - [ ] **Step 3: 实现 AutomationToolLogic**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationToolLogic.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationToolLogic.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationType
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -878,22 +878,22 @@ object AutomationToolLogic {
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.lianyu.ai.feature.automation.AutomationToolLogicTest"`
+Run: `./gradlew :feature:automation:testDebugUnitTest --tests "com.yunian.ai.feature.automation.AutomationToolLogicTest"`
 Expected: 5 tests PASS
 
 - [ ] **Step 5: 实现 AutomationTools**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationTools.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationTools.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation
+package com.yunian.ai.feature.automation
 
 import android.app.Application
-import com.lianyu.ai.domain.AiTool
-import com.lianyu.ai.domain.ToolRegistry
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationStore
-import com.lianyu.ai.feature.automation.data.AutomationType
+import com.yunian.ai.domain.AiTool
+import com.yunian.ai.domain.ToolRegistry
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationStore
+import com.yunian.ai.feature.automation.data.AutomationType
 import java.util.UUID
 
 /**
@@ -1036,30 +1036,30 @@ object AutomationTools {
 
 - [ ] **Step 6: app 启动注册 + 调度重建**
 
-在 `app/src/main/java/com/lianyu/ai/LianYuApplication.kt` 的 `registerServiceProviders` 末尾（`MemoryRecallTools.registerAll(...)` 之后）新增：
+在 `app/src/main/java/com/yunian/ai/YuNianApplication.kt` 的 `registerServiceProviders` 末尾（`MemoryRecallTools.registerAll(...)` 之后）新增：
 
 ```kotlin
             // ── 自动化工具（AI 对话可创建/取消定时自动化） ──
             ServiceRegistry.registerSingleton(AutomationStore::class.java) {
-                com.lianyu.ai.feature.automation.data.AutomationStore(app)
+                com.yunian.ai.feature.automation.data.AutomationStore(app)
             }
-            com.lianyu.ai.feature.automation.AutomationTools.registerAll(
+            com.yunian.ai.feature.automation.AutomationTools.registerAll(
                 ServiceRegistry.getOrThrow(AutomationStore::class.java),
                 app
             )
             // 启动对账：重建全部启用自动化的 WorkManager 调度
             runCatching {
                 val automations = ServiceRegistry.getOrThrow(AutomationStore::class.java).list()
-                com.lianyu.ai.feature.automation.AutomationScheduler.rescheduleAll(app, automations)
+                com.yunian.ai.feature.automation.AutomationScheduler.rescheduleAll(app, automations)
             }.onFailure {
-                SecureLog.e("LianYuApplication", "Automation rescheduleAll failed", it)
+                SecureLog.e("YuNianApplication", "Automation rescheduleAll failed", it)
             }
 ```
 
 并在文件顶部 import 区添加：
 
 ```kotlin
-import com.lianyu.ai.feature.automation.data.AutomationStore
+import com.yunian.ai.feature.automation.data.AutomationStore
 ```
 
 - [ ] **Step 7: 编译验证**
@@ -1070,7 +1070,7 @@ Expected: BUILD SUCCESSFUL，5 个 logic 测试 PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationToolLogic.kt feature/automation/src/main/java/com/lianyu/ai/feature/automation/AutomationTools.kt feature/automation/src/test/java/com/lianyu/ai/feature/automation/AutomationToolLogicTest.kt app/src/main/java/com/lianyu/ai/LianYuApplication.kt
+git add feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationToolLogic.kt feature/automation/src/main/java/com/yunian/ai/feature/automation/AutomationTools.kt feature/automation/src/test/java/com/yunian/ai/feature/automation/AutomationToolLogicTest.kt app/src/main/java/com/yunian/ai/YuNianApplication.kt
 git commit -m "feat(automation): AI 工具 create/cancel/list + app 注册与调度重建"
 ```
 
@@ -1079,11 +1079,11 @@ git commit -m "feat(automation): AI 工具 create/cancel/list + app 注册与调
 ### Task 6: 确认卡片机制（AiToolLoopRunner + ChatGenerationManager + 瑞幸 createOrder）
 
 **Files:**
-- Create: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ToolConfirmationRequest.kt`
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/AiToolLoopRunner.kt`
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatGenerationManager.kt`
-- Modify: `feature/coffee/src/main/java/com/lianyu/ai/feature/coffee/LuckinCoffeeTools.kt`（CreateOrderTool 需确认 + 摘要）
-- Test: `feature/chat/src/test/java/com/lianyu/ai/feature/chat/AiToolLoopRunnerConfirmationTest.kt`
+- Create: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ToolConfirmationRequest.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/AiToolLoopRunner.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatGenerationManager.kt`
+- Modify: `feature/coffee/src/main/java/com/yunian/ai/feature/coffee/LuckinCoffeeTools.kt`（CreateOrderTool 需确认 + 摘要）
+- Test: `feature/chat/src/test/java/com/yunian/ai/feature/chat/AiToolLoopRunnerConfirmationTest.kt`
 
 **Interfaces:**
 - Consumes: `AiTool.requiresConfirmation`、`AiTool.summarizeArguments`、`TimeoutBudgets.AUTOMATION_CONFIRM_TIMEOUT_MS`（Task 1）
@@ -1095,10 +1095,10 @@ git commit -m "feat(automation): AI 工具 create/cancel/list + app 注册与调
 
 - [ ] **Step 1: 创建 ToolConfirmationRequest**
 
-创建 `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ToolConfirmationRequest.kt`：
+创建 `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ToolConfirmationRequest.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.chat.ui.viewmodel
+package com.yunian.ai.feature.chat.ui.viewmodel
 
 /** AI 工具执行前的用户确认请求（驱动 ChatScreen 弹确认卡片）。 */
 data class ToolConfirmationRequest(
@@ -1111,20 +1111,20 @@ data class ToolConfirmationRequest(
 
 - [ ] **Step 2: 写 AiToolLoopRunner 确认门控测试**
 
-创建 `feature/chat/src/test/java/com/lianyu/ai/feature/chat/AiToolLoopRunnerConfirmationTest.kt`：
+创建 `feature/chat/src/test/java/com/yunian/ai/feature/chat/AiToolLoopRunnerConfirmationTest.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.chat
+package com.yunian.ai.feature.chat
 
-import com.lianyu.ai.domain.AiChatMessage
-import com.lianyu.ai.domain.AiCompanionInfo
-import com.lianyu.ai.domain.AiResponse
-import com.lianyu.ai.domain.AiServiceProvider
-import com.lianyu.ai.domain.AiTool
-import com.lianyu.ai.domain.AiToolCall
-import com.lianyu.ai.domain.ToolRegistry
-import com.lianyu.ai.feature.chat.ui.viewmodel.AiToolLoopRunner
-import com.lianyu.ai.feature.chat.ui.viewmodel.ConfirmationGate
+import com.yunian.ai.domain.AiChatMessage
+import com.yunian.ai.domain.AiCompanionInfo
+import com.yunian.ai.domain.AiResponse
+import com.yunian.ai.domain.AiServiceProvider
+import com.yunian.ai.domain.AiTool
+import com.yunian.ai.domain.AiToolCall
+import com.yunian.ai.domain.ToolRegistry
+import com.yunian.ai.feature.chat.ui.viewmodel.AiToolLoopRunner
+import com.yunian.ai.feature.chat.ui.viewmodel.ConfirmationGate
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -1186,9 +1186,9 @@ class AiToolLoopRunnerConfirmationTest {
             history: List<AiChatMessage>,
             stickerProbability: Int,
             ntpTimeEnabled: Boolean,
-            turnId: com.lianyu.ai.domain.timeline.TurnId,
+            turnId: com.yunian.ai.domain.timeline.TurnId,
             startedAtMs: Long
-        ): kotlinx.coroutines.flow.Flow<com.lianyu.ai.domain.stream.AssistantStreamEvent> = error("not used")
+        ): kotlinx.coroutines.flow.Flow<com.yunian.ai.domain.stream.AssistantStreamEvent> = error("not used")
 
         override suspend fun sendMessageWithImage(
             companion: AiCompanionInfo,
@@ -1276,12 +1276,12 @@ class AiToolLoopRunnerConfirmationTest {
 
 - [ ] **Step 3: 运行确认失败**
 
-Run: `./gradlew :feature:chat:testDebugUnitTest --tests "com.lianyu.ai.feature.chat.AiToolLoopRunnerConfirmationTest"`
+Run: `./gradlew :feature:chat:testDebugUnitTest --tests "com.yunian.ai.feature.chat.AiToolLoopRunnerConfirmationTest"`
 Expected: FAIL（`ConfirmationGate` 不存在，编译错误）
 
 - [ ] **Step 4: 改造 AiToolLoopRunner**
 
-修改 `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/AiToolLoopRunner.kt`：
+修改 `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/AiToolLoopRunner.kt`：
 
 1) 类声明改为：
 
@@ -1322,7 +1322,7 @@ class AiToolLoopRunner(
                 ChatDebugLog.log("[ToolLoop] ${toolCall.name} executed, resultLen=${result.length}")
 
                 mutableHistory.add(
-                    com.lianyu.ai.domain.AiDialogueHistoryPolicy.toolResultMessage(
+                    com.yunian.ai.domain.AiDialogueHistoryPolicy.toolResultMessage(
                         toolName = toolCall.name,
                         result = result,
                         companionId = companionInfo.id
@@ -1372,12 +1372,12 @@ class AiToolLoopRunner(
 
 - [ ] **Step 5: 运行确认通过**
 
-Run: `./gradlew :feature:chat:testDebugUnitTest --tests "com.lianyu.ai.feature.chat.AiToolLoopRunnerConfirmationTest"`
+Run: `./gradlew :feature:chat:testDebugUnitTest --tests "com.yunian.ai.feature.chat.AiToolLoopRunnerConfirmationTest"`
 Expected: 2 tests PASS
 
 - [ ] **Step 6: ChatGenerationManager 实现 Gate**
 
-修改 `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatGenerationManager.kt`：
+修改 `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatGenerationManager.kt`：
 
 1) 构造 toolLoopRunner 处（`private val toolLoopRunner = AiToolLoopRunner(aiService)`）改为：
 
@@ -1426,7 +1426,7 @@ Expected: 2 tests PASS
 
 - [ ] **Step 7: 瑞幸 createOrder 需确认 + 摘要**
 
-修改 `feature/coffee/src/main/java/com/lianyu/ai/feature/coffee/LuckinCoffeeTools.kt` 的 `CreateOrderTool` 类：新增两个覆写：
+修改 `feature/coffee/src/main/java/com/yunian/ai/feature/coffee/LuckinCoffeeTools.kt` 的 `CreateOrderTool` 类：新增两个覆写：
 
 ```kotlin
         override val requiresConfirmation: Boolean get() = true
@@ -1451,7 +1451,7 @@ Expected: BUILD SUCCESSFUL，确认门控 2 测试 + 逻辑 5 测试 PASS
 - [ ] **Step 9: Commit**
 
 ```bash
-git add feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ToolConfirmationRequest.kt feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/AiToolLoopRunner.kt feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatGenerationManager.kt feature/chat/src/test/java/com/lianyu/ai/feature/chat/AiToolLoopRunnerConfirmationTest.kt feature/coffee/src/main/java/com/lianyu/ai/feature/coffee/LuckinCoffeeTools.kt
+git add feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ToolConfirmationRequest.kt feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/AiToolLoopRunner.kt feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatGenerationManager.kt feature/chat/src/test/java/com/yunian/ai/feature/chat/AiToolLoopRunnerConfirmationTest.kt feature/coffee/src/main/java/com/yunian/ai/feature/coffee/LuckinCoffeeTools.kt
 git commit -m "feat(agent): 确认卡片门控 — createOrder/automation_create 需用户确认"
 ```
 
@@ -1460,8 +1460,8 @@ git commit -m "feat(agent): 确认卡片门控 — createOrder/automation_create
 ### Task 7: ChatViewModel + ChatScreen 确认卡片 UI
 
 **Files:**
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt`
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/screen/ChatScreen.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/screen/ChatScreen.kt`
 
 **Interfaces:**
 - Consumes: `ChatGenerationManager.confirmationRequest`、`respondToConfirmation`、`ToolConfirmationRequest`（Task 6）
@@ -1469,7 +1469,7 @@ git commit -m "feat(agent): 确认卡片门控 — createOrder/automation_create
 
 - [ ] **Step 1: ChatViewModel 暴露确认状态**
 
-在 `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt` 的 `val ttsState: StateFlow<ChatTtsState> = generation.ttsState` 之后新增：
+在 `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt` 的 `val ttsState: StateFlow<ChatTtsState> = generation.ttsState` 之后新增：
 
 ```kotlin
     val confirmationRequest: StateFlow<ToolConfirmationRequest?> = generation.confirmationRequest
@@ -1479,7 +1479,7 @@ git commit -m "feat(agent): 确认卡片门控 — createOrder/automation_create
 
 - [ ] **Step 2: ChatScreen 弹确认 Dialog**
 
-在 `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/screen/ChatScreen.kt`：
+在 `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/screen/ChatScreen.kt`：
 
 1) 在 `val viewModel: ChatViewModel = viewModel(...)` 之后新增收集：
 
@@ -1529,7 +1529,7 @@ Expected: BUILD SUCCESSFUL
 - [ ] **Step 4: Commit**
 
 ```bash
-git add feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatViewModel.kt feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/screen/ChatScreen.kt
+git add feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatViewModel.kt feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/screen/ChatScreen.kt
 git commit -m "feat(agent): ChatScreen 确认卡片 UI（创建自动化 / 瑞幸下单）"
 ```
 
@@ -1538,7 +1538,7 @@ git commit -m "feat(agent): ChatScreen 确认卡片 UI（创建自动化 / 瑞�
 ### Task 8: ChatToolIntent 关键词扩充
 
 **Files:**
-- Modify: `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatToolIntent.kt`
+- Modify: `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatToolIntent.kt`
 
 **Interfaces:**
 - Consumes: 无
@@ -1546,7 +1546,7 @@ git commit -m "feat(agent): ChatScreen 确认卡片 UI（创建自动化 / 瑞�
 
 - [ ] **Step 1: 扩充关键词列表**
 
-修改 `feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatToolIntent.kt` 的 keywords：
+修改 `feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatToolIntent.kt` 的 keywords：
 
 ```kotlin
     private val keywords = listOf(
@@ -1564,7 +1564,7 @@ Expected: BUILD SUCCESSFUL
 - [ ] **Step 3: Commit**
 
 ```bash
-git add feature/chat/src/main/java/com/lianyu/ai/feature/chat/ui/viewmodel/ChatToolIntent.kt
+git add feature/chat/src/main/java/com/yunian/ai/feature/chat/ui/viewmodel/ChatToolIntent.kt
 git commit -m "feat(agent): 工具门控扩充自动化触发词"
 ```
 
@@ -1573,11 +1573,11 @@ git commit -m "feat(agent): 工具门控扩充自动化触发词"
 ### Task 9: AutomationListScreen + 路由 + 设置入口
 
 **Files:**
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/ui/AutomationListViewModel.kt`
-- Create: `feature/automation/src/main/java/com/lianyu/ai/feature/automation/ui/AutomationListScreen.kt`
-- Modify: `app/src/main/java/com/lianyu/ai/MainRoute.kt`
-- Modify: `app/src/main/java/com/lianyu/ai/MainNavGraph.kt`
-- Modify: `feature/profile/src/main/java/com/lianyu/ai/feature/profile/GeneralSettingsScreen.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/ui/AutomationListViewModel.kt`
+- Create: `feature/automation/src/main/java/com/yunian/ai/feature/automation/ui/AutomationListScreen.kt`
+- Modify: `app/src/main/java/com/yunian/ai/MainRoute.kt`
+- Modify: `app/src/main/java/com/yunian/ai/MainNavGraph.kt`
+- Modify: `feature/profile/src/main/java/com/yunian/ai/feature/profile/GeneralSettingsScreen.kt`
 
 **Interfaces:**
 - Consumes: `AutomationStore`（Task 2）、`AutomationScheduler`（Task 4）
@@ -1585,17 +1585,17 @@ git commit -m "feat(agent): 工具门控扩充自动化触发词"
 
 - [ ] **Step 1: 创建 AutomationListViewModel**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/ui/AutomationListViewModel.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/ui/AutomationListViewModel.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation.ui
+package com.yunian.ai.feature.automation.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.lianyu.ai.feature.automation.AutomationScheduler
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationStore
+import com.yunian.ai.feature.automation.AutomationScheduler
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -1632,10 +1632,10 @@ class AutomationListViewModel(application: Application) : AndroidViewModel(appli
 
 - [ ] **Step 2: 创建 AutomationListScreen**
 
-创建 `feature/automation/src/main/java/com/lianyu/ai/feature/automation/ui/AutomationListScreen.kt`：
+创建 `feature/automation/src/main/java/com/yunian/ai/feature/automation/ui/AutomationListScreen.kt`：
 
 ```kotlin
-package com.lianyu.ai.feature.automation.ui
+package com.yunian.ai.feature.automation.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -1680,9 +1680,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.lianyu.ai.feature.automation.data.Automation
-import com.lianyu.ai.feature.automation.data.AutomationType
-import com.lianyu.ai.uicommon.theme.AppTheme
+import com.yunian.ai.feature.automation.data.Automation
+import com.yunian.ai.feature.automation.data.AutomationType
+import com.yunian.ai.uicommon.theme.AppTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -1826,7 +1826,7 @@ private fun triggerText(a: Automation): String {
 
 - [ ] **Step 3: MainRoute 增加路由**
 
-在 `app/src/main/java/com/lianyu/ai/MainRoute.kt` 的「=== 瑞幸咖啡 ===」区块之后新增：
+在 `app/src/main/java/com/yunian/ai/MainRoute.kt` 的「=== 瑞幸咖啡 ===」区块之后新增：
 
 ```kotlin
     // === 自动化 ===
@@ -1841,12 +1841,12 @@ private fun triggerText(a: Automation): String {
 
 - [ ] **Step 4: MainNavGraph 注册页面 + 设置入口**
 
-在 `app/src/main/java/com/lianyu/ai/MainNavGraph.kt`：
+在 `app/src/main/java/com/yunian/ai/MainNavGraph.kt`：
 
 1) import 区新增：
 
 ```kotlin
-import com.lianyu.ai.feature.automation.ui.AutomationListScreen
+import com.yunian.ai.feature.automation.ui.AutomationListScreen
 ```
 
 2) 在 `composable(MainRoute.SettingsTools.route)` 内 `onCoffeeClick` 之后新增：
@@ -1865,7 +1865,7 @@ import com.lianyu.ai.feature.automation.ui.AutomationListScreen
 
 - [ ] **Step 5: ToolsSettingsScreen 增加入口项**
 
-在 `feature/profile/src/main/java/com/lianyu/ai/feature/profile/GeneralSettingsScreen.kt`：
+在 `feature/profile/src/main/java/com/yunian/ai/feature/profile/GeneralSettingsScreen.kt`：
 
 1) `ToolsSettingsScreen` 签名改为：
 
@@ -1898,7 +1898,7 @@ Expected: BUILD SUCCESSFUL
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/src/main/java/com/lianyu/ai/MainRoute.kt app/src/main/java/com/lianyu/ai/MainNavGraph.kt feature/profile/src/main/java/com/lianyu/ai/feature/profile/GeneralSettingsScreen.kt feature/automation/src/main/java/com/lianyu/ai/feature/automation/ui
+git add app/src/main/java/com/yunian/ai/MainRoute.kt app/src/main/java/com/yunian/ai/MainNavGraph.kt feature/profile/src/main/java/com/yunian/ai/feature/profile/GeneralSettingsScreen.kt feature/automation/src/main/java/com/yunian/ai/feature/automation/ui
 git commit -m "feat(automation): 自动化列表页 + 路由 + 设置入口"
 ```
 

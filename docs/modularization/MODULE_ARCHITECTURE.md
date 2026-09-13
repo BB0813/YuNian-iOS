@@ -1,4 +1,4 @@
-# 恋语 (LianYu) 模块化开发文档
+# 恋语 (YuNian) 模块化开发文档
 
 > **本文档帮助贡献者快速理解项目结构，高效并行开发。核心模块已用 🔴 标注，修改时需格外谨慎。**
 
@@ -75,13 +75,13 @@
 ## 项目结构速览
 
 ```
-LianYu/
+YuNian/
 ├── app/                                    # 📱 入口模块（Application + 导航）
 │   ├── build.gradle.kts
 │   └── src/main/
 │       ├── AndroidManifest.xml             # ⚠️ Service/Receiver 用全限定类名
-│       ├── java/com/lianyu/ai/
-│       │   ├── LianYuApplication.kt        # Application 初始化
+│       ├── java/com/yunian/ai/
+│       │   ├── YuNianApplication.kt        # Application 初始化
 │       │   └── MainActivity.kt             # 唯一 Activity + NavHost
 │       └── res/
 │           ├── drawable/ic_notification.xml
@@ -170,8 +170,8 @@ LianYu/
 
 ### `:core:common` — 公共基础 🔴
 
-**路径**：`core/common/src/main/java/com/lianyu/ai/common/`  
-**包名**：`com.lianyu.ai.common`  
+**路径**：`core/common/src/main/java/com/yunian/ai/common/`  
+**包名**：`com.yunian.ai.common`  
 **依赖**：仅 AndroidX Core KTX（最小依赖）  
 **被依赖方**：所有其他模块（13个模块依赖它）
 
@@ -195,8 +195,8 @@ LianYu/
 
 ### `:core:database` — 数据持久化 🔴
 
-**路径**：`core/database/src/main/java/com/lianyu/ai/database/`  
-**包名**：`com.lianyu.ai.database`  
+**路径**：`core/database/src/main/java/com/yunian/ai/database/`  
+**包名**：`com.yunian.ai.database`  
 **依赖**：Room ORM、Kotlin Serialization、AndroidX Lifecycle ViewModel  
 **被依赖方**：所有 feature 模块 + `core:network`
 
@@ -246,8 +246,8 @@ LianYu/
 
 ### `:core:network` — 网络通信 🔴
 
-**路径**：`core/network/src/main/java/com/lianyu/ai/network/`  
-**包名**：`com.lianyu.ai.network`  
+**路径**：`core/network/src/main/java/com/yunian/ai/network/`  
+**包名**：`com.yunian.ai.network`  
 **依赖**：`core:database`、Retrofit、OkHttp、Kotlin Serialization  
 **被依赖方**：`feature:chat`、`feature:groupchat`、`feature:notification`、`:app`
 
@@ -266,7 +266,7 @@ LianYu/
 ### `:core:security` — 安全加密 🔴
 
 **路径**：`core/security/src/main/`  
-**包名**：`com.lianyu.ai.security`  
+**包名**：`com.yunian.ai.security`  
 **依赖**：仅 AndroidX Core KTX  
 **被依赖方**：`:app`（Application 初始化）、`feature:update`
 
@@ -321,8 +321,8 @@ externalNativeBuild {
 
 ### `:core:ui-common` — 通用 UI 🔴
 
-**路径**：`core/ui-common/src/main/java/com/lianyu/ai/uicommon/`  
-**包名**：`com.lianyu.ai.uicommon`  
+**路径**：`core/ui-common/src/main/java/com/yunian/ai/uicommon/`  
+**包名**：`com.yunian.ai.uicommon`  
 **依赖**：`core:common`、Compose BOM、Material 3、Coil  
 **被依赖方**：所有 feature 模块 + `:app`
 
@@ -333,7 +333,7 @@ externalNativeBuild {
 | 文件 | 类型 | 功能说明 |
 |------|------|----------|
 | **`theme/` 主题系统** | | |
-| `Theme.kt` | Composable | 主题入口 `LianYuTheme`（亮/暗/跟随系统） |
+| `Theme.kt` | Composable | 主题入口 `YuNianTheme`（亮/暗/跟随系统） |
 | `Color.kt` | 常量 | 微信风格色板 + 旧版色值（保持兼容） |
 | `Type.kt` | 常量 | 字体排版定义 `AppTypography` |
 | **`component/` 共享组件** | | |
@@ -360,8 +360,8 @@ externalNativeBuild {
 
 ### `:feature:chat` — 一对一聊天
 
-**路径**：`feature/chat/src/main/java/com/lianyu/ai/feature/chat/`  
-**包名**：`com.lianyu.ai.feature.chat`  
+**路径**：`feature/chat/src/main/java/com/yunian/ai/feature/chat/`  
+**包名**：`com.yunian.ai.feature.chat`  
 **依赖**：`core:common`、`core:database`、`core:network`、`core:ui-common`、`feature:profile`（读取用户头像）
 
 **文件清单**：
@@ -395,8 +395,8 @@ ChatScreen (UI update)
 
 ### `:feature:companion` — 伴侣管理
 
-**路径**：`feature/companion/src/main/java/com/lianyu/ai/feature/companion/`  
-**包名**：`com.lianyu.ai.feature.companion`  
+**路径**：`feature/companion/src/main/java/com/yunian/ai/feature/companion/`  
+**包名**：`com.yunian.ai.feature.companion`  
 **依赖**：`core:common`、`core:database`、`core:ui-common`
 
 **文件清单**：
@@ -415,8 +415,8 @@ ChatScreen (UI update)
 
 ### `:feature:groupchat` — 群聊
 
-**路径**：`feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/`  
-**包名**：`com.lianyu.ai.feature.groupchat`  
+**路径**：`feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/`  
+**包名**：`com.yunian.ai.feature.groupchat`  
 **依赖**：`core:common`、`core:database`、`core:network`、`core:ui-common`、`feature:profile`
 
 **文件清单**：
@@ -435,8 +435,8 @@ ChatScreen (UI update)
 
 ### `:feature:memory` — 记忆系统
 
-**路径**：`feature/memory/src/main/java/com/lianyu/ai/feature/memory/`  
-**包名**：`com.lianyu.ai.feature.memory`  
+**路径**：`feature/memory/src/main/java/com/yunian/ai/feature/memory/`  
+**包名**：`com.yunian.ai.feature.memory`  
 **依赖**：`core:common`、`core:database`、`core:ui-common`
 
 **文件清单**：
@@ -453,8 +453,8 @@ ChatScreen (UI update)
 
 ### `:feature:notification` — 通知与后台
 
-**路径**：`feature/notification/src/main/java/com/lianyu/ai/feature/notification/`  
-**包名**：`com.lianyu.ai.feature.notification`  
+**路径**：`feature/notification/src/main/java/com/yunian/ai/feature/notification/`  
+**包名**：`com.yunian.ai.feature.notification`  
 **依赖**：`core:common`、`core:database`、`core:network`
 
 > ⚠️ **此模块涉及后台服务和 AndroidManifest 声明，修改 Service/Receiver 后需同步更新 `app/src/main/AndroidManifest.xml`。**
@@ -473,9 +473,9 @@ ChatScreen (UI update)
 
 ```xml
 <!-- 必须使用全限定类名！ -->
-<service android:name="com.lianyu.ai.feature.notification.CompanionKeepAliveService"
+<service android:name="com.yunian.ai.feature.notification.CompanionKeepAliveService"
     android:foregroundServiceType="dataSync" />
-<receiver android:name="com.lianyu.ai.feature.notification.BootReceiver" />
+<receiver android:name="com.yunian.ai.feature.notification.BootReceiver" />
 ```
 
 **关键说明**：
@@ -486,8 +486,8 @@ ChatScreen (UI update)
 
 ### `:feature:profile` — 个人中心与首页
 
-**路径**：`feature/profile/src/main/java/com/lianyu/ai/feature/profile/`  
-**包名**：`com.lianyu.ai.feature.profile`  
+**路径**：`feature/profile/src/main/java/com/yunian/ai/feature/profile/`  
+**包名**：`com.yunian.ai.feature.profile`  
 **依赖**：`core:common`、`core:database`、`core:ui-common`
 
 **文件清单**：
@@ -510,8 +510,8 @@ ChatScreen (UI update)
 
 ### `:feature:settings` — 设置中心
 
-**路径**：`feature/settings/src/main/java/com/lianyu/ai/feature/settings/`  
-**包名**：`com.lianyu.ai.feature.settings`  
+**路径**：`feature/settings/src/main/java/com/yunian/ai/feature/settings/`  
+**包名**：`com.yunian.ai.feature.settings`  
 **依赖**：`core:common`、`core:database`、`core:ui-common`、`feature:update`
 
 **文件清单**：
@@ -535,21 +535,21 @@ ChatScreen (UI update)
 
 ## `:app` 入口模块
 
-**路径**：`app/src/main/java/com/lianyu/ai/`  
-**包名**：`com.lianyu.ai`  
+**路径**：`app/src/main/java/com/yunian/ai/`  
+**包名**：`com.yunian.ai`  
 **依赖**：所有 core 模块 + 所有 feature 模块
 
 **仅包含 2 个 Kotlin 文件**：
 
 | 文件 | 功能 |
 |------|------|
-| `LianYuApplication.kt` | Application：安全初始化、语言设置、背景预加载 |
+| `YuNianApplication.kt` | Application：安全初始化、语言设置、背景预加载 |
 | `MainActivity.kt` | Activity：全屏配置、NavHost 路由表、更新弹窗逻辑 |
 
 **启动链路**：
 
 ```
-LianYuApplication.onCreate()
+YuNianApplication.onCreate()
   ├── SecurityGuard.init()          ← 安全校验
   ├── NativeBridge.verifySignature()  ← 签名验证
   ├── AiService.initialize()        ← 网络预热
@@ -557,7 +557,7 @@ LianYuApplication.onCreate()
   └── preloadBackground()           ← 异步加载聊天背景
 
 MainActivity.onCreate()
-  ├── setContent { LianYuTheme {
+  ├── setContent { YuNianTheme {
   │     ├── AgreementScreen        ← 首次启动：用户协议
   │     ├── BanScreen              ← 封禁拦截
   │     └── MainScreen
@@ -613,7 +613,7 @@ feature/
     ├── build.gradle.kts
     └── src/main/
         ├── AndroidManifest.xml                    # module namespace
-        └── java/com/lianyu/ai/feature/newfeature/
+        └── java/com/yunian/ai/feature/newfeature/
             ├── ui/
             │   ├── screen/                        # Compose Screen
             │   ├── component/                     # 模块内共享组件
@@ -633,7 +633,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.newfeature"
+    namespace = "com.yunian.ai.feature.newfeature"
     compileSdk = 35
 
     defaultConfig { minSdk = 26 }
@@ -842,7 +842,7 @@ composable("chat/{companionId}") { backStackEntry ->
 ### core 模块
 
 ```
-core/common/src/main/java/com/lianyu/ai/common/
+core/common/src/main/java/com/yunian/ai/common/
 ├── BanManager.kt
 ├── BatteryOptimizationHelper.kt
 ├── ContentFilter.kt
@@ -853,7 +853,7 @@ core/common/src/main/java/com/lianyu/ai/common/
 └── update/
     └── UpdateModels.kt
 
-core/database/src/main/java/com/lianyu/ai/database/
+core/database/src/main/java/com/yunian/ai/database/
 ├── AppDatabase.kt
 ├── dao/
 │   ├── CompanionDao.kt
@@ -881,11 +881,11 @@ core/database/src/main/java/com/lianyu/ai/database/
     ├── CompanionListViewModel.kt
     └── ChatGroupViewModel.kt
 
-core/network/src/main/java/com/lianyu/ai/network/
+core/network/src/main/java/com/yunian/ai/network/
 └── AiService.kt
 
 core/security/src/main/
-├── java/com/lianyu/ai/security/
+├── java/com/yunian/ai/security/
 │   ├── NativeBridge.kt
 │   └── SecurityGuard.kt
 └── cpp/
@@ -894,7 +894,7 @@ core/security/src/main/
     ├── Application.mk
     └── version-script.map
 
-core/ui-common/src/main/java/com/lianyu/ai/uicommon/
+core/ui-common/src/main/java/com/yunian/ai/uicommon/
 ├── theme/
 │   ├── Theme.kt
 │   ├── Color.kt
@@ -913,35 +913,35 @@ core/ui-common/src/main/java/com/lianyu/ai/uicommon/
 ### feature 模块
 
 ```
-feature/chat/src/main/java/com/lianyu/ai/feature/chat/
+feature/chat/src/main/java/com/yunian/ai/feature/chat/
 ├── ui/screen/ChatScreen.kt
 ├── ui/viewmodel/ChatViewModel.kt
 └── ui/viewmodel/ChatViewModelFactory.kt
 
-feature/companion/src/main/java/com/lianyu/ai/feature/companion/
+feature/companion/src/main/java/com/yunian/ai/feature/companion/
 ├── ui/screen/CompanionListScreen.kt
 ├── ui/screen/ContactsScreen.kt
 ├── ui/screen/CreateCompanionScreen.kt
 └── ui/viewmodel/CreateCompanionViewModel.kt
 
-feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/
+feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/
 ├── ui/GroupChatScreen.kt
 ├── ui/CreateGroupScreen.kt
 ├── GroupChatViewModel.kt
 └── GroupChatViewModelFactory.kt
 
-feature/memory/src/main/java/com/lianyu/ai/feature/memory/
+feature/memory/src/main/java/com/yunian/ai/feature/memory/
 ├── MemoryScreen.kt
 └── MemoryViewModel.kt
 
-feature/notification/src/main/java/com/lianyu/ai/feature/notification/
+feature/notification/src/main/java/com/yunian/ai/feature/notification/
 ├── NotificationHelper.kt
 ├── CompanionKeepAliveService.kt
 ├── CompanionMessageWorker.kt
 ├── AiReplyWorker.kt
 └── BootReceiver.kt
 
-feature/profile/src/main/java/com/lianyu/ai/feature/profile/
+feature/profile/src/main/java/com/yunian/ai/feature/profile/
 ├── HomeScreen.kt
 ├── ProfileScreen.kt
 ├── AboutScreen.kt
@@ -951,7 +951,7 @@ feature/profile/src/main/java/com/lianyu/ai/feature/profile/
 ├── HomeViewModel.kt
 └── ProfileViewModel.kt
 
-feature/settings/src/main/java/com/lianyu/ai/feature/settings/
+feature/settings/src/main/java/com/yunian/ai/feature/settings/
 ├── ui/screen/SettingsScreen.kt
 ├── ui/screen/ThemeScreen.kt
 ├── ui/screen/LanguageScreen.kt
@@ -965,8 +965,8 @@ feature/settings/src/main/java/com/lianyu/ai/feature/settings/
 ### app 模块
 
 ```
-app/src/main/java/com/lianyu/ai/
-├── LianYuApplication.kt
+app/src/main/java/com/yunian/ai/
+├── YuNianApplication.kt
 └── MainActivity.kt
 ```
 

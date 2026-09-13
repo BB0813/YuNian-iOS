@@ -1,5 +1,5 @@
-#ifndef LIANYU_DEX_PACKER_H
-#define LIANYU_DEX_PACKER_H
+#ifndef YUNIAN_DEX_PACKER_H
+#define YUNIAN_DEX_PACKER_H
 
 #include <cstdint>
 #include <cstddef>
@@ -53,11 +53,11 @@ int dex_packer_decrypt(uint8_t* out, size_t out_cap);
 
 /**
  * Load the encrypted business DEX via InMemoryDexClassLoader.
- * Called from Java (LianYuShellApplication.attachBaseContext).
+ * Called from Java (YuNianShellApplication.attachBaseContext).
  *
  * @param env      JNI environment
  * @param ctx      Android Context (for getClassLoader / getCacheDir)
- * @param appClass Real Application class name (e.g. "com.lianyu.ai.LianYuApplication")
+ * @param appClass Real Application class name (e.g. "com.yunian.ai.YuNianApplication")
  * @return 0 on success, negative on failure
  */
 int dex_packer_load(JNIEnv* env, jobject ctx, const char* appClass);
@@ -75,4 +75,4 @@ jint native_load_payload_entry(JNIEnv* env, jclass clazz, jobject context, jstri
 }
 #endif
 
-#endif /* LIANYU_DEX_PACKER_H */
+#endif /* YUNIAN_DEX_PACKER_H */

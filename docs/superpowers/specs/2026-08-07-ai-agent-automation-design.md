@@ -41,7 +41,7 @@
 1. `settings.gradle.kts`：`include(":feature:automation")`
 2. `app/build.gradle.kts`：添加依赖
 3. `MainRoute.kt` / `MainNavGraph.kt`：添加 `automation` 路由
-4. `LianYuApplication.registerServiceProviders`：注册 `AutomationStore` 单例 + `AutomationTools.registerAll(...)`
+4. `YuNianApplication.registerServiceProviders`：注册 `AutomationStore` 单例 + `AutomationTools.registerAll(...)`
 5. 设置页添加「自动化」入口项
 
 ## 4. 数据模型
@@ -77,7 +77,7 @@ data class Automation(
 
 - 每个启用中的自动化注册一个 WorkManager `OneTimeWorkRequest`，唯一名 `automation_<id>`，`initialDelay = 下次触发时刻 - now`。
 - 创建/修改/删除/开关时调用 `reschedule(id)` / `cancel(id)` 维护调度。
-- App 启动时在 `LianYuApplication.initBusiness` 的 bgScope 内对全部启用中的自动化统一调用 `reschedule(id)` 重建调度（WorkManager 本身会对未执行任务开机自动恢复，此重建用于对账兜底）。
+- App 启动时在 `YuNianApplication.initBusiness` 的 bgScope 内对全部启用中的自动化统一调用 `reschedule(id)` 重建调度（WorkManager 本身会对未执行任务开机自动恢复，此重建用于对账兜底）。
 
 ### AutomationFireWorker.doWork
 

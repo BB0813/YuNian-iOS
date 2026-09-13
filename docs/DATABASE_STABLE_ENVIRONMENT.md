@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-LianYu 项目使用 **Room 2.7.2**（Android SQLite ORM）作为本地持久化层。为避免功能开发过程中频繁升级数据库版本（v17→v21 共 4 次升级，均为新增列），现建立**固定版本数据库环境**：一次性升级到 v22 并永久锁定，后续所有功能扩展通过 `ext_json` 扩展列吸收，不再执行 ALTER TABLE。
+YuNian 项目使用 **Room 2.7.2**（Android SQLite ORM）作为本地持久化层。为避免功能开发过程中频繁升级数据库版本（v17→v21 共 4 次升级，均为新增列），现建立**固定版本数据库环境**：一次性升级到 v22 并永久锁定，后续所有功能扩展通过 `ext_json` 扩展列吸收，不再执行 ALTER TABLE。
 
 > **重要认知**：Room/SQLite 是嵌入式数据库，不存在服务端数据库的"连接池大小""内存分配"等配置参数。SQLite 的运行时参数（WAL 模式、page_size 等）由 Room 框架管理，开发者无需也无法调整。本方案聚焦于 **Schema 版本锁定** 与 **扩展字段预留**。
 
@@ -42,7 +42,7 @@ ksp {
 }
 ```
 
-Schema JSON 导出目录：`core/database/schemas/com.lianyu.ai.database.AppDatabase/`
+Schema JSON 导出目录：`core/database/schemas/com.yunian.ai.database.AppDatabase/`
 
 当前基线文件：`22.json`（v22 锁定后的 Schema 快照）
 
@@ -98,7 +98,7 @@ val cleared = companion.extJson.removeExt("customTag")
 if (companion.extJson.hasExt("customTag")) { ... }
 ```
 
-API 定义：`core/database/src/main/java/com/lianyu/ai/database/model/ExtJson.kt`
+API 定义：`core/database/src/main/java/com/yunian/ai/database/model/ExtJson.kt`
 
 ### 3.4 CI 守卫脚本
 
@@ -257,9 +257,9 @@ API 定义：`core/database/src/main/java/com/lianyu/ai/database/model/ExtJson.k
 
 | 文件 | 用途 |
 |------|------|
-| `core/database/src/main/java/com/lianyu/ai/database/AppDatabase.kt` | 数据库定义、版本号、迁移脚本 |
-| `core/database/src/main/java/com/lianyu/ai/database/model/ExtJson.kt` | ext_json 读写 API |
-| `core/database/src/main/java/com/lianyu/ai/database/model/*.kt` | 实体定义（含 extJson 字段） |
-| `core/database/schemas/com.lianyu.ai.database.AppDatabase/22.json` | v22 Schema 基线 |
+| `core/database/src/main/java/com/yunian/ai/database/AppDatabase.kt` | 数据库定义、版本号、迁移脚本 |
+| `core/database/src/main/java/com/yunian/ai/database/model/ExtJson.kt` | ext_json 读写 API |
+| `core/database/src/main/java/com/yunian/ai/database/model/*.kt` | 实体定义（含 extJson 字段） |
+| `core/database/schemas/com.yunian.ai.database.AppDatabase/22.json` | v22 Schema 基线 |
 | `scripts/check-database-schema.ps1` | CI 守卫脚本 |
-| `feature/backup/src/main/java/com/lianyu/ai/feature/backup/model/BackupData.kt` | 备份 Snapshot 定义（含 extJson） |
+| `feature/backup/src/main/java/com/yunian/ai/feature/backup/model/BackupData.kt` | 备份 Snapshot 定义（含 extJson） |

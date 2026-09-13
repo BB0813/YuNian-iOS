@@ -10,8 +10,8 @@
  *   if (XS_FRIDA(buf)) { ... }
  *   char decoded[64]; DE_XOR_IDX(decoded, OBS_FRIDA, 0);
  */
-#ifndef LIANYU_OBFUSCATED_STRINGS_H
-#define LIANYU_OBFUSCATED_STRINGS_H
+#ifndef YUNIAN_OBFUSCATED_STRINGS_H
+#define YUNIAN_OBFUSCATED_STRINGS_H
 
 #include <cstring>
 #include <cstdint>
@@ -234,4 +234,4 @@ static const uint8_t g_obs_io_va_exposed[]     = { OBS_IO_VA_EXPOSED };
 static const uint8_t g_obs_virtualxposed[]     = { OBS_VIRTUALXPOSED };
 static const uint8_t g_obs_virtualapp[]        = { OBS_VIRTUALAPP };
 
-#endif /* LIANYU_OBFUSCATED_STRINGS_H */
+#endif /* YUNIAN_OBFUSCATED_STRINGS_H */

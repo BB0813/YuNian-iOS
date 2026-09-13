@@ -15,16 +15,16 @@
 ## 文件结构
 
 ### 新建文件（core/common 模块）
-- `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryItem.kt` — 记忆数据模型
-- `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryTokenizer.kt` — 中文分词
-- `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryIndex.kt` — 倒排索引
-- `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryStore.kt` — JSON文件持久化
-- `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryManager.kt` — 核心管理器（单例）
+- `core/common/src/main/java/com/yunian/ai/common/memory/MemoryItem.kt` — 记忆数据模型
+- `core/common/src/main/java/com/yunian/ai/common/memory/MemoryTokenizer.kt` — 中文分词
+- `core/common/src/main/java/com/yunian/ai/common/memory/MemoryIndex.kt` — 倒排索引
+- `core/common/src/main/java/com/yunian/ai/common/memory/MemoryStore.kt` — JSON文件持久化
+- `core/common/src/main/java/com/yunian/ai/common/memory/MemoryManager.kt` — 核心管理器（单例）
 
 ### 修改文件
 - `core/common/build.gradle.kts` — 添加 kotlinx-serialization-json 依赖
-- `core/network/src/main/java/com/lianyu/ai/network/AiService.kt` — 接入新记忆系统
-- `feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/GroupChatViewModel.kt` — 群聊接入记忆+底层优化
+- `core/network/src/main/java/com/yunian/ai/network/AiService.kt` — 接入新记忆系统
+- `feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/GroupChatViewModel.kt` — 群聊接入记忆+底层优化
 
 ---
 
@@ -50,12 +50,12 @@ Expected: 显示 kotlinx-serialization-json
 ## Task 2: 创建 MemoryItem 数据模型
 
 **Files:**
-- Create: `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryItem.kt`
+- Create: `core/common/src/main/java/com/yunian/ai/common/memory/MemoryItem.kt`
 
 - [ ] **Step 1: 创建记忆数据模型**
 
 ```kotlin
-package com.lianyu.ai.common.memory
+package com.yunian.ai.common.memory
 
 import kotlinx.serialization.Serializable
 
@@ -94,14 +94,14 @@ data class MemoryItem(
 ## Task 3: 创建 MemoryTokenizer（中文分词）
 
 **Files:**
-- Create: `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryTokenizer.kt`
+- Create: `core/common/src/main/java/com/yunian/ai/common/memory/MemoryTokenizer.kt`
 
 - [ ] **Step 1: 实现中文分词器**
 
 基于标点+停用词的简易分词，不引入外部依赖。
 
 ```kotlin
-package com.lianyu.ai.common.memory
+package com.yunian.ai.common.memory
 
 object MemoryTokenizer {
     private val delimiters = Regex("[，。！？、；：""''（）【】《》\\s\\n\\r\\t,.!?;:\"'()<>\\[\\]@#￥%…&*+=|/\\\\-]")
@@ -130,12 +130,12 @@ object MemoryTokenizer {
 ## Task 4: 创建 MemoryIndex（倒排索引）
 
 **Files:**
-- Create: `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryIndex.kt`
+- Create: `core/common/src/main/java/com/yunian/ai/common/memory/MemoryIndex.kt`
 
 - [ ] **Step 1: 实现倒排索引**
 
 ```kotlin
-package com.lianyu.ai.common.memory
+package com.yunian.ai.common.memory
 
 import kotlinx.serialization.Serializable
 import java.util.concurrent.ConcurrentHashMap
@@ -240,12 +240,12 @@ class MemoryIndex {
 ## Task 5: 创建 MemoryStore（JSON文件持久化）
 
 **Files:**
-- Create: `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryStore.kt`
+- Create: `core/common/src/main/java/com/yunian/ai/common/memory/MemoryStore.kt`
 
 - [ ] **Step 1: 实现 JSON 文件持久化**
 
 ```kotlin
-package com.lianyu.ai.common.memory
+package com.yunian.ai.common.memory
 
 import android.content.Context
 import kotlinx.serialization.encodeToString
@@ -317,7 +317,7 @@ class MemoryStore(private val context: Context, private val deviceId: String) {
 ## Task 6: 创建 MemoryManager（核心管理器）
 
 **Files:**
-- Create: `core/common/src/main/java/com/lianyu/ai/common/memory/MemoryManager.kt`
+- Create: `core/common/src/main/java/com/yunian/ai/common/memory/MemoryManager.kt`
 
 - [ ] **Step 1: 实现核心管理器**
 
@@ -328,7 +328,7 @@ class MemoryStore(private val context: Context, private val deviceId: String) {
 ## Task 7: 改造 AiService 接入新记忆系统
 
 **Files:**
-- Modify: `core/network/src/main/java/com/lianyu/ai/network/AiService.kt`
+- Modify: `core/network/src/main/java/com/yunian/ai/network/AiService.kt`
 
 - [ ] **Step 1: 在 AiService 中注入 MemoryManager**
 - [ ] **Step 2: 替换 getEnrichedContext 调用为 MemoryManager.getMemoryContext**
@@ -339,7 +339,7 @@ class MemoryStore(private val context: Context, private val deviceId: String) {
 ## Task 8: 群聊接入记忆系统
 
 **Files:**
-- Modify: `feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/GroupChatViewModel.kt`
+- Modify: `feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/GroupChatViewModel.kt`
 
 - [ ] **Step 1: 在群聊 prompt 中注入记忆上下文**
 - [ ] **Step 2: 群聊回复后提取记忆**
@@ -349,7 +349,7 @@ class MemoryStore(private val context: Context, private val deviceId: String) {
 ## Task 9: 群聊底层优化
 
 **Files:**
-- Modify: `feature/groupchat/src/main/java/com/lianyu/ai/feature/groupchat/GroupChatViewModel.kt`
+- Modify: `feature/groupchat/src/main/java/com/yunian/ai/feature/groupchat/GroupChatViewModel.kt`
 
 - [ ] **Step 1: 上下文全可见+身份保留（废弃隔离历史）**
 - [ ] **Step 2: 串行调度（废弃并发）**

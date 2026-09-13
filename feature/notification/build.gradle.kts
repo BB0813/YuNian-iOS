@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.feature.notification"
+    namespace = "com.yunian.ai.feature.notification"
     compileSdk = 35
 
     defaultConfig {

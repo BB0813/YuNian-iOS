@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.lianyu.ai.database"
+    namespace = "com.yunian.ai.database"
     compileSdk = 35
 
     defaultConfig {

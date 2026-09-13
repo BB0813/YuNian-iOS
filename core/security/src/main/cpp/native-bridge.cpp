@@ -298,13 +298,13 @@ static void bp_guard_register(int slot, const void* func) {
 extern "C" 
 /* KmsProvider JNI functions (defined in kms-engine.cpp, registered in JNI_OnLoad) */
 extern "C" {
-    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt(JNIEnv*, jclass, jbyteArray);
-    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt(JNIEnv*, jclass, jbyteArray);
-    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2(JNIEnv*, jclass, jbyteArray, jbyteArray);
-    jbyteArray Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2(JNIEnv*, jclass, jbyteArray, jbyteArray);
-    jint Java_com_lianyu_ai_security_KmsProvider_nativeInit(JNIEnv*, jclass);
-    void Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain(JNIEnv*, jclass);
-    jint Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus(JNIEnv*, jclass);
+    jbyteArray Java_com_yunian_ai_security_KmsProvider_nativeEncrypt(JNIEnv*, jclass, jbyteArray);
+    jbyteArray Java_com_yunian_ai_security_KmsProvider_nativeDecrypt(JNIEnv*, jclass, jbyteArray);
+    jbyteArray Java_com_yunian_ai_security_KmsProvider_nativeEncryptV2(JNIEnv*, jclass, jbyteArray, jbyteArray);
+    jbyteArray Java_com_yunian_ai_security_KmsProvider_nativeDecryptV2(JNIEnv*, jclass, jbyteArray, jbyteArray);
+    jint Java_com_yunian_ai_security_KmsProvider_nativeInit(JNIEnv*, jclass);
+    void Java_com_yunian_ai_security_KmsProvider_nativeDestroyKeychain(JNIEnv*, jclass);
+    jint Java_com_yunian_ai_security_KmsProvider_nativeGetStatus(JNIEnv*, jclass);
 }
 
 __attribute__((visibility("default"))) extern "C" int check_dex_integrity(void);
@@ -2447,7 +2447,7 @@ static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context) {
     // blocked business init and left MainActivity on a white screen.
     uint8_t actual_cert_sha256[32];
     if (!get_apk_cert_sha256(env, context, actual_cert_sha256)) {
-        __android_log_print(ANDROID_LOG_ERROR, "LianYu",
+        __android_log_print(ANDROID_LOG_ERROR, "YuNian",
             "APK signature verification FAILED — refusing to run");
         return 0;  // Fail-close: no cert = no execution
     }
@@ -2459,7 +2459,7 @@ static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context) {
     }
 
     if (memcmp(actual_cert_sha256, expected_cert_sha256, 32) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "LianYu",
+        __android_log_print(ANDROID_LOG_ERROR, "YuNian",
             "APK signature MISMATCH — re-packaging detected");
         memset(actual_cert_sha256, 0, sizeof(actual_cert_sha256));
         memset(expected_cert_sha256, 0, sizeof(expected_cert_sha256));
@@ -2484,12 +2484,12 @@ static int check_apk_signature(JNIEnv* env, jobject thiz, jobject context) {
 
 extern "C" {
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_nativeLoadPayload(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_nativeLoadPayload(
     JNIEnv* env, jclass clazz, jobject context, jstring appClassName) {
     return native_load_payload_entry(env, clazz, context, appClassName);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_verifySignature(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_verifySignature(
     JNIEnv* env, jobject thiz, jobject context) {
     int ok = check_apk_signature(env, thiz, context);
     g_sig_ok = ok;
@@ -2500,28 +2500,28 @@ extern "C" {
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_injectAuthHeader(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_injectAuthHeader(
     JNIEnv* env, jobject thiz, jobject builder) {
 }
 
-/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_getRepoOwner(
+/* RN */ jstring Java_com_yunian_ai_security_NativeBridge_getRepoOwner(
     JNIEnv* env, jobject thiz) {
     return env->NewStringUTF("linruoxi666");
 }
 
-/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_getRepoName(
+/* RN */ jstring Java_com_yunian_ai_security_NativeBridge_getRepoName(
     JNIEnv* env, jobject thiz) {
     return env->NewStringUTF("LianYu");
 }
 
-/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_getGitHubApiUrl(
+/* RN */ jstring Java_com_yunian_ai_security_NativeBridge_getGitHubApiUrl(
     JNIEnv* env, jobject thiz) {
     // Update URL is configured via BuildConfig, not hardcoded.
     // Return empty = update check disabled by default.
     return env->NewStringUTF("");
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isSafe(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isSafe(
     JNIEnv* env, jobject thiz) {
     // Full 360° detection chain — all checks must pass
     if (check_root())          return JNI_FALSE;
@@ -2537,7 +2537,7 @@ extern "C" {
     return JNI_TRUE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isMitmDetected(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isMitmDetected(
     JNIEnv* env, jobject thiz) {
     // Check for common MITM proxy ports (Charles, Burp, mitmproxy)
     int proxy_ports[] = {8888, 8080, 9090, 9999, -1};
@@ -2562,34 +2562,34 @@ extern "C" {
     return JNI_FALSE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_verifyRequestIntegrity(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_verifyRequestIntegrity(
     JNIEnv* env, jobject thiz, jstring url) {
     return JNI_TRUE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isDeviceRooted(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isDeviceRooted(
     JNIEnv* env, jobject thiz) {
     int r = check_root();
     return (jboolean)(r ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isHookDetected(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isHookDetected(
     JNIEnv* env, jobject thiz) {
     return (jboolean)(cm() || cp() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isEmulator(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isEmulator(
     JNIEnv* env, jobject thiz) {
     return (jboolean)(check_emulator() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isDebugged(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isDebugged(
     JNIEnv* env, jobject thiz) {
     int tp = getTracerPid();
     return (jboolean)(tp > 0 ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_getThreatScore(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_getThreatScore(
     JNIEnv* env, jobject thiz) {
     int s = 0;
     if (cm()) s += 30;
@@ -2598,16 +2598,16 @@ extern "C" {
     return (jint)s;
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_resetGuard(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_resetGuard(
     JNIEnv* env, jobject thiz) {
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkFridaFiles(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkFridaFiles(
     JNIEnv* env, jobject thiz) {
     return (jboolean)(cp() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkSelinuxPermissive(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkSelinuxPermissive(
     JNIEnv* env, jobject thiz) {
     int fd = open("/sys/fs/selinux/enforce", O_RDONLY);
     if (fd < 0) return JNI_FALSE;
@@ -2617,12 +2617,12 @@ extern "C" {
     return (jboolean)(c == '0' ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkBootloader(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkBootloader(
     JNIEnv* env, jobject thiz) {
     return check_bootloader() ? JNI_TRUE : JNI_FALSE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkZygiskModules(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkZygiskModules(
     JNIEnv* env, jobject thiz) {
     int r = check_maps_for_magisk();
     // Also check /data/adb/modules for active Zygisk modules
@@ -2648,12 +2648,12 @@ extern "C" {
     return (jboolean)(r ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkLibraryInjection(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkLibraryInjection(
     JNIEnv* env, jobject thiz) {
     return (jboolean)(cm() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkVirtualEnv(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkVirtualEnv(
     JNIEnv* env, jobject thiz) {
     // Virtual environment detection: check for vmos, parallel space, virtual app
     // Check /proc/self/mountinfo for virtual-specific mounts
@@ -2698,7 +2698,7 @@ extern "C" {
     return JNI_FALSE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkFridaThreads(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkFridaThreads(
     JNIEnv* env, jobject thiz) {
     // Check for Frida-specific thread names via /proc/self/task
     DIR* d = opendir("/proc/self/task");
@@ -2729,7 +2729,7 @@ extern "C" {
     return (jboolean)(cp() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_getSecureString(
+/* RN */ jstring Java_com_yunian_ai_security_NativeBridge_getSecureString(
     JNIEnv* env, jobject thiz, jint id) {
     // Secure string table — returns obfuscated sensitive strings
     // These are decoded at runtime and never stored in DEX string pool
@@ -2744,7 +2744,7 @@ extern "C" {
     return env->NewStringUTF(strings[id]);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_getFullThreatScore(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_getFullThreatScore(
     JNIEnv* env, jobject thiz) {
     // Full 32-point detection — weighted scoring (max 100)
     int s = 0;
@@ -2771,17 +2771,17 @@ extern "C" {
     return (jint)(s > 100 ? 100 : s);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmRunCheckTracer(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmRunCheckTracer(
     JNIEnv* env, jobject thiz) {
     return (jint)getTracerPid();
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmSelftest(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmSelftest(
     JNIEnv* env, jobject thiz) {
     return 1;
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpWbAesKeycheck(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpWbAesKeycheck(
     JNIEnv* env, jobject thiz) {
     /* Run the WB-AES keycheck bytecode inside the VM. The bytecode performs
        HC_WB_AES_KEYCHECK → selftest()==0 ? 1 : 0, so R0==1 on success.
@@ -2790,22 +2790,22 @@ extern "C" {
     return native_vmp_wb_aes_keycheck(env, (jclass)thiz);
 }
 
-/* RN */ jlong Java_com_lianyu_ai_security_NativeBridge_vmpKmsDeriveSk(
+/* RN */ jlong Java_com_yunian_ai_security_NativeBridge_vmpKmsDeriveSk(
     JNIEnv* env, jobject thiz, jlong ctxPtr, jint ctxLen) {
     return 0;
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpTeeAttest(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpTeeAttest(
     JNIEnv* env, jobject thiz) {
     return native_vmp_tee_attest(env, (jclass)thiz);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpTrustAnchorsVerify(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpTrustAnchorsVerify(
     JNIEnv* env, jobject thiz) {
     return native_vmp_trust_anchors_verify(env, (jclass)thiz);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpApkSigVerify(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpApkSigVerify(
     JNIEnv* env, jobject thiz) {
     /* Run the APK signature verification bytecode inside the VM
        (HC_TRACER → HC_ROOT_CHECK → HC_SIG_VERIFY). Previously bound to
@@ -2819,7 +2819,7 @@ extern "C" {
  * ================================================================ */
 
 /* Root + debug detection inside VM. Returns 1 if compromised. */
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpRootDetect(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpRootDetect(
     JNIEnv* env, jobject thiz) {
     VMState vm;
     vm_init(&vm, g_vmp_root_detect, g_vmp_root_detect_size);
@@ -2830,7 +2830,7 @@ extern "C" {
 /* .text section CRC32 integrity check inside VM.
  * expectedCrc: pre-computed CRC32 of .text section.
  * Returns 1 if ok, 0xFF if failed. */
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpCodeIntegrity(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpCodeIntegrity(
     JNIEnv* env, jobject thiz, jint expectedCrc) {
     VMState vm;
     vm_init(&vm, g_vmp_code_integrity, g_vmp_code_integrity_size);
@@ -2843,7 +2843,7 @@ extern "C" {
  * dataPtr: native pointer to data buffer
  * dataLen: length in bytes
  * Returns hash_ptr (32 bytes in scratch buffer) or 0. */
-/* RN */ jlong Java_com_lianyu_ai_security_NativeBridge_vmpSm3Hash(
+/* RN */ jlong Java_com_yunian_ai_security_NativeBridge_vmpSm3Hash(
     JNIEnv* env, jobject thiz, jlong dataPtr, jint dataLen) {
     VMState vm;
     vm_init(&vm, g_vmp_sm3_hash, g_vmp_sm3_hash_size);
@@ -2855,7 +2855,7 @@ extern "C" {
 
 /* Combined Frida+CRC32 heartbeat inside VM.
  * Returns 0xFFFFFFFF if Frida detected, or CRC32 of .text if clean. */
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_vmpFridaHeartbeat(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_vmpFridaHeartbeat(
     JNIEnv* env, jobject thiz) {
     VMState vm;
     vm_init(&vm, g_vmp_frida_heartbeat, g_vmp_frida_heartbeat_size);
@@ -2863,31 +2863,31 @@ extern "C" {
     return (jint)vm_get_reg(&vm, 0);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_ptraceSelfAttach(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_ptraceSelfAttach(
     JNIEnv* env, jobject thiz) {
     return (jboolean)(mg_ptrace_self_attach() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_antiDebugInit(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_antiDebugInit(
     JNIEnv* env, jobject thiz) {
     return (jboolean)(mg_ptrace_self_attach() ? JNI_TRUE : JNI_FALSE);
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_zeroTrustInit(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_zeroTrustInit(
     JNIEnv* env, jobject thiz) {
 
     jclass kmsClass;
     // RegisterNatives for KmsProvider (must match KmsProvider.kt signatures)
-    kmsClass = env->FindClass("com/lianyu/ai/security/KmsProvider");
+    kmsClass = env->FindClass("com/yunian/ai/security/KmsProvider");
     if (kmsClass && !env->ExceptionCheck()) {
         JNINativeMethod kmsMethods[] = {
-            {const_cast<char*>("nativeInit"),             const_cast<char*>("()I"),                      (void*)Java_com_lianyu_ai_security_KmsProvider_nativeInit},
-            {const_cast<char*>("nativeEncrypt"),          const_cast<char*>("([B)[B"),                    (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncrypt},
-            {const_cast<char*>("nativeDecrypt"),          const_cast<char*>("([B)[B"),                    (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecrypt},
-            {const_cast<char*>("nativeEncryptV2"),        const_cast<char*>("([B[B)[B"),                  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeEncryptV2},
-            {const_cast<char*>("nativeDecryptV2"),        const_cast<char*>("([B[B)[B"),                  (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDecryptV2},
-            {const_cast<char*>("nativeDestroyKeychain"),  const_cast<char*>("()V"),                      (void*)Java_com_lianyu_ai_security_KmsProvider_nativeDestroyKeychain},
-            {const_cast<char*>("nativeGetStatus"),        const_cast<char*>("()I"),                      (void*)Java_com_lianyu_ai_security_KmsProvider_nativeGetStatus},
+            {const_cast<char*>("nativeInit"),             const_cast<char*>("()I"),                      (void*)Java_com_yunian_ai_security_KmsProvider_nativeInit},
+            {const_cast<char*>("nativeEncrypt"),          const_cast<char*>("([B)[B"),                    (void*)Java_com_yunian_ai_security_KmsProvider_nativeEncrypt},
+            {const_cast<char*>("nativeDecrypt"),          const_cast<char*>("([B)[B"),                    (void*)Java_com_yunian_ai_security_KmsProvider_nativeDecrypt},
+            {const_cast<char*>("nativeEncryptV2"),        const_cast<char*>("([B[B)[B"),                  (void*)Java_com_yunian_ai_security_KmsProvider_nativeEncryptV2},
+            {const_cast<char*>("nativeDecryptV2"),        const_cast<char*>("([B[B)[B"),                  (void*)Java_com_yunian_ai_security_KmsProvider_nativeDecryptV2},
+            {const_cast<char*>("nativeDestroyKeychain"),  const_cast<char*>("()V"),                      (void*)Java_com_yunian_ai_security_KmsProvider_nativeDestroyKeychain},
+            {const_cast<char*>("nativeGetStatus"),        const_cast<char*>("()I"),                      (void*)Java_com_yunian_ai_security_KmsProvider_nativeGetStatus},
         };
         jint kmsRc = env->RegisterNatives(kmsClass, kmsMethods, 7);
         if (kmsRc != JNI_OK) {
@@ -2902,69 +2902,69 @@ extern "C" {
     zero_trust_init();
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustEvaluate(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustEvaluate(
     JNIEnv* env, jobject thiz) {
     return (jint)zero_trust_evaluate();
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustGetState(
     JNIEnv* env, jobject thiz) {
     return (jint)zero_trust_get_state();
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScore(
     JNIEnv* env, jobject thiz) {
     return (jint)zero_trust_get_score();
 }
 
-/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown(
+/* RN */ jstring Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScoreBreakdown(
     JNIEnv* env, jobject thiz) {
     (void)thiz;
     return env->NewStringUTF(zero_trust_get_score_breakdown_str());
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustGetRiskLevel(
     JNIEnv* env, jobject thiz) {
     (void)thiz;
     return (jint)zero_trust_get_risk_level();
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustIsDegraded(
     JNIEnv* env, jobject thiz) {
     return zero_trust_is_degraded() ? 1 : 0;
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustIsLocked(
     JNIEnv* env, jobject thiz) {
     return zero_trust_is_locked() ? 1 : 0;
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning(
     JNIEnv* env, jobject thiz) {
     return zero_trust_is_continuous_eval_running();
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_wbAesInit(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_wbAesInit(
     JNIEnv* env, jobject thiz) {
     native_wb_init(env, env->GetObjectClass(thiz));
 }
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_wbAesEncrypt(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_wbAesEncrypt(
     JNIEnv* env, jobject thiz, jbyteArray data) {
     return native_wb_encrypt(env, env->GetObjectClass(thiz), data);
 }
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_wbAesDecrypt(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_wbAesDecrypt(
     JNIEnv* env, jobject thiz, jbyteArray data) {
     return native_wb_decrypt(env, env->GetObjectClass(thiz), data);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_wbAesSelftest(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_wbAesSelftest(
     JNIEnv* env, jobject thiz) {
     return native_wb_selftest(env, env->GetObjectClass(thiz));
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_wbAesObfuscateTables(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_wbAesObfuscateTables(
     JNIEnv* env, jobject thiz, jbyteArray seed) {
     if (!seed) return;
     jsize len = env->GetArrayLength(seed);
@@ -2975,7 +2975,7 @@ extern "C" {
     env->ReleaseByteArrayElements(seed, seedBytes, JNI_ABORT);
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_wbAesSideChannelDefense(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_wbAesSideChannelDefense(
     JNIEnv* env, jobject thiz) {
     wb_aes_side_channel_defense();
 }
@@ -2986,33 +2986,33 @@ static const char* g_pinned_certs[] = {
 static const int g_pinned_cert_count =
     static_cast<int>(sizeof(g_pinned_certs) / sizeof(g_pinned_certs[0]));
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_encryptBody(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_encryptBody(
     JNIEnv* env, jobject thiz, jbyteArray plaintext) {
     return native_encrypt_body(env, env->GetObjectClass(thiz), plaintext, nullptr);
 }
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_decryptBody(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_decryptBody(
     JNIEnv* env, jobject thiz, jbyteArray ciphertext) {
     return native_decrypt_body(env, env->GetObjectClass(thiz), ciphertext, nullptr);
 }
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_sealCredential(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_sealCredential(
     JNIEnv* env, jobject thiz, jbyteArray plaintext, jbyteArray aad) {
     return native_encrypt_body(env, env->GetObjectClass(thiz), plaintext, aad);
 }
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_unsealCredential(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_unsealCredential(
     JNIEnv* env, jobject thiz, jbyteArray ciphertext, jbyteArray aad) {
     return native_decrypt_body(env, env->GetObjectClass(thiz), ciphertext, aad);
 }
 
-/* RN */ jstring Java_com_lianyu_ai_security_NativeBridge_getPinnedCert(
+/* RN */ jstring Java_com_yunian_ai_security_NativeBridge_getPinnedCert(
     JNIEnv* env, jobject thiz, jint index) {
     if (index < 0 || index >= g_pinned_cert_count) return nullptr;
     return env->NewStringUTF(g_pinned_certs[index]);
 }
 
-/* RN */ jint Java_com_lianyu_ai_security_NativeBridge_getPinnedCertCount(
+/* RN */ jint Java_com_yunian_ai_security_NativeBridge_getPinnedCertCount(
     JNIEnv* env, jobject thiz) {
     return g_pinned_cert_count;
 }
@@ -3030,7 +3030,7 @@ static const int g_pinned_cert_count =
 // stored in g_cert_hash_config.h (auto-generated, not committed).
 // Format: 32 bytes of XOR-obfuscated SHA-256, key = CERT_HASH_KEY.
 
-#ifdef LIANYU_CERT_HASH_CONFIG_H
+#ifdef YUNIAN_CERT_HASH_CONFIG_H
 #include "g_cert_hash_config.h"
 #else
 // Fallback: placeholder — will fail signature verification in release.
@@ -3044,7 +3044,7 @@ static const uint8_t g_cert_hash_obf[] = {
 };
 #endif
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_getExpectedCertSha256(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_getExpectedCertSha256(
     JNIEnv* env, jobject thiz) {
     OBF_BARRIER(71);
     // Prefer build-generated g_cert_hash_config.h when present; otherwise fall
@@ -3080,22 +3080,22 @@ static const uint8_t g_cert_hash_obf[] = {
     return out;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkDexIntegrity(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkDexIntegrity(
     JNIEnv* env, jobject thiz) {
     return check_dex_integrity() ? JNI_TRUE : JNI_FALSE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkSoIntegrity(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkSoIntegrity(
     JNIEnv* env, jobject thiz) {
     return check_so_integrity() ? JNI_TRUE : JNI_FALSE;
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_checkResourcesIntegrity(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_checkResourcesIntegrity(
     JNIEnv* env, jobject thiz) {
     return check_resources_integrity() ? JNI_TRUE : JNI_FALSE;
 }
 
-/* RN */ jbyteArray Java_com_lianyu_ai_security_NativeBridge_computeIntegrityDigest(
+/* RN */ jbyteArray Java_com_yunian_ai_security_NativeBridge_computeIntegrityDigest(
     JNIEnv* env, jobject thiz) {
     uint8_t combined[96];
     memcpy(combined,       (const void*)g_computed_digests[0], 32);
@@ -3108,11 +3108,11 @@ static const uint8_t g_cert_hash_obf[] = {
     return out;
 }
 
-/* RN */ void Java_com_lianyu_ai_security_NativeBridge_startHeartbeat(
+/* RN */ void Java_com_yunian_ai_security_NativeBridge_startHeartbeat(
     JNIEnv* env, jobject thiz) {
 }
 
-/* RN */ jboolean Java_com_lianyu_ai_security_NativeBridge_isHeartbeatOk(
+/* RN */ jboolean Java_com_yunian_ai_security_NativeBridge_isHeartbeatOk(
     JNIEnv* env, jobject thiz) {
     return JNI_TRUE;
 }
@@ -3168,63 +3168,63 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LS_LOGE("JNI_OnLoad: ptrace/prctl done");
 
     // RegisterNatives — all NativeBridge methods (hides JNI symbols from SO exports)
-    jclass bridgeClass = env->FindClass("com/lianyu/ai/security/NativeBridge");
+    jclass bridgeClass = env->FindClass("com/yunian/ai/security/NativeBridge");
     if (bridgeClass && !env->ExceptionCheck()) {
         JNINativeMethod methods[] = {
-            {const_cast<char*>("nativeLoadPayload"), const_cast<char*>("(Landroid/content/Context;Ljava/lang/String;)I"), (void*)Java_com_lianyu_ai_security_NativeBridge_nativeLoadPayload},
-            {const_cast<char*>("verifySignature"), const_cast<char*>("(Landroid/content/Context;)Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_verifySignature},
-            {const_cast<char*>("isSafe"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isSafe},
-            {const_cast<char*>("isMitmDetected"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isMitmDetected},
-            {const_cast<char*>("isDeviceRooted"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isDeviceRooted},
-            {const_cast<char*>("isHookDetected"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isHookDetected},
-            {const_cast<char*>("isEmulator"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isEmulator},
-            {const_cast<char*>("isDebugged"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isDebugged},
-            {const_cast<char*>("getThreatScore"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_getThreatScore},
-            {const_cast<char*>("resetGuard"), const_cast<char*>("()V"), (void*)Java_com_lianyu_ai_security_NativeBridge_resetGuard},
-            {const_cast<char*>("checkFridaFiles"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkFridaFiles},
-            {const_cast<char*>("checkSelinuxPermissive"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkSelinuxPermissive},
-            {const_cast<char*>("checkBootloader"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkBootloader},
-            {const_cast<char*>("checkZygiskModules"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkZygiskModules},
-            {const_cast<char*>("checkLibraryInjection"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkLibraryInjection},
-            {const_cast<char*>("checkVirtualEnv"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkVirtualEnv},
-            {const_cast<char*>("checkFridaThreads"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkFridaThreads},
-            {const_cast<char*>("getFullThreatScore"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_getFullThreatScore},
-            {const_cast<char*>("vmRunCheckTracer"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmRunCheckTracer},
-            {const_cast<char*>("vmSelftest"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmSelftest},
-            {const_cast<char*>("vmpWbAesKeycheck"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpWbAesKeycheck},
-            {const_cast<char*>("vmpKmsDeriveSk"), const_cast<char*>("(JI)J"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpKmsDeriveSk},
-            {const_cast<char*>("vmpTeeAttest"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpTeeAttest},
-            {const_cast<char*>("vmpApkSigVerify"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpApkSigVerify},
-            {const_cast<char*>("vmpRootDetect"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpRootDetect},
-            {const_cast<char*>("vmpCodeIntegrity"), const_cast<char*>("(I)I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpCodeIntegrity},
-            {const_cast<char*>("vmpSm3Hash"), const_cast<char*>("(JI)J"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpSm3Hash},
-            {const_cast<char*>("vmpFridaHeartbeat"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpFridaHeartbeat},
-            {const_cast<char*>("vmpTrustAnchorsVerify"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_vmpTrustAnchorsVerify},
-            {const_cast<char*>("ptraceSelfAttach"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_ptraceSelfAttach},
-            {const_cast<char*>("antiDebugInit"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_antiDebugInit},
-            {const_cast<char*>("zeroTrustInit"), const_cast<char*>("()V"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustInit},
-            {const_cast<char*>("zeroTrustEvaluate"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustEvaluate},
-            {const_cast<char*>("zeroTrustGetState"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetState},
-            {const_cast<char*>("zeroTrustGetScore"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScore},
-            {const_cast<char*>("zeroTrustGetScoreBreakdown"), const_cast<char*>("()Ljava/lang/String;"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetScoreBreakdown},
-            {const_cast<char*>("zeroTrustGetRiskLevel"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustGetRiskLevel},
-            {const_cast<char*>("zeroTrustIsDegraded"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsDegraded},
-            {const_cast<char*>("zeroTrustIsLocked"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsLocked},
-            {const_cast<char*>("zeroTrustIsContinuousEvaluationRunning"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning},
-            {const_cast<char*>("wbAesInit"), const_cast<char*>("()V"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesInit},
-            {const_cast<char*>("wbAesEncrypt"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesEncrypt},
-            {const_cast<char*>("wbAesDecrypt"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesDecrypt},
-            {const_cast<char*>("wbAesSelftest"), const_cast<char*>("()I"), (void*)Java_com_lianyu_ai_security_NativeBridge_wbAesSelftest},
-            {const_cast<char*>("checkDexIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkDexIntegrity},
-            {const_cast<char*>("checkSoIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkSoIntegrity},
-            {const_cast<char*>("checkResourcesIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_checkResourcesIntegrity},
-            {const_cast<char*>("computeIntegrityDigest"), const_cast<char*>("()[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_computeIntegrityDigest},
-            {const_cast<char*>("encryptBody"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_encryptBody},
-            {const_cast<char*>("decryptBody"), const_cast<char*>("([B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_decryptBody},
-            {const_cast<char*>("sealCredential"), const_cast<char*>("([B[B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_sealCredential},
-            {const_cast<char*>("unsealCredential"), const_cast<char*>("([B[B)[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_unsealCredential},
-            {const_cast<char*>("isHeartbeatOk"), const_cast<char*>("()Z"), (void*)Java_com_lianyu_ai_security_NativeBridge_isHeartbeatOk},
-            {const_cast<char*>("getExpectedCertSha256"), const_cast<char*>("()[B"), (void*)Java_com_lianyu_ai_security_NativeBridge_getExpectedCertSha256},
+            {const_cast<char*>("nativeLoadPayload"), const_cast<char*>("(Landroid/content/Context;Ljava/lang/String;)I"), (void*)Java_com_yunian_ai_security_NativeBridge_nativeLoadPayload},
+            {const_cast<char*>("verifySignature"), const_cast<char*>("(Landroid/content/Context;)Z"), (void*)Java_com_yunian_ai_security_NativeBridge_verifySignature},
+            {const_cast<char*>("isSafe"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isSafe},
+            {const_cast<char*>("isMitmDetected"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isMitmDetected},
+            {const_cast<char*>("isDeviceRooted"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isDeviceRooted},
+            {const_cast<char*>("isHookDetected"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isHookDetected},
+            {const_cast<char*>("isEmulator"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isEmulator},
+            {const_cast<char*>("isDebugged"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isDebugged},
+            {const_cast<char*>("getThreatScore"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_getThreatScore},
+            {const_cast<char*>("resetGuard"), const_cast<char*>("()V"), (void*)Java_com_yunian_ai_security_NativeBridge_resetGuard},
+            {const_cast<char*>("checkFridaFiles"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkFridaFiles},
+            {const_cast<char*>("checkSelinuxPermissive"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkSelinuxPermissive},
+            {const_cast<char*>("checkBootloader"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkBootloader},
+            {const_cast<char*>("checkZygiskModules"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkZygiskModules},
+            {const_cast<char*>("checkLibraryInjection"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkLibraryInjection},
+            {const_cast<char*>("checkVirtualEnv"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkVirtualEnv},
+            {const_cast<char*>("checkFridaThreads"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkFridaThreads},
+            {const_cast<char*>("getFullThreatScore"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_getFullThreatScore},
+            {const_cast<char*>("vmRunCheckTracer"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmRunCheckTracer},
+            {const_cast<char*>("vmSelftest"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmSelftest},
+            {const_cast<char*>("vmpWbAesKeycheck"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpWbAesKeycheck},
+            {const_cast<char*>("vmpKmsDeriveSk"), const_cast<char*>("(JI)J"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpKmsDeriveSk},
+            {const_cast<char*>("vmpTeeAttest"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpTeeAttest},
+            {const_cast<char*>("vmpApkSigVerify"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpApkSigVerify},
+            {const_cast<char*>("vmpRootDetect"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpRootDetect},
+            {const_cast<char*>("vmpCodeIntegrity"), const_cast<char*>("(I)I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpCodeIntegrity},
+            {const_cast<char*>("vmpSm3Hash"), const_cast<char*>("(JI)J"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpSm3Hash},
+            {const_cast<char*>("vmpFridaHeartbeat"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpFridaHeartbeat},
+            {const_cast<char*>("vmpTrustAnchorsVerify"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_vmpTrustAnchorsVerify},
+            {const_cast<char*>("ptraceSelfAttach"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_ptraceSelfAttach},
+            {const_cast<char*>("antiDebugInit"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_antiDebugInit},
+            {const_cast<char*>("zeroTrustInit"), const_cast<char*>("()V"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustInit},
+            {const_cast<char*>("zeroTrustEvaluate"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustEvaluate},
+            {const_cast<char*>("zeroTrustGetState"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustGetState},
+            {const_cast<char*>("zeroTrustGetScore"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScore},
+            {const_cast<char*>("zeroTrustGetScoreBreakdown"), const_cast<char*>("()Ljava/lang/String;"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustGetScoreBreakdown},
+            {const_cast<char*>("zeroTrustGetRiskLevel"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustGetRiskLevel},
+            {const_cast<char*>("zeroTrustIsDegraded"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustIsDegraded},
+            {const_cast<char*>("zeroTrustIsLocked"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustIsLocked},
+            {const_cast<char*>("zeroTrustIsContinuousEvaluationRunning"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_zeroTrustIsContinuousEvaluationRunning},
+            {const_cast<char*>("wbAesInit"), const_cast<char*>("()V"), (void*)Java_com_yunian_ai_security_NativeBridge_wbAesInit},
+            {const_cast<char*>("wbAesEncrypt"), const_cast<char*>("([B)[B"), (void*)Java_com_yunian_ai_security_NativeBridge_wbAesEncrypt},
+            {const_cast<char*>("wbAesDecrypt"), const_cast<char*>("([B)[B"), (void*)Java_com_yunian_ai_security_NativeBridge_wbAesDecrypt},
+            {const_cast<char*>("wbAesSelftest"), const_cast<char*>("()I"), (void*)Java_com_yunian_ai_security_NativeBridge_wbAesSelftest},
+            {const_cast<char*>("checkDexIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkDexIntegrity},
+            {const_cast<char*>("checkSoIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkSoIntegrity},
+            {const_cast<char*>("checkResourcesIntegrity"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_checkResourcesIntegrity},
+            {const_cast<char*>("computeIntegrityDigest"), const_cast<char*>("()[B"), (void*)Java_com_yunian_ai_security_NativeBridge_computeIntegrityDigest},
+            {const_cast<char*>("encryptBody"), const_cast<char*>("([B)[B"), (void*)Java_com_yunian_ai_security_NativeBridge_encryptBody},
+            {const_cast<char*>("decryptBody"), const_cast<char*>("([B)[B"), (void*)Java_com_yunian_ai_security_NativeBridge_decryptBody},
+            {const_cast<char*>("sealCredential"), const_cast<char*>("([B[B)[B"), (void*)Java_com_yunian_ai_security_NativeBridge_sealCredential},
+            {const_cast<char*>("unsealCredential"), const_cast<char*>("([B[B)[B"), (void*)Java_com_yunian_ai_security_NativeBridge_unsealCredential},
+            {const_cast<char*>("isHeartbeatOk"), const_cast<char*>("()Z"), (void*)Java_com_yunian_ai_security_NativeBridge_isHeartbeatOk},
+            {const_cast<char*>("getExpectedCertSha256"), const_cast<char*>("()[B"), (void*)Java_com_yunian_ai_security_NativeBridge_getExpectedCertSha256},
         };
         jint rc = env->RegisterNatives(bridgeClass, methods, sizeof(methods)/sizeof(methods[0]));
         if (rc != JNI_OK) {
@@ -3264,7 +3264,7 @@ int native_vmp_apk_sig_verify_wrapper(void) { return native_vmp_apk_sig_verify(n
 }
 
 JNIEXPORT void JNICALL
-Java_com_lianyu_ai_security_NativeBridge_enterDeadLoop(
+Java_com_yunian_ai_security_NativeBridge_enterDeadLoop(
     JNIEnv*, jclass) {
     volatile int i = 0;
     while (1) { i = (i + 1) & 0x7FFFFFFF; }

@@ -2,7 +2,7 @@
 
 ## 1. 设计目标
 
-为恋语（LianYu）扩展「AI男友」角色选项，使其与现有「AI女友」在对话节奏、情感表达、语言特征上形成清晰区分，同时保证两种角色在切换时不丢失聊天记录与个性化设置。
+为恋语（YuNian）扩展「AI男友」角色选项，使其与现有「AI女友」在对话节奏、情感表达、语言特征上形成清晰区分，同时保证两种角色在切换时不丢失聊天记录与个性化设置。
 
 ## 2. 角色定位
 
@@ -115,11 +115,11 @@
 
 ## 9. 相关代码位置
 
-- `core/common/src/main/java/com/lianyu/ai/common/CompanionRole.kt` — 角色枚举
-- `core/common/src/main/java/com/lianyu/ai/common/RolePromptProvider.kt` — Prompt 规则
-- `core/database/src/main/java/com/lianyu/ai/database/RolePresets.kt` — 默认人设
-- `core/database/src/main/java/com/lianyu/ai/database/RolePresetStore.kt` — 快照持久化
-- `core/database/src/main/java/com/lianyu/ai/database/model/RoleProfile.kt` — 角色预设数据类
+- `core/common/src/main/java/com/yunian/ai/common/CompanionRole.kt` — 角色枚举
+- `core/common/src/main/java/com/yunian/ai/common/RolePromptProvider.kt` — Prompt 规则
+- `core/database/src/main/java/com/yunian/ai/database/RolePresets.kt` — 默认人设
+- `core/database/src/main/java/com/yunian/ai/database/RolePresetStore.kt` — 快照持久化
+- `core/database/src/main/java/com/yunian/ai/database/model/RoleProfile.kt` — 角色预设数据类
 - `feature/profile/.../ProfileViewModel.kt` — 切换逻辑
 - `feature/profile/.../RoleSelectionScreen.kt` — 初始选择界面
 - `feature/profile/.../RoleManagerScreen.kt` — 个人中心角色管理界面

@@ -1,8 +1,8 @@
-# LianYu 安全加固 — 改动记录
+# YuNian 安全加固 — 改动记录
 
 ## 概览
 
-本次改造将 LianYu Android 应用从标准 Gradle 构建升级为**极简壳架构**：
+本次改造将 YuNian Android 应用从标准 Gradle 构建升级为**极简壳架构**：
 - 壳 DEX: 9.5MB → 6.1KB (纯 Java, 零 Kotlin 依赖)
 - 壳 SO: 9KB → 122KB (VMP1 双指令集 + syscall 反调试 + HMAC-SHA256 + 设备指纹)
 - 启动链: 零桩 — 系统直接加载业务 MainActivity
