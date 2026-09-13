@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 internal val sec1Title = "一、关于本软件"
-internal val sec1Body = "恋语(以下简称本软件)是一款基于人工智能技术的虚拟伴侣应用。本软件仅供年满18周岁的成年用户用于个人娱乐、情感陪伴及日常交流。本软件不构成任何人际关系、医疗建议、心理咨询或法律服务的替代。"
+internal val sec1Body = "予念(以下简称本软件)是一款基于人工智能技术的虚拟伴侣应用。本软件仅供年满18周岁的成年用户用于个人娱乐、情感陪伴及日常交流。本软件不构成任何人际关系、医疗建议、心理咨询或法律服务的替代。"
 
 internal val sec2Title = "二、用户资格与设备绑定"
 internal val sec2Body = """

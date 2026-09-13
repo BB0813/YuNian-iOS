@@ -1,6 +1,6 @@
-# 恋语 (YuNian) 贡献者指南
+# 予念 (YuNian) 贡献者指南
 
-> 欢迎加入恋语开源项目！本文档将帮助你快速上手，参与模块化开发。
+> 欢迎加入予念开源项目！本文档将帮助你快速上手，参与模块化开发。
 
 ---
 
@@ -385,7 +385,7 @@ docs: 更新模块化架构文档
 
 ## 贡献者
 
-感谢所有为恋语做出贡献的开发者！
+感谢所有为予念做出贡献的开发者！
 
 <a href="https://github.com/linruoxo666/LianYu/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=linruoxo666/LianYu" />

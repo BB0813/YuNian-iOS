@@ -127,7 +127,7 @@ fun HomeScreen(
                     Box(modifier = Modifier.weight(1f))
 
                     Text(
-                        text = "恋语",
+                        text = "予念",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 22.sp

@@ -350,7 +350,7 @@ class QQBotChatBridge(
             return
         }
         missingCompanionHintAtMs[key] = now
-        sendReply(event, "还没有可用的 AI 伴侣，请先在恋语里创建一个伴侣，再回来和我聊天。")
+        sendReply(event, "还没有可用的 AI 伴侣，请先在予念里创建一个伴侣，再回来和我聊天。")
     }
 
     private suspend fun sendReply(event: QQInboundEvent, text: String) {

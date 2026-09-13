@@ -1484,7 +1484,7 @@ class AiService(context: Context) : AiServiceProvider {
                 }
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
-                // 与 RikkaHub 行为对齐 —— 不配置就交给服务端使用模型默认输出上限。
+                // 行为说明：不配置就交给服务端使用模型默认输出上限。
                 config.maxTokens?.takeIf { it > 0 }?.let { maxTokens ->
                     val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
                         "max_completion_tokens"
@@ -1621,7 +1621,7 @@ class AiService(context: Context) : AiServiceProvider {
                 }
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
-                // 与 RikkaHub 行为对齐 —— 不配置就交给服务端使用模型默认输出上限。
+                // 行为说明：不配置就交给服务端使用模型默认输出上限。
                 config.maxTokens?.takeIf { it > 0 }?.let { maxTokens ->
                     val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
                         "max_completion_tokens"

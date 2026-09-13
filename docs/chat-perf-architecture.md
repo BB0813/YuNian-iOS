@@ -1,4 +1,4 @@
-# 恋语 YuNian · 聊天页性能与稳定性优化 · 架构设计
+# 予念 YuNian · 聊天页性能与稳定性优化 · 架构设计
 
 > 作者：软件架构师（高见远） ｜ 版本：v2（含第二轮增量） ｜ 范围：`feature:chat` + `core:ui-common` + `feature:groupchat`
 >

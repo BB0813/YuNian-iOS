@@ -298,7 +298,7 @@ suspend fun loginUser(email: String, password: String): AuthResult {
 suspend fun getSaltForEmail(email: String): String {
     val digest = java.security.MessageDigest.getInstance("SHA-256")
     // ⚠️ 此盐参与老账号凭据派生（password 哈希），必须永久保持 "com.lianyu.ai:$email:auth_salt_v2"
-    //    的历史前缀，禁止随品牌改名（恋语/LianYu → 予念/Yunian）而修改，否则老用户将无法登录。
+    //    的历史前缀，禁止随品牌改名（LianYu → Yunian）而修改，否则老用户将无法登录。
     val input = "com.lianyu.ai:$email:auth_salt_v2"
     val hashBytes = digest.digest(input.toByteArray(Charsets.UTF_8))
     return hashBytes.joinToString("") { "%02x".format(it) }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YuNian (恋语) is an Android AI companion app built with Kotlin and Jetpack Compose. It uses a **feature-based modular architecture** with 16 Gradle modules: 1 `:app` entry, 9 `feature:*` modules, 6 `core:*` modules, and 1 `:shell` JVM test module.
+YuNian (予念) is an Android AI companion app built with Kotlin and Jetpack Compose. It uses a **feature-based modular architecture** with 16 Gradle modules: 1 `:app` entry, 9 `feature:*` modules, 6 `core:*` modules, and 1 `:shell` JVM test module.
 
 ## Build Commands
 

@@ -6,7 +6,7 @@
         <service
             android:name=".accessibility.YuNianAccessibilityService"
             android:exported="true"
-            android:label="恋语助手控制服务"
+            android:label="予念助手控制服务"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

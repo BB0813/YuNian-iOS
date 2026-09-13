@@ -17,7 +17,7 @@ object PushMessageDispatcher {
 
     fun onMessageReceived(context: Context, title: String?, content: String?, payload: Map<String, String>?) {
         SecureLog.d(TAG, "Message from vendor: title=$title content=$content")
-        val safeTitle = title?.takeIf { it.isNotBlank() } ?: "恋语"
+        val safeTitle = title?.takeIf { it.isNotBlank() } ?: "予念"
         val safeContent = content?.takeIf { it.isNotBlank() } ?: "您有一条新消息"
         NotificationHelper.showCompanionMessageNotification(context, safeTitle, safeContent, companionId = 0L)
     }

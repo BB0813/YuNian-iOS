@@ -5,7 +5,7 @@ import kotlinx.serialization.json.Json
 
 /**
  * 世界书导入/导出的 JSON 传输格式
- * 参考 rikkahub 的 ExportSerializer 模式：格式标识 + 版本号 + 数据体
+ * 采用 ExportSerializer 模式：格式标识 + 版本号 + 数据体
  */
 @Serializable
 data class WorldbookEntryDto(

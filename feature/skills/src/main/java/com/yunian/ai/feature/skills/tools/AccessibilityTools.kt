@@ -39,7 +39,7 @@ private fun a11yOk(vararg pairs: Pair<String, Any?>): String = buildJsonObject {
 private inline fun withService(onReady: (YuNianAccessibilityService) -> String): String {
     val service = YuNianAccessibilityService.instance
         ?: return a11yError(
-            "无障碍服务未开启：请在系统设置 → 无障碍 → 已下载的应用 → 「恋语助手控制服务」中开启后重试",
+            "无障碍服务未开启：请在系统设置 → 无障碍 → 已下载的应用 → 「予念助手控制服务」中开启后重试",
         )
     return onReady(service)
 }

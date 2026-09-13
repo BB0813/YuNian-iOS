@@ -35,7 +35,7 @@ fun checkShizukuStatus(context: Context): ShizukuStatus {
 
     val hint = when {
         granted -> "Shizuku 通道可用，可执行特权操作"
-        running -> "Shizuku 正在运行但未授权：请打开 Shizuku 应用 → 授权「恋语」"
+        running -> "Shizuku 正在运行但未授权：请打开 Shizuku 应用 → 授权「予念」"
         installed -> "Shizuku 已安装但未运行：请打开 Shizuku 应用启动服务"
         else -> "未检测到 Shizuku：请从应用商店或官网安装 Shizuku，并通过无线调试或连接电脑启动"
     }
