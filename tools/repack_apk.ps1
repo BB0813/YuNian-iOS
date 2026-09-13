@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 
 # === Paths ===
-$projectRoot = "C:\Users\27194\Desktop\LianYu"
+$projectRoot = "C:\Users\27194\Desktop\YuNian"
 $originalApk = "$projectRoot\app\build\outputs\apk\release\app-release.apk"
 $packedSecuritySo = "$projectRoot\core\security\build\intermediates\cxx\Release\1d71203t\obj\local\arm64-v8a\liblianyu_security.packed.so"
 $packedShellSo = "$projectRoot\core\security\build\intermediates\cxx\Release\1d71203t\obj\local\arm64-v8a\liblianyu_shell.packed.so"
