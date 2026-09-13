@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,7 +57,8 @@ import com.yunian.ai.feature.profile.R
 @Composable
 fun AboutScreen(
     onNavigateBack: () -> Unit,
-    onAgreementClick: () -> Unit = {}
+    onAgreementClick: () -> Unit = {},
+    onTeamClick: () -> Unit = {}
 ) {
     val colorScheme = AppTheme.colors
 
@@ -146,9 +148,9 @@ fun AboutScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            AboutCard() {
+            AboutCard(onClick = onTeamClick) {
                 Text(
-                    text = stringResource(R.string.developer),
+                    text = stringResource(R.string.dev_team_title),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
@@ -157,26 +159,37 @@ fun AboutScreen(
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = stringResource(R.string.developer_douyin),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    color = AppTheme.colors.primary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = stringResource(R.string.developer_hint),
+                    text = stringResource(R.string.dev_team_desc),
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = 12.sp
                     ),
-                    color = colorScheme.onSurfaceVariant
+                    color = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    teamMembers.forEach { member ->
+                        member.avatarRes?.let { avatarRes ->
+                            Image(
+                                painter = painterResource(id = avatarRes),
+                                contentDescription = member.name,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -232,6 +245,7 @@ fun AboutScreen(
 
 @Composable
 fun AboutCard(
+    onClick: (() -> Unit)? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -243,6 +257,13 @@ fun AboutCard(
                 backdrop = LocalPageBackdrop.current,
                 shape = shape,
                 surfaceColor = AppTheme.colors.surfaceVariant
+            )
+            .then(
+                if (onClick != null) {
+                    Modifier.clip(shape).clickable { onClick() }
+                } else {
+                    Modifier
+                }
             )
             .padding(20.dp)
     ) {

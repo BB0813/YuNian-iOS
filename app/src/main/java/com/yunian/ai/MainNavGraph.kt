@@ -251,7 +251,8 @@ internal fun MainNavHost(
         composable(MainRoute.About.route) {
             AboutScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onAgreementClick = { navController.navigate(MainRoute.AgreementView.route) }
+                onAgreementClick = { navController.navigate(MainRoute.AgreementView.route) },
+                onTeamClick = { navController.navigate(MainRoute.Team.route) }
             )
         }
         composable(MainRoute.AgreementView.route) {
