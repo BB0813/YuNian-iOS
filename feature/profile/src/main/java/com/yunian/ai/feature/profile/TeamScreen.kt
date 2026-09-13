@@ -64,51 +64,44 @@ val teamMembers = listOf(
     TeamMember(
         name = "\u6797\u6893\u6DB5",
         role = "\u521B\u5EFA\u8005 & \u5168\u6808",
-        description = "\u8D1F\u8D23\u6574\u4F53\u67B6\u6784\u8BBE\u8BA1\u3001Android\u5BA2\u6237\u7AEF\u5F00\u53D1\u3001AI\u63A5\u53E3\u96C6\u6210\u4E0E\u9879\u76EE\u7BA1\u7406",
+        description = "\u67B6\u6784\u8BBE\u8BA1 \u00B7 \u5168\u6808\u5F00\u53D1",
         color = Color(0xFF07C160),
         avatarRes = R.drawable.team_linruoxo
     ),
     TeamMember(
-        name = "\u4E0B\u5317\u6CFD\u4F20\u5947",
-        role = "\u6838\u5FC3\u534F\u4F5C\u8005",
-        description = "\u4EA7\u54C1\u89C4\u5212\u3001UI\u8BBE\u8BA1\u3001\u6D4B\u8BD5\u4E0E\u793E\u533A\u8FD0\u8425",
-        color = Color(0xFFCCA8E9),
-        avatarRes = R.drawable.team_xiabeize
-    ),
-    TeamMember(
         name = "\u7948\u613F\u5C0F\u82CF",
-        role = "\u5B89\u5168\u52A0\u5BC6 \u00B7 \u540E\u7AEF",
-        description = "\u8D1F\u8D23\u5E94\u7528\u5B89\u5168\u52A0\u56FA\u3001JNI/NDK\u539F\u751F\u5B89\u5168\u3001\u540E\u7AEF\u670D\u52A1\u652F\u6301",
-        color = Color(0xFF07C160),
+        role = "\u5B89\u5168\u52A0\u5BC6",
+        description = "JNI \u5B89\u5168 \u00B7 \u540E\u7AEF\u670D\u52A1",
+        color = Color(0xFF3498DB),
         avatarRes = R.drawable.team_qiyuanxiaosu
-    ),
-    TeamMember(
-        name = "\u7740\u9B54",
-        role = "\u604B\u7231\u6559\u7A0B",
-        description = "\u4E3A\u865A\u62DF\u604B\u4EBA\u63D0\u4F9B\u60C5\u611F\u4EA4\u6D41\u6307\u5BFC\u4E0E\u604B\u7231\u6559\u7A0B\u5185\u5BB9",
-        color = Color(0xFFE85D75),
-        avatarRes = R.drawable.team_zhaomo
     ),
     TeamMember(
         name = "\u9E22\u7940",
         role = "\u591A\u6A21\u6001",
-        description = "\u8D1F\u8D23\u56FE\u7247\u751F\u6210\u3001\u8BED\u97F3\u5408\u6210\u7B49\u591A\u6A21\u6001AI\u529F\u80FD\u7684\u96C6\u6210\u4E0E\u4F18\u5316",
+        description = "\u56FE\u50CF\u5904\u7406 \u00B7 \u8BED\u97F3\u8BC6\u522B",
         color = Color(0xFF9B59B6),
         avatarRes = R.drawable.team_yuansi
     ),
     TeamMember(
-        name = "\u6545\u6E0A",
-        role = "\u540E\u7AEF\u652F\u6301",
-        description = "\u8D1F\u8D23\u670D\u52A1\u5668\u7EF4\u62A4\u3001\u540E\u7AEF\u67B6\u6784\u8BBE\u8BA1\u4E0E\u90E8\u7F72\u652F\u6301",
-        color = Color(0xFF3498DB),
-        avatarRes = R.drawable.team_guyuan
+        name = "\u9752\u601D\u96E8",
+        role = "PC \u7AEF\u5F00\u53D1",
+        description = "\u684C\u9762\u5BA2\u6237\u7AEF \u00B7 \u8DE8\u5E73\u53F0",
+        color = Color(0xFFCCA8E9),
+        avatarRes = R.drawable.team_qingsiyu
     ),
     TeamMember(
-        name = "\u5C06\u548C\u5E73",
-        role = "\u865A\u62DF\u4EBA\u7269\u4EA4\u4E92",
-        description = "\u8D1F\u8D23\u865A\u62DF\u4EBA\u7269\u4EA4\u4E92\u6A21\u5757\u5F00\u53D1\u4E0E\u4F53\u9A8C\u4F18\u5316",
+        name = "Clove.",
+        role = "\u8F6F\u4EF6\u57FA\u7840\u5F00\u53D1",
+        description = "\u5E95\u5C42\u5F00\u53D1",
         color = Color(0xFFE67E22),
-        avatarRes = R.drawable.team_jiangheping
+        avatarRes = R.drawable.team_clove
+    ),
+    TeamMember(
+        name = "\u5BD2\u62C2\u6674ColdBreeze",
+        role = "\u529F\u80FD\u5F00\u53D1",
+        description = "\u8BED\u97F3\u901A\u8BDD \u00B7 bug\u4FEE\u590D",
+        color = Color(0xFFE85D75),
+        avatarRes = R.drawable.team_hanfuqing
     )
 )
 

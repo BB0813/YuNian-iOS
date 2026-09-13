@@ -69,9 +69,6 @@
     <string name="version">バージョン 1.8</string>
     <string name="about_desc_title">予念について</string>
     <string name="about_desc">予念は先進的な大規模言語モデル技術に基づくAIバーチャル恋人チャットアプリです。</string>
-    <string name="developer">開発者</string>
-    <string name="developer_douyin">TikTok: 我想天天开心</string>
-    <string name="developer_hint">フォローして最新情報をゲット</string>
     <string name="features">機能</string>
     <string name="feature_multi_ai">複数AIモデル対応</string>
     <string name="feature_multi_ai_desc">OpenAI / Claude / Gemini / DeepSeek / 通義千問</string>

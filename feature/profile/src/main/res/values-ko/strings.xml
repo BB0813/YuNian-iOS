@@ -69,9 +69,6 @@
     <string name="version">버전 1.8</string>
     <string name="about_desc_title">予念 소개</string>
     <string name="about_desc">予念는先進的な 대규모 언어 모델 기술을 기반으로 한 AI 가상 연인 채팅 앱입니다.</string>
-    <string name="developer">개발자</string>
-    <string name="developer_douyin">TikTok: 我想天天开心</string>
-    <string name="developer_hint">팔로우하여 최신 정보 얻기</string>
     <string name="features">기능</string>
     <string name="feature_multi_ai">다중 AI 모델 지원</string>
     <string name="feature_multi_ai_desc">OpenAI / Claude / Gemini / DeepSeek / 通义千问</string>
