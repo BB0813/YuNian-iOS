@@ -99,4 +99,30 @@ class BubbleJsonProtocolTest {
         val reply = BubbleJsonProtocol.parse(long)
         assertNull(reply)
     }
+
+    @Test
+    fun `extractTextLenient - 被截断的 JSON 仍能抠出 text`() {
+        val raw = """{"text":"你好","continue":"""
+        assertEquals("你好", BubbleJsonProtocol.extractTextLenient(raw))
+    }
+
+    @Test
+    fun `extractTextLenient - 含转义字符正确反转义`() {
+        val raw = """{"text":"a\"b\nc","continue":false}"""
+        assertEquals("a\"b\nc", BubbleJsonProtocol.extractTextLenient(raw))
+    }
+
+    @Test
+    fun `extractTextLenient - 纯文本无 JSON 特征原样返回`() {
+        val raw = "这是一条正常的自然语言回复，没有任何 JSON 结构。"
+        assertEquals(raw, BubbleJsonProtocol.extractTextLenient(raw))
+    }
+
+    @Test
+    fun `extractTextLenient - 只有空 JSON 无 text 返回原文且不为空`() {
+        val raw = "{}"
+        val result = BubbleJsonProtocol.extractTextLenient(raw)
+        assertEquals(raw, result)
+        assertTrue(result.isNotEmpty())
+    }
 }
