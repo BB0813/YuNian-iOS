@@ -18,6 +18,7 @@ import com.yunian.ai.database.model.GroupMessage
 import com.yunian.ai.database.model.Message
 import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.StickerInfo
+import com.yunian.ai.common.text.BubbleTextSplitter
 import com.yunian.ai.common.text.DedupGuard
 import com.yunian.ai.database.repository.ChatGroupRepository
 import com.yunian.ai.database.repository.CompanionRepository
@@ -1250,9 +1251,15 @@ class GroupChatViewModel(
         }
 
         if (stickerNames.isEmpty() && textSegments.size <= 1) {
-            val msg = GroupMessage(groupId = groupId, companionId = companionId, content = cleaned, timestamp = System.currentTimeMillis())
-            val msgId = messageWriter.enqueueGroup(msg)
-            broadcastWeChatMessage(companionId, msgId)
+            // 按 AI 自己敲的换行拆分：单行即一条；成员在回复里敲了回车就逐条发出（群聊同样尊重 AI 的分条意图）
+            val textBubbles = BubbleTextSplitter.splitByParagraphs(cleaned)
+            textBubbles.forEachIndexed { index, bubbleText ->
+                if (index > 0) delay(Random.nextLong(600L, 1600L))
+                if (bubbleText.isBlank()) return@forEachIndexed
+                val msg = GroupMessage(groupId = groupId, companionId = companionId, content = bubbleText, timestamp = System.currentTimeMillis())
+                val msgId = messageWriter.enqueueGroup(msg)
+                broadcastWeChatMessage(companionId, msgId)
+            }
         } else {
 
             val orderedItems = mutableListOf<Either<String, String>>()
@@ -1282,9 +1289,19 @@ class GroupChatViewModel(
                 orderedItems.add(Either.Left(textSegments[textCount + i]))
             }
 
-            Log.d("GroupChatViewModel", "AI回复按原文顺序发送 ${orderedItems.size} 项 (text=${textSegments.size}, sticker=${stickerNames.size})")
+            // 文本段再按 AI 自己敲的换行展开（保持与贴纸的交错顺序：文本按序拆行、贴纸位置不变）
+            val expandedItems = orderedItems.flatMap { item ->
+                when (item) {
+                    is Either.Left -> BubbleTextSplitter.splitByParagraphs(item.value)
+                        .filter { it.isNotBlank() }
+                        .map { Either.Left(it) }
+                    is Either.Right -> listOf(item)
+                }
+            }
+
+            Log.d("GroupChatViewModel", "AI回复按原文顺序发送 ${expandedItems.size} 项 (text=${textSegments.size}, sticker=${stickerNames.size})")
             var segmentIndex = 0
-            for (item in orderedItems) {
+            for (item in expandedItems) {
                 delay(Random.nextLong(600L, 1600L))
                 when (item) {
                     is Either.Left -> {
@@ -1297,7 +1314,7 @@ class GroupChatViewModel(
                     }
                 }
                 segmentIndex++
-                Log.d("GroupChatViewModel", "发送 $segmentIndex/${orderedItems.size}")
+                Log.d("GroupChatViewModel", "发送 $segmentIndex/${expandedItems.size}")
             }
         }
     }

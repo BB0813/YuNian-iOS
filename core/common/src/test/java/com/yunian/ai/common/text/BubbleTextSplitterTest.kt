@@ -29,11 +29,22 @@ class BubbleTextSplitterTest {
     }
 
     @Test
-    fun `单个换行不拆`() {
-        val text = "上半句\n下半句"
+    fun `单个换行也拆 - AI 敲的回车 = 想换一条`() {
+        val text = "嘿嘿，被你这么一夸，尾巴都要翘起来啦～\n那下次你再说三个词，我还能给你编个更长的～"
         val result = BubbleTextSplitter.splitByParagraphs(text)
-        assertEquals(1, result.size)
-        assertEquals(text, result[0])
+        assertEquals(2, result.size)
+        assertEquals("嘿嘿，被你这么一夸，尾巴都要翘起来啦～", result[0])
+        assertEquals("那下次你再说三个词，我还能给你编个更长的～", result[1])
+    }
+
+    @Test
+    fun `代码块围栏内不拆 - fence 内换行保留为一条`() {
+        val text = "看代码：\n```\nfun main() {\n    println(\"hi\")\n}\n```\n就这些"
+        val result = BubbleTextSplitter.splitByParagraphs(text)
+        assertEquals(3, result.size)
+        assertEquals("看代码：", result[0])
+        assertEquals("```\nfun main() {\n    println(\"hi\")\n}\n```", result[1])
+        assertEquals("就这些", result[2])
     }
 
     @Test

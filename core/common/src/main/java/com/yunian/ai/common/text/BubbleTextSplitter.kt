@@ -3,24 +3,29 @@ package com.yunian.ai.common.text
 /**
  * 气泡文本切分器（AI 自主决策的兜底层）。
  *
- * 设计原则：**拆不拆、拆几条，由 AI 显式标记决定**。
- * 本切分器只认 AI 自己写下的「空行分段」这一显式意图，绝不按句末标点做句子级切分——
- * 因为句子级切分会把 AI 想要的「一段连贯叙述」硬拆成多条气泡，破坏真人连发观感。
+ * 设计原则：**AI 敲的每一个回车，都是「想发下一条」的信号**。
+ * 拆分单位 = AI 自己写下的换行（`\n`，无论单换行还是空行），绝不按句末标点做句子级切分——
+ * 句子级切分会把 AI 想要的「一段连贯叙述」硬拆成多条气泡，破坏真人连发观感；
+ * 而只认空行会把 AI 用单换行表达的「分两次发」意图压成一条（「全部塞在一起」的观感）。
  *
- * 与之配合的另外两条显式通道：
- *  - 气泡协议 JSON（[com.yunian.ai.network.bubble.BubbleJsonProtocol]）→ 由连发循环逐条生成，本层不参与；
- *  - 无空行、无协议标记的整段文本 → 原样单条送达。
+ * 内容形态到气泡的映射：
+ *  - 整段无换行（一气呵成的故事/长叙述）→ 恰好一条；
+ *  - AI 用换行分隔的短句（闲聊两连句）→ 一行一条；
+ *  - 段间空行 → 与单换行等价（空行不产生空气泡）；
+ *  - Markdown 代码块（\`\`\` 围栏）→ 整块作为一条，围栏内换行不再拆分。
+ *
+ * 与之配合的另一条显式通道：气泡协议 JSON（BubbleJsonProtocol）→ 由连发循环逐条生成；
+ * 协议 text 内若也塞了换行，本层同样按换行放行拆分（AI 的回车意图高于协议格式约束）。
  */
 object BubbleTextSplitter {
 
     /** 单条回复最多拆分出的气泡数。超出部分拼接进最后一条，避免无限连发。 */
     const val DEFAULT_MAX_BUBBLES = 8
 
-    /** 只认空行分段：单个 `\n` 不拆。 */
-    private val BLANK_LINE = Regex("\\n\\s*\\n")
+    private const val CODE_FENCE = "```"
 
     /**
-     * 只按 AI 显式空行分段；绝不做句子级切分。无空行 → 整段单条。
+     * 按 AI 自己敲的换行拆分（单 \n 与空行同效）；绝不按句末标点拆分；代码块围栏内不拆。
      *
      * @param text 待切分文本。
      * @param maxBubbles 气泡数上限；超过时保留前 `maxBubbles - 1` 条并把尾段拼接为最后一条。
@@ -28,18 +33,53 @@ object BubbleTextSplitter {
      */
     fun splitByParagraphs(text: String, maxBubbles: Int = DEFAULT_MAX_BUBBLES): List<String> {
         if (text.isBlank()) return listOf(text)
-        val blocks = text.split(BLANK_LINE).map { it.trim() }.filter { hasContent(it) }
-        if (blocks.size <= 1) return listOf(text)
-        if (blocks.size <= maxBubbles) return blocks
-        return blocks.take(maxBubbles - 1) + listOf(blocks.drop(maxBubbles - 1).joinToString("\n"))
+
+        val bubbles = mutableListOf<String>()
+        val buf = StringBuilder()
+        var inFence = false
+
+        fun flush() {
+            val seg = buf.toString().trim()
+            if (hasContent(seg)) bubbles += seg
+            buf.clear()
+        }
+
+        for (line in text.split("\n")) {
+            val fence = line.trimStart().startsWith(CODE_FENCE)
+            when {
+                // 围栏开始：围栏外的普通行先各自冲刷成气泡，随后整段作为一条
+                fence && !inFence -> {
+                    flush()
+                    inFence = true
+                    buf.append(line).append('\n')
+                }
+                // 围栏结束：代码块整体冲刷为一条（围栏内换行不拆）
+                fence && inFence -> {
+                    inFence = false
+                    buf.append(line).append('\n')
+                    flush()
+                }
+                inFence -> buf.append(line).append('\n')
+                // 普通行：一行 = 一条候选气泡；空行只尽显间隔（不产生空气泡）
+                else -> {
+                    buf.append(line)
+                    flush()
+                }
+            }
+        }
+        flush()
+
+        if (bubbles.isEmpty()) return listOf(text)
+        if (bubbles.size <= maxBubbles) return bubbles
+        return bubbles.take(maxBubbles - 1) + listOf(bubbles.drop(maxBubbles - 1).joinToString("\n"))
     }
 
     /**
-     * 送达前切分：`allowParagraphSplit == false` 时整条不拆（用于气泡协议已逐条生成的场景，
-     * 避免对单条气泡做二次拆分）。
+     * 送达前切分：`allowParagraphSplit == false` 时整条不拆（用于文本已被上游明确整装的场景，
+     * 避免对单条内容做二次拆分）。
      *
      * @param text 待切分文本。
-     * @param allowParagraphSplit 是否允许按空行分段。
+     * @param allowParagraphSplit 是否允许按换行拆分。
      * @param maxBubbles 气泡数上限。
      */
     fun splitForDelivery(
