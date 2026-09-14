@@ -130,6 +130,12 @@ object ChatConstants {
 
     const val FOLLOW_UP_RANDOM_DELAY_MS = 3000L
 
+    /**
+     * 自动追问抑制阈值：主回复长度达到该值时视为「长叙述」，不再自动追问，
+     * 避免 AI 在自己讲完一大段后还自问自答。
+     */
+    const val FOLLOW_UP_SUPPRESS_MIN_CHARS = 80
+
     const val LOAD_MORE_HISTORY_DELAY_MS = 200L
 
     const val OBSERVE_MESSAGES_RESTART_DELAY_MS = 500L

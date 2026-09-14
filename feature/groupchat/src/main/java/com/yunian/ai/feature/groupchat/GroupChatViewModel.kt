@@ -18,6 +18,7 @@ import com.yunian.ai.database.model.GroupMessage
 import com.yunian.ai.database.model.Message
 import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.StickerInfo
+import com.yunian.ai.common.text.DedupGuard
 import com.yunian.ai.database.repository.ChatGroupRepository
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.GroupMessageRepository
@@ -661,13 +662,8 @@ class GroupChatViewModel(
             .takeLast(ChatConstants.GROUP_CHAT_CONTEXT_WINDOW)
     }
 
-    /** 查重规范化：剥 @、空白、标点、引号括号后小写，取前 40 字。 */
-    private fun normalizeForDedup(text: String): String {
-        return text
-            .replace(Regex("[@\\s，。！？!?,.～~…、:：;；\"'「」『』()（）\\[\\]【】]"), "")
-            .lowercase()
-            .take(40)
-    }
+    /** 查重规范化：委托 [DedupGuard.normalize]（剥 @、空白、标点、引号括号后小写，取前 40 字），与单聊统一口径。 */
+    private fun normalizeForDedup(text: String): String = DedupGuard.normalize(text)
 
     /**
      * 与本轮其他角色的回复比对，近似重复则不发言。
@@ -1002,29 +998,38 @@ class GroupChatViewModel(
         }
         val bubbles = mutableListOf<String>()
 
-        val first = aiServiceProvider.sendMessageWithCustomSystem(
+        val protocolRules = BubbleJsonProtocol.systemRules()
+        val firstRaw = aiServiceProvider.sendMessageWithCustomSystem(
             companion.toAiCompanionInfo(), filteredSnapshot.map { it.toAiChatMessage() },
-            systemPrompt, companionNameMap = companionNameMap
-        ).trim().replace(Regex("\n{2,}"), "\n")
+            systemPrompt + "\n\n" + protocolRules, companionNameMap = companionNameMap
+        )
+        // 首条同样按气泡协议解析：遵守协议则取 text；未遵守（非 JSON）则回落整段原文。
+        val firstReply = BubbleJsonProtocol.parseStrict(firstRaw)
+        val first = (firstReply?.text ?: firstRaw).trim().replace(Regex("\n{2,}"), "\n")
         if (first.isBlank()) return emptyList()
         bubbles.add(first)
 
-        val followUp = bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
-            val appendedHistory = filteredSnapshot.map { it.toAiChatMessage() } + alreadyGenerated.map { text ->
-                AiChatMessage(
-                    isFromUser = false,
-                    content = text,
-                    timestamp = System.currentTimeMillis(),
-                    role = AiMessageRole.ASSISTANT,
+        // 连发门控：仅当首条显式 continue=true 才续接后续气泡（原来是无条件续发）。
+        val followUp = if (firstReply?.continueChat == true) {
+            bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
+                val appendedHistory = filteredSnapshot.map { it.toAiChatMessage() } + alreadyGenerated.map { text ->
+                    AiChatMessage(
+                        isFromUser = false,
+                        content = text,
+                        timestamp = System.currentTimeMillis(),
+                        role = AiMessageRole.ASSISTANT,
+                    )
+                }
+                aiServiceProvider.sendMessageWithCustomSystem(
+                    companion.toAiCompanionInfo(),
+                    appendedHistory,
+                    systemPrompt + "\n\n" + protocolRules,
+                    companionNameMap = companionNameMap,
+                    scope = ConversationScope.Group(groupId),
                 )
             }
-            aiServiceProvider.sendMessageWithCustomSystem(
-                companion.toAiCompanionInfo(),
-                appendedHistory,
-                systemPrompt + "\n\n" + BubbleJsonProtocol.systemRules(),
-                companionNameMap = companionNameMap,
-                scope = ConversationScope.Group(groupId),
-            )
+        } else {
+            emptyList()
         }
         bubbles.addAll(followUp)
         return bubbles

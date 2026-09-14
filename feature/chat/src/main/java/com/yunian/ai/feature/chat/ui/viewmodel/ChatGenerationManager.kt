@@ -731,6 +731,8 @@ class ChatGenerationManager private constructor(
             val showReasoning = appSettingsStore.getShowReasoning()
             // OpenMinis 模式：只要不是图片/本地模型路径就带工具，由模型自主决定是否调用
             val useTools = imagePath == null && !isLocalModelEnabled() && ToolRegistry.isNotEmpty()
+            // 流式分支是否接入了气泡协议（决定首条是否走「协议解析 + 单条送达」路径）
+            var appliedBubbleProtocol = false
             val streamEvents = when {
                 imagePath != null -> {
                     val aiResponse = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
@@ -797,8 +799,17 @@ class ChatGenerationManager private constructor(
                 }
                 else -> {
 
+                    // 气泡协议接入：把协议文本并入角色自定义系统提示词（复用生图范例），
+                    // 使 streamMessage 内部据此推导 preserveRaw，无需改动接口。
+                    appliedBubbleProtocol = true
+                    val streamCompanion = aiCompanion.copy(
+                        systemPrompt = listOfNotNull(
+                            aiCompanion.systemPrompt?.trim()?.takeIf { it.isNotEmpty() },
+                            BubbleJsonProtocol.systemRules(),
+                        ).joinToString("\n\n")
+                    )
                     aiService.streamMessage(
-                        companion = aiCompanion,
+                        companion = streamCompanion,
                         history = modelHistory,
                         stickerProbability = stickerProbability,
                         ntpTimeEnabled = ntpTimeEnabled,
@@ -837,17 +848,21 @@ class ChatGenerationManager private constructor(
             }
 
             val aiContentRaw = streamResult.assistantText
+            // 协议模式：首条按气泡协议严格解析，正文取其 text；未遵守（非 JSON）则回落整段原文，
+            // 交回 deliverResponse 走「空行分段」兜底。
+            val firstReply = if (appliedBubbleProtocol) BubbleJsonProtocol.parseStrict(aiContentRaw) else null
+            val firstTextRaw = firstReply?.text ?: aiContentRaw
             // 生图标签只用于提取画面描述，绝不允许进入气泡或会话列表摘要。
             // 若剥离后为空（模型整条回复只有标签/画面描述），也不能回落成原文——那正是标签泄漏的来源。
             val aiContent = if (imageGenEnabled) {
-                val stripped = ImageGenTriggerLogic.stripTags(aiContentRaw)
+                val stripped = ImageGenTriggerLogic.stripTags(firstTextRaw)
                 when {
                     stripped.isNotBlank() -> stripped
-                    ImageGenTriggerLogic.isPromptOnly(aiContentRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
-                    else -> aiContentRaw
+                    ImageGenTriggerLogic.isPromptOnly(firstTextRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
+                    else -> firstTextRaw
                 }
             } else {
-                aiContentRaw
+                firstTextRaw
             }
             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
             if (toastMsg != null) {
@@ -871,6 +886,8 @@ class ChatGenerationManager private constructor(
                 pendingTurn = pendingTurn,
                 reasoningStartedAtMs = requestStartedAt,
                 onCommitted = onCommitted,
+                // 协议遵守 → 单条（不再分割）；未遵守 → 允许空行兜底分段。
+                allowParagraphSplit = firstReply == null,
             )
 
             exitLoading()
@@ -883,7 +900,9 @@ class ChatGenerationManager private constructor(
                 enabled = imageGenEnabled,
             )
 
-            val enableBubbleChain = imagePath == null && !isLocalModelEnabled()
+            // 连发门控：仅当接入协议且首条显式 continue=true 时才继续生成追尾气泡。
+            val enableBubbleChain = appliedBubbleProtocol && firstReply?.continueChat == true &&
+                imagePath == null && !isLocalModelEnabled()
             val followUpBubbles = if (enableBubbleChain) {
                 bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
                     val appendedHistory = modelHistory + alreadyGenerated.map { text ->
@@ -924,6 +943,8 @@ class ChatGenerationManager private constructor(
                         userContentForMemory = null,
                         pendingTurn = pendingTurn,
                         onCommitted = onCommitted,
+                        // 追尾气泡已由协议逐条生成，整条不拆。
+                        allowParagraphSplit = false,
                     )
                 }.onFailure { e ->
                     SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)

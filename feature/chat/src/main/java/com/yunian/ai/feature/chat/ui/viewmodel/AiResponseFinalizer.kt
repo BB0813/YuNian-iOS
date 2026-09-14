@@ -9,6 +9,8 @@ import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.TimeoutBudgets
 import com.yunian.ai.common.safety.SafetyScore
 import com.yunian.ai.common.safety.ScoreSource
+import com.yunian.ai.common.text.BubbleTextSplitter
+import com.yunian.ai.common.text.DedupGuard
 import com.yunian.ai.common.text.MessageSegmenter
 import com.yunian.ai.domain.wechat.WeChatProactiveSync
 import com.yunian.ai.database.model.ChatMessage
@@ -65,22 +67,6 @@ class AiResponseFinalizer(
         val allowFollowUpMessage: Boolean
     )
 
-    suspend fun finalizeResponse(
-        aiContent: String,
-        reasoning: String?,
-        userContentForMemory: String? = null,
-        logMessage: String = "AI response received"
-    ): Long {
-        val delivered = deliverResponse(
-            aiContent = aiContent,
-            reasoning = reasoning,
-            userContentForMemory = userContentForMemory,
-            logMessage = logMessage
-        )
-        afterDeliver(delivered)
-        return delivered.messageId
-    }
-
     suspend fun deliverResponse(
         aiContent: String,
         reasoning: String?,
@@ -95,6 +81,12 @@ class AiResponseFinalizer(
          * 一轮多段回复时任一 (或全部) 段落库成功都会触发（幂等），用于生成侧打断合并时判断旧 batch 是否可丢弃。
          */
         onCommitted: (() -> Unit)? = null,
+        /**
+         * 是否允许按 AI 显式空行分段送达。
+         * `true`（默认）：未走气泡协议时，按空行分段作为兜底拆分；
+         * `false`：气泡协议已逐条生成，本段整条不拆。
+         */
+        allowParagraphSplit: Boolean = true,
     ): DeliveredResponse {
         val showReasoning = appSettingsStore.getShowReasoning()
         val turn = pendingTurn ?: PendingTurn.start(
@@ -158,7 +150,13 @@ class AiResponseFinalizer(
             settings.stickerProbability,
         ) { sendStickerMessage(it) }
 
-        val segments = splitIntoSegments(processedText)
+        val rawSegments = BubbleTextSplitter.splitForDelivery(
+            processedText,
+            allowParagraphSplit = allowParagraphSplit,
+            maxBubbles = MAX_BUBBLES_PER_REPLY,
+        )
+        val dedupWindow = loadDedupWindow(turn.turnId.value)
+        val segments = BubbleDedupPlanner.plan(rawSegments, dedupWindow)
         val hasPendingSticker = turnState.pendingSticker != null
         val stickerBeforeText = hasPendingSticker && kotlin.random.Random.nextFloat() < 0.5f
 
@@ -168,7 +166,7 @@ class AiResponseFinalizer(
 
         val aiMessageId = if (segments.size <= 1) {
 
-            val safeProcessed = processedText.ifBlank {
+            val safeProcessed = (segments.firstOrNull() ?: processedText).ifBlank {
                 if (aiContent.isNotBlank()) {
                     SecureLog.w("ChatViewModel", "Falling back to zero-width space. aiContent length=${aiContent.length}")
                     "\u200B"
@@ -303,6 +301,8 @@ class AiResponseFinalizer(
 
     private fun triggerFollowUpIfNeeded(aiContent: String, allowFollowUp: Boolean) {
         if (!allowFollowUp) return
+        // 长叙述不追问：AI 已讲完一大段，再自动追问会变成自问自答。
+        if (aiContent.length >= ChatConstants.FOLLOW_UP_SUPPRESS_MIN_CHARS) return
         if (questionRegex.containsMatchIn(aiContent)) return
         if (looksLikeTurnBackToUser(aiContent)) return
         val now = System.currentTimeMillis()
@@ -361,33 +361,28 @@ class AiResponseFinalizer(
         return interactiveMarkers.any { text.contains(it) }
     }
 
-    private fun splitIntoSegments(text: String): List<String> {
-        if (text.isBlank()) return listOf(text)
-        val fragments = mutableListOf<String>()
-        text.split(Regex("\\n+")).forEach { block ->
-            val blockText = block.trim()
-            if (!hasContent(blockText)) return@forEach
-            val sentences = blockText
-                .split(SENTENCE_BOUNDARY_REGEX)
-                .map { it.trim() }
-                .filter { hasContent(it) }
-            if (sentences.size >= 2) {
-                fragments.addAll(sentences)
-            } else {
-                fragments.add(blockText)
-            }
-        }
-        if (fragments.size <= 1) return listOf(text)
-        return if (fragments.size <= MAX_BUBBLES_PER_REPLY) {
-            fragments
-        } else {
-            fragments.take(MAX_BUBBLES_PER_REPLY - 1) +
-                listOf(fragments.drop(MAX_BUBBLES_PER_REPLY - 1).joinToString(""))
-        }
-    }
+    /**
+     * 加载本轮查重窗口：
+     * 优先复用 `ChatTurnState` 上按轮次缓存的窗口（同一轮多次送达 —— 如连发气泡逐条送达 —— 共用并把已发气泡累积进去）；
+     * 首次则用「最近 [DedupGuard.WINDOW_LAST_AI] 条历史 AI 消息」初始化。
+     */
+    private suspend fun loadDedupWindow(turnKey: String): MutableList<String> {
+        val cached = turnState.dedupWindow
+        if (turnState.dedupTurnKey == turnKey && cached != null) return cached
 
-    private fun hasContent(s: String): Boolean =
-        s.any { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }
+        val window = mutableListOf<String>()
+        runCatching {
+            contextResolver.getShortHistoryForAi(companionId, shortLimit = ChatConstants.SHORT_HISTORY_LIMIT)
+        }.getOrDefault(emptyList())
+            .asReversed()
+            .filter { !it.isFromUser }
+            .take(DedupGuard.WINDOW_LAST_AI)
+            .forEach { window.add(DedupGuard.normalize(it.content)) }
+
+        turnState.dedupTurnKey = turnKey
+        turnState.dedupWindow = window
+        return window
+    }
 
     private suspend fun sendStickerMessage(sticker: StickerInfo): Long {
         return turnState.stickerMutex.withLock {
@@ -423,5 +418,3 @@ class AiResponseFinalizer(
 }
 
 private const val MAX_BUBBLES_PER_REPLY = 8
-
-private val SENTENCE_BOUNDARY_REGEX = Regex("(?<=[。！？～!?~])")
