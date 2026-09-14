@@ -35,9 +35,14 @@ class QaBubbleSplitParityTest {
     }
 
     @Test
-    fun `单个换行不拆 - 严禁句子级切分`() {
+    fun `无换行时绝不按标点拆；AI 敲回车即拆（症状④塞在一起修复）`() {
+        // 无换行：全文受标点约束但绝不按句末标点切分 → 单条
         val text = "一句。两句！三句？四句～五句……"
         assertEquals(1, BubbleTextSplitter.splitForDelivery(text, true, 8).size)
-        assertEquals(1, BubbleTextSplitter.splitForDelivery(text.replace("。", "。\n"), true, 8).size)
+        // 有换行：AI 自己敲了回车 = 想换一条 → 按行拆分（解决「全部塞在一起」的观感）
+        val withEnters = text.replace("。", "。\n")
+        val bubbles = BubbleTextSplitter.splitForDelivery(withEnters, true, 8)
+        assertEquals(withEnters.split("\n").size, bubbles.size)
+        assertEquals("一句。", bubbles[0])
     }
 }

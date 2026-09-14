@@ -892,8 +892,9 @@ class ChatGenerationManager private constructor(
                 pendingTurn = pendingTurn,
                 reasoningStartedAtMs = requestStartedAt,
                 onCommitted = onCommitted,
-                // 协议遵守 → 单条（不再分割）；未遵守 → 允许空行兜底分段。
-                allowParagraphSplit = firstReply == null,
+                // 始终允许按 AI 自己敲的换行拆分：AI 的回车 = 想换一条，无论协议是否遵守
+                // （协议 text 内若塞了换行，同样按回车拆分，防止「全部塞在一起」）。
+                allowParagraphSplit = true,
             )
 
             exitLoading()
@@ -949,8 +950,8 @@ class ChatGenerationManager private constructor(
                         userContentForMemory = null,
                         pendingTurn = pendingTurn,
                         onCommitted = onCommitted,
-                        // 追尾气泡已由协议逐条生成，整条不拆。
-                        allowParagraphSplit = false,
+                        // 追尾气泡同样按 AI 的回车拆分（若模型把多句塞进一条 text，回车意图照发）。
+                        allowParagraphSplit = true,
                     )
                 }.onFailure { e ->
                     SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)
