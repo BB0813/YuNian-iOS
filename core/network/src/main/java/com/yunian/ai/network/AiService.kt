@@ -2610,7 +2610,7 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
                     reasoningFields = reasoningFields,
                     completedAtMs = { System.currentTimeMillis() },
                     postProcessText = { raw ->
-                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(raw, sortedHistory)
+                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(raw, sortedHistory, preserveRaw = bubbleMode)
                         contentLen = cleaned.length
                         val safety = ContentFilter.checkOutputSafety(cleaned)
                         if (!safety.isSafe) {
