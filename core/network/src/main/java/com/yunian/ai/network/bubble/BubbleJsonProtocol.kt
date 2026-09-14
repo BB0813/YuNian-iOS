@@ -68,6 +68,15 @@ object BubbleJsonProtocol {
             if (extracted.isNotEmpty()) return extracted
         }
 
+        // 1b. 防御式兜底：若 JSON 骨架已被上游（extractDirectReply 引号抽取）打散成
+        //     "text\n<正文>\ncontinue" 形态，则按行剔骨取正文，避免骨架泄漏给用户。
+        val lines = raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.size >= 2 && lines.first() == "text") {
+            val body = if (lines.last() == "continue") lines.subList(1, lines.size - 1) else lines.drop(1)
+            val joined = body.joinToString("\n").trim()
+            if (joined.isNotEmpty()) return joined
+        }
+
         // 2. 无 text 字段：若形如 JSON 残片则剥结构字符，避免把协议骨架暴露给用户。
         val trimmed = raw.trimStart()
         val looksLikeJson = raw.contains("\"continue\"") || trimmed.startsWith("{") || trimmed.startsWith("[")
