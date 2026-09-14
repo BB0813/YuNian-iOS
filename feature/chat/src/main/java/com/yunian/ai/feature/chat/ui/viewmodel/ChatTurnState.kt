@@ -16,6 +16,12 @@ class ChatTurnState {
 
     @Volatile var sendMessageJob: Job? = null
 
+    /** 查重窗口所属的轮次 key（TurnId.value）；与当前轮不一致时重建窗口。 */
+    var dedupTurnKey: String? = null
+
+    /** 本轮已发气泡 + 最近历史 AI 消息的归一化查重窗口（随本轮逐条送达累积）。 */
+    var dedupWindow: MutableList<String>? = null
+
     val stickerMutex: Mutex = Mutex()
 
     fun reset() {
@@ -23,6 +29,8 @@ class ChatTurnState {
         pendingSticker = null
         lastStickerMsgId = -1
         lastStickerContent = ""
+        dedupTurnKey = null
+        dedupWindow = null
     }
 
     fun cancelSendJob() {

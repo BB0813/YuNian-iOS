@@ -204,13 +204,20 @@ object AiPromptBuilder {
         return if (filtered.isNotEmpty()) filtered.joinToString("。") else trimmed
     }
 
-    internal fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
+    internal fun applyPersonaPostProcessing(
+        response: String,
+        recentMessages: List<ChatMessage>,
+        preserveRaw: Boolean = false,
+    ): String {
 
         val thinkingStripped = ResponsePostProcessor.stripThinkingContent(response)
 
         if (BubbleJsonProtocol.parseStrict(thinkingStripped) != null) {
             return thinkingStripped
         }
+        // 气泡协议模式下模型理应输出 JSON；此处保留原文（仅剥离思考内容），
+        // 交回调用方用 parseStrict 判定是否遵守协议，避免拆句/截断破坏 JSON。
+        if (preserveRaw) return thinkingStripped
         var cleaned = thinkingStripped
             .replace(Regex("\\*.*?\\*"), "")
             .replace(Regex("<(?!\\[).*?>"), "")
