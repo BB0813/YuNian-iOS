@@ -125,4 +125,16 @@ class BubbleJsonProtocolTest {
         assertEquals(raw, result)
         assertTrue(result.isNotEmpty())
     }
+
+    @Test
+    fun `extractTextLenient - 首行为 text 但末行非 continue 时原样返回不丢首行`() {
+        val raw = "text\n哈哈好吧\n今天天气不错"
+        assertEquals(raw, BubbleJsonProtocol.extractTextLenient(raw))
+    }
+
+    @Test
+    fun `extractTextLenient - 两端骨架特征齐备时正确剔骨`() {
+        val raw = "text\n你好呀\ncontinue"
+        assertEquals("你好呀", BubbleJsonProtocol.extractTextLenient(raw))
+    }
 }

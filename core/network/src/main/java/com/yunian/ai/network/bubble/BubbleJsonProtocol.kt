@@ -68,11 +68,11 @@ object BubbleJsonProtocol {
             if (extracted.isNotEmpty()) return extracted
         }
 
-        // 1b. 防御式兜底：若 JSON 骨架已被上游（extractDirectReply 引号抽取）打散成
-        //     "text\n<正文>\ncontinue" 形态，则按行剔骨取正文，避免骨架泄漏给用户。
+        // 1b. 防御式兜底：仅当「首行 == text 且 末行 == continue」（骨架两端特征齐备）时，
+        //     才判定为被打散的 JSON 骨架并按行剔骨取正文；避免误伤以 "text" 开头的正常多行文本。
         val lines = raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-        if (lines.size >= 2 && lines.first() == "text") {
-            val body = if (lines.last() == "continue") lines.subList(1, lines.size - 1) else lines.drop(1)
+        if (lines.size >= 2 && lines.first() == "text" && lines.last() == "continue") {
+            val body = lines.subList(1, lines.size - 1)
             val joined = body.joinToString("\n").trim()
             if (joined.isNotEmpty()) return joined
         }
