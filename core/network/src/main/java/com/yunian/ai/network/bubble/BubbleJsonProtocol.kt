@@ -17,6 +17,9 @@ object BubbleJsonProtocol {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** 抠取残缺 JSON 中 "text" 字段值（支持转义）的正则。 */
+    private val TEXT_FIELD_REGEX = Regex("\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+
     /**
      * 判断系统提示词是否已启用气泡协议。
      * @param systemPrompt 最终装配好的系统提示词。
@@ -48,6 +51,80 @@ object BubbleJsonProtocol {
     fun parse(raw: String): BubbleReply? = parseInternal(raw, fallbackToPlainText = true)
 
     fun parseStrict(raw: String): BubbleReply? = parseInternal(raw, fallbackToPlainText = false)
+
+    /**
+     * 协议模式下模型输出非法/畸形 JSON 时的宽容提取：
+     * 优先用正则从残缺 JSON 中抠出 "text" 字段的真实内容；若无 text 字段但整体像 JSON 残片，
+     * 剥掉 JSON 结构字符（`{}[]`、`"continue": true/false`、多余的引号）；都不像 JSON 则原样返回。
+     * 目标：绝不把 `{"text":"…","continue":` 这类残片展示给用户。
+     */
+    fun extractTextLenient(raw: String): String {
+        if (raw.isBlank()) return raw
+
+        // 1. 直接从残缺 JSON 中抠出 "text" 字段（含基本反转义）。
+        val match = TEXT_FIELD_REGEX.find(raw)
+        if (match != null) {
+            val extracted = unescapeJsonString(match.groupValues[1]).trim()
+            if (extracted.isNotEmpty()) return extracted
+        }
+
+        // 2. 无 text 字段：若形如 JSON 残片则剥结构字符，避免把协议骨架暴露给用户。
+        val trimmed = raw.trimStart()
+        val looksLikeJson = raw.contains("\"continue\"") || trimmed.startsWith("{") || trimmed.startsWith("[")
+        if (looksLikeJson) {
+            var stripped = raw
+                .replace(Regex("\"continue\"\\s*:\\s*(true|false)"), "")
+                .replace(Regex("[{}\\[\\]]"), "")
+                .replace(Regex("^[\"\\s]+"), "")
+                .replace(Regex("[\"\\s]+$"), "")
+                .trim()
+            // 处理 `"text" : 内容` 前缀残留（例如缺失闭合引号的情形）。
+            stripped = stripped.replace(Regex("^\"?text\"?\\s*:\\s*"), "").trim()
+            stripped = stripped.trim('"').trim()
+            if (stripped.isNotEmpty()) return stripped
+        }
+
+        // 3. 都不成立 → 原样返回（不制造空消息）。
+        return raw
+    }
+
+    /** JSON 字符串内容的基本反转义（`\n` `\t` `\r` `\b` `\f` `\"` `\\` `\/` `\uXXXX`）。 */
+    private fun unescapeJsonString(s: String): String {
+        if (!s.contains('\\')) return s
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '\\' && i + 1 < s.length) {
+                when (val n = s[i + 1]) {
+                    '"' -> { sb.append('"'); i += 2 }
+                    '\\' -> { sb.append('\\'); i += 2 }
+                    '/' -> { sb.append('/'); i += 2 }
+                    'n' -> { sb.append('\n'); i += 2 }
+                    't' -> { sb.append('\t'); i += 2 }
+                    'r' -> { sb.append('\r'); i += 2 }
+                    'b' -> { sb.append('\b'); i += 2 }
+                    'f' -> { sb.append('\u000C'); i += 2 }
+                    'u' -> {
+                        val hex = if (i + 6 <= s.length) s.substring(i + 2, i + 6) else ""
+                        val code = hex.toIntOrNull(16)
+                        if (hex.length == 4 && code != null) {
+                            sb.append(code.toChar())
+                            i += 6
+                        } else {
+                            sb.append(n)
+                            i += 2
+                        }
+                    }
+                    else -> { sb.append(n); i += 2 }
+                }
+            } else {
+                sb.append(c)
+                i += 1
+            }
+        }
+        return sb.toString()
+    }
 
     private fun parseInternal(raw: String, fallbackToPlainText: Boolean): BubbleReply? {
         if (raw.isBlank()) return null

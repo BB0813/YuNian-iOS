@@ -851,18 +851,24 @@ class ChatGenerationManager private constructor(
             // 协议模式：首条按气泡协议严格解析，正文取其 text；未遵守（非 JSON）则回落整段原文，
             // 交回 deliverResponse 走「空行分段」兜底。
             val firstReply = if (appliedBubbleProtocol) BubbleJsonProtocol.parseStrict(aiContentRaw) else null
-            val firstTextRaw = firstReply?.text ?: aiContentRaw
+            // 协议模式下 parseStrict 失败时，用宽容提取清洗畸形/截断 JSON 残片，
+            // 避免把 {"text":"…","continue": 这类骨架直接展示给用户。
+            val sourceText = when {
+                firstReply != null -> firstReply.text
+                appliedBubbleProtocol -> BubbleJsonProtocol.extractTextLenient(aiContentRaw)
+                else -> aiContentRaw
+            }
             // 生图标签只用于提取画面描述，绝不允许进入气泡或会话列表摘要。
             // 若剥离后为空（模型整条回复只有标签/画面描述），也不能回落成原文——那正是标签泄漏的来源。
             val aiContent = if (imageGenEnabled) {
-                val stripped = ImageGenTriggerLogic.stripTags(firstTextRaw)
+                val stripped = ImageGenTriggerLogic.stripTags(sourceText)
                 when {
                     stripped.isNotBlank() -> stripped
-                    ImageGenTriggerLogic.isPromptOnly(firstTextRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
-                    else -> firstTextRaw
+                    ImageGenTriggerLogic.isPromptOnly(sourceText) -> IMAGE_GEN_ONLY_REPLY_TEXT
+                    else -> sourceText
                 }
             } else {
-                firstTextRaw
+                sourceText
             }
             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
             if (toastMsg != null) {
