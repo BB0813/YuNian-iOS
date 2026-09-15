@@ -280,6 +280,8 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initSecurityData(app) }
             bgScope.launch { autoBackupDatabase(app) }
             bgScope.launch { initVectorLibrary(app) }
+            // 阶段 5.9：世界书迁移 + 运行时注入（幂等；与其它 IO 任务并行，不阻挡首帧）
+            bgScope.launch { initWorldbookAgent(app) }
             ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
             PerformanceTrace.markStartupStage("ib_safety_classifier")
             bgScope.launch { initSafetyVerifier(app) }
@@ -389,6 +391,38 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                     ContentSafetyVerifier.bootstrap(keywords)
                 }
             }
+        }
+
+        /**
+         * 阶段 5.9 · 世界书 Agent 化启动接线。
+         *
+         * 两件事，均幂等：
+         * 1. 一次性迁移 —— 本地结构化 `lorebooks` / `lorebook_entries` → `worldbooks`（ST World Info JSON）。
+         *    迁移器内部有 `AppMetaStore` 标志位保护，失败不写标志，下次启动自动重试。
+         *    源表冻结保留，作为回滚数据源（计划 §5.4）。
+         * 2. 全局默认书注入 —— 把当前 active 的全局世界书推给 Rust `AgentRuntime`。
+         *    伴侣级世界书由 `ChatGenerationManager` 每回合按 companionId 实时合成后再覆盖（§5.3b），
+         *    这里只是保证「未进入任何会话前」运行时也有正确的世界书上下文。
+         *
+         * 注：`AgentFacade.setWorldbook` 是幂等覆盖写，重复调用无副作用。
+         */
+        private suspend fun initWorldbookAgent(app: Application) {
+            val repo = com.yunian.ai.agent.worldbook.WorldbookRepository(app)
+            runCatching {
+                when (val r = com.yunian.ai.agent.worldbook.WorldbookMigrator(app).run()) {
+                    is com.yunian.ai.agent.worldbook.WorldbookMigrator.Result.Migrated ->
+                        SecureLog.i("YuNianApplication", "世界书迁移完成：${r.books} 本 / ${r.entries} 条")
+                    com.yunian.ai.agent.worldbook.WorldbookMigrator.Result.Skipped -> Unit
+                    com.yunian.ai.agent.worldbook.WorldbookMigrator.Result.Empty ->
+                        SecureLog.i("YuNianApplication", "世界书迁移：无存量数据")
+                    is com.yunian.ai.agent.worldbook.WorldbookMigrator.Result.Failed ->
+                        SecureLog.e("YuNianApplication", "世界书迁移失败：${r.reason}")
+                }
+            }.onFailure {
+                SecureLog.e("YuNianApplication", "Worldbook migration crashed", it)
+            }
+            runCatching { repo.syncActiveToRuntime() }
+                .onFailure { SecureLog.e("YuNianApplication", "Worldbook runtime sync failed", it) }
         }
 
         private fun registerServiceProviders(app: Application) {
