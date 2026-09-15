@@ -74,10 +74,10 @@ object ChatPromptBuilder {
             appendLine(AiContextTools.buildConversationTimingRules())
             appendLine(AiContextTools.buildDeliveryBudgetRules())
             appendLine("表达约束：")
-            appendLine("A. 长度服从动作数：闲聊单动作通常一句完整口语即可；解释/答问可稍长。不要为凑字再塞第二个动作，也不要为压字数写残句。")
+            appendLine("A. 长度服从动作数：闲聊通常一两条完整口语即可；解释/答问可稍长。不要为凑字再塞第二个动作，也不要为压字数写残句。")
             appendLine("B. 每句话用标点结尾（。！？～…），表意收住。")
             appendLine("C. 不要重复同样的话。")
-            appendLine("D. 每条回复 = 一条气泡：把同一动作用一句完整口语说完并收尾；不要用空行/换行分块（连发由系统连发机制处理）。不要 markdown。")
+            appendLine("D. 像真人发微信那样自然分条连发：默认 1~3 条，一层意思一条；想说的多就换行多分几条（每条完整口语、标点收尾），不要挤成一条长气泡；只有一句短回应就一条；一段连贯叙述/故事整段合并成一条。你的每一次回车 = 发出下一条气泡；不要 markdown。")
             if (innerThoughtEnabled) {
                 appendLine("E. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。")
             } else {
