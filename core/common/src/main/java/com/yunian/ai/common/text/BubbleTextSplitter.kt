@@ -67,6 +67,16 @@ object BubbleTextSplitter {
                 }
             }
         }
+        // P2-A1：fence 未闭合（奇数个 ``` 行）时，落单围栏起滞留的内容按「fence 从未生效」降级——
+        // 视为普通文本逐行冲入气泡（同 else 分支），不再整段吞并为一条留到文末、围栏标记原文展出。
+        if (inFence) {
+            val stranded = buf.toString()
+            buf.clear()
+            for (strandedLine in stranded.split("\n")) {
+                buf.append(strandedLine)
+                flush()
+            }
+        }
         flush()
 
         if (bubbles.isEmpty()) return listOf(text)

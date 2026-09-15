@@ -1309,14 +1309,23 @@ class GroupChatViewModel(
             }
 
             Log.d("GroupChatViewModel", "AI回复按原文顺序发送 ${expandedItems.size} 项 (text=${textSegments.size}, sticker=${stickerNames.size})")
+            // P2-C1：本批查重小窗（思路同 CompanionMessageWorker.sendMessage）——左向文本气泡
+            // enqueue 前与本批已发内容比对，命中复读即跳过，避免同一批里整行复读。
+            val batchSentNorms = mutableListOf<String>()
             var segmentIndex = 0
             for (item in expandedItems) {
                 delay(Random.nextLong(600L, 1600L))
                 when (item) {
                     is Either.Left -> {
-                        val msg = GroupMessage(groupId = groupId, companionId = companionId, content = item.value, timestamp = System.currentTimeMillis())
-                        val msgId = messageWriter.enqueueGroup(msg)
-                        broadcastWeChatMessage(companionId, msgId)
+                        val norm = DedupGuard.normalize(item.value)
+                        if (norm.isNotEmpty() && DedupGuard.isDuplicate(norm, batchSentNorms)) {
+                            Log.w("GroupChatViewModel", "dedup hit in batch, skip bubble: ${item.value.take(30)}")
+                        } else {
+                            if (norm.isNotEmpty()) batchSentNorms.add(norm)
+                            val msg = GroupMessage(groupId = groupId, companionId = companionId, content = item.value, timestamp = System.currentTimeMillis())
+                            val msgId = messageWriter.enqueueGroup(msg)
+                            broadcastWeChatMessage(companionId, msgId)
+                        }
                     }
                     is Either.Right -> {
                         sendStickerMessage(groupId, companionId, item.value)

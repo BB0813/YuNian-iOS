@@ -15,13 +15,17 @@ object DedupGuard {
     private const val CONTAIN_MIN = 10
 
     /**
-     * 查重规范化：剥 @、空白、标点、引号括号后小写，取前 40 字。
+     * 查重规范化：剥 @、空白、标点、引号括号与 emoji 后小写，取前 40 字。
+     *
+     * emoji 区段（P2-A4）：astral 平面 emoji 在 UTF-16 下是代理对，需同时剥除
+     * 高半代理 [0xD800,0xDBFF] 与低半代理 [0xDC00,0xDFFF]；❤☀ 等 BMP 符号落在
+     * [0x2600,0x27BF]。效果：「好呀😊」与「好呀😂」归一化相同 → 命中查重。
      *
      * 注意：正则与 `take(40)` 必须与群聊既有实现保持一致，任何改动都会改变判定结果。
      */
     fun normalize(text: String): String {
         return text
-            .replace(Regex("[@\\s，。！？!?,.～~…、:：;；\"'「」『』()（）\\[\\]【】]"), "")
+            .replace(Regex("[@\\s，。！？!?,.～~…、:：;；\"'「」『』()（）\\[\\]【】\\uD800-\\uDBFF\\uDC00-\\uDFFF\\u2600-\\u27BF]"), "")
             .lowercase()
             .take(40)
     }

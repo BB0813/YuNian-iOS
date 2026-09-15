@@ -1,5 +1,6 @@
 package com.yunian.ai.feature.chat.ui.viewmodel
 
+import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.text.DedupGuard
 
 /**
@@ -9,6 +10,8 @@ import com.yunian.ai.common.text.DedupGuard
  * 命中重复即丢弃。若某轮所有候选都被丢弃，则用极简应答池兜底，**绝不让整轮变空**。
  */
 internal object BubbleDedupPlanner {
+
+    private const val TAG = "BubbleDedupPlanner"
 
     /** 全部候选被查重命中时的兜底应答池（池内优先选未重复项）。 */
     val FALLBACK_ACKS = listOf("嗯嗯", "在呢", "怎么啦", "嗯，你说", "我在听")
@@ -45,10 +48,19 @@ internal object BubbleDedupPlanner {
             return accepted
         }
 
+        // P2-A3(a)：整轮候选全被查重命中、走兜底应答时留痕（dropped 只取前 40 字，避免刷屏）。
+        SecureLog.w(TAG, "all candidates dropped, fallback ack used. dropped=${segments.joinToString(" | ").take(40)}")
+
+        // P2-A3(b)：兜底池优先选未重复项；池内全部已在窗口（重复）时留痕后落到默认首项，
+        // 保持既有兜底行为不炸。
         val fallback = FALLBACK_ACKS.firstOrNull {
             !DedupGuard.isDuplicate(DedupGuard.normalize(it), window)
-        } ?: FALLBACK_ACKS.first()
-        window.add(DedupGuard.normalize(fallback))
-        return listOf(fallback)
+        }
+        if (fallback == null) {
+            SecureLog.w(TAG, "all fallback acks already in window, using default ack")
+        }
+        val chosen = fallback ?: FALLBACK_ACKS.first()
+        window.add(DedupGuard.normalize(chosen))
+        return listOf(chosen)
     }
 }
