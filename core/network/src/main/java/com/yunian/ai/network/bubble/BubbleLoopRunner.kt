@@ -50,7 +50,12 @@ class BubbleLoopRunner(
 
     companion object {
 
-        const val MAX_BUBBLES = 16
+        /**
+         * 单轮连发气泡的**兜底安全上限**（非产品限流）：条数本身由模型 `continue` 自决，
+         * 该值只在模型失控连发时兜底——注意链式连发的每一条都是一次独立的模型调用，
+         * 因此保留一个高水位护栏（用户要求「条数不限」，常规聊天远达不到此值）。
+         */
+        const val MAX_BUBBLES = 64
 
         const val MAX_RETRIES = 3
     }
