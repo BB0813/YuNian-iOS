@@ -26,15 +26,27 @@ class ChatTurnState {
      * 跨轮滚动查重窗口（P1-4）：最近若干轮**已落实**气泡的归一化内容，
      * 容量滚动 ≤ [RECENT_DEDUP_WINDOW_CAP]。
      * 价值恰恰在跨轮（防「历史 3 条窗口随轮次滚动而失效」的复读）——因此 [reset] 绝不清空它。
+     *
+     * 并发说明：deliverResponse 在逐条送达协程 [pushRecentDedup]，loadDedupWindow 在生成协程
+     * 读（且 stale-job 取消不 join），窗口会跨线程并发读改。容器保持 ArrayDeque 不换，
+     * 写入与读取快照均以 [@Synchronized] 串行化（同一实例监视器互斥）。
      */
     val recentDedupWindow: ArrayDeque<String> = ArrayDeque()
 
     /** 把一条已落实气泡的归一化内容压入跨轮窗口；超出容量时从队首滚出。 */
+    @Synchronized
     fun pushRecentDedup(normalized: String) {
         if (normalized.isEmpty()) return
         recentDedupWindow.addLast(normalized)
         while (recentDedupWindow.size > RECENT_DEDUP_WINDOW_CAP) recentDedupWindow.removeFirst()
     }
+
+    /**
+     * 读取侧快照（与 [pushRecentDedup] 同一监视器互斥）。
+     * 查重判定必须先取快照再遍历，禁止直接边遍历边改本窗口（理论 CME / 窗口内容丢失）。
+     */
+    @Synchronized
+    fun snapshotRecentDedup(): List<String> = recentDedupWindow.toList()
 
     val stickerMutex: Mutex = Mutex()
 
