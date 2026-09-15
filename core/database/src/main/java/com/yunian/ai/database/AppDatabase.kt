@@ -9,22 +9,33 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.database.dao.AgentDispatchLogDao
+import com.yunian.ai.database.dao.AgentSkillDao
 import com.yunian.ai.database.dao.ApiConfigDao
 import com.yunian.ai.database.dao.ApiProviderPresetDao
 import com.yunian.ai.database.dao.AppMetaDao
 import com.yunian.ai.database.dao.ChatGroupDao
 import com.yunian.ai.database.dao.CompanionDao
 import com.yunian.ai.database.dao.ConversationSummaryDao
+import com.yunian.ai.database.dao.DelegationDao
 import com.yunian.ai.database.dao.DiaryDao
+import com.yunian.ai.database.dao.EventLedgerDao
 import com.yunian.ai.database.dao.KeywordDao
 import com.yunian.ai.database.dao.LorebookDao
 import com.yunian.ai.database.dao.MemoryDao
 import com.yunian.ai.database.dao.MessageDao
+import com.yunian.ai.database.dao.PromptAuditDao
 import com.yunian.ai.database.dao.QuizQuestionDao
+import com.yunian.ai.database.dao.StickerEntryDao
+import com.yunian.ai.database.dao.StickerTagDao
+import com.yunian.ai.database.dao.StickerUsageLogDao
 import com.yunian.ai.database.dao.TokenUsageDao
 import com.yunian.ai.database.dao.UnifiedMemoryDao
 import com.yunian.ai.database.dao.WeChatInboxDedupeDao
 import com.yunian.ai.database.dao.WeChatOutboxDao
+import com.yunian.ai.database.dao.WorldbookDao
+import com.yunian.ai.database.model.AgentDispatchLogEntity
+import com.yunian.ai.database.model.AgentSkillEntity
 import com.yunian.ai.database.model.ApiConfig
 import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.database.model.AppMetaEntity
@@ -34,7 +45,10 @@ import com.yunian.ai.database.model.ArchivedMessageBody
 import com.yunian.ai.database.model.ChatGroup
 import com.yunian.ai.database.model.CompanionEntity
 import com.yunian.ai.database.model.ConversationSummary
+import com.yunian.ai.database.model.DelegationRecordEntity
 import com.yunian.ai.database.model.DiaryEntry
+import com.yunian.ai.database.model.EventLedgerEntity
+import com.yunian.ai.database.model.EventLedgerSnapshotEntity
 import com.yunian.ai.database.model.FileFormat
 import com.yunian.ai.database.model.KeywordEntity
 import com.yunian.ai.database.model.LorebookEntity
@@ -49,11 +63,16 @@ import com.yunian.ai.database.model.MemoryType
 import com.yunian.ai.database.model.MessageType
 import com.yunian.ai.database.model.MessageBody
 import com.yunian.ai.database.model.MessageSearchIndex
+import com.yunian.ai.database.model.PromptAuditEntity
 import com.yunian.ai.database.model.QuizQuestionEntity
+import com.yunian.ai.database.model.StickerEntryEntity
+import com.yunian.ai.database.model.StickerTagEntity
+import com.yunian.ai.database.model.StickerUsageLogEntity
 import com.yunian.ai.database.model.TempMemory
 import com.yunian.ai.database.model.TokenUsage
 import com.yunian.ai.database.model.WeChatInboxDedupeEntity
 import com.yunian.ai.database.model.WeChatOutboxEntity
+import com.yunian.ai.database.model.WorldbookEntity
 import com.yunian.ai.database.repository.MessageSearchTokenizer
 import java.io.File
 
@@ -81,8 +100,19 @@ import java.io.File
         WeChatInboxDedupeEntity::class,
         LorebookEntity::class,
         LorebookEntryEntity::class,
+        // ==== Agent 架构迁移新增（v45，10 张表，纯增量）====
+        AgentSkillEntity::class,
+        PromptAuditEntity::class,
+        AgentDispatchLogEntity::class,
+        StickerEntryEntity::class,
+        StickerTagEntity::class,
+        StickerUsageLogEntity::class,
+        EventLedgerEntity::class,
+        EventLedgerSnapshotEntity::class,
+        DelegationRecordEntity::class,
+        WorldbookEntity::class,
     ],
-    version = 44,
+    version = 45,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -103,12 +133,25 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun weChatOutboxDao(): WeChatOutboxDao
     abstract fun weChatInboxDedupeDao(): WeChatInboxDedupeDao
+    // ==== Agent 架构迁移新增（v45）====
+    abstract fun agentSkillDao(): AgentSkillDao
+    abstract fun promptAuditDao(): PromptAuditDao
+    abstract fun agentDispatchLogDao(): AgentDispatchLogDao
+    abstract fun stickerEntryDao(): StickerEntryDao
+    abstract fun stickerTagDao(): StickerTagDao
+    abstract fun stickerUsageLogDao(): StickerUsageLogDao
+    abstract fun eventLedgerDao(): EventLedgerDao
+    abstract fun delegationDao(): DelegationDao
+    abstract fun worldbookDao(): WorldbookDao
 
     companion object {
         private const val DB_NAME = "yunian_database"
 
         // schema 冻结基线：自 v41 起，新增功能走 AppMetaStore(KV) 或 ExtJson，禁止加表/字段/索引。
         // 确需变更见 docs/database-schema-freeze.md，走向后兼容迁移。
+        //
+        // 【已批准的冻结例外 #1】v44 → v45：Agent 架构迁移（10 张新表，纯增量）。
+        // 详见 MIGRATION_44_45 的注释与 docs/database-schema-freeze.md 第六节。
         private const val SCHEMA_FROZEN_VERSION = 41
         private val LOCK = Any()
 
@@ -1654,6 +1697,83 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 44 → 45：Agent 架构迁移（唯一一次 schema 冻结例外，纯增量）。
+         *
+         * 背景：本地 v44 与 master(lianyu) v44 **不是同一套 schema** —— 两边版本号巧合一致，
+         * 但 master 的 agent 相关表分散建立在它的 v38 / v39 / v43 / v44 / v45…v48 上，
+         * 本地 v38~v44 用在 quiz / lorebook / app_meta 上，因此本地**从未**有过这 10 张表。
+         * 故这里不照搬 master 的 44→48 迁移链，而是一次性把 10 张表补齐为最终形态：
+         * 已核对 master v44→v48 期间这 10 张表的结构，agent_skills / prompt_audit /
+         * agent_dispatch_log / sticker_* 均**无变更**，其余 4 张是 v45+ 新建 → 直接建终态即可。
+         *
+         * 红线：仅 `CREATE TABLE/INDEX IF NOT EXISTS`，不做任何 DROP / TRUNCATE / 改列；
+         * 不动本地既有 22 张表（含本地独有 app_meta / keywords / quiz_questions /
+         * lorebooks / lorebook_entries，及 companions.apiConfigId / lorebookIdsJson）。
+         *
+         * DDL 来源：master 仓库 `core/database/schemas/` 下其 AppDatabase 的 `48.json`
+         * 的 entities[].createSql / indices[].createSql —— 即 Room 校验迁移时使用的目标语句，
+         * 逐字照抄可保证迁移后校验必过（含 sticker_* 的自定义索引名 idx_*）。
+         */
+        val MIGRATION_44_45 = object : Migration(44, 45) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // ---- agent_skills：技能索引表（正文存 filesDir/agent_skills/<skillId>/content.md）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `agent_skills` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `skillId` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `category` TEXT NOT NULL, `tags` TEXT NOT NULL, `tools` TEXT NOT NULL, `contentPath` TEXT NOT NULL, `contentHash` TEXT NOT NULL, `contentLength` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, `companionId` INTEGER, `version` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_agent_skills_skillId` ON `agent_skills` (`skillId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_skills_category` ON `agent_skills` (`category`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_skills_companionId` ON `agent_skills` (`companionId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_skills_enabled` ON `agent_skills` (`enabled`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_skills_updatedAt` ON `agent_skills` (`updatedAt`)")
+
+                // ---- prompt_audit：提示词审计（片段构成 / 版本 / 命中工具）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `prompt_audit` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestamp` INTEGER NOT NULL, `companionId` INTEGER, `groupId` INTEGER, `sessionId` TEXT, `promptVersion` INTEGER NOT NULL, `fragmentsJson` TEXT NOT NULL, `roundsUsed` INTEGER NOT NULL, `systemPromptHash` TEXT NOT NULL, `toolNames` TEXT NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_prompt_audit_timestamp` ON `prompt_audit` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_prompt_audit_companionId` ON `prompt_audit` (`companionId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_prompt_audit_groupId` ON `prompt_audit` (`groupId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_prompt_audit_sessionId` ON `prompt_audit` (`sessionId`)")
+
+                // ---- agent_dispatch_log：每回合派发日志（工具调用 / 事件 / 结束原因）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `agent_dispatch_log` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `timestamp` INTEGER NOT NULL, `companionId` INTEGER, `groupId` INTEGER, `sessionId` TEXT, `dispatchId` TEXT NOT NULL, `provider` TEXT NOT NULL, `model` TEXT NOT NULL, `startedAtMs` INTEGER NOT NULL, `completedAtMs` INTEGER NOT NULL, `roundsUsed` INTEGER NOT NULL, `finishedReason` TEXT NOT NULL, `error` TEXT NOT NULL, `toolNames` TEXT NOT NULL, `toolCallsJson` TEXT NOT NULL, `eventsJson` TEXT NOT NULL, `querySummary` TEXT NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_dispatch_log_timestamp` ON `agent_dispatch_log` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_dispatch_log_companionId` ON `agent_dispatch_log` (`companionId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_dispatch_log_groupId` ON `agent_dispatch_log` (`groupId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_dispatch_log_sessionId` ON `agent_dispatch_log` (`sessionId`)")
+
+                // ---- sticker_entries：贴纸条目（自定义索引名 idx_*，与 master 一致）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `sticker_entries` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `description` TEXT, `hash` TEXT NOT NULL, `tags` TEXT NOT NULL, `embeddedText` TEXT, `detail` TEXT, `fileName` TEXT NOT NULL, `source` TEXT NOT NULL, `fileSize` INTEGER, `userUsageCount` INTEGER NOT NULL, `modelUsageCount` INTEGER NOT NULL, `createdAt` INTEGER, `lastUsedAt` INTEGER)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `idx_sticker_entries_hash` ON `sticker_entries` (`hash`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `idx_sticker_entries_tags` ON `sticker_entries` (`tags`)")
+
+                // ---- sticker_tags：标签聚合 ----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `sticker_tags` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `tag` TEXT NOT NULL, `stickerCount` INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_sticker_tags_tag` ON `sticker_tags` (`tag`)")
+
+                // ---- sticker_usage_log：使用日志（自定义索引名 idx_*，与 master 一致）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `sticker_usage_log` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `stickerId` INTEGER NOT NULL, `source` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `contextTags` TEXT NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `idx_sticker_usage_sticker` ON `sticker_usage_log` (`stickerId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `idx_sticker_usage_time` ON `sticker_usage_log` (`timestamp`)")
+
+                // ---- event_ledger：事件账本（哈希链 + 幂等键）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `event_ledger` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `streamId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `type` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `payloadJson` TEXT NOT NULL, `metadataJson` TEXT NOT NULL, `idempotencyKey` TEXT, `prevHash` TEXT NOT NULL, `hash` TEXT NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_event_ledger_streamId_sequence` ON `event_ledger` (`streamId`, `sequence`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_event_ledger_idempotencyKey` ON `event_ledger` (`idempotencyKey`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_ledger_timestamp` ON `event_ledger` (`timestamp`)")
+
+                // ---- event_ledger_snapshot：账本快照（主键即 streamId）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `event_ledger_snapshot` (`streamId` TEXT NOT NULL, `version` INTEGER NOT NULL, `stateJson` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`streamId`))")
+
+                // ---- delegation_records：子代理委派记录 ----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `delegation_records` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `role` TEXT NOT NULL, `prompt` TEXT NOT NULL, `status` TEXT NOT NULL, `result` TEXT NOT NULL, `error` TEXT NOT NULL, `companionId` INTEGER, `dispatchId` TEXT, `createdAtMs` INTEGER NOT NULL, `completedAtMs` INTEGER)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_delegation_records_status` ON `delegation_records` (`status`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_delegation_records_companionId` ON `delegation_records` (`companionId`)")
+
+                // ---- worldbooks：世界书（ST World Info JSON 原样存储）----
+                db.execSQL("CREATE TABLE IF NOT EXISTS `worldbooks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `json` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `companionId` INTEGER, `updatedAt` INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_worldbooks_enabled` ON `worldbooks` (`enabled`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_worldbooks_companionId` ON `worldbooks` (`companionId`)")
+            }
+        }
+
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -1771,6 +1891,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_41_42,
             MIGRATION_42_43,
             MIGRATION_43_44,
+            MIGRATION_44_45,
         )
 
         private var lastBackupTime: Long = 0L
