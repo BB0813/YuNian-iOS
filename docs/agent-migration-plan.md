@@ -245,8 +245,12 @@ cdylib_name = "lianyu_agent"
 |---|---|---|
 | Room version | **44** | **48** |
 | `DB_NAME` | `yunian_database` | `lianyu_database` |
-| 实体数 | 22 | 34 |
+| 实体数 | 22 → **32**（迁移后） | 27 |
 | 冻结策略 | **`SCHEMA_FROZEN_VERSION = 41`** | 无 |
+
+> 本地实体数：v44 为 22，本阶段新增 10 张 agent 表后为 32。与 master v48 的 27 表**不同**——
+> 本地多 5 张独有表（`app_meta` / `keywords` / `quiz_questions` / `lorebooks` / `lorebook_entries`），
+> master 则多 `companions` 的列删除。两者已分叉，不追求相同。
 
 #### ★ 决定性发现：schema 自 v41 起已分叉
 
@@ -260,23 +264,32 @@ cdylib_name = "lianyu_agent"
 | v44 | 同上 | + `agent_dispatch_log` | `companions` 缺 `apiConfigId`, `lorebookIdsJson` |
 
 **结论**：两边 **v41–44 的迁移脚本内容不同**。绝不能把 master 的 `MIGRATION_44_45` … `MIGRATION_47_48` 直接追加到本地。
-必须在本地 v44 之上**新写** 45–48，SQL 只拷贝 master 那 9 张 agent 表的 `CREATE TABLE`（对照 master `schemas/44.json` → `48.json` 的 `ColumnInfo`），
+必须**在本地 v44 之上一次性新写 `MIGRATION_44_45`**（终态版本号 = **45**，非 48），SQL 只拷贝 master 那 10 张 agent 表的 `CREATE TABLE` / `CREATE INDEX`，
 忽略 master 对 `companions` 列的删除。
 
-#### 需要新增的 9 张表
+> **为何是 45 而非 48**（已于阶段 3 实测后修订）：master 的这批表分散建在**它的** v37→38 / v38→39 / v43→44（`agent_skills` / `prompt_audit` / `agent_dispatch_log` / `sticker_*`）
+> 与 v45~v48（`event_ledger` / `event_ledger_snapshot` / `delegation_records` / `worldbooks`）上，而本地 v38~v44 用在 quiz / lorebook / app_meta 上——
+> 即本地**从未**存在这 10 张表，缺的是 master v38–v48 整条血统。已程序化核对：前 6 张表在 master **v44→v48 期间结构无任何变更**，后 4 张是 v45+ 才新建，
+> 故**一次建终态**即可。不跳 48 的理由：本地 schema 与 master v48 本就不同（本地保留 5 张独有表），版本号相同反而制造「结构相同」的错觉，
+> 且会凭空多出 45→48 三个空洞版本。
 
-| 表 | 来源版本 | 用途 |
+#### 需要新增的 10 张表（终态，本地 v45 一次性建立）
+
+| 表 | master 中首见于 | 用途 |
 |---|---|---|
-| `agent_skills` | 41 | SKILL.md 技能存储 |
-| `prompt_audit` | 41 | 提示词审计 |
-| `sticker_entries` | 42 | 表情包条目 |
-| `sticker_usage_log` | 42 | 表情使用日志 |
-| `sticker_tags` | 43 | 表情标签 |
-| `agent_dispatch_log` | 44 | Agent 派发审计 |
-| `event_ledger` | 45 | 事件账本（timeline） |
-| `event_ledger_snapshot` | 46 | 账本快照 |
-| `delegation_record` | 46 | 多 Agent 委派记录 |
-| `worldbooks` | 47/48 | 世界书（见 §5） |
+| `agent_skills` | ≤v44 | SKILL.md 技能存储 |
+| `prompt_audit` | ≤v44 | 提示词审计 |
+| `agent_dispatch_log` | ≤v44 | Agent 派发审计 |
+| `sticker_entries` | ≤v44 | 表情包条目 |
+| `sticker_usage_log` | ≤v44 | 表情使用日志 |
+| `sticker_tags` | ≤v44 | 表情标签 |
+| `event_ledger` | v45+ | 事件账本（timeline） |
+| `event_ledger_snapshot` | v45+ | 账本快照 |
+| `delegation_records` | v45+ | 多 Agent 委派记录 |
+| `worldbooks` | v45+ | 世界书（见 §5） |
+
+> 「首见于」列仅作参考：本地建的是 **master v48 的终态定义**，与首见版本无关。
+> 注意表名是 `delegation_records`（复数），非 `delegation_record`。
 
 ### 2.5 `core:domain`
 
@@ -368,7 +381,7 @@ feature/settings/build.gradle.kts:35              implementation(project(":core:
 |---|---|
 | 2.1 | 复制 `_ref_master/agent-native/` → 本地根目录 `agent-native/`（含 `Cargo.toml` / `Cargo.lock` / `uniffi.toml` / `README.md` / `src/`） |
 | 2.2 | `native_gateway.rs`：硬编码 DB 名 `"lianyu_database"` → `"yunian_database"`（当前仅有注释，需全文确认） |
-| 2.3 | `native_gateway.rs`：`MAX_SUPPORTED_SCHEMA` `46` → **48**（本地最终版本）；`MIN_SUPPORTED_SCHEMA` 保持 `41`（本地 v44 在范围内） |
+| 2.3 | `native_gateway.rs`：`MAX_SUPPORTED_SCHEMA` `46` → **`45`**（本地最终版本，ROOM v45）；`MIN_SUPPORTED_SCHEMA` 保持 `41`（本地 v44/v45 在范围内） |
 | 2.4 | `uniffi.toml`：`package_name` 改 `com.yunian.ai.agent.uniffi`；`cdylib_name` **保持 `lianyu_agent`**（避免联动改 `.so` 名与 JNA 逻辑） |
 | 2.5 | 复制 `_ref_master/scripts/build_agent.ps1` → 本地 `scripts/` |
 | 2.6 | `cargo build && cargo test`（宿主编译，116 用例）→ 必须全绿 |
@@ -388,22 +401,27 @@ feature/settings/build.gradle.kts:35              implementation(project(":core:
 
 > `Cargo.toml` 依赖 `cordis-rs =0.6.2` / `cordis-loader =0.0.23`。
 
-### 阶段 3 — 数据库 v45–48
+### 阶段 3 — 数据库 v44 → v45 ✅ 已完成
 
-| # | 动作 |
-|---|---|
-| 3.1 | 在本地 `AppDatabase.kt` 上新增 `MIGRATION_44_45` … `MIGRATION_47_48`（**本地自定义版本号 45–48**，SQL 内容对齐 master 的 agent 表 DDL） |
-| 3.2 | `@Database(version = 44)` → **`48`**；`entities` 增加 9 个实体类引用 |
-| 3.3 | 新增 9 个 Entity + 9 个 DAO（`agentSkillDao`、`promptAuditDao`、`agentDispatchLogDao`、`stickerEntryDao`、`stickerUsageLogDao`、`stickerTagDao`、`eventLedgerDao`、`delegationDao`、`worldbookDao`） |
-| 3.4 | 保留本地 `appMetaDao` / `keywordDao` / `quizQuestionDao` / `lorebookDao`（**不删**） |
-| 3.5 | `docs/database-schema-freeze.md` 增加「例外条款 E1」：agent 表为纯增量，已评审通过 |
-| 3.6 | 新增 `core/database/schemas/com.yunian.ai.database.AppDatabase/45.json` … `48.json`（构建时导出，需与 DDL 一致） |
-| 3.7 | 不设 `fallbackToDestructiveMigration`；保留全部历史迁移 |
-| 3.8 | 同步 `native_gateway.rs` 的 `MAX_SUPPORTED_SCHEMA = 48` |
+| # | 动作 | 状态 |
+|---|---|---|
+| 3.1 | 在本地 `AppDatabase.kt` 上新增**单个** `MIGRATION_44_45`（终态版本 **45**，SQL 逐字照抄 master | 已完成 |
+| 3.2 | `@Database(version = 44)` → **`45`**；`entities` 增加 10 个实体类引用（22 → 32） | 已完成 |
+| 3.3 | 新增 9 个 Entity 文件 + 9 个 DAO 文件（`EventLedgerEntity.kt` 内含 `EventLedgerSnapshotEntity`，故 10 个实体类 / 18 个文件） | 已完成 |
+| 3.4 | 保留本地 `appMetaDao` / `keywordDao` / `quizQuestionDao` / `lorebookDao`（**未删**） | 已完成 |
+| 3.5 | `docs/database-schema-freeze.md` 更新基线描述 + 新增「第七节 冻结例外记录」留档 | 已完成 |
+| 3.6 | 新增 `schemas/…/45.json`（构建时导出，需提交） | 待编译后产出 |
+| 3.7 | 未设 `fallbackToDestructiveMigration`；保留全部历史迁移 | 已完成 |
+| 3.8 | 同步 `native_gateway.rs` 的 `MAX_SUPPORTED_SCHEMA = 45` | 阶段 2 执行 |
+
+> **修订说明**：3.1/3.2/3.6/3.8 原为「45–48 多步链 + 版本 48」，于阶段 3 实测后修订为**单个 44→45**。
+> 理由见 §2.4 的「为何是 45 而非 48」。DDL 已程序化校验 **35/35 条**与 master `48.json` 逐字一致
+> （含 `sticker_*` 的自定义索引名 `idx_*`；手写 Room 默认名会触发 `Migration didn't properly handle`）。
 
 > **关键**：`companions` 表**保留** `apiConfigId` 与 `lorebookIdsJson` 列（master 删了，本地不能删）。
-> 这会导致本地 `companions` 与 master 的 schema 在 v48 之后仍不同 —— **可接受**，因为 Rust 只读
-> `api_configs` / `companions` 的**部分列**，多出的列不影响只读查询。
+> 这会导致本地 `companions` 与 master 的 schema 在迁移后仍不同 —— **可接受**，因为 Rust 只读
+> `api_configs` / `companions` 的**部分列**，多出的列不影响只读查询。已实测确认：除 `companions`
+> 外，本地 v44 与 master v48 的其余 **17 张共有表 createSql 逐字一致、索引零差异**。
 
 ### 阶段 4 — `core:domain` 接口增补
 
@@ -836,14 +854,14 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 - [ ] `./gradlew --no-daemon -Dorg.gradle.java.home=C:\Users\27194\.jdks\corretto-17.0.14 assembleDebug` 通过
 - [ ] `cd agent-native; cargo test` 通过（116 用例）
 - [ ] `grep -r "com\.lianyu" --include=*.kt --include=*.kts --include=*.toml . | grep -v _ref_master` 结果为空
-- [ ] `grep -rn "version =" core/database/src/main/java/com/yunian/ai/database/AppDatabase.kt` == `48`
-- [ ] `MIN_SUPPORTED_SCHEMA = 41` / `MAX_SUPPORTED_SCHEMA = 48`（Rust）
+- [ ] `grep -rn "version =" core/database/src/main/java/com/yunian/ai/database/AppDatabase.kt` == `45`
+- [ ] `MIN_SUPPORTED_SCHEMA = 41` / `MAX_SUPPORTED_SCHEMA = 45`（Rust）
 
 ### 7.2 运行时
 
 - [ ] 冷启动无 linker error（`liblianyu_agent.so` 加载成功）
 - [ ] 首启 JNA 初始化 < 200 ms（`warmUp` 生效）
-- [ ] 覆盖安装旧版（v44 库）→ 迁移到 v48 **不丢数据**（`companions` / `messages` 行数一致）
+- [ ] 覆盖安装旧版（v44 库）→ 迁移到 v45 **不丢数据**（`companions` / `messages` 行数一致）
 - [ ] 世界书：旧结构化条目**全部**出现在新 `worldbooks.json`（`SUM(本地 enabled 条目数) == SUM(新 JSON entries 数)`；保留书本边界（1 书 → 1 记录，§5.3）；若同书内重复 content 被预去重，须有告警日志）
 - [ ] 世界书注入顺序：`insertion_order` 取反公式生效（高 `priority` 条目在提示词中靠前）
 - [ ] 世界书 5 种注入位置**全保真**（Q2）：`before_char` / `after_char` / `top_of_chat` / `bottom_of_chat` / `at_depth` 各注入一次，位置与本地 `PromptInjectionTransformer` 一致
@@ -883,10 +901,10 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 |---|---|
 | 整体 | `git reset --hard pre-agent-migration`（阶段 0.3 打的 tag） |
 | 模块级 | 删除 `core/agent/` + `agent-native/` + 还原 5 个 build.gradle.kts |
-| 数据库 | Room v45–48 迁移**只新增表**，旧表与旧列全部保留 → 回退 App 版本即可继续用旧代码读同一库（新增空表不影响） |
+| 数据库 | Room v44→45 迁移**只新增 10 张表**，旧表与旧列全部保留 → 回退 App 版本即可继续用旧代码读同一库（新增空表不影响） |
 | Rust | 保留 master 原版 `liblianyu_agent.so` 备份；若自编译版本异常可回滚二进制 |
 
-> 因为 DB 迁移是**纯增量**，回滚 App 版本**不会**导致旧版打开崩溃（Room 看到 `user_version=48`
+> 因为 DB 迁移是**纯增量**，回滚 App 版本**不会**导致旧版打开崩溃（Room 看到 `user_version=45`
 > 高于代码声明的 44 时会抛 `IllegalStateException`）—— ⚠️ **这是唯一需要额外注意的点**。
 > 缓解：回滚时若需降版本，必须同时回滚 App 内的 `user_version`（需专门的降级脚本），
 > 或接受「回滚 = 清库重装」。
@@ -899,7 +917,7 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 graph LR
     P0[阶段0 准备] --> P1[阶段1 core:agent + 包名]
     P1 --> P2[阶段2 agent-native Rust<br/>+ Q2 注入子系统重写]
-    P2 --> P3[阶段3 数据库 v45-48]
+    P2 --> P3[阶段3 数据库 v44→v45]
     P3 --> P4[阶段4 core:domain 接口]
     P4 --> P4B[阶段4b 本地独有模块接入<br/>Q1 automation cordis 重写<br/>Q6 skills SkillStore 适配器]
     P4B --> P5[阶段5 世界书收敛<br/>Q2 注入位置 / Q3 UI / Q4 Kotlin 每回合合并]

@@ -151,7 +151,7 @@ abstract class AppDatabase : RoomDatabase() {
         // 确需变更见 docs/database-schema-freeze.md，走向后兼容迁移。
         //
         // 【已批准的冻结例外 #1】v44 → v45：Agent 架构迁移（10 张新表，纯增量）。
-        // 详见 MIGRATION_44_45 的注释与 docs/database-schema-freeze.md 第六节。
+        // 详见 MIGRATION_44_45 的注释与 docs/database-schema-freeze.md 第七节「冻结例外记录」。
         private const val SCHEMA_FROZEN_VERSION = 41
         private val LOCK = Any()
 
