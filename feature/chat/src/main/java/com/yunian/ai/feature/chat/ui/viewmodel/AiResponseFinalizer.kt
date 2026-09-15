@@ -386,7 +386,8 @@ class AiResponseFinalizer(
             .take(DedupGuard.WINDOW_LAST_AI)
             .forEach { window.add(DedupGuard.normalize(it.content)) }
 
-        window.addAll(turnState.recentDedupWindow)
+        // 读取侧快照后再并入（与 pushRecentDedup 互斥）：禁止边遍历边改跨轮窗口
+        window.addAll(turnState.snapshotRecentDedup())
 
         turnState.dedupTurnKey = turnKey
         turnState.dedupWindow = window

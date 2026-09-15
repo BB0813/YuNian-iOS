@@ -47,4 +47,51 @@ class ChatTurnStateRecentDedupTest {
         state.pushRecentDedup("")
         assertEquals(0, state.recentDedupWindow.size)
     }
+
+    @Test
+    fun `并发冒烟 - 多线程交替 push 与 snapshot 不抛异常且内容有序不丢`() {
+        // 生产环境场景：deliverResponse 在逐条送达协程 push、loadDedupWindow 在生成协程读，
+        // 线程不 join（stale-job 取消即放手）→ 窗口并发读改。加固后必须无 CME、无内容丢失。
+        val state = ChatTurnState()
+        val total = 5000
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+
+        fun guarded(body: () -> Unit): Thread = Thread {
+            try {
+                body()
+            } catch (t: Throwable) {
+                errors.add(t)
+            }
+        }
+
+        // 单生产者：保证窗口内容天然有序（msg0..msg4999），便于快照一致性断言
+        val producer = guarded {
+            repeat(total) { state.pushRecentDedup("msg$it") }
+        }
+        val consumers = (1..4).map {
+            guarded {
+                repeat(2000) {
+                    val snapshot = state.snapshotRecentDedup()
+                    // 快照必须是「某一时刻的尾窗口」：不超容量、msgK 的 K 严格递增
+                    if (snapshot.size > RECENT_DEDUP_WINDOW_CAP) {
+                        throw AssertionError("快照超容量: size=${snapshot.size}")
+                    }
+                    val indices = snapshot.map { it.removePrefix("msg").toInt() }
+                    if (indices.zipWithNext().any { (a, b) -> b <= a }) {
+                        throw AssertionError("快照内容乱序/被改写: $indices")
+                    }
+                }
+            }
+        }
+
+        (consumers + producer).forEach { it.start() }
+        producer.join()
+        consumers.forEach { it.join() }
+
+        assertEquals("并发执行出现未捕获异常: ${errors.firstOrNull()}", 0, errors.size)
+
+        // 内容不丢：全部 join 后窗口 = 恰好最后 RECENT_DEDUP_WINDOW_CAP 条
+        val expected = (total - RECENT_DEDUP_WINDOW_CAP until total).map { "msg$it" }
+        assertEquals(expected, state.snapshotRecentDedup())
+    }
 }
