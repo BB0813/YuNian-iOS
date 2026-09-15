@@ -33,6 +33,8 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:ui-common"))
     implementation(project(":core:domain"))
+    // Agent 核心门面（P4：气泡协议模式改走 AgentFacade.runTurn，Rust 决策 + Kotlin 纯 IO 回调）
+    implementation(project(":core:agent"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

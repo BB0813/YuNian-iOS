@@ -25,6 +25,8 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:database"))
     implementation(project(":core:domain"))
+    // Agent 核心门面（AiReplyWorker / CompanionMessageWorker 生成改走 AgentFacade）
+    implementation(project(":core:agent"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.work.runtime.ktx)
