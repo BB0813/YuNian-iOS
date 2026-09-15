@@ -64,11 +64,134 @@ class WorldbookRepository(private val context: Context) {
         true
     }
 
-    /** 把激活世界书注入 AgentRuntime（启动/变更后调用；companionId>0 优先伴侣级）。 */
+    // ────────────────────────── Q4：伴侣级世界书实时合并 ──────────────────────────
+
+    private val companionDao = AppDatabase.getDatabase(context.applicationContext).companionDao()
+
+    /**
+     * 读取伴侣绑定的全局世界书 id 集合（`companions.lorebookIdsJson`）；
+     * 解析失败或未绑定 → 空列表（语义与本地 `feature:worldbook` 完全一致）。
+     */
+    suspend fun parseBoundIds(companionId: Long): List<Long> {
+        val raw = runCatching { companionDao.getCompanionById(companionId)?.lorebookIdsJson }
+            .getOrNull() ?: return emptyList()
+        return runCatching {
+            val arr = org.json.JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val v = arr.optLong(i, 0L)
+                    if (v > 0L) add(v)
+                }
+            }.distinct()
+        }.getOrElse { emptyList() }
+    }
+
+    /**
+     * 合成某伴侣当前应生效的世界书 JSON（Q4：**Kotlin 侧每回合实时合并，零 Rust 改动**）。
+     *
+     * 生效集合（§5.3b）：
+     * 1. **未绑定**（`boundIds` 为空）→ 专属书 ∪ 全部全局书
+     * 2. **已绑定** → 专属书 ∪ `boundIds` 命中的全局书
+     * 3. 仅取 `enabled = 1` 且 `json` 非空的行
+     *
+     * 合成前做两项归一（§5.3c）：
+     * - **按 `content` 去重**（保留 `priority` 高者，并列时保留靠后的启用项）
+     * - **`insertion_order` 全局重编号**：多本书的 `insertion_order` 各自独立，
+     *   直接拼接会产生大量冲突 → 按去重后的 `priority` 降序统一分配 1..N
+     *
+     * @return 单本 ST World Info JSON；无生效世界书时返回 `""`
+     */
+    suspend fun synthForCompanion(companionId: Long): String = withContext(Dispatchers.IO) {
+        val rows = effectiveRows(companionId)
+        if (rows.isEmpty()) return@withContext ""
+
+        // 汇总全部条目（保留来源书本名以便回溯）
+        data class Item(
+            val entry: com.yunian.ai.database.model.LorebookEntryEntity,
+            val bookName: String,
+            val bookId: Long,
+        )
+
+        val items = ArrayList<Item>()
+        for (row in rows) {
+            val decoded = WorldbookJsonCodec.entries(row.json)
+            for (st in decoded) {
+                if (!st.enabled) continue
+                val e = st.toEntity(lorebookId = 0L)
+                if (e.content.isBlank()) continue
+                items += Item(e, row.name, row.id)
+            }
+        }
+        if (items.isEmpty()) return@withContext ""
+
+        // ① 按 content 去重：保留 priority 高者；并列时保留后出现者（更晚的书覆盖早的）
+        val best = LinkedHashMap<String, Item>()
+        for (item in items) {
+            val key = item.entry.content
+            val prev = best[key]
+            if (prev == null || item.entry.priority >= prev.entry.priority) best[key] = item
+        }
+        val deduped = best.values.toList()
+
+        // ② insertion_order 全局重编号：priority 降序 → 序号 1..N
+        val ordered = deduped.sortedWith(
+            compareByDescending<Item> { it.entry.priority }.thenBy { it.entry.id },
+        )
+        val objs = ordered.mapIndexed { idx, item ->
+            WorldbookJsonCodec.entryToJson(
+                entry = item.entry,
+                bookId = item.bookId,
+                bookName = item.bookName,
+                insertionOrder = (idx + 1).toLong(),
+            )
+        }
+
+        // ③ 运行时断言（§5.3d）：合成 JSON 条目数 == 去重后实际生效条目数
+        val core = rows.firstOrNull()
+        val merged = WorldbookJsonCodec.assemble(
+            name = core?.name ?: "世界书",
+            description = null,
+            scanDepth = WorldbookJsonCodec.dominantScanDepth(ordered.map { it.entry }),
+            tokenBudget = WorldbookJsonCodec.DEFAULT_TOKEN_BUDGET,
+            entryObjects = objs,
+        )
+        val actual = WorldbookJsonCodec.entryCount(merged)
+        if (actual != objs.size) {
+            Log.w(TAG, "世界书合成条目数异常: 期望 ${objs.size} 实际 $actual（伴侣 $companionId）")
+        }
+        merged
+    }
+
+    /** 取某伴侣当前生效的 `worldbooks` 行集合。 */
+    private suspend fun effectiveRows(companionId: Long): List<WorldbookEntity> {
+        val all = dao.all().filter { it.enabled && it.json.isNotBlank() && it.json != "{}" }
+        if (all.isEmpty()) return emptyList()
+        val boundIds = if (companionId > 0L) parseBoundIds(companionId) else emptyList()
+        return if (boundIds.isEmpty()) {
+            // 未绑定：专属书 ∪ 全部全局书
+            all.filter { companionId <= 0L || it.companionId == null || it.companionId == companionId }
+        } else {
+            // 已绑定：专属书 ∪ boundIds 命中的全局书
+            all.filter { it.companionId == companionId || (it.companionId == null && it.id in boundIds) }
+        }
+    }
+
+    /**
+     * 把**当前伴侣**应生效的世界书合并后注入 AgentRuntime。
+     *
+     * ★ 必须**每回合**调用（`ChatGenerationManager`），因为绑定的世界书集合
+     * 与启用状态都可能在会话中变化，而 `AgentRuntime.setWorldbook` 是覆盖式的。
+     *
+     * `companionId <= 0` 时退化为「全局激活书」单本语义（启动/全局变更场景）。
+     */
     suspend fun syncActiveToRuntime(companionId: Long = 0L) {
-        val active = if (companionId > 0L) dao.activeForCompanion(companionId) ?: dao.active() else dao.active()
+        val payload = if (companionId > 0L) {
+            synthForCompanion(companionId)
+        } else {
+            dao.active()?.json ?: ""
+        }
         runCatching {
-            AgentFacade.setWorldbook(context, active?.json ?: "")
+            AgentFacade.setWorldbook(context, payload)
         }.onFailure { Log.w(TAG, "sync worldbook failed", it) }
     }
 
