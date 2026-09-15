@@ -85,4 +85,30 @@ class BubbleTextSplitterTest {
         val result = BubbleTextSplitter.splitForDelivery(text, allowParagraphSplit = true)
         assertEquals(listOf("第一段", "第二段"), result)
     }
+
+    @Test
+    fun `主动消息多行文本拆成多条气泡并按本批窗口去重`() {
+        // 主动消息生成端保留换行后，发送端依赖本拆分器把多行文本拆成多条气泡连发：
+        // 一行一条、空行不产生空气泡，本批内重复气泡（归一化后）被过滤。
+        val proactive = "刚看到个超好笑的\n突然想到你\n\n刚看到个超好笑的\n你今天忙不忙呀"
+        val bubbles = BubbleTextSplitter.splitByParagraphs(proactive)
+        assertEquals(4, bubbles.size)
+
+        val window = mutableListOf<String>()
+        val delivered = bubbles.mapNotNull { bubble ->
+            val text = bubble.trim()
+            if (text.isEmpty()) return@mapNotNull null
+            val norm = DedupGuard.normalize(text)
+            if (norm.isNotEmpty() && DedupGuard.isDuplicate(norm, window)) {
+                null
+            } else {
+                if (norm.isNotEmpty()) window.add(norm)
+                text
+            }
+        }
+        assertEquals(listOf("刚看到个超好笑的", "突然想到你", "你今天忙不忙呀"), delivered)
+
+        // 无换行的单条主动消息：行为与旧版一致，恰好 1 条气泡
+        assertEquals(1, BubbleTextSplitter.splitByParagraphs("在干嘛呢").size)
+    }
 }

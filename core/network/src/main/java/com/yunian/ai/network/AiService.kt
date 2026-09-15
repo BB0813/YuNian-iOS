@@ -687,8 +687,8 @@ class AiService(context: Context) : AiServiceProvider {
                     - 未完结且感兴趣：可自然延伸，但不要复读、不要为了承接而追问已答完的内容。
                     - 已完结或不感兴趣：可轻转、只回情绪/态度，或输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}；不要硬续旧话题。
                     若决定发消息，要求：
-                    1. 像真人聊天一样自然；单次单动作且句式完整，不要长文堆共情+方案+追问，也不要半截残句
-                    2. 优先 1 条消息，不要拆成很多短句连发
+                    1. 像真人在微信连发那样说话：口语、自然，不要长文堆共情+方案+大道理，也不要半截残句
+                    2. 消息条数不限：换行即下一条。话多就多敲几行（真人会连发），话少一条也行——由你的性格与此刻想说的话决定，不硬凑条数，也不要把全部内容塞进一条
                     3. 不要重新开场、不要念日程
                     4. 语气与互动方式严格服从角色性格，不要统一撒娇/催促
                     5. 禁止括号，禁止AI感词汇，禁止说教
@@ -707,13 +707,12 @@ class AiService(context: Context) : AiServiceProvider {
 
                 val semantic = AiPromptBuilder.parseProactiveGenerationResult(rawResponse)
                     ?: return@withContext null
-                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages)
-                val singleLine = cleaned
-                    .replace(Regex("\\r\\n|\\r|\\n+"), "，")
-                    .replace(Regex("，{2,}"), "，")
-                    .trimStart('，', ',', '.', '。', ' ')
-                    .trim()
-                val finalText = AiPromptBuilder.parseProactiveGenerationResult(singleLine)
+                // preserveRaw = true：保留 AI 自己敲的换行（换行即「想连发下一条」的信号），
+                // 并避免长文本被后处理截断。不再把换行压平成单条。
+                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages, preserveRaw = true)
+                // parseProactiveGenerationResult 按行检查 NO_PROACTIVE_MARKER，可直接用于含换行的多行文本；
+                // 多行文本交由发送端 BubbleTextSplitter 拆成多条气泡连发。
+                val finalText = AiPromptBuilder.parseProactiveGenerationResult(cleaned)
                     ?: return@withContext null
 
                 val safetyResult = ContentFilter.checkOutputSafety(finalText)

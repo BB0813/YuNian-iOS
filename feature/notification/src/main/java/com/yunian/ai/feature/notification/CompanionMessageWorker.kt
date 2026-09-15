@@ -28,6 +28,8 @@ import com.yunian.ai.common.BanManager
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.common.ChatDetailSettingsDataStoreProvider
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.text.BubbleTextSplitter
+import com.yunian.ai.common.text.DedupGuard
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -243,6 +245,15 @@ class CompanionMessageWorker(
         SecureLog.d("CompanionMessageWorker", "Enqueue WeChat proactive message, companionId=$companionId, messageId=$messageId")
     }
 
+    /**
+     * 把一次主动生成内容送达为一条或多条气泡。
+     *
+     * 拆分语义遵循 [BubbleTextSplitter]：AI 敲的每一个换行都是「想发下一条」的信号，
+     * 一行一条、空行不产生空气泡；无换行时恰好 1 条，行为与旧版单条发送一致。
+     * 每条气泡落库前与「本批已发出气泡的归一化内容」查重（[DedupGuard]），过滤空/重复气泡。
+     *
+     * @return 最后一条成功落库气泡的消息 id（供 follow-up 状态追踪）；全部失败返回 null。
+     */
     private suspend fun sendMessage(companion: com.yunian.ai.database.model.CompanionEntity, content: String): Long? {
         val trimmed = content.trim()
         if (trimmed.isEmpty()) return null
@@ -255,24 +266,51 @@ class CompanionMessageWorker(
         }
         // 主动消息同样可能夹带生图标签/画面描述：落库前统一清洗
         val clean = ImageGenProtocol.sanitizeForDisplay(trimmed).ifBlank { trimmed }
-        val message = ChatMessage(
-            companionId = companion.id,
-            content = clean,
-            isFromUser = false
-        )
-        val messageId = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
-            .enqueueChat(message)
-        broadcastProactiveWeChatMessage(companion.id, messageId)
+
+        // 换行即下一条气泡；无换行时整条为 1 个气泡
+        val bubbles = BubbleTextSplitter.splitByParagraphs(clean)
+        val writeCoordinator = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
+        // 查重窗口 = 本批已发出气泡的归一化内容
+        val sentNorms = mutableListOf<String>()
+        val delivered = mutableListOf<String>()
+        var lastMessageId: Long? = null
+        for (bubble in bubbles) {
+            val text = bubble.trim()
+            if (text.isEmpty()) continue
+            val norm = DedupGuard.normalize(text)
+            if (norm.isNotEmpty() && DedupGuard.isDuplicate(norm, sentNorms)) {
+                SecureLog.d("CompanionMessageWorker", "Proactive bubble dropped as in-batch duplicate")
+                continue
+            }
+            val messageId = writeCoordinator.enqueueChat(
+                ChatMessage(
+                    companionId = companion.id,
+                    content = text,
+                    isFromUser = false
+                )
+            )
+            broadcastProactiveWeChatMessage(companion.id, messageId)
+            lastMessageId = messageId
+            delivered.add(text)
+            if (norm.isNotEmpty()) sentNorms.add(norm)
+        }
+
+        if (lastMessageId == null) return null
+
+        // 按「生成一次」计数：无论一次拆出几条气泡都只算 1 次主动消息
         incrementTodayProactiveCount(context, companion.id, 1)
         if (!AppForegroundTracker.isInForeground) {
+            // 多气泡合并成单条预览，沿用 50 字截断规则（与 AiReplyWorker 一致）
+            val merged = delivered.joinToString(" ")
+            val notificationPreview = if (merged.length > 50) merged.take(50) + "..." else merged
             NotificationHelper.showCompanionMessageNotification(
                 context,
                 companion.name,
-                clean,
+                notificationPreview,
                 companion.id
             )
         }
-        return messageId
+        return lastMessageId
     }
 
     private fun isInDndRange(nowMinutes: Int, settings: ProactiveSettings): Boolean {
