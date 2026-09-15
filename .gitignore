@@ -93,3 +93,14 @@ MODULE_ARCHITECTURE.pdf
 .zcode/
 .playwright-mcp/
 nul
+
+# master 参考 worktree（迁移期临时，勿提交）
+_ref_master/
+
+# 迁移期临时脚本 / 构建日志 / 文档备份（勿提交）
+_tmp_*.py
+_tmp_*.txt
+_agent_*.log
+_agent_*.txt
+docs/*.bak
+*.md.bak
