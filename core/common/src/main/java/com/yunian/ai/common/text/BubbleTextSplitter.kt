@@ -19,8 +19,11 @@ package com.yunian.ai.common.text
  */
 object BubbleTextSplitter {
 
-    /** 单条回复最多拆分出的气泡数。超出部分拼接进最后一条，避免无限连发。 */
-    const val DEFAULT_MAX_BUBBLES = 8
+    /**
+     * 气泡数上限默认值：**不设限**（条数由 AI 自己敲的换行决定，想说几条说几条）。
+     * 如需人为兜底可显式传 `maxBubbles`（超过时保留前 `maxBubbles - 1` 条、尾段拼接为最后一条）。
+     */
+    const val DEFAULT_MAX_BUBBLES = Int.MAX_VALUE
 
     private const val CODE_FENCE = "```"
 
@@ -28,7 +31,7 @@ object BubbleTextSplitter {
      * 按 AI 自己敲的换行拆分（单 \n 与空行同效）；绝不按句末标点拆分；代码块围栏内不拆。
      *
      * @param text 待切分文本。
-     * @param maxBubbles 气泡数上限；超过时保留前 `maxBubbles - 1` 条并把尾段拼接为最后一条。
+     * @param maxBubbles 气泡数上限，默认 [DEFAULT_MAX_BUBBLES]（不限）。
      * @return 气泡列表；至少包含一个元素（空白输入返回 `listOf(text)`）。
      */
     fun splitByParagraphs(text: String, maxBubbles: Int = DEFAULT_MAX_BUBBLES): List<String> {

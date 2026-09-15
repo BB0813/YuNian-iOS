@@ -153,7 +153,8 @@ class AiResponseFinalizer(
         val rawSegments = BubbleTextSplitter.splitForDelivery(
             processedText,
             allowParagraphSplit = allowParagraphSplit,
-            maxBubbles = MAX_BUBBLES_PER_REPLY,
+            // 条数不设限：AI 敲几个回车就发几条（用户要求「无限制」）
+            maxBubbles = BubbleTextSplitter.DEFAULT_MAX_BUBBLES,
         )
         val dedupWindow = loadDedupWindow(turn.turnId.value)
         val segments = BubbleDedupPlanner.plan(rawSegments, dedupWindow)
@@ -426,5 +427,3 @@ class AiResponseFinalizer(
 
     var companionInfoProvider: (() -> com.yunian.ai.domain.AiCompanionInfo?)? = null
 }
-
-private const val MAX_BUBBLES_PER_REPLY = 8
