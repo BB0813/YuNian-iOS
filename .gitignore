@@ -66,10 +66,18 @@ debug-*.md
 # Local scratch / backups / notes
 _usage_check.*
 build_*.txt
+build_*.log
 install_*.txt
 tools/_tmp_*.py
 *.bak_oldinv
 ui*_local.xml
+
+# One-off remote/server probe helpers (deliverables live in _server_update/)
+_srv_*.sh
+_srv_*.py
+_srv_*.txt
+_srv_*.json
+_check_release_env.ps1
 
 # Docs
 _push_tmp/

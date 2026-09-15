@@ -66,7 +66,8 @@ fun UpdateDialog(
     updateInfo: UpdateInfo,
     downloadProgress: DownloadProgress,
     onUpdate: () -> Unit,
-    onCancel: () -> Unit,
+    onBackgroundUpdate: () -> Unit,
+    onNotNow: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val buttonScale by animateFloatAsState(
@@ -257,7 +258,8 @@ fun UpdateDialog(
                             ) {
                                 Text(
                                     text = if (downloadProgress.status == com.yunian.ai.common.update.DownloadStatus.COMPLETED)
-                                        stringResource(R.string.download_complete) else stringResource(R.string.downloading_progress, downloadProgress.progress),
+                                        stringResource(R.string.download_complete)
+                                    else stringResource(R.string.downloading_progress, downloadProgress.progress),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 12.sp
@@ -266,7 +268,7 @@ fun UpdateDialog(
                                         Color(0xFF4CAF50) else BlushPink
                                 )
                                 Text(
-                                    text = formatBytes(downloadProgress.downloadedBytes),
+                                    text = formatProgress(downloadProgress),
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                     color = WarmGray40
                                 )
@@ -314,8 +316,65 @@ fun UpdateDialog(
                     }
 
                     val isDownloading = downloadProgress.status == com.yunian.ai.common.update.DownloadStatus.DOWNLOADING
-                    val isDownloaded = downloadProgress.status == com.yunian.ai.common.update.DownloadStatus.COMPLETED
+                    val isDownloaded = downloadProgress.status == com.yunian.ai.common.update.DownloadStatus.COMPLETED ||
+                            downloadProgress.status == com.yunian.ai.common.update.DownloadStatus.INSTALLING
 
+                    // 主按钮：立即更新（全宽，下载中/完成后禁用）
+                    Button(
+                        onClick = onUpdate,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .height(50.dp)
+                            .scale(buttonScale),
+                        shape = RoundedCornerShape(25.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = Color.White
+                        ),
+                        enabled = !isDownloading && !isDownloaded
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .clip(RoundedCornerShape(25.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = if (isDownloading || isDownloaded)
+                                            listOf(WarmGray40.copy(alpha = 0.4f), WarmGray40.copy(alpha = 0.3f))
+                                        else
+                                            listOf(RoseDeep.copy(alpha = 0.9f), BlushPink.copy(alpha = 0.85f))
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = AppIcons.Download,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isDownloading) stringResource(R.string.downloading)
+                                    else if (isDownloaded) stringResource(R.string.downloaded)
+                                    else stringResource(R.string.update_now),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 次级按钮：后台更新 + 暂不更新
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -323,11 +382,11 @@ fun UpdateDialog(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         OutlinedButton(
-                            onClick = onCancel,
+                            onClick = onBackgroundUpdate,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp),
-                            shape = RoundedCornerShape(24.dp),
+                                .height(46.dp),
+                            shape = RoundedCornerShape(23.dp),
                             border = ButtonDefaults.outlinedButtonBorder.copy(
                                 brush = Brush.linearGradient(
                                     colors = listOf(
@@ -338,65 +397,45 @@ fun UpdateDialog(
                             ),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = Color.Transparent
-                            )
-                        ) {
-                            Text(
-                                text = stringResource(R.string.remind_later),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 14.sp
-                                ),
-                                color = WarmGray
-                            )
-                        }
-
-                        Button(
-                            onClick = onUpdate,
-                            modifier = Modifier
-                                .weight(1.5f)
-                                .height(48.dp)
-                                .scale(buttonScale),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.Transparent,
-                                contentColor = Color.White
                             ),
                             enabled = !isDownloading && !isDownloaded
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .clip(RoundedCornerShape(24.dp))
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            colors = if (isDownloading || isDownloaded)
-                                                listOf(WarmGray40.copy(alpha = 0.4f), WarmGray40.copy(alpha = 0.3f))
-                                            else
-                                                listOf(RoseDeep.copy(alpha = 0.9f), BlushPink.copy(alpha = 0.85f))
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = AppIcons.Download,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
+                            Text(
+                                text = stringResource(R.string.background_update),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp
+                                ),
+                                color = RoseDeep
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onNotNow,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(23.dp),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        WarmGray40.copy(alpha = 0.4f),
+                                        WarmGray40.copy(alpha = 0.25f)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (isDownloading) stringResource(R.string.downloading) else if (isDownloaded) stringResource(R.string.downloaded) else stringResource(R.string.update_now),
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 14.sp
-                                        )
-                                    )
-                                }
-                            }
+                                )
+                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.Transparent
+                            )
+                        ) {
+                            Text(
+                                text = stringResource(R.string.not_now),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp
+                                ),
+                                color = WarmGray
+                            )
                         }
                     }
                 }
@@ -412,4 +451,11 @@ private fun formatBytes(bytes: Long): String {
         bytes >= 1024 -> String.format("%.1f KB", bytes / 1024f)
         else -> "$bytes B"
     }
+}
+
+/** 进度文本：已下载 / 总大小，均以 MB 展示（小文件回退 KB/B） */
+private fun formatProgress(progress: DownloadProgress): String {
+    val downloaded = formatBytes(progress.downloadedBytes)
+    val total = if (progress.totalBytes > 0) formatBytes(progress.totalBytes) else "?"
+    return "$downloaded / $total"
 }

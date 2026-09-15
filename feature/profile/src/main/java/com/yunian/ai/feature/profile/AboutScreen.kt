@@ -121,7 +121,9 @@ private val ossCategories = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
+    versionName: String,
     onNavigateBack: () -> Unit,
+    onCheckUpdateClick: () -> Unit = {},
     onAgreementClick: () -> Unit = {},
     onTeamClick: () -> Unit = {}
 ) {
@@ -178,14 +180,47 @@ fun AboutScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = stringResource(R.string.version),
+                text = stringResource(R.string.version_format, versionName),
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontSize = 12.sp
                 ),
                 color = colorScheme.onSurfaceVariant
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 检查新版本入口
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .clickable { onCheckUpdateClick() }
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .drawGlass(
+                        backdrop = LocalPageBackdrop.current,
+                        shape = RoundedCornerShape(18.dp),
+                        surfaceColor = colorScheme.surfaceVariant
+                    )
+            ) {
+                Icon(
+                    imageVector = AppIcons.RefreshCw,
+                    contentDescription = null,
+                    tint = colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.check_new_version_entry),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp
+                    ),
+                    color = colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
 
             AboutCard() {
                 Text(

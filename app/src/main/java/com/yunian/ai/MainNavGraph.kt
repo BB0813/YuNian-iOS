@@ -250,7 +250,9 @@ internal fun MainNavHost(
         }
         composable(MainRoute.About.route) {
             AboutScreen(
+                versionName = BuildConfig.VERSION_NAME,
                 onNavigateBack = { navController.popBackStack() },
+                onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) },
                 onAgreementClick = { navController.navigate(MainRoute.AgreementView.route) },
                 onTeamClick = { navController.navigate(MainRoute.Team.route) }
             )

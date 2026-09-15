@@ -37,8 +37,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -59,6 +62,8 @@ import com.yunian.ai.feature.settings.R
 import com.yunian.ai.feature.update.AppUpdateManager
 import com.yunian.ai.common.update.DownloadStatus
 import com.yunian.ai.common.update.UpdateCheckState
+import com.yunian.ai.common.update.UpdateMode
+import com.yunian.ai.uicommon.component.UpdateDialog
 import com.yunian.ai.uicommon.theme.WeChatDarkCard
 import com.yunian.ai.uicommon.theme.WeChatDarkTextPrimary
 import com.yunian.ai.uicommon.theme.WeChatLightTextPrimary
@@ -81,6 +86,8 @@ fun CheckUpdateScreen(
     val updateInfo by updateManager.updateInfo.collectAsState()
     val scope = rememberCoroutineScope()
     val downloadProgress by updateManager.downloadProgress.collectAsState()
+    val showUpdateDialog by updateManager.showUpdateDialog.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val currentVersion = remember { updateManager.getCurrentVersionName() }
     val themeViewModel: ThemeViewModel = viewModel()
@@ -93,13 +100,45 @@ fun CheckUpdateScreen(
     val textPrimary = if (isDarkTheme) WeChatDarkTextPrimary else WeChatLightTextPrimary
     val cardColor = if (isDarkTheme) WeChatDarkCard else AppTheme.colors.staticWhite
 
+    // 已是最新版本 → 页面底部跳出提示
+    LaunchedEffect(checkState) {
+        if (checkState == UpdateCheckState.LATEST) {
+            snackbarHostState.showSnackbar(context.getString(R.string.software_latest_version))
+        }
+    }
+
+    // 发现新版本 → 弹出更新弹窗（三选项 + 进度）
+    val info = updateInfo
+    if (showUpdateDialog && info != null) {
+        UpdateDialog(
+            updateInfo = info,
+            downloadProgress = downloadProgress,
+            onUpdate = {
+                if (updateManager.checkInstallPermission()) {
+                    updateManager.startDownload(info, UpdateMode.IMMEDIATE)
+                } else {
+                    (context as? android.app.Activity)?.let { act ->
+                        updateManager.requestInstallPermission(act)
+                    }
+                }
+            },
+            onBackgroundUpdate = {
+                updateManager.startDownload(info, UpdateMode.BACKGROUND)
+                updateManager.dismissUpdate()
+            },
+            onNotNow = { updateManager.dismissUpdate() },
+            onDismiss = { updateManager.dismissUpdate() }
+        )
+    }
+
     GlassPageScaffold(
         topBar = {
             GlassTopBar(
                 title = stringResource(R.string.check_update_title),
                 onBack = onNavigateBack
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -364,7 +403,7 @@ fun CheckUpdateScreen(
                                             updateInfo?.let {
                                                 if (it.updateUrl.isNotEmpty()) {
                                                     if (updateManager.checkInstallPermission()) {
-                                                        updateManager.startDownload(it.updateUrl)
+                                                        updateManager.startDownload(it, UpdateMode.IMMEDIATE)
                                                     } else {
                                                         (context as? android.app.Activity)?.let { act ->
                                                             updateManager.requestInstallPermission(act)
