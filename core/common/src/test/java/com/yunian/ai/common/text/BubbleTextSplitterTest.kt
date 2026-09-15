@@ -48,6 +48,23 @@ class BubbleTextSplitterTest {
     }
 
     @Test
+    fun `fence 未闭合时滞留内容按普通行拆分 - 不吞并为一条`() {
+        // P2-A1：奇数个 ``` 行（fence 未闭合）时，落单围栏起到文末的内容
+        // 按「fence 从未生效」降级为普通文本逐行切分，不得吞并成一条。
+        val text = "开头\n```kotlin\n未闭合fun x()\n普通文本两行"
+        val result = BubbleTextSplitter.splitByParagraphs(text)
+        assertEquals(listOf("开头", "```kotlin", "未闭合fun x()", "普通文本两行"), result)
+    }
+
+    @Test
+    fun `fence 未闭合且滞留内容含多行时逐行成泡`() {
+        // P2-A1 补充：未闭合滞留段里的空行同样不产生空气泡，围栏行按普通行处理。
+        val text = "```\n第一行\n\n第二行"
+        val result = BubbleTextSplitter.splitByParagraphs(text)
+        assertEquals(listOf("第一行", "第二行"), result)
+    }
+
+    @Test
     fun `超过上限时拼接尾段`() {
         val max = 3
         val text = (1..5).joinToString("\n\n") { "段落$it" }

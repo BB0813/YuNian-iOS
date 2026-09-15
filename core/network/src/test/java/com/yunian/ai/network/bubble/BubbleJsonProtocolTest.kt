@@ -38,12 +38,34 @@ class BubbleJsonProtocolTest {
     }
 
     @Test
-    fun `parse - 前后杂文包裹仍提取 JSON 对象`() {
+    fun `parse - 前后杂文包裹时外围正文并入结果`() {
+        // P2-A5：JSON 外围的非空正文不再静默丢弃，与 JSON 的 text 一并保留（外围在前）。
         val raw = "好的，我看看。\n{\"text\":\"被提取的文本\",\"continue\":false}\n以上。"
         val reply = BubbleJsonProtocol.parse(raw)
         assertNotNull(reply)
-        assertEquals("被提取的文本", reply!!.text)
+        assertTrue(reply!!.text.contains("好的，我看看。"))
+        assertTrue(reply.text.contains("被提取的文本"))
+        assertTrue(reply.text.contains("以上。"))
         assertFalse(reply.continueChat)
+    }
+
+    @Test
+    fun `parse - JSON 后的尾随正文并入结果`() {
+        // P2-A5：text 同时包含 JSON 正文 + 后半句。
+        val reply = BubbleJsonProtocol.parse("{\"text\":\"你好\",\"continue\":false}\n其实我想说别的")
+        assertNotNull(reply)
+        assertTrue(reply!!.text.contains("你好"))
+        assertTrue(reply.text.contains("其实我想说别的"))
+        assertFalse(reply.continueChat)
+    }
+
+    @Test
+    fun `parseStrict - 外围正文不并入 JSON 透传不变`() {
+        // P2-A5 仅宽容模式生效：strict 模式下即使有外围正文仍只透传 JSON 的 text。
+        val reply = BubbleJsonProtocol.parseStrict("{\"text\":\"严格提取\",\"continue\":true}\n尾随正文")
+        assertNotNull(reply)
+        assertEquals("严格提取", reply!!.text)
+        assertTrue(reply.continueChat)
     }
 
     @Test

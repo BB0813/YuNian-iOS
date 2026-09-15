@@ -12,8 +12,12 @@ object BubbleJsonProtocol {
      * 协议启用标记：出现在系统提示词中即代表本轮走「气泡协议模式」。
      * [com.yunian.ai.network.AiService.streamMessage] 用它推导 `preserveRaw`，
      * 从而无需改动 [com.yunian.ai.domain.AiServiceProvider.streamMessage] 接口。
+     *
+     * P2-A6：取值为 [systemRules] 首行标题完整串（含 `===` 与括号说明）。嗅探用完整串做
+     * contains，避免正常正文/转述中出现的「微信气泡连发协议」字样造成子串误判；
+     * [systemRules] 首行直接拼接本常量，保持单一事实源。
      */
-    const val PROTOCOL_MARKER = "微信气泡连发协议"
+    const val PROTOCOL_MARKER = "=== 微信气泡连发协议（本条优先级最高，覆盖上面任何输出格式规则）==="
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -27,7 +31,7 @@ object BubbleJsonProtocol {
     fun isProtocolEnabled(systemPrompt: String): Boolean = systemPrompt.contains(PROTOCOL_MARKER)
 
     fun systemRules(): String = """
-=== ${PROTOCOL_MARKER}（本条优先级最高，覆盖上面任何输出格式规则）===
+$PROTOCOL_MARKER
 你现在处于「真人微信连发」模式：你每一条回复 = 你发出的**一条微信气泡**，就像真人聊天时连发的其中一条。
 每一轮你必须且只能输出一个 JSON 对象，严禁输出 JSON 以外的任何文字、解释或标记：
 
@@ -173,6 +177,22 @@ object BubbleJsonProtocol {
                 val continueChat = parsed["continue"]?.jsonPrimitive?.booleanOrNull ?: false
 
                 if (text.isBlank()) return null
+
+                // P2-A5：JSON 前/后存在非空外围正文时，把外围正文与提取的 text 一并保留
+                // （外围正文在前、与 text 以换行分隔），不再静默吞掉。
+                // 仅宽容模式（parse）生效；parseStrict 的 JSON 透传行为保持不变。
+                if (fallbackToPlainText) {
+                    val surrounding = listOf(
+                        jsonCandidate.substring(0, start).trim(),
+                        jsonCandidate.substring(end + 1).trim()
+                    ).filter { it.isNotBlank() }
+                    if (surrounding.isNotEmpty()) {
+                        return BubbleReply(
+                            text = (surrounding + text).joinToString("\n"),
+                            continueChat = continueChat
+                        )
+                    }
+                }
                 return BubbleReply(text = text, continueChat = continueChat)
             }
         }

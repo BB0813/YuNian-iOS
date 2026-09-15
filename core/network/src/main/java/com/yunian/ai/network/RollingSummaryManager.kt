@@ -38,8 +38,9 @@ data class RollingSummaryState(
  *   在飞合并（重复触发直接丢弃，绝不阻塞调用方）；
  * - [mergeBlocking] 为同步版本，仅供首启回退路径复用（走同一把锁与双检逻辑）。
  *
- * 容错：AppMetaStore 全部读写以 runCatching 包裹，读失败/解码失败按「无状态」处理，
- * 写失败仅记日志（SecureLog.w）静默降级，不影响主聊天链路。
+ * 容错：AppMetaStore 全部读写以 runCatching 包裹，读失败/解码失败按「无状态」处理（P2-B3 起
+ * 读写失败均记日志含 key，可观测），写失败仅记日志静默降级，不影响主聊天链路。
+ * 合并失败另有进程内退避（P2-B2，[isMergeThrottled]），避免每次 build 重复打合并 API。
  */
 class RollingSummaryManager(
     private val metaStore: AppMetaStore,
@@ -62,19 +63,52 @@ class RollingSummaryManager(
 
     private val inFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    // P2-B2：合并失败的进程内退避状态（纯内存态，不落 AppMetaStore——schema 冻结红线不动）。
+    /** 最近一次合并失败时间（ms）。 */
+    private val lastFailureAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** 连续失败次数（成功即清零）。 */
+    private val consecutiveFailures = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     private fun lockFor(key: String): Mutex = locks.computeIfAbsent(key) { Mutex() }
 
-    /** 读取指定会话的滚动摘要状态；读失败/无状态返回 null（天然容错）。 */
+    /**
+     * P2-B2：是否处于失败退避窗口。连续失败第 n 次后，
+     * 窗口 = min(n * [MERGE_BACKOFF_STEP_MS], [MERGE_BACKOFF_MAX_MS])。
+     */
+    private fun isMergeThrottled(key: String): Boolean {
+        val lastFail = lastFailureAtMs[key] ?: return false
+        val failures = consecutiveFailures[key] ?: 1
+        val backoffMs = minOf(failures.toLong() * MERGE_BACKOFF_STEP_MS, MERGE_BACKOFF_MAX_MS)
+        return System.currentTimeMillis() - lastFail < backoffMs
+    }
+
+    private fun recordMergeFailure(key: String) {
+        consecutiveFailures.merge(key, 1) { old, _ -> old + 1 }
+        lastFailureAtMs[key] = System.currentTimeMillis()
+    }
+
+    private fun clearMergeFailure(key: String) {
+        consecutiveFailures.remove(key)
+        lastFailureAtMs.remove(key)
+    }
+
+    /** 读取指定会话的滚动摘要状态；读失败/无状态返回 null（天然容错，P2-B3 起留痕含 key）。 */
     suspend fun loadState(scope: ConversationScope): RollingSummaryState? {
+        val key = scope.storeKey()
         return runCatching {
-            metaStore.get(scope.storeKey(), RollingSummaryState.serializer())
+            metaStore.get(key, RollingSummaryState.serializer())
+        }.onFailure {
+            // P2-B3：读异常（DAO 层失败/数据损坏）不再静默——记 error 日志（含 key）后按「无状态」降级。
+            SecureLog.e(TAG, "load rolling summary failed. key=$key", it)
         }.getOrNull()
     }
 
     /** 清除指定会话的滚动摘要状态（陈旧防护：会话重置后旧摘要作废）。 */
     suspend fun clear(scope: ConversationScope) {
-        runCatching { metaStore.remove(scope.storeKey()) }
-            .onFailure { SecureLog.w(TAG, "clear rolling summary failed: ${it.message}") }
+        val key = scope.storeKey()
+        runCatching { metaStore.remove(key) }
+            .onFailure { SecureLog.w(TAG, "clear rolling summary failed. key=$key: ${it.message}") }
     }
 
     /**
@@ -95,11 +129,16 @@ class RollingSummaryManager(
     ) {
         if (delta.isEmpty() || batchEndId <= 0L) return
         val key = scope.storeKey()
+        // P2-B2：近期合并失败处于退避窗口内 → 直接跳过，避免每次 build 都重复打合并 API。
+        if (isMergeThrottled(key)) {
+            SecureLog.d(TAG, "merge throttled after recent failures, skip: $key")
+            return
+        }
         if (!inFlight.add(key)) {
             SecureLog.d(TAG, "merge already in flight, skip: $key")
             return
         }
-        backgroundScope.launch {
+        val job = backgroundScope.launch {
             try {
                 lockFor(key).withLock {
                     mergeLocked(scope, key, delta, batchEndId, companionNameMap, memoryContext, selfName)
@@ -107,11 +146,13 @@ class RollingSummaryManager(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                recordMergeFailure(key)
                 SecureLog.w(TAG, "incremental merge failed: ${e.message}")
-            } finally {
-                inFlight.remove(key)
             }
         }
+        // P2-B1：协程因 scope 取消等原因从未真正执行时，finally 不会触发、标记永久滞留。
+        // invokeOnCompletion 无论 job 以何种方式结束（含未启动即取消）都会释放 inFlight 标记。
+        job.invokeOnCompletion { inFlight.remove(key) }
     }
 
     /**
@@ -140,6 +181,7 @@ class RollingSummaryManager(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            recordMergeFailure(key)
             SecureLog.w(TAG, "blocking merge failed: ${e.message}")
             null
         }
@@ -237,6 +279,8 @@ class RollingSummaryManager(
         }
 
         if (mergedText.isNullOrBlank()) {
+            // P2-B2：摘要合并失败计入退避（失败段/整批失败同口径），窗口内的新触发被跳过。
+            recordMergeFailure(key)
             SecureLog.w(TAG, "merge summarizer returned empty, keeping state unchanged: $key")
             return null
         }
@@ -251,14 +295,21 @@ class RollingSummaryManager(
             coveredMessageCount = (current?.coveredMessageCount ?: 0) + nextCount,
             updatedAt = System.currentTimeMillis()
         )
-        return if (persist(key, nextState)) nextState else null
+        // 合并成功并落库 → 清零退避状态（P2-B2）
+        return if (persist(key, nextState)) {
+            clearMergeFailure(key)
+            nextState
+        } else {
+            null
+        }
     }
 
     private suspend fun persist(key: String, state: RollingSummaryState): Boolean {
         return runCatching {
             metaStore.put(key, state, RollingSummaryState.serializer())
         }.onFailure {
-            SecureLog.w(TAG, "persist rolling summary failed: ${it.message}")
+            // P2-B3：写失败注记含 key，便于定位是哪条会话的摘要落库失败。
+            SecureLog.w(TAG, "persist rolling summary failed. key=$key: ${it.message}")
         }.isSuccess
     }
 
@@ -303,5 +354,11 @@ class RollingSummaryManager(
 
     private companion object {
         const val TAG = "RollingSummaryManager"
+
+        /** P2-B2：退避步长——每次连续失败 +5 分钟。 */
+        const val MERGE_BACKOFF_STEP_MS = 5L * 60L * 1000L
+
+        /** P2-B2：退避窗口上限 30 分钟。 */
+        const val MERGE_BACKOFF_MAX_MS = 30L * 60L * 1000L
     }
 }

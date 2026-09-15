@@ -15,6 +15,22 @@ class DedupGuardTest {
     }
 
     @Test
+    fun `归一化剥除 emoji - 同一文本不同 emoji 归一相同并命中查重`() {
+        // P2-A4：emoji 区段（astral 代理对 \uD800-\uDFFF + BMP 符号 \u2600-\u27BF）不参与比对，
+        // 「好呀😊」与「好呀😂」归一化相同 → 命中查重；纯文本归一化结果不受影响。
+        assertEquals("好呀", DedupGuard.normalize("好呀😊"))
+        assertEquals(DedupGuard.normalize("好呀😊"), DedupGuard.normalize("好呀😂"))
+        assertTrue(
+            DedupGuard.isDuplicate(
+                DedupGuard.normalize("好的呀😊"),
+                listOf(DedupGuard.normalize("好的呀😂"))
+            )
+        )
+        // 不误伤正文：无 emoji 的既有行为不变
+        assertEquals("今天天气不错", DedupGuard.normalize("今天天气不错"))
+    }
+
+    @Test
     fun `归一化截断到四十字`() {
         val long = "字".repeat(60)
         assertEquals(40, DedupGuard.normalize(long).length)

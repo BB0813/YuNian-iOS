@@ -120,7 +120,7 @@ API 定义：`core/database/src/main/java/com/yunian/ai/database/model/ExtJson.k
 
    ```bash
    git clone <repo-url>
-   cd lianyu
+   cd LianYu
    ```
 
 2. **确认环境**
