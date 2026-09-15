@@ -197,11 +197,16 @@ object AiPromptBuilder {
             "这是", "这是在", "顺着", "氛围", "接话", "回复", "回答", "思考过程",
             "内心独白", "不能让任何人", "知道你是AI", "你是AI", "作为AI", "模型"
         )
-        val sentences = trimmed.split(Regex("""[。！？!?]""")).map { it.trim() }.filter { it.isNotBlank() }
-        val filtered = sentences.filter { sentence ->
-            metaMarkers.none { marker -> sentence.contains(marker) }
-        }
-        return if (filtered.isNotEmpty()) filtered.joinToString("。") else trimmed
+        // 注意：必须**逐行**重建，不能把整段句子 joinToString("。")——那会把模型自己写的
+        // 换行（＝它想分条连发的意图）消灭掉，导致下游拆分器永远只看到一个气泡
+        // （用户反馈「永远一问一答」的机制根因之一）。行内句子用。连接，行间保留 \n。
+        val rebuilt = trimmed.split("\n").map { line ->
+            line.split(Regex("""[。！？!?]"""))
+                .map { it.trim() }
+                .filter { it.isNotBlank() && metaMarkers.none { marker -> it.contains(marker) } }
+                .joinToString("。")
+        }.filter { it.isNotBlank() }.joinToString("\n")
+        return rebuilt.ifEmpty { trimmed }
     }
 
     internal fun applyPersonaPostProcessing(
