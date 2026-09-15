@@ -21,6 +21,7 @@ class LoadTest {
     private val apiKey = "sk-" + "a".repeat(20)
     private val baseUrl = "https://suflow.cloud/v1"
 
+    @org.junit.Ignore("外部网络压测（suflow.cloud 38 并发），需真机/网络演练时手动去掉本注解单跑，不作为 unitTest 常规断言")
     @org.junit.Test
     fun testFetchModelsWith38Users() = runBlocking {
         val userCount = 38

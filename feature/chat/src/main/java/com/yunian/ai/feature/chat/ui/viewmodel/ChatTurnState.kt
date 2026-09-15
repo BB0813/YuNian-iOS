@@ -22,6 +22,20 @@ class ChatTurnState {
     /** 本轮已发气泡 + 最近历史 AI 消息的归一化查重窗口（随本轮逐条送达累积）。 */
     var dedupWindow: MutableList<String>? = null
 
+    /**
+     * 跨轮滚动查重窗口（P1-4）：最近若干轮**已落实**气泡的归一化内容，
+     * 容量滚动 ≤ [RECENT_DEDUP_WINDOW_CAP]。
+     * 价值恰恰在跨轮（防「历史 3 条窗口随轮次滚动而失效」的复读）——因此 [reset] 绝不清空它。
+     */
+    val recentDedupWindow: ArrayDeque<String> = ArrayDeque()
+
+    /** 把一条已落实气泡的归一化内容压入跨轮窗口；超出容量时从队首滚出。 */
+    fun pushRecentDedup(normalized: String) {
+        if (normalized.isEmpty()) return
+        recentDedupWindow.addLast(normalized)
+        while (recentDedupWindow.size > RECENT_DEDUP_WINDOW_CAP) recentDedupWindow.removeFirst()
+    }
+
     val stickerMutex: Mutex = Mutex()
 
     fun reset() {
@@ -57,3 +71,6 @@ class ChatTurnState {
         lastStickerContent = content
     }
 }
+
+/** 跨轮滚动查重窗口容量（见 [ChatTurnState.recentDedupWindow]）。 */
+internal const val RECENT_DEDUP_WINDOW_CAP = 16

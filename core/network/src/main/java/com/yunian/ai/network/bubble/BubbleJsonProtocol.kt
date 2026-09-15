@@ -65,7 +65,7 @@ object BubbleJsonProtocol {
         val match = TEXT_FIELD_REGEX.find(raw)
         if (match != null) {
             val extracted = unescapeJsonString(match.groupValues[1]).trim()
-            if (extracted.isNotEmpty()) return extracted
+            if (extracted.isNotEmpty()) return orEmptyIfNoContent(extracted)
         }
 
         // 1b. 防御式兜底：仅当「首行 == text 且 末行 == continue」（骨架两端特征齐备）时，
@@ -74,7 +74,7 @@ object BubbleJsonProtocol {
         if (lines.size >= 2 && lines.first() == "text" && lines.last() == "continue") {
             val body = lines.subList(1, lines.size - 1)
             val joined = body.joinToString("\n").trim()
-            if (joined.isNotEmpty()) return joined
+            if (joined.isNotEmpty()) return orEmptyIfNoContent(joined)
         }
 
         // 2. 无 text 字段：若形如 JSON 残片则剥结构字符，避免把协议骨架暴露给用户。
@@ -90,12 +90,19 @@ object BubbleJsonProtocol {
             // 处理 `"text" : 内容` 前缀残留（例如缺失闭合引号的情形）。
             stripped = stripped.replace(Regex("^\"?text\"?\\s*:\\s*"), "").trim()
             stripped = stripped.trim('"').trim()
-            if (stripped.isNotEmpty()) return stripped
+            // 骨架残留检测（P0-1）：剥完后若不含任何字母/数字/CJK 正文（",`、`{}` 类残壳），
+            // 归一为空串——交给上层 aiContent.isBlank() 分支提示「API返回空内容」，
+            // 绝不把 JSON 残壳/标点残渣当气泡展出。不得再落回步骤 3 原样返回残壳。
+            return orEmptyIfNoContent(stripped)
         }
 
         // 3. 都不成立 → 原样返回（不制造空消息）。
         return raw
     }
+
+    /** 骨架残留检测：结果不含任何字母/数字/CJK 正文时归一空串（P0-1）。 */
+    private fun orEmptyIfNoContent(s: String): String =
+        if (s.any { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }) s else ""
 
     /** JSON 字符串内容的基本反转义（`\n` `\t` `\r` `\b` `\f` `\"` `\\` `\/` `\uXXXX`）。 */
     private fun unescapeJsonString(s: String): String {

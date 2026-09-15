@@ -23,6 +23,9 @@ class BubbleLoopRunner(
                 attemptCount++
                 val raw = try {
                     generateOnce(bubbles)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // 取消不是生成失败：必须向上传播（用户打断/新消息到达），绝不能吞进重试循环。
+                    throw e
                 } catch (e: Exception) {
                     SecureLog.w("BubbleLoopRunner", "generateOnce failed (attempt ${attempt + 1}): ${e.message}")
                     ""

@@ -46,4 +46,40 @@ class QaBubblePreserveRawTest {
         assertEquals(truncatedJson, postProcessed)
         assertEquals("你好呀今天过得怎么样", BubbleJsonProtocol.extractTextLenient(postProcessed))
     }
+
+    // ==================================================================
+    // P0-1 回归用例（深审 2025-xx 发现，工程师修复前应为红，修复后转绿）
+    // 缺陷：extractTextLenient 对「空 text / 纯 JSON 残壳」输入清洗后残留标点
+    // 或整串骨架，经 ChatGenerationManager 源文本兜底原样落库，用户看到
+    // 「,」「{}」垃圾气泡。期望语义：无任何字母/汉字/数字正文时返回空串，
+    // 交给上层 aiContent.isBlank() 分支走「API返回空内容」提示。
+    // ==================================================================
+
+    @Test
+    fun `P0-1 空text协议JSON 应提取为空而非逗号残渣`() {
+        // 当前坏行为：剥 continue→剥括号→剥 text 前缀后剩 `"",`，trim('"') 得 ","
+        val result = BubbleJsonProtocol.extractTextLenient("""{"text":"","continue":true}""")
+        assertEquals("空 text 骨架不得产生标点残渣气泡", "", result)
+    }
+
+    @Test
+    fun `P0-1 空JSON骨架 应提取为空而非原样返回`() {
+        // 当前坏行为：剥空后落 step3 原样返回 "{}"（BubbleJsonProtocolTest 反向锁定，工程师一并修）
+        val result = BubbleJsonProtocol.extractTextLenient("{}")
+        assertEquals("纯 JSON 残壳不得展示给用户", "", result)
+    }
+
+    @Test
+    fun `P0-1 无正文残壳标点残渣 应提取为空`() {
+        // 残壳 + 尾逗号：无任何字母/汉字/数字正文 → 视为无正文
+        val result = BubbleJsonProtocol.extractTextLenient("""{"text":"","continue":false,}""")
+        assertEquals("JSON 残壳与标点残渣不得产生气泡", "", result)
+    }
+
+    @Test
+    fun `P0-1 有正文骨架不受影响 仍提取正文`() {
+        // 正确性兜底：修复「残壳返空」不得误伤有正文的骨架
+        val result = BubbleJsonProtocol.extractTextLenient("""{"text":"你好","continue":true}""")
+        assertEquals("有正文的骨架应照常提取", "你好", result)
+    }
 }
