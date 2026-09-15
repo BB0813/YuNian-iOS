@@ -746,4 +746,54 @@ mod tests {
         assert!(Lorebook::parse("{not json").is_err());
         assert!(Lorebook::parse(r#"{"entries":{}}"#).is_ok());
     }
+
+    /// ★ 契约锁定：map 格式必须能承载 5 值 `position` + `role` + `depth` + `scan_depth`。
+    /// 数组格式会走 `chara_card` 校验（其 `EntryPosition` 仅 `before_char`/`after_char`），
+    /// 因此本地迁移产出的 ST JSON **必须**使用 `entries` 对象形式。
+    #[test]
+    fn map_format_supports_all_five_positions() {
+        let json = r#"{"name":"迁移书","scan_depth":10,"token_budget":10000,"entries":{
+            "1":{"keys":["k1"],"secondary_keys":[],"content":"前段","insertion_order":1,"enabled":true,"position":"before_char","extensions":{"_bookId":7,"_bookName":"旧书"}},
+            "2":{"keys":["k2"],"secondary_keys":[],"content":"后段","insertion_order":2,"enabled":true,"position":"after_char"},
+            "3":{"keys":["k3"],"secondary_keys":[],"content":"顶部","insertion_order":3,"enabled":true,"position":"top_of_chat"},
+            "4":{"keys":["k4"],"secondary_keys":[],"content":"底部","insertion_order":4,"enabled":true,"position":"bottom_of_chat"},
+            "5":{"keys":["k5"],"secondary_keys":[],"content":"深度","insertion_order":5,"enabled":true,"position":"at_depth","depth":2,"role":"assistant","scan_depth":5}
+        }}"#;
+        let lb = Lorebook::parse(json).expect("map 格式必须无需 chara_card 校验即可解析");
+        let entries: Vec<LorebookEntry> = lb.entries.iter();
+        assert_eq!(entries.len(), 5, "5 条条目必须全部保留");
+
+        let by_order = |o: u64| {
+            entries
+                .iter()
+                .find(|e| e.insertion_order == o)
+                .unwrap_or_else(|| panic!("insertion_order={o} 丢失"))
+        };
+        assert_eq!(by_order(1).position.as_deref(), Some("before_char"));
+        assert_eq!(by_order(2).position.as_deref(), Some("after_char"));
+        assert_eq!(by_order(3).position.as_deref(), Some("top_of_chat"));
+        assert_eq!(by_order(4).position.as_deref(), Some("bottom_of_chat"));
+        assert_eq!(by_order(5).position.as_deref(), Some("at_depth"));
+        assert_eq!(by_order(5).depth, Some(2), "depth 必须透传");
+        assert_eq!(by_order(5).role.as_deref(), Some("assistant"), "role 必须透传");
+        assert_eq!(by_order(5).scan_depth, Some(5), "条目级 scan_depth 必须透传");
+        assert_eq!(lb.token_budget, Some(10000), "token_budget 必须透传");
+
+        // 命中后 `position` 解析必须落在 5 个不同分支上
+        let keys: Vec<String> = (1..=5).map(|i| format!("k{i}")).collect();
+        let texts = vec![keys.join(" ")];
+        let hits = LorebookInjector::scan(&lb, &texts);
+        let pos_of = |o: u64| {
+            hits.iter()
+                .find(|h| h.id == o.to_string())
+                .map(|h| h.position)
+                .unwrap_or_else(|| panic!("insertion_order={o} 未命中"))
+        };
+        assert_eq!(pos_of(1), InjectionPosition::BeforeChar);
+        assert_eq!(pos_of(2), InjectionPosition::AfterChar);
+        assert_eq!(pos_of(3), InjectionPosition::TopOfChat);
+        assert_eq!(pos_of(4), InjectionPosition::BottomOfChat);
+        assert_eq!(pos_of(5), InjectionPosition::AtDepth);
+        assert_eq!(hits.iter().find(|h| h.id == "5").unwrap().depth, 2);
+    }
 }
