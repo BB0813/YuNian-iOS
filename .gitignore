@@ -108,5 +108,7 @@ _cargo_*.log
 _q2_*.log
 _nb_*.log
 _ca_*.log
+_ap_*.log
+_aj_*.log
 docs/*.bak
 *.md.bak
