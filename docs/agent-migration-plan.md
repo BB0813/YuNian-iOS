@@ -635,16 +635,41 @@ Rust `Lorebook` 顶层字段：`name` / `description` / `scan_depth` / `token_bu
 |---|---|---|---|
 | q2-1 | `agent-native/src/lorebook.rs` | `LorebookEntry` 新增 `pub depth: Option<u64>`（`#[serde(default)]`） | 承载 `AT_DEPTH` 的深度参数 |
 | q2-2 | `agent-native/src/lorebook.rs` | `LorebookEntry` 新增 `pub role: Option<String>`（`#[serde(default)]`） | 承载条目级角色 |
-| q2-3 | `agent-native/src/lorebook.rs` | 新增注入位置枚举/常量：`before_char` / `after_char` / `top_of_chat` / `bottom_of_chat` / `at_depth` | ⚠️ `layer_for()` 需**重定位**：既然 F1 证明 `layer` 在注入路径被丢弃、F3 证明它不影响 orchestrator，则 `layer_for` 应改为产出**「注入位置」语义**而非 layer 编号 |
-| q2-4 | `agent-native/src/prompt_orchestrator.rs` | `PromptFragment` **新增 `role: Option<String>` 字段** | ⚠️ 改 UniFFI `Record` → **必须重生成绑定**；这是跨语言契约变更 |
-| q2-5 | `agent-native/src/agent.rs` | **★ 核心改动**：世界书注入**从 `sys` 字符串改为写入 `messages[]`** | `top_of_chat`（首条非 system 前）/ `bottom_of_chat`（末条前）/ `at_depth`（倒数第 `depth` 条前）本质是**消息流位置**，无法用单一 system 字符串表达。`before_char` / `after_char` 可继续走 `sys` |
-| q2-6 | `agent-native/src/agent.rs` | 按 `f.role` 决定生成的消息角色（`system` / `user` / `assistant`） | 对齐本地 `buildRoleMessages` |
+| q2-2b | `agent-native/src/lorebook.rs` | `LorebookEntry` 新增 `pub scan_depth: Option<u64>`（`#[serde(default)]`） | ✅ **附加项，R14 无损化**：给 Rust 加条目级扫描深度（原计划列为「可选项」）。**注**：本地每条目独立 `take(scanDepth)`，Rust 取顶层——加此字段后完全无损。当前 `scan()` 尚未逐条目应用（顶层仍生效），字段先落地以备后续接线 |
+| q2-3 | `agent-native/src/lorebook.rs` | 新增注入位置枚举 `InjectionPosition`（5 值）+ `parse()` + `is_message_stream()` + `layer()` | ✅ `layer_for()` **已删除**（F1/F3 证其为死代码，仅单测引用）；位置语义改由 `LorebookHit.position` 承载 |
+| q2-4 | `agent-native/src/prompt_orchestrator.rs` | `PromptFragment` **新增 `role: Option<String>` 字段** | ⚠️ 改 UniFFI `Record` → **必须重生成绑定**。⚠️ 注意：**不可加 `#[serde(default)]`** —— `PromptFragment` 是 `uniffi::Record` 而非 serde 结构体，加 serde 属性会导致 `cannot find attribute 'serde'` 编译失败 |
+| q2-5 | `agent-native/src/agent.rs` | **★ 核心改动**：世界书注入**从 `sys` 字符串改为写入 `messages[]`** | ✅ 落地为 `AgentRuntime::worldbook_injection_plan()`（纯查询）+ `apply_worldbook_injections()`（生成**发送副本**，不改 `messages` 本体）+ `find_safe_insert_index()`（对齐本地工具链避让） |
+| q2-6 | `agent-native/src/agent.rs` | 按 `f.role` 决定生成的消息角色（`system` / `user` / `assistant`） | ✅ 落地在 `lorebook::build_role_messages()`：**`assistant` 独立成组，其余（含 `system`）折入 `user`**，输出顺序恒为 `user` → `assistant`，与本地 `buildRoleMessages` 逐字对齐 |
 | q2-7 | 构建 | `cargo test` 全绿 → `cargo ndk` 重编译 4 ABI → `-GenBindings` 重生成 `lianyu_agent.kt` → 同步包名 | 校验绑定行数 / 大小（R3） |
 
 > ⚠️ **q2-3 / q2-5 的插入顺序必须对照本地 `PromptInjectionTransformer.kt` 逐字确认**，
 > 本地顺序为：`before/after system 文本` → `top_of_chat` → `bottom_of_chat` → `at_depth`（按深度降序处理）。
 > **先写一份「5 位置 → 注入点」对照表再动代码**（此表须同时覆盖：目标容器是 `sys` 还是 `messages[]`、
 > 插入索引如何计算、`role` 如何映射），不可猜想。
+
+#### ★ 5 位置 → 注入点对照表（实施前定稿，已落地）
+
+| ST `position` | 本地枚举 | 目标容器 | 插入索引（`messages[]`） | `role` 映射 | 字符上限 |
+|---|---|---|---|---|---|
+| `before_char` | `BEFORE_SYSTEM_PROMPT` | **`sys` 文本前段** | —（不产生消息） | — | 组内 8000 / 总量 20000 |
+| `after_char` | `AFTER_SYSTEM_PROMPT` | **`sys` 文本后段** | —（不产生消息） | — | 同上 |
+| `top_of_chat` | `TOP_OF_CHAT` | `messages[]` | `find_safe_insert_index(first_non_system_index)` | `ASSISTANT`→`assistant`；**其余（含 `SYSTEM`）→ `user`** | 同上 |
+| `bottom_of_chat` | `BOTTOM_OF_CHAT` | `messages[]` | `find_safe_insert_index(len - 1)` | 同上 | 同上 |
+| `at_depth`（`depth=n`） | `AT_DEPTH` | `messages[]` | `find_safe_insert_index(len - max(n,1))` | 同上 | 同上 |
+
+**应用顺序**（严格逐字对齐本地）：① `sys_before` → ② `sys_after` → ③ `top_of_chat` → ④ `bottom_of_chat` → ⑤ `at_depth` 按 `depth` **降序**逐组。
+
+> **★ 关键实现事实（已实测）**：`at_depth` 的「按深度降序」**无需手工补偿索引漂移**。
+> 原因是插入点始终按**当前** `len` 计算（`len - n`），从更大深度（更靠前）先插入时，
+> 后续更小深度（更靠后）的锚点会随 `len` 增长自动后移，结果与本地 `groupBy{depth}.toSortedMap(descending)`
+> 完全一致 —— 本地注释「深度大的先插入（避免索引漂移）」描述的即是此性质。
+
+**`role` 折叠规则（对齐 `buildRoleMessages`）**：同 role 的条目**合并为一条消息**、内容以 `\n` 连接；
+输出顺序**恒为 `user` 在前、`assistant` 在后**（保证对话顺序自然）；至多产出 2 条消息。
+
+**安全落点 `find_safe_insert_index`**（本地 4 条避让规则，逐条移植）：
+`user → assistant(带 tool_calls)` / `assistant(带 tool_calls) → tool` / `tool → assistant` / `assistant → assistant`
+—— 命中任一则索引 `-= 1` 继续前探，避免打断工具调用链导致供应商报错。
 
 > **R20 风险等级由「中」上调为「高」**：因为改动面从「加字段 + 加分支」变成了「跨语言契约变更 + 注入路径重写」，
 > 且 F1/F2/F3 三条事实说明原文档对 Rust 侧的理解存在系统性偏差 —— 实际动代码时**可能继续发现新的认知缺口**。

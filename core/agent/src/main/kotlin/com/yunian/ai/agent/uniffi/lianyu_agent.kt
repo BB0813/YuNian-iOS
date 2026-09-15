@@ -8407,7 +8407,15 @@ data class PromptFragment (
      * stable / task / status / external
      */
     var `lifetime`: kotlin.String, 
-    var `content`: kotlin.String
+    var `content`: kotlin.String, 
+    /**
+     * ★ Q2 新增：注入角色（`system` / `user` / `assistant`）。
+     *
+     * 仅供**世界书注入**（`source == "lorebook"`）使用：`top_of_chat` /
+     * `bottom_of_chat` / `at_depth` 三类片段要落进 `messages[]`，
+     * 需按此角色构造消息。其余片段为 `None`（一律并入 system 文本）。
+     */
+    var `role`: kotlin.String?
 ) {
     
     companion object
@@ -8424,6 +8432,7 @@ public object FfiConverterTypePromptFragment: FfiConverterRustBuffer<PromptFragm
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -8432,7 +8441,8 @@ public object FfiConverterTypePromptFragment: FfiConverterRustBuffer<PromptFragm
             FfiConverterString.allocationSize(value.`id`) +
             FfiConverterString.allocationSize(value.`source`) +
             FfiConverterString.allocationSize(value.`lifetime`) +
-            FfiConverterString.allocationSize(value.`content`)
+            FfiConverterString.allocationSize(value.`content`) +
+            FfiConverterOptionalString.allocationSize(value.`role`)
     )
 
     override fun write(value: PromptFragment, buf: ByteBuffer) {
@@ -8441,6 +8451,7 @@ public object FfiConverterTypePromptFragment: FfiConverterRustBuffer<PromptFragm
             FfiConverterString.write(value.`source`, buf)
             FfiConverterString.write(value.`lifetime`, buf)
             FfiConverterString.write(value.`content`, buf)
+            FfiConverterOptionalString.write(value.`role`, buf)
     }
 }
 
