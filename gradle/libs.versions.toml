@@ -43,10 +43,13 @@ iconsaxCompose = "1.0.1"
 kyantCapsule = "2.1.1"
 mcpSdk = "0.10.0"
 ktor = "3.0.3"
+jna = "5.13.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# UniFFI 生成的 Kotlin 绑定依赖 JNA（com.sun.jna.Pointer 等）；Android 上取官方 AAR（含各 ABI 的 libjnidispatch.so）
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 # JVM 版 org.json：本地单测提供真实 JSONObject 解析（Android 的 org.json 是 stub，直接跑会抛 Stub!）
 org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
