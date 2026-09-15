@@ -213,4 +213,29 @@ class ResponsePostProcessorTest {
 
         assertTrue(cleaned.length < 80)
     }
+
+    /**
+     * 回归（用户反馈「永远一问一答」的机制根因）：extractDirectReply 旧实现会把整段句子
+     * `joinToString("。")`，把模型自己写的换行——也就是它想分条连发的意图——彻底消灭，
+     * 导致下游 BubbleTextSplitter 永远只看到一个气泡。此处锁定「行结构必须保留」。
+     */
+    @Test
+    fun extractDirectReply_preservesLineBreaks() {
+        val multiLine = "哟，你可算舍得露面啦～\n我都快把枕头抱出洞了\n怎么这么晚才来呀"
+        val out = AiPromptBuilder.extractDirectReply(multiLine)
+        assertEquals(3, out.split("\n").size)
+        assertTrue(out.contains("露面"))
+        assertTrue(out.contains("枕头"))
+        assertTrue(out.contains("这么晚"))
+    }
+
+    @Test
+    fun applyPersona_preservesMultiLineForBubbleSplitting() {
+        // 非协议路径（工具路径等）也多行保留：3 行输入 → 输出仍是 3 行，供下游拆成 3 条气泡
+        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(
+            "哟，你可算舍得露面啦\n我都快把枕头抱出洞了\n怎么这么晚才来呀",
+            emptyList(),
+        )
+        assertEquals(3, cleaned.split("\n").size)
+    }
 }
