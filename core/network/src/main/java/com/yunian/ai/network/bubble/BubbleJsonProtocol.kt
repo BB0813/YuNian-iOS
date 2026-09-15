@@ -100,9 +100,21 @@ object BubbleJsonProtocol {
         return raw
     }
 
-    /** 骨架残留检测：结果不含任何字母/数字/CJK 正文时归一空串（P0-1）。 */
+    /**
+     * 骨架残留检测：结果不含任何字母/数字/CJK 正文 **或 emoji** 时归一空串（P0-1）。
+     *
+     * emoji 判定说明（P2-new-1）：😂 等主 emoji 在 astral 平面（U+1F300+），UTF-16 下是
+     * 代理对——`Char.code` 是码元值（最大 0xFFFF），`code >= 0x1F000` 恒 false，必须用
+     * 高半代理区段 [0xD800, 0xDBFF] 识别；❤☀ 等 BMP 符号再补 [0x2600, 0x27BF]。
+     * JSON 残壳字符（`{}[]"',:` 等 ASCII）均不命中，骨架检测语义不变。
+     */
     private fun orEmptyIfNoContent(s: String): String =
-        if (s.any { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }) s else ""
+        if (s.any {
+            it.isLetterOrDigit() ||
+                it.code in 0x4E00..0x9FFF ||
+                it.code in 0xD800..0xDBFF ||
+                it.code in 0x2600..0x27BF
+        }) s else ""
 
     /** JSON 字符串内容的基本反转义（`\n` `\t` `\r` `\b` `\f` `\"` `\\` `\/` `\uXXXX`）。 */
     private fun unescapeJsonString(s: String): String {

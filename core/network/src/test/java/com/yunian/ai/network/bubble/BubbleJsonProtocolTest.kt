@@ -137,4 +137,24 @@ class BubbleJsonProtocolTest {
         val raw = "text\n你好呀\ncontinue"
         assertEquals("你好呀", BubbleJsonProtocol.extractTextLenient(raw))
     }
+
+    @Test
+    fun `extractTextLenient - 纯 emoji 文本是正文不得判空`() {
+        // P2-new-1：emoji 是有效正文（astral 平面代理对），骨架残留检测不得误判为空
+        val raw = """{"text":"😂😂","continue":true}"""
+        assertEquals("😂😂", BubbleJsonProtocol.extractTextLenient(raw))
+    }
+
+    @Test
+    fun `extractTextLenient - 纯 emoji 截断残片正常提取`() {
+        val raw = """{"text":"😂😂","continue":"""
+        assertEquals("😂😂", BubbleJsonProtocol.extractTextLenient(raw))
+    }
+
+    @Test
+    fun `extractTextLenient - 空 text 骨架仍返回空串`() {
+        // emoji 放行不影响骨架检测：无任何正文/emoji 的骨架仍归空串
+        val raw = """{"text":"","continue":true}"""
+        assertEquals("", BubbleJsonProtocol.extractTextLenient(raw))
+    }
 }
