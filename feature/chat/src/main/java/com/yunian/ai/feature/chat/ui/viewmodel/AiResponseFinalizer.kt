@@ -187,6 +187,8 @@ class AiResponseFinalizer(
                 durationMs = voiceBar?.durationMs,
                 onPersisted = onCommitted,
             )
+            // 已落实气泡进跨轮滚动窗口（P1-4）
+            turnState.pushRecentDedup(DedupGuard.normalize(safeProcessed))
             SecureLog.d("ChatViewModel", "$logMessage, length=${aiContent.length}, id=$id, voiceBar=${voiceBar != null}")
             if (!stickerBeforeText && turnState.pendingSticker != null) {
                 flushPendingSticker()
@@ -214,6 +216,8 @@ class AiResponseFinalizer(
                     durationMs = voiceBar?.durationMs,
                     onPersisted = onCommitted,
                 )
+                // 已落实气泡进跨轮滚动窗口（P1-4）
+                turnState.pushRecentDedup(DedupGuard.normalize(safeSegment))
                 lastId = id
                 SecureLog.d(
                     "ChatViewModel",
@@ -352,19 +356,22 @@ class AiResponseFinalizer(
         }
     }
 
+    /**
+     * 明确的话轮移交信号（P1-6）：命中即视为 AI 已把话头递回给用户，不再自动追问。
+     * 旧的裸 `contains("你")` 与高频语气词列表误杀面太大（日常口语几乎都带「你/吧/呀」），
+     * 把追问转化率压没了；只保留这些一眼就是「在问你」的短语。
+     * questionRegex 与长度闸在调用处保持不变。
+     */
     private fun looksLikeTurnBackToUser(text: String): Boolean {
-        if (text.contains("你")) return true
-        val interactiveMarkers = listOf(
-            "吧", "呀", "嘛", "哼", "啦", "呗", "哈哈", "嘿嘿", "嘻嘻",
-            "~", "～", "等着", "看你", "找你", "来找我", "算账", "不信", "才怪",
-        )
-        return interactiveMarkers.any { text.contains(it) }
+        val turnBackMarkers = listOf("你呢", "你说呢", "你觉得", "你们觉得呢", "想听你", "问下你", "问你呢")
+        return turnBackMarkers.any { text.contains(it) }
     }
 
     /**
      * 加载本轮查重窗口：
      * 优先复用 `ChatTurnState` 上按轮次缓存的窗口（同一轮多次送达 —— 如连发气泡逐条送达 —— 共用并把已发气泡累积进去）；
-     * 首次则用「最近 [DedupGuard.WINDOW_LAST_AI] 条历史 AI 消息」初始化。
+     * 首次则用「最近 [DedupGuard.WINDOW_LAST_AI] 条历史 AI 消息 ∪ 跨轮滚动窗口 recentDedupWindow」初始化（P1-4：
+     * 仅靠历史 3 条会随轮次滚动而漏掉上几轮刚发过的内容，滚动窗口把跨轮已落实气泡也纳入查重）。
      */
     private suspend fun loadDedupWindow(turnKey: String): MutableList<String> {
         val cached = turnState.dedupWindow
@@ -378,6 +385,8 @@ class AiResponseFinalizer(
             .filter { !it.isFromUser }
             .take(DedupGuard.WINDOW_LAST_AI)
             .forEach { window.add(DedupGuard.normalize(it.content)) }
+
+        window.addAll(turnState.recentDedupWindow)
 
         turnState.dedupTurnKey = turnKey
         turnState.dedupWindow = window

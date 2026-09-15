@@ -119,11 +119,11 @@ class BubbleJsonProtocolTest {
     }
 
     @Test
-    fun `extractTextLenient - 只有空 JSON 无 text 返回原文且不为空`() {
-        val raw = "{}"
-        val result = BubbleJsonProtocol.extractTextLenient(raw)
-        assertEquals(raw, result)
-        assertTrue(result.isNotEmpty())
+    fun `extractTextLenient - 只有空 JSON 无 text 返回空串`() {
+        // P0-1：纯 JSON 残壳不含任何字母/数字/CJK 正文 → 归一空串，
+        // 交给上层 aiContent.isBlank() 分支提示「API返回空内容」，不得展示残壳。
+        val result = BubbleJsonProtocol.extractTextLenient("{}")
+        assertEquals("", result)
     }
 
     @Test

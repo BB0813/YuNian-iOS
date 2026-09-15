@@ -95,6 +95,31 @@ class ChatGenerationManager private constructor(
         fun release(companionId: Long) {
             instances[companionId]?.onReleased()
         }
+
+        /**
+         * 组装气泡连发第 N 轮的模型历史（P0-2）。
+         *
+         * 首条正文气泡已经送达/落库，但它不在首轮请求的 [modelHistory] 里——若不显式注入，
+         * 连发第 2 轮起的模型看不到第 1 条说了什么，会复读或自相矛盾。
+         *
+         * 去重约定：[alreadyGenerated] 只含连发循环追加生成的追尾气泡（[BubbleLoopRunner] 传入的
+         * 就是这份增量列表），首条由 [firstBubbleText] 恰好注入一次，二者不重叠。
+         *
+         * @return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
+         */
+        internal fun buildChainHistory(
+            modelHistory: List<AiChatMessage>,
+            firstBubbleText: String,
+            alreadyGenerated: List<String>,
+        ): List<AiChatMessage> {
+            fun assistant(text: String) = AiChatMessage(
+                isFromUser = false,
+                content = text,
+                timestamp = System.currentTimeMillis(),
+                role = com.yunian.ai.domain.AiMessageRole.ASSISTANT,
+            )
+            return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
+        }
     }
 
     private val refCount = AtomicInteger(0)
@@ -912,14 +937,9 @@ class ChatGenerationManager private constructor(
                 imagePath == null && !isLocalModelEnabled()
             val followUpBubbles = if (enableBubbleChain) {
                 bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
-                    val appendedHistory = modelHistory + alreadyGenerated.map { text ->
-                        AiChatMessage(
-                            isFromUser = false,
-                            content = text,
-                            timestamp = System.currentTimeMillis(),
-                            role = com.yunian.ai.domain.AiMessageRole.ASSISTANT,
-                        )
-                    }
+                    // 链发历史必须含首条正文（P0-2）：否则第 2 轮看不到第 1 条说了什么。
+                    // alreadyGenerated 只含本循环追加的追尾气泡，首条由 aiContent 恰好注入一次。
+                    val appendedHistory = buildChainHistory(modelHistory, aiContent, alreadyGenerated)
                     val resp = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
                         aiService.sendMessage(
                             companion = aiCompanion,
@@ -943,7 +963,7 @@ class ChatGenerationManager private constructor(
 
             followUpBubblesDelivered.forEach { bubble ->
                 delay(800L + kotlin.random.Random.nextLong(1200L))
-                runCatching {
+                try {
                     responseFinalizer.deliverResponse(
                         aiContent = bubble,
                         reasoning = null,
@@ -953,7 +973,10 @@ class ChatGenerationManager private constructor(
                         // 追尾气泡同样按 AI 的回车拆分（若模型把多句塞进一条 text，回车意图照发）。
                         allowParagraphSplit = true,
                     )
-                }.onFailure { e ->
+                } catch (e: CancellationException) {
+                    // 取消必须向上传播（runCatching 会把它当普通失败吞掉，P1-2）。
+                    throw e
+                } catch (e: Exception) {
                     SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)
                 }
             }
@@ -1165,7 +1188,7 @@ class ChatGenerationManager private constructor(
             appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
             appendLine("5. 不要重复同样的话。")
             appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
-            appendLine("7. 每条回复默认 = 一条气泡：把同一动作用一句完整口语说完并收尾；如果用户明确要求发多条、或你的回复由多条独立短消息组成，把每条消息写成一句完整的话并用标点（。！？～）收尾，系统会按句末标点自动拆成多条气泡连发。")
+            appendLine("7. 每条回复默认 = 一条气泡：把同一动作用一句完整口语说完并收尾；如果用户明确要求发多条、或你的回复由多条独立短消息组成：你的每一次回车 = 发出下一条气泡；想让用户分开收就换行，想一气说完就不换行；不要假设系统会按标点拆。")
             if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
             RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
             if (stickerProbability > 0) {

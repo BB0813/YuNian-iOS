@@ -552,19 +552,22 @@ class GroupChatViewModel(
         val firstContent = bubbles.firstOrNull()?.trim() ?: return
         val aiContent = firstContent.replace(Regex("\n{2,}"), "\n")
 
-        // 自查重：不要复读自己刚说过的话
+        // 自查重：不要复读自己刚说过的话。
+        // 口径与单聊/跨角色统一为 DedupGuard.isDuplicate（P1-5）：精确相等或 ≥10 字双向包含，
+        // 旧的「>5 字子串包含」会把「哈哈哈哈」类短句误杀。
         val recentRepliesFromThisChar = isolatedHistory
             .filter { it.companionId == companion.id }
             .takeLast(3)
             .map { normalizeForDedup(it.content) }
         val normalizedNew = normalizeForDedup(aiContent)
-        val isDuplicate = recentRepliesFromThisChar.any {
-            it == normalizedNew ||
-                it.length > 5 && normalizedNew.contains(it) ||
-                normalizedNew.length > 5 && it.contains(normalizedNew)
-        }
-        if (isDuplicate) {
-            Log.d("GroupChatM", "[${companion.name}] 跳过重复回复")
+        val isSelfDuplicate = DedupGuard.isDuplicate(normalizedNew, recentRepliesFromThisChar)
+        if (isSelfDuplicate) {
+            // 静默轮兜底（skipDedupCheck=true）落库前同样过这道自查重：命中即放弃本轮（P1-3）。
+            if (skipDedupCheck) {
+                Log.w("GroupChatM", "[${companion.name}] 兜底放行命中自查重，放弃本轮")
+            } else {
+                Log.d("GroupChatM", "[${companion.name}] 跳过重复回复")
+            }
             return
         }
 
@@ -1224,7 +1227,13 @@ class GroupChatViewModel(
         val stickerManager = StickerManager.getInstance(getApplication())
         val systemTags = setOf("语音", "图片", "视频", "文件", "位置", "红包", "转账")
         val stickerRegex = Regex("\\[([^\\]]+)\\]")
-        val matches = stickerRegex.findAll(cleaned)
+        // 先剥系统标签（P1-7）：[图片]/[文件] 等系统标签不应出现在文本气泡里。
+        // 旧实现仅在抽取贴纸时跳过它们，但子串游标仍基于原文——夹在中间的系统标签会漏进文本段。
+        // 剥离后 systemTags 在 systemTagFree 中已不存在，下游游标问题自然消失。
+        val systemTagFree = stickerRegex.replace(cleaned) { m ->
+            if (m.groupValues[1].trim() in systemTags) "" else m.value
+        }
+        val matches = stickerRegex.findAll(systemTagFree)
 
         val textSegments = mutableListOf<String>()
         val stickerNames = mutableListOf<String>()
@@ -1233,7 +1242,7 @@ class GroupChatViewModel(
         for (match in matches) {
             val description = match.groupValues[1].trim()
             if (description !in systemTags) {
-                val beforeText = cleaned.substring(lastIndex, match.range.first).trim()
+                val beforeText = systemTagFree.substring(lastIndex, match.range.first).trim()
                 if (beforeText.isNotBlank()) {
                     textSegments.add(beforeText)
                 }
@@ -1241,7 +1250,7 @@ class GroupChatViewModel(
                 lastIndex = match.range.last + 1
             }
         }
-        val remainingText = cleaned.substring(lastIndex).trim()
+        val remainingText = systemTagFree.substring(lastIndex).trim()
         if (remainingText.isNotBlank()) {
             textSegments.add(remainingText)
         }
@@ -1252,7 +1261,7 @@ class GroupChatViewModel(
 
         if (stickerNames.isEmpty() && textSegments.size <= 1) {
             // 按 AI 自己敲的换行拆分：单行即一条；成员在回复里敲了回车就逐条发出（群聊同样尊重 AI 的分条意图）
-            val textBubbles = BubbleTextSplitter.splitByParagraphs(cleaned)
+            val textBubbles = BubbleTextSplitter.splitByParagraphs(systemTagFree)
             textBubbles.forEachIndexed { index, bubbleText ->
                 if (index > 0) delay(Random.nextLong(600L, 1600L))
                 if (bubbleText.isBlank()) return@forEachIndexed
@@ -1264,10 +1273,10 @@ class GroupChatViewModel(
 
             val orderedItems = mutableListOf<Either<String, String>>()
             var cursor = 0
-            for (match in stickerRegex.findAll(cleaned)) {
+            for (match in stickerRegex.findAll(systemTagFree)) {
                 val description = match.groupValues[1].trim()
                 if (description !in systemTags) {
-                    val beforeText = cleaned.substring(cursor, match.range.first).trim()
+                    val beforeText = systemTagFree.substring(cursor, match.range.first).trim()
                     if (beforeText.isNotBlank()) {
                         orderedItems.add(Either.Left(beforeText))
                     }
@@ -1275,7 +1284,7 @@ class GroupChatViewModel(
                     cursor = match.range.last + 1
                 }
             }
-            val remaining = cleaned.substring(cursor).trim()
+            val remaining = systemTagFree.substring(cursor).trim()
             if (remaining.isNotBlank()) {
                 orderedItems.add(Either.Left(remaining))
             }
