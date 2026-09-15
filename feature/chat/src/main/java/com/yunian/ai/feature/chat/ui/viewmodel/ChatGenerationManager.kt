@@ -1182,13 +1182,13 @@ class ChatGenerationManager private constructor(
             }
             appendLine()
             appendLine("回复规则：")
-            appendLine("1. 单次单动作：每轮只做一个核心社交意图（纯共情/纯反问/纯表态/纯答问；求方案才给一步），完整说完。严禁问好+共情+反问+方案打包，也严禁半截残句。")
+            appendLine("1. 单次单动作：每轮只做一个核心社交意图（纯共情/纯反问/纯表态/纯答问；求方案才给一步），完整说完；可按真人习惯用换行分成 1~3 条短消息连发，但严禁问好+共情+反问+方案打包成长文，也严禁半截残句。")
             appendLine("2. 长度服从动作数：闲聊通常一句完整口语即可；解释可稍长。不要为凑字再塞第二个动作；写完自查意图数，不要按 30 字砍成残句。")
             appendLine("3. 活人语气，自然口语化，不要AI腔。")
             appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
             appendLine("5. 不要重复同样的话。")
             appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
-            appendLine("7. 每条回复默认 = 一条气泡：把同一动作用一句完整口语说完并收尾；如果用户明确要求发多条、或你的回复由多条独立短消息组成：你的每一次回车 = 发出下一条气泡；想让用户分开收就换行，想一气说完就不换行；不要假设系统会按标点拆。")
+            appendLine("7. 默认像真人连发：一层意思发一条，内容多就换行分成 2~3 条（每条完整口语、标点收尾），不要把几句话挤进同一条；只有一句短回应时一条即可；一段连贯叙述/故事合并成一条。你的每一次回车 = 发出下一条气泡，不要假设系统会按标点拆。")
             if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
             RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
             if (stickerProbability > 0) {
