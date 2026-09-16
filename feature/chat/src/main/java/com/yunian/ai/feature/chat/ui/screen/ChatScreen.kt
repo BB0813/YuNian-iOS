@@ -2,7 +2,6 @@ package com.yunian.ai.feature.chat.ui.screen
 import com.yunian.ai.uicommon.icon.AppIcons
 
 
-import android.util.Log
 
 import android.app.Application
 import android.content.ClipData
@@ -14,17 +13,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.asImageBitmap
 import com.yunian.ai.uicommon.theme.ThemeViewModel
 import com.yunian.ai.uicommon.theme.ThemeMode
 import com.yunian.ai.common.PerformanceTrace
@@ -36,35 +29,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import kotlin.math.abs
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -72,7 +50,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -86,10 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -104,16 +78,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.yunian.ai.feature.chat.R
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.FileProvider
-import coil.compose.AsyncImage
-import com.yunian.ai.database.model.ChatMessage
-import com.yunian.ai.database.model.CompanionEntity as CompanionModel
 import com.yunian.ai.database.model.MessageType
 import com.yunian.ai.feature.chat.ui.message.ChatRowRenderer
 import com.yunian.ai.feature.chat.ui.message.ImageGenGeneratingItem
@@ -141,12 +110,8 @@ import com.yunian.ai.uicommon.component.sticker.StickerImportOverlay
 import com.yunian.ai.uicommon.component.sticker.suggestStickerName
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.yunian.ai.uicommon.component.UserAvatar
-import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.component.glass.ProvidePageBackdrop
-import com.yunian.ai.uicommon.component.glass.drawGlass
 import com.yunian.ai.uicommon.component.VoiceRecorder
-import com.yunian.ai.uicommon.component.VoiceMessageBubble
 import com.yunian.ai.uicommon.component.getChatBackgroundByKey
 import com.yunian.ai.uicommon.component.getChatBackgroundKey
 import com.yunian.ai.uicommon.component.isCustomBackground
@@ -162,7 +127,6 @@ import com.yunian.ai.feature.chat.ui.message.LocalCompanionAvatarClick
 import com.yunian.ai.feature.chat.ui.message.LocalUserAvatarClick
 import com.yunian.ai.uicommon.theme.LocalChatGlassBackdrop
 import com.yunian.ai.uicommon.theme.LocalChatGlassEnabled
-import com.yunian.ai.uicommon.theme.AdaptiveSizing
 import com.yunian.ai.uicommon.theme.AppTheme
 import com.yunian.ai.uicommon.theme.rememberAdaptiveSizing
 import com.yunian.ai.uicommon.utils.PageTransitions

@@ -1,7 +1,6 @@
 package com.yunian.ai.network
 
 import com.yunian.ai.database.model.ChatMessage
-import com.yunian.ai.database.model.CompanionEntity as CompanionModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

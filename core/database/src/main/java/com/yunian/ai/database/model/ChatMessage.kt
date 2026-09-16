@@ -1,6 +1,5 @@
 package com.yunian.ai.database.model
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable

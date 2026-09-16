@@ -8,7 +8,6 @@ import androidx.lifecycle.viewModelScope
 import com.yunian.ai.uicommon.picker.data.AlbumRepository
 import com.yunian.ai.uicommon.picker.domain.PickerState
 import com.yunian.ai.uicommon.picker.domain.SelectionManager
-import com.yunian.ai.uicommon.picker.model.AlbumInfo
 import com.yunian.ai.uicommon.picker.model.MediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

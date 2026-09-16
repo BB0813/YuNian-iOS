@@ -4,8 +4,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
 import java.security.*
-import java.security.cert.Certificate
-import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
 import android.security.keystore.KeyInfo
 

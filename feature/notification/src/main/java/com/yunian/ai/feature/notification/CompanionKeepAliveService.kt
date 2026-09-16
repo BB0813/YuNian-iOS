@@ -12,7 +12,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.domain.AutomationTickProvider

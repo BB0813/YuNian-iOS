@@ -31,7 +31,6 @@ import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.text.BubbleTextSplitter
 import com.yunian.ai.common.text.DedupGuard
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first

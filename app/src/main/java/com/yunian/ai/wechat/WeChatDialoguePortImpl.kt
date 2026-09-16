@@ -4,7 +4,6 @@ import android.content.Context
 import com.yunian.ai.common.AppSettingsStore
 import com.yunian.ai.common.BanManager
 import com.yunian.ai.common.ContentFilter
-import com.yunian.ai.common.SecureLog
 import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.model.MessageType
 import com.yunian.ai.database.repository.ChatRepository

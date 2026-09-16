@@ -13,7 +13,6 @@ import com.yunian.ai.database.repository.filterDecrypted
 import com.yunian.ai.domain.AiChatMessage
 import com.yunian.ai.domain.AiCompanionInfo
 import com.yunian.ai.domain.AiMessageType
-import com.yunian.ai.domain.AiResponse
 import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.ServiceRegistry

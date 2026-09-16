@@ -2,12 +2,10 @@ package com.yunian.ai.feature.memory.engine
 
 import android.content.Context
 import android.util.Log
-import com.yunian.ai.common.DeviceIdProvider
 import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.model.DiaryEntry
 import com.yunian.ai.database.model.MemoryScope
-import com.yunian.ai.database.model.MemorySource
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.DiaryProvider
 import com.yunian.ai.database.repository.EmbeddingProvider

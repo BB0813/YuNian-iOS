@@ -16,7 +16,6 @@ import com.yunian.ai.common.TimeoutBudgets
 import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.feature.wechat.R
 import com.yunian.ai.feature.wechat.WeChatDebugLog
-import com.yunian.ai.feature.wechat.data.WeChatMessageRepository
 import com.yunian.ai.wechat.ilink.IlinkSessionExpiredException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job

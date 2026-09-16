@@ -7,7 +7,6 @@ import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.model.FileFormat
 import com.yunian.ai.database.model.GroupMessage
-import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking

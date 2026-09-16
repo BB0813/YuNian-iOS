@@ -9,7 +9,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
@@ -24,7 +23,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -40,11 +38,9 @@ import com.yunian.ai.domain.LorebookEntry
 import com.yunian.ai.domain.LorebookProvider
 import com.yunian.ai.domain.ServiceRegistry
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.coroutineScope
 import com.yunian.ai.feature.settings.worldbook.WorldbookEntryDto
 import com.yunian.ai.feature.settings.worldbook.WorldbookExportDto
 import com.yunian.ai.feature.settings.worldbook.WorldbookTransfer
-import kotlinx.serialization.json.Json
 import com.yunian.ai.uicommon.component.glass.GlassTopBar
 import com.yunian.ai.uicommon.component.glass.GlassPageScaffold
 import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop

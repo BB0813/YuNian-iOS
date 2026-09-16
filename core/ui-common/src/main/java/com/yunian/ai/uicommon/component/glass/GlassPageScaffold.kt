@@ -1,6 +1,5 @@
 package com.yunian.ai.uicommon.component.glass
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,8 +18,6 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.yunian.ai.uicommon.component.BackgroundSettingsViewModel
 import com.yunian.ai.uicommon.component.PageBackgroundContent
 import com.yunian.ai.uicommon.component.WindowMainBackground
-import com.yunian.ai.uicommon.theme.WeChatDarkBackground
-import com.yunian.ai.uicommon.theme.WeChatLightBackground
 
 /**
  * 二级页面统一玻璃容器。

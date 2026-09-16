@@ -9,7 +9,6 @@ import com.yunian.ai.database.repository.ChatRepository
 import com.yunian.ai.database.repository.MessageWriteCoordinator
 import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.feature.automation.data.Automation
-import com.yunian.ai.feature.automation.data.WorkflowEdge
 import com.yunian.ai.feature.automation.data.WorkflowNode
 import com.yunian.ai.feature.automation.data.WorkflowNodeType
 import kotlinx.coroutines.Dispatchers

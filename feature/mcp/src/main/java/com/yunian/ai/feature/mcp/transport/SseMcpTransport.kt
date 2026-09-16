@@ -6,19 +6,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.coroutines.suspendCancellableCoroutine
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * MCP SSE (Server-Sent Events) 传输实现（存根实现）。
