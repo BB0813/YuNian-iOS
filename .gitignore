@@ -92,3 +92,8 @@ nul
 /_*.diff
 /.gradle-*.log
 .superpowers/
+
+# 批次0 建议补充（原仅存于 .git/info/exclude，不随仓库共享）
+/releases/
+/*.log
+/bugreport-*.zip
