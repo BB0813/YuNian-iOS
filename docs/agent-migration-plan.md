@@ -93,15 +93,13 @@ master 把**整条对话链路与内容安全链路**下沉到 Rust，因此以�
 | **companion** | `CreateCompanionViewModel:75` | 确认用途（可能是人设生成） |
 | **settings** | `SettingsViewModel:34` | 改读 `api_configs` + Agent 配置 |
 | **automation（Q1 保留）** | `AutomationExecutor:48`、`WorkflowEngine:21` | 改走 `DialogueCoordinator` / `AgentFacade`（阶段 4b） |
-| **测试** | `AiToolLoopRunnerConfirmationTest`、`AiToolLoopRunnerRoundBudgetTest`、`AiToolLoopRunnerToolFailureStatusTest` | 前者的确认测试重写为 `approveTool`/`rejectTool`；后两者随 `AiToolLoopRunner` 删除而移除 |
+| **测试** | ~~`AiToolLoopRunnerConfirmationTest`、`AiToolLoopRunnerRoundBudgetTest`、`AiToolLoopRunnerToolFailureStatusTest`~~ | ✅ **已处理（`27537c30`）**：三者全删（`ConfirmationGate` 已无调用方）；确认门控测试改由 Agent 路径的 `approveTool`/`rejectTool` 承担 |
 
-> ⚠️ **待办 E 因此升级为高优先级**：`AiServiceProvider` **不可在本轮直接删除** ——
-> 需先确认 Rust `native_gateway.rs` 是否覆盖 `shouldProactivelyMessage` / `generateProactiveMessage` /
-> `generateFollowUpReminder` / `sendMessageWithCustomSystem` 四个方法的能力；未覆盖的须在本轮**保留接口与本地实现**。
+> ✅ **待办 E 已收口**（`91355f11`，详见文末「阶段 8 实况复核」）：
+> `shouldProactivelyMessage` / `generateProactiveMessage` / `generateFollowUpReminder` 三个方法在 master 中
+> **根本不存在** → **必须保留本地实现**；`sendMessageWithCustomSystem` 经全仓普查**零调用方** →
+> 连同 `streamMessage` 一并删除。`AiServiceProvider` **接口本体保留**（已删的只是两个无调用方的方法）。
 > `coffee` 模块**不依赖** `AiServiceProvider`（已 grep 验证为空）。
-
-> **★ 待办 E 已在 §1.4 部分收口**：`CompanionMessageWorker` 的三个主动消息方法在 master 中**根本不存在**
-> （master 删除了该 Worker 且未实现替代品）→ 结论变为「**必须保留本地实现**」，而非「比对后可能保留」。
 
 ### 1.4 ⚠️ 主动消息：master 删除了能力但替代品未实现（Q5 依据）
 
@@ -810,10 +808,10 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 |---|---|---|
 | 8.1 | `feature/localmodel/**` + `app` 依赖 | D4 |
 | 8.2 | `core/domain/LocalModelProvider.kt`、`ModelInfo.kt`、`ModelState.kt` | D4 连带 |
-| 8.3 | `core/network/AiService.kt` + `AiPromptBuilder.kt`（若仅 AiService 使用） | ⚠️ **受 §1.3 阻塞**：`AiServiceProvider` 被 23 文件引用，其中 `CompanionMessageWorker` 主动消息三方法 / `GroupChatViewModel.sendMessageWithCustomSystem` 是否被 Rust 覆盖**未确认**（待办 E）。**未确认前不得删除** |
-| 8.4 | `core/common/ContentFilter.kt`、`BanManager.kt`、`safety/BayesianClassifier.kt` | master 已删（**T1 高风险，需先归档模式清单**） |
-| 8.5 | `feature/chat/.../AiToolLoopRunner.kt`、`AiResponseFinalizer.kt`、`ChatFollowUpTrigger.kt` | master 已删（Rust 工具循环 + 生成终结）。⚠️ 三者均引用 `AiServiceProvider`，须与 8.3 同步处置 |
-| 8.6 | 本地 `LorebookEntity` 的注入路径（保留表） | §5.4 |
+| 8.3 | `core/network/AiService.kt` + `AiPromptBuilder.kt`（若仅 AiService 使用） | ✅ **已收口为「仅删方法」**（`91355f11`）：移除 `streamMessage` / `sendMessageWithCustomSystem` 两条接口与实现（共 −299 行）。❌ **`AiPromptBuilder` 不可删** —— `AiService.kt` ~30 处引用 + `CompanionMessageWorker.kt:321,525`。`AiServiceProvider` 接口本体保留 |
+| 8.4 | `core/common/ContentFilter.kt`、`BanManager.kt`、`safety/BayesianClassifier.kt` | 🔶 **MUST STAY（L3 决策）**：以远端为准，L3 语义链保持删除，只留 `ContentFilter` 正则 |
+| 8.5 | `feature/chat/.../AiToolLoopRunner.kt`、`AiResponseFinalizer.kt`、`ChatFollowUpTrigger.kt` | ✅ **部分完成**：仅 `AiToolLoopRunner.kt`（+3 测试）可删且已删（`27537c30`）；`ToolStatus`/`ToolActivity` 已抽到新文件 `ToolActivity.kt`。❌ **`AiResponseFinalizer` 必须保留**（`ChatGenerationManager:1059/1075/1112/1149` 仍在 Agent 路径）；`ChatFollowUpTrigger.kt` 已由远端合并删除 |
+| 8.6 | 本地 `LorebookEntity` 的注入路径（保留表） | ✅ **已完成**（复核见文末「8.6 复核」）：迁移器 + 每回合 `syncActiveToRuntime` + 启动接线全部在位 |
 | 8.7 | master 引入的构建垃圾 | ⚠️ **不要从 worktree 复制任何** `*.obj` / `*.db` / `*.dex` / `*.jks` / `*.keystore` / `gradle_*_check.txt` / `chatvm_*_txt` |
 
 **✅ 明确「不删除」清单（Q1 / Q3 决策，防止误删）**：
@@ -826,7 +824,7 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 | `feature:worldbook/**` | Q3 保留；改造为 ST JSON 数据层适配模块 |
 | `feature/settings/.../WorldbookScreens.kt` | Q3 保留；本地结构化编辑器 |
 | `core/domain/ToolRegistry` + `AiTool` | 保留；工具注册契约（`AgentToolHost` 依赖） |
-| `core/domain/AiServiceProvider.kt` | 保留（待办 E 确认前） |
+| `core/domain/AiServiceProvider.kt` | ✅ 保留（表面积已收缩，见 8.3；接口本体是 `core:domain` 对外契约） |
 | `companions.apiConfigId` / `companions.lorebookIdsJson` 列 | 保留（本地方案依赖） |
 | `libs.kyant.backdrop` / `libs.kyant.capsule` | 保留（本地 UI 依赖） |
 | `lorebooks` / `lorebook_entries` 表 | 保留（回滚数据源，§5.4） |
@@ -912,10 +910,37 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 > 注：`SkillMarketTools.kt:34` 出现 `AiToolLoopRunner` 字样，但**仅位于 KDoc 注释**（"供
 > AiToolLoopRunner 判定工具失败状态"），不构成真实依赖 —— 该文件零改动，注释保留为历史说明。
 
-### 8.6 状态
+### ✅ 8.6 复核 —— 注入路径已完整落地（2026-09-17）
 
-本地 `LorebookEntity` 注入路径（§5.4）**保持待办**：`lorebooks` / `lorebook_entries` 表按决策冻结保留，
-数据源已由 `core:agent/worldbook` 承接。本轮不动。
+上一版把 8.6 记为"待办"，实为**描述过期**。逐项复核 `core:agent/worldbook` 后的真实状态：
+
+| §5 步骤 | 落地位置 | 状态 |
+|---|---|---|
+| 5.1 实体 + DAO | `core/database/.../dao/WorldbookDao.kt`（`WorldbookEntity` + `WorldbookEntryEntity`）、`AppDatabase:130 abstract fun lorebookDao()` | ✅ |
+| 5.2 仓储 | `core/agent/.../worldbook/WorldbookRepository.kt`（依赖 `db.worldbookDao()`） | ✅ |
+| 5.3 一次性迁移 | `WorldbookMigrator.kt`（读旧 `lorebookDao` → 写 `worldbookDao.upsert`，`AppMetaStore` 标志位保护） | ✅ |
+| 5.3a 溯源标签 | `WorldbookJsonCodec.entryToJson(bookId, bookName)` → `extensions._bookId/_bookName` | ✅ |
+| 5.3b 运行时合并 | `WorldbookRepository.synthForCompanion()`：`boundIds` 空 → 专属书 ∪ 全部全局书；非空 → 专属书 ∪ 命中全局书 | ✅ |
+| 5.3c 去重 + 重编号 | `synthForCompanion` 内 `LinkedHashMap<content>` 去重（`priority` 高者胜）+ `insertionOrder = idx+1` 全局重编号 | ✅ |
+| 5.3d 运行时断言 | `synthForCompanion` 末尾比对 `entryCount(merged) != objs.size` → `Log.w` | ✅ |
+| 5.4 源表冻结 | `lorebooks` / `lorebook_entries` 保留，仅迁移器读、无写入 | ✅ |
+| 5.5 退役 `PromptInjectionTransformer` | 全仓 0 处定义/调用，仅 `AiService.kt:114` 留注释说明 | ✅ |
+| 5.6 `LorebookProvider` 转薄适配器 | `core/domain/.../LorebookProvider.kt:63` 纯 CRUD 契约，KDoc 明确注入职责已移交 Rust | ✅ |
+| 5.7 `feature:worldbook` 换数据源 | `feature/worldbook/.../WorldbookRepository.kt:57 implements LorebookProvider`，写操作后调 `agentRepo.syncActiveToRuntime` | ✅ |
+| 5.9 启动接线 | `YuNianApplication.initWorldbookAgent()`：迁移 + `repo.syncActiveToRuntime()` | ✅ |
+| 5.10 导入导出 | `feature/settings/.../WorldbookTransfer.kt:85` 走 `WorldbookJsonCodec.assemble` | ✅ |
+
+**运行时注入点（关键证据）：**
+- `ChatGenerationManager.runTurnWithConfirmation():663-667` —— **每回合**调
+  `WorldbookRepository(application).syncActiveToRuntime(companionId)`，失败仅告警不中断回合。
+- `GroupChatViewModel.kt:938` —— 群聊路径同样每回合同步。
+- `YuNianApplication.kt:432` —— 冷启动同步全局书，保证「未进入会话前」上下文正确。
+- `WorldbookRepository.kt:43/56/63` —— 世界书自身写操作后立即回灌运行时。
+
+→ **结论：8.6 无需再做任何工作。** 唯一"未做"的是 §5.11 迁移自检的**独立测试**——
+      现有实现把等价断言放在了运行时（5.3d），属设计选择而非缺口。
+      剩余风险仅 `synthForCompanion` 的合并语义**无单测覆盖**，
+      但它是纯函数式变换（读 DAO → 排序去重 → 序列化），已在 `WorldbookJsonCodecTest` 覆盖编解码层。
 
 
 ---
@@ -1050,8 +1075,13 @@ graph LR
 > 因此阶段 2 是本次迁移**工作量最大、失败面最广**的阶段 —— 必须先写「5 位置 → 注入点」对照表再改代码。
 > **R20 等级已由「中」上调为「高」。**
 >
-> ⚠️ **阶段 8 受三个门控阻塞**：8.3/8.5 等待办 E，8.4 等待办 C，
-> **8.3 额外等待办 L**（主动消息在 master 中无替代品，Q5/R24）。门控未通过则**保留本地实现**（不与 Agent 架构冲突）。
+> ✅ **阶段 8 三个门控现状（2026-09-17 复核）**：
+> - **待办 E —— 已收口**（`91355f11`）。8.3 完成「仅删方法」；8.5 完成「仅删 `AiToolLoopRunner`」。
+> - **待办 C —— 已裁决（L3）**。8.4 **不做**：以远端为准，L3 语义链保持删除，只留 `ContentFilter` 正则。
+> - **待办 L（R24）—— 仍然有效**。`CompanionMessageWorker` 三个主动消息方法在 master 无替代品，
+>   必须保留；本轮的 `AiServiceProvider` 收缩**未触及**这三个方法。
+>
+> → 阶段 8 已**无剩余阻塞项**，仅 8.7（构建垃圾防护）作为常驻规则生效。
 
 ---
 
@@ -1063,9 +1093,9 @@ graph LR
 | ~~**A2**~~ | ~~确认 `priority`/`sortOrder` 排序方向~~ | 阶段 5 | ✅ **已收口**：降序 ⟷ 升序，公式 `4294967296u64 - priority` |
 | **A3** | 统计本地库中 `injectionPosition` / `role` / `scanDepth` / `lorebookIdsJson` 的**实际取值分布**，评估 R14 实际影响面；`lorebookIdsJson` 非空伴侣数（Q4 迁移前提） | 阶段 5.0c | ⬜ 仍需执行（**R12/R15/R18 已由 Q2/Q4 收口，此项仅剩 R14 与迁移规模评估**） |
 | **B** | 核对本地 `app` 依赖中的 `libs.kyant.backdrop` / `libs.kyant.capsule` / sherpa-onnx AAR 必须保留 | 阶段 6.4–6.5 | ⬜ |
-| **C** | 抽取本地 `ContentFilter` / `BanManager` / `BayesianClassifier` 规则，与 Rust 安全过滤覆盖度比对；不足则暂缓删除 | 阶段 8.4 | ⬜ |
+| ~~**C**~~ | ~~抽取本地 `ContentFilter` / `BanManager` / `BayesianClassifier` 规则，与 Rust 安全过滤覆盖度比对；不足则暂缓删除~~ | 阶段 8.4 | ✅ **已裁决（L3）**：以远端为准，**L3 语义链保持删除**，只留 `ContentFilter` 正则；`ContentFilter` / `BanManager` **必须保留** |
 | ~~**D**~~ | ~~确认本地 `feature:automation` / `feature:mcp` / `feature:skills` 是否保留~~ | 阶段 6.3 / 8 | ✅ **已收口（Q1/Q6）**：三者**全部保留**；`automation` 工具层按 cordis 重写，`mcp` **零改动**，`skills` **技能本体需收敛**（见待办 L） |
-| **E** | ⚠️ **升级为高优先级**：确认 `AiServiceProvider` 的哪些能力被 Rust 覆盖。重点 4 个方法：`shouldProactivelyMessage` / `generateProactiveMessage` / `generateFollowUpReminder` / `sendMessageWithCustomSystem`。未覆盖的须保留（见 §1.3） | 阶段 4.3 / 8.3 / 8.5 | ⬜ **阻塞 8.3 / 8.5**。→ **已部分收口（R24）**：前 3 个方法在 master **根本不存在** → **必须保留**；仅 `sendMessageWithCustomSystem` 待确认 |
+| ~~**E**~~ | ~~确认 `AiServiceProvider` 的哪些能力被 Rust 覆盖。重点 4 个方法：`shouldProactivelyMessage` / `generateProactiveMessage` / `generateFollowUpReminder` / `sendMessageWithCustomSystem`~~ | 阶段 4.3 / 8.3 / 8.5 | ✅ **已裁决**（`91355f11`，详见文末复核）：`sendMessageWithCustomSystem` / `streamMessage` **零调用方** → 已删（接口 + 实现）；前 3 个方法在 master **根本不存在** → **必须保留** |
 | ~~**F**~~ | ~~决策 R12/R15：是否改 Rust 补 `depth` + 位置层 + `role`~~ | 阶段 5.1 | ✅ **已决策（Q2）：改 Rust 补全，但确认为「注入子系统重写」**；原「6 项」清单已修正为 **7 项（q2-1～q2-7）**，含 `PromptFragment` 加 `role`（契约变更）与注入移入 `messages[]`（§5.2）。**R20 上调为高** |
 | ~~**G**~~ | ~~决策 R18：伴侣级绑定采用「降级」还是「保真」~~ | 阶段 5.3b | ✅ **已决策（Q4，方案已修正）：Kotlin 侧每回合实时合并**（零 Rust 改动）。`parseBoundIds`/`getEnabledEntriesForCompanion` **保留**并搬进 `syncActiveToRuntime`；`lorebookIdsJson` 列**保留**（§5.3b） |
 | ~~**H**~~ | ~~决策世界书 UI 取舍~~ | 阶段 5.8 / 7.8 | ✅ **已决策（Q3）：保留本地结构化编辑器**，仅换数据层 |
@@ -1074,7 +1104,7 @@ graph LR
 | **K** | **新增**：确认 master `CoffeePlugin` 插件已接入本地 `PluginHostImpl`（§7.13） | 阶段 7.13 | ⬜ |
 | **L** | **新增（Q6）**：编写 `SkillStoreAdapter : SkillStore` 桥接本地 `SkillManager` → Rust `SkillSelector`（e1–e6 / s1–s6）；**退役 `use_skill`**（防模型双调，R22） | 阶段 4b.1-B | ⬜ |
 | **M** | **新增（Q5/R24）**：确认本地 `CompanionMessageWorker` 的三个主动消息方法的**生成路径**可改走 `AgentFacade`，且**判定/调度逻辑不变**；对应 `AiServiceProvider` 方法可删但**接口不整体删** | 阶段 4.3 / 8.3 | ⬜ |
-| **N** | **新增（Q4/R23）**：实现 `syncActiveToRuntime(companionId)` 的**每回合 Kotlin 合并**；确定**去重策略**（Rust 按 `content` 去重）与 `insertion_order` **全局重编号**规则（§5.3b/§5.3c） | 阶段 4b.3 / 5.3b | ⬜ |
+| ~~**N**~~ | ~~实现 `syncActiveToRuntime(companionId)` 的**每回合 Kotlin 合并**；确定**去重策略**与 `insertion_order` **全局重编号**规则~~ | 阶段 4b.3 / 5.3b | ✅ **已落地**：`WorldbookRepository.synthForCompanion()`（按 `content` 去重 + `idx+1` 重编号）；`ChatGenerationManager:665` / `GroupChatViewModel:938` 每回合调用 |
 | **O** | **新增（R25）**：确定 `fire_automation` 的处置——保留为本地 Kotlin 工具 + 工具描述明确**异步语义**（Rust 无定时器） | 阶段 4b.2 | ⬜ |
 
 > ~~A2 为何关键~~ → **A2 已收口**。`lorebook.rs:218` `sort_by_key(|e| e.insertion_order)` 为**升序**，
