@@ -33,6 +33,7 @@ import com.yunian.ai.common.AppSettingsStore
 import com.yunian.ai.common.YandereModeManager
 import com.yunian.ai.domain.CompanionProvider
 import com.yunian.ai.domain.AiServiceProvider
+import com.yunian.ai.domain.DialogueCoordinator
 import com.yunian.ai.domain.ImageGenerationProvider
 import com.yunian.ai.domain.CoffeeOrderProvider
 import com.yunian.ai.domain.BuiltinCloudAccessPolicy
@@ -282,6 +283,12 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initVectorLibrary(app) }
             // 阶段 5.9：世界书迁移 + 运行时注入（幂等；与其它 IO 任务并行，不阻挡首帧）
             bgScope.launch { initWorldbookAgent(app) }
+            // 阶段 5.10：Agent 运行时接线（Rust 决策层）
+            //   · installRequestSigner 为 **同步必需**：PARTNER(suflow.cloud) 请求服务端校验
+            //     X-LianYu-Sig-Version，缺签名会被拒；且必须在首次 runTurn 之前完成。
+            //   · warmUp 延迟 5s 后台预热（提前 dlopen liblianyu_agent.so，消除首次对话卡顿）。
+            //   · registerGlobalTools 注册委派/汇聚工具（执行端在 AgentToolHost 特判分支）。
+            initAgentRuntime(app)
             ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
             PerformanceTrace.markStartupStage("ib_safety_classifier")
             bgScope.launch { initSafetyVerifier(app) }
@@ -425,6 +432,62 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 .onFailure { SecureLog.e("YuNianApplication", "Worldbook runtime sync failed", it) }
         }
 
+        /**
+         * 阶段 5.10 · Agent 运行时启动接线（Rust 决策层）。
+         *
+         * 三件事，均幂等，且**全部在后台线程**执行（首次 `dlopen("liblianyu_agent.so")`
+         * 是数十毫秒级阻塞操作，禁止上主线程）：
+         *
+         * 1. `installRequestSigner` —— PARTNER(suflow.cloud) 请求的服务端验签回调。
+         *    服务端校验 `X-LianYu-Sig-Version` 头，缺失会被拒；必须在首次 `runTurn` 前就位。
+         *    用户从冷启到进入聊天页有数百毫秒以上，本协程与首帧并行，时序充足。
+         * 2. `registerGlobalTools` —— 多 Agent 编排的委派/汇聚工具定义注册进 Rust 全局注册表
+         *    （决策在 Rust，执行端在 `AgentToolHost` 的特判分支）。
+         * 3. `warmUp` —— 延迟 5s 空闲期预热，避免与启动期 IO 争抢。
+         */
+        private fun initAgentRuntime(app: Application) {
+            bgScope.launch {
+                runCatching { com.yunian.ai.agent.AgentFacade.installRequestSigner(app) }
+                    .onFailure { SecureLog.e("YuNianApplication", "installRequestSigner failed", it) }
+
+                runCatching {
+                    com.yunian.ai.agent.AgentFacade.registerGlobalTools(
+                        app,
+                        listOf(
+                            com.yunian.ai.agent.uniffi.ToolDefinition(
+                                name = "delegate_task",
+                                description = "将子任务委派给子 Agent（角色：analyst 分析 / helper 助手）。" +
+                                    "返回 delegation_id，稍后用 fetch_delegation_result 查询结果。",
+                                parametersJson = "{\"type\":\"object\",\"properties\":{" +
+                                    "\"role\":{\"type\":\"string\",\"description\":\"analyst|helper\"}," +
+                                    "\"prompt\":{\"type\":\"string\",\"description\":\"任务说明\"}}," +
+                                    "\"required\":[\"prompt\"],\"additionalProperties\":false}",
+                                category = com.yunian.ai.agent.uniffi.ToolCategory.GENERAL,
+                                toolsets = listOf("agent"),
+                                available = true,
+                            ),
+                            com.yunian.ai.agent.uniffi.ToolDefinition(
+                                name = "fetch_delegation_result",
+                                description = "查询委派任务的执行结果（delegate_task 返回的 delegation_id）。",
+                                parametersJson = "{\"type\":\"object\",\"properties\":{" +
+                                    "\"delegation_id\":{\"type\":\"integer\"}}," +
+                                    "\"required\":[\"delegation_id\"],\"additionalProperties\":false}",
+                                category = com.yunian.ai.agent.uniffi.ToolCategory.GENERAL,
+                                toolsets = listOf("agent"),
+                                available = true,
+                            ),
+                        ),
+                    )
+                }.onFailure { SecureLog.e("YuNianApplication", "registerGlobalTools failed", it) }
+            }
+
+            bgScope.launch {
+                kotlinx.coroutines.delay(5_000)
+                runCatching { com.yunian.ai.agent.AgentFacade.warmUp(app) }
+                    .onFailure { SecureLog.e("YuNianApplication", "Agent warmUp failed", it) }
+            }
+        }
+
         private fun registerServiceProviders(app: Application) {
             val appSettings = AppSettingsStore(app)
             ServiceRegistry.registerSingleton(BuiltinCloudAccessPolicy::class.java) {
@@ -560,6 +623,12 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             }
             ServiceRegistry.registerSingleton(YandereModeManager::class.java) {
                 YandereModeManager(app)
+            }
+
+            // 统一 AI 对话中间层（core:agent 实现）：
+            // 微信 / QQ 桥接层只做消息收发，AI 回合 / 安全 / 落库 / 记忆全部收敛到它。
+            ServiceRegistry.registerSingleton(DialogueCoordinator::class.java) {
+                com.yunian.ai.agent.AgentDialogueCoordinator(app)
             }
 
             ServiceRegistry.registerSingleton(AppMetaStore::class.java) {
