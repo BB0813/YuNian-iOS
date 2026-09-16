@@ -34,6 +34,7 @@ import com.yunian.ai.common.YandereModeManager
 import com.yunian.ai.domain.CompanionProvider
 import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.domain.DialogueCoordinator
+import com.yunian.ai.domain.ToolRegistry
 import com.yunian.ai.domain.ImageGenerationProvider
 import com.yunian.ai.domain.CoffeeOrderProvider
 import com.yunian.ai.domain.BuiltinCloudAccessPolicy
@@ -222,6 +223,14 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                     PerformanceTrace.markStartupStage("service_registry_ready")
                     ServiceRegistry.markInitialized()
                 }
+
+                // ── 蓝图装载（对应 cordis.yml：plugins + patches + inserts 组合语义） ──
+                // assets/blueprints/default.json 统一驱动 coffee.luckin /
+                // skill.builtin_chat_protocol / sticker.preference 三个内置插件。
+                // fail-soft：单个插件装载失败只记录日志，不影响其余插件与主流程。
+                runCatching { loadDefaultBlueprint(app) }
+                    .onFailure { SecureLog.e("YuNianApplication", "loadDefaultBlueprint failed", it) }
+                PerformanceTrace.markStartupStage("ib_blueprint")
 
                 // ── 以下全部在「放行」之后，不再阻挡首帧 ──────────────────────────────────
 
@@ -639,9 +648,25 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 com.yunian.ai.feature.coffee.CoffeeOrderProviderImpl(app)
             }
 
-            com.yunian.ai.feature.coffee.LuckinCoffeeTools.registerAll(
-                ServiceRegistry.getOrThrow(CoffeeOrderProvider::class.java)
+            // ── Cordis 双层插件模板：PluginHost（代码插件 builtin） ──
+            // 框架服务预置（对齐 Cordis 宿主 ctx.<service>）：appContext / tools
+            val pluginHost = com.yunian.ai.agent.plugin.PluginHostImpl(
+                mapOf(
+                    com.yunian.ai.domain.plugin.PluginServices.APP_CONTEXT to app,
+                    com.yunian.ai.domain.plugin.PluginServices.TOOLS to ToolRegistry,
+                )
             )
+            // 注册首批代码插件：工具（瑞幸咖啡）、技能（内置聊天协议）、表情包偏好
+            pluginHost.register(
+                com.yunian.ai.feature.coffee.CoffeePlugin(
+                    ServiceRegistry.getOrThrow(CoffeeOrderProvider::class.java)
+                )
+            )
+            pluginHost.register(com.yunian.ai.agent.plugin.BuiltinChatSkillPlugin())
+            pluginHost.register(com.yunian.ai.agent.plugin.StickerPreferencePlugin())
+            ServiceRegistry.registerSingleton(com.yunian.ai.domain.plugin.PluginHost::class.java) { pluginHost }
+            // 插件装载由默认蓝图统一驱动（assets/blueprints/default.json，initBusiness 内执行）；
+            // 因此此处不再直接调用 LuckinCoffeeTools.registerAll（改由 coffee.luckin 插件装载）。
 
             com.yunian.ai.feature.memory.MemoryRecallTools.registerAll(
                 ServiceRegistry.getOrThrow(MemoryProvider::class.java)
@@ -698,6 +723,38 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             //   `runBlocking { AutomationStore.list() + AutomationScheduler.rescheduleAll(app, ...) }`
             // 已移出「放行屏障」——改到 initBusiness 的 bgScope 中、ServiceRegistry.markInitialized()
             // 之后的独立协程执行（保持「仍执行 + runCatching + 失败上报」语义，仅不再占用首帧前的屏障耗时）。
+        }
+
+        /**
+         * Cordis 蓝图装载：读 `assets/blueprints/default.json` → 解析 → PluginHost.loadBlueprint。
+         *
+         * 语义与 cordis.yml 一致：plugins 为基准列表（缺省启用），patches 覆盖配置，
+         * inserts 追加新插件；装载顺序即列表顺序（sticker 引擎依赖此顺序）。
+         * 幂等：PluginHost 内部对已装载插件做 config 比对，配置未变则跳过。
+         */
+        private fun loadDefaultBlueprint(app: Application) {
+            val json = app.assets.open("blueprints/default.json")
+                .bufferedReader()
+                .use { it.readText() }
+            val blueprint = com.yunian.ai.agent.plugin.PluginBlueprintParser.parse(json)
+            val host = ServiceRegistry.get(com.yunian.ai.domain.plugin.PluginHost::class.java)
+            if (host == null) {
+                SecureLog.w("YuNianApplication", "PluginHost not registered, skip blueprint")
+                return
+            }
+            when (val result = host.loadBlueprint(blueprint)) {
+                is com.yunian.ai.domain.plugin.BlueprintLoadResult.Applied ->
+                    SecureLog.i(
+                        "YuNianApplication",
+                        "Blueprint ${blueprint.id} applied: loaded=${result.loaded} skipped=${result.skipped}",
+                    )
+                is com.yunian.ai.domain.plugin.BlueprintLoadResult.Failed ->
+                    SecureLog.e("YuNianApplication", "Blueprint ${blueprint.id} failed: ${result.reason}")
+            }
+            // 核心插件底座可见性：记录 cordis-rs 宿主快照（回合统计 / 插件健康）
+            runCatching {
+                SecureLog.i("YuNianApplication", "Core plugins: ${com.yunian.ai.agent.AgentFacade.corePluginSnapshot(app)}")
+            }.onFailure { SecureLog.w("YuNianApplication", "corePluginSnapshot failed: ${it.message}") }
         }
 
         private fun clearUpdateIgnore(app: Application) {
