@@ -2,6 +2,7 @@ package com.yunian.ai.feature.localmodel
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Contents
@@ -10,6 +11,8 @@ import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.yunian.ai.common.perf.PerfBoost
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,6 +25,17 @@ class LocalAiService private constructor(private val context: Context) {
     private var engineModelId: String? = null
     private var refCount = 0
 
+    /**
+     * 本地 LLM 推理专用调度。
+     *
+     * 本地大模型推理是**纯 CPU 密集型**工作，原实现跑在 [Dispatchers.IO] 上存在调度失配：
+     * IO 池默认上限 64 线程，CPU 密集任务挤进去既难以被调度到大核、又放大了线程竞争与
+     * 上下文切换开销。这里改用 [Dispatchers.Default] 上并发度=1 的专用 view：
+     * 保证同一时刻只有一段推理在跑（引擎本身串行），且与 IO 池的阻塞任务相互隔离。
+     */
+    private val inferenceDispatcher: CoroutineDispatcher =
+        Dispatchers.Default.limitedParallelism(1, "local-llm")
+
     @Volatile
     private var _activeModel: LocalModel = LocalModelCatalog.default
     val activeModel: LocalModel get() = _activeModel
@@ -31,6 +45,9 @@ class LocalAiService private constructor(private val context: Context) {
         private const val TAG = "LocalAiService"
         private const val PREFS_NAME = "local_ai_engine_state"
         private const val KEY_ENGINE_DISABLED = "engine_disabled"
+
+        /** ADPF 推理目标工作时长：本地 LLM 单轮生成量级取 80ms（仅作系统提频参考）。 */
+        private const val LOCAL_INFERENCE_TARGET_NANOS = 80_000_000L
 
         @Volatile
         private var instance: LocalAiService? = null
@@ -124,7 +141,7 @@ class LocalAiService private constructor(private val context: Context) {
         historyPrompt: String,
         userPrompt: String,
         model: LocalModel = _activeModel
-    ): String = withContext(Dispatchers.IO) {
+    ): String = withContext(inferenceDispatcher) {
         if (!isNativeLibrarySupported) {
             throw IllegalStateException(
                 "Local model is not supported on this device (${Build.SUPPORTED_ABIS.firstOrNull()})"
@@ -177,17 +194,35 @@ class LocalAiService private constructor(private val context: Context) {
             )
         )
 
-        activeEngine.createConversation(config).use { conversation ->
-            val prompt = buildString {
-                if (historyPrompt.isNotBlank()) {
-                    appendLine(historyPrompt)
-                    appendLine()
-                }
-                append(userPrompt)
-            }.trim()
+        // ADPF：把本次推理线程声明为关键工作负载，交由系统提频/摆核。
+        // 该 API 是「一次性阻塞调用」（无分块回调），故在生成结束时上报一次总耗时，
+        // 频率克制；仅在支持时创建，否则零开销。
+        val perfSession = if (PerfBoost.isSupported) {
+            PerfBoost.createSession(
+                tag = "local-llm",
+                targetWorkDurationNanos = LOCAL_INFERENCE_TARGET_NANOS,
+                threadIds = intArrayOf(PerfBoost.currentThreadId()),
+            )
+        } else {
+            null
+        }
+        val inferenceStartedNanos = SystemClock.elapsedRealtimeNanos()
+        try {
+            activeEngine.createConversation(config).use { conversation ->
+                val prompt = buildString {
+                    if (historyPrompt.isNotBlank()) {
+                        appendLine(historyPrompt)
+                        appendLine()
+                    }
+                    append(userPrompt)
+                }.trim()
 
-            val response = conversation.sendMessage(prompt)
-            conversation.renderMessageIntoString(response).trim()
+                val response = conversation.sendMessage(prompt)
+                conversation.renderMessageIntoString(response).trim()
+            }
+        } finally {
+            perfSession?.reportActual(SystemClock.elapsedRealtimeNanos() - inferenceStartedNanos)
+            perfSession?.close()
         }
     }
 }
