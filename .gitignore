@@ -104,3 +104,6 @@ nul
 *.p12
 *.pfx
 /release.keystore
+
+# 本地参考项目副本（146M，不参与构建；此前仅存于 .git/info/exclude，换克隆即失效）
+/rikkahub/
