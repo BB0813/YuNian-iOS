@@ -57,9 +57,9 @@ with open('gradle.properties', 'a') as f:
 ### 2.4 环境变量（可选，推荐 gradle.properties）
 
 ```bash
-export YUNIAN_STORE_PASSWORD="3498762309"
+export YUNIAN_STORE_PASSWORD="<你的 store 口令，勿写入仓库>"
 export YUNIAN_KEY_ALIAS="your_alias"
-export YUNIAN_KEY_PASSWORD="3498762309"
+export YUNIAN_KEY_PASSWORD="<你的 key 口令，勿写入仓库>"
 ```
 
 ## 三、源码准备
@@ -271,9 +271,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 
 ```bash
 # 在 git-bash 中
-export YUNIAN_STORE_PASSWORD="3498762309"
+export YUNIAN_STORE_PASSWORD="<你的 store 口令，勿写入仓库>"
 export YUNIAN_KEY_ALIAS="your_alias"
-export YUNIAN_KEY_PASSWORD="3498762309"
+export YUNIAN_KEY_PASSWORD="<你的 key 口令，勿写入仓库>"
 
 rm -rf core/security/build app/build/outputs/apk/debug
 

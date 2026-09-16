@@ -1,9 +1,6 @@
 package com.yunian.ai.feature.mcp.transport
 
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.channelFlow
 import okhttp3.Response
 
 interface McpTransport {

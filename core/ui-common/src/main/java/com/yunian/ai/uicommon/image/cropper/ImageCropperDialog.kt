@@ -49,7 +49,7 @@ import com.yunian.ai.uicommon.image.engine.ImageTransform
 import com.yunian.ai.uicommon.image.engine.TransformState
 import com.yunian.ai.uicommon.image.viewer.AtomicImageViewer
 import com.yunian.ai.uicommon.theme.WeChatDarkBackground
-import kotlinx.coroutines.Dispatchers
+import com.yunian.ai.common.concurrent.AppDispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -169,7 +169,7 @@ fun ImageCropperDialog(
                 onCancel = onDismiss,
                 onConfirm = {
                     scope.launch {
-                        val result = withContext(Dispatchers.Default) {
+                        val result = withContext(AppDispatchers.cpu) {
                             coordinator.crop(bitmap, currentTransform)
                         }
                         onConfirm(result)

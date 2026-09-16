@@ -387,8 +387,8 @@ docs: 更新模块化架构文档
 
 感谢所有为予念做出贡献的开发者！
 
-<a href="https://github.com/linruoxo666/LianYu/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=linruoxo666/LianYu" />
+<a href="https://github.com/linruoxi666/LianYu/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=linruoxi666/LianYu" />
 </a>
 
 ---

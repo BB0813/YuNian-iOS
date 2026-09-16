@@ -1,7 +1,6 @@
 package com.yunian.ai.feature.chat.ui.screen
 import com.yunian.ai.uicommon.icon.AppIcons
 
-
 import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -56,7 +54,6 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import com.yunian.ai.feature.chat.R
 import com.yunian.ai.feature.chat.data.CompanionChatDetailSettings
 import com.yunian.ai.feature.chat.ui.viewmodel.ChatDetailSettingsViewModel
 import com.yunian.ai.feature.chat.ui.viewmodel.ChatDetailSettingsViewModelFactory
@@ -72,6 +69,8 @@ import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.component.glass.drawGlass
 import com.yunian.ai.uicommon.component.parseColorBackground
 import com.yunian.ai.uicommon.theme.AppTheme
+import com.yunian.ai.uicommon.component.SettingsRow
+import com.yunian.ai.uicommon.component.SettingsToggleRow
 
 @Composable
 fun ChatDetailScreen(
@@ -592,56 +591,6 @@ private fun SettingsCard(content: @Composable () -> Unit) {
             )
     ) {
         content()
-    }
-}
-
-@Composable
-private fun SettingsRow(title: String, subtitle: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
-    val colors = AppTheme.colors
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column {
-            Text(text = title, fontSize = 15.sp, color = colors.onSurface.copy(alpha = if (enabled) 1f else 0.4f))
-            if (subtitle != null) {
-                Text(text = subtitle, fontSize = 13.sp, color = colors.metadataContent.copy(alpha = if (enabled) 1f else 0.4f))
-            }
-        }
-        Text(text = "›", fontSize = 18.sp, color = colors.outline.copy(alpha = if (enabled) 1f else 0.4f))
-    }
-}
-
-@Composable
-private fun SettingsToggleRow(title: String, subtitle: String? = null, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    val colors = AppTheme.colors
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, fontSize = 15.sp, color = colors.onSurface)
-            if (subtitle != null) {
-                Text(text = subtitle, fontSize = 12.sp, color = colors.metadataContent)
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.primary,
-                checkedTrackColor = colors.primary.copy(alpha = 0.5f)
-            )
-        )
     }
 }
 

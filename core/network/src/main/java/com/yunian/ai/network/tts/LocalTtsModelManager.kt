@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import androidx.core.net.toUri
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.concurrent.AppDispatchers
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -46,7 +47,7 @@ class LocalTtsModelManager private constructor(private val context: Context) {
     private val preferences = LocalTtsPreferences(appContext)
     private val downloadManager =
         appContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     private var model: LocalTtsModel = LocalTtsCatalog.default
 

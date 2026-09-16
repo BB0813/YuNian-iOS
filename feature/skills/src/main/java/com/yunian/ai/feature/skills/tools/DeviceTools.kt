@@ -7,7 +7,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.provider.AlarmClock
 import androidx.core.app.NotificationCompat
@@ -15,7 +14,6 @@ import com.yunian.ai.common.SecureLog
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ToolRegistry
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject

@@ -1,7 +1,6 @@
 package com.yunian.ai.wechat
 
 import com.yunian.ai.wechat.ilink.IlinkHttpApi
-import com.yunian.ai.wechat.ilink.IlinkSessionExpiredException
 import com.yunian.ai.wechat.ilink.IlinkWireJson
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive

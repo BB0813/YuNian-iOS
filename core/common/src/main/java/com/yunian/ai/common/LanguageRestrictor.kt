@@ -1,6 +1,5 @@
 package com.yunian.ai.common
 
-import android.util.Log
 import java.util.regex.Pattern
 
 object LanguageRestrictor {

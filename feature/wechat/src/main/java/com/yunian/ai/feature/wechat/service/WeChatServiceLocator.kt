@@ -1,6 +1,7 @@
 package com.yunian.ai.feature.wechat.service
 
 import android.content.Context
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.feature.wechat.data.SdkWeChatTransport
 import com.yunian.ai.feature.wechat.data.WeChatChatBridge
@@ -11,7 +12,6 @@ import com.yunian.ai.wechat.inbox.WeChatInboxCoordinator
 import com.yunian.ai.wechat.ilink.IlinkClientManager
 import com.yunian.ai.wechat.outbox.WeChatOutboxCoordinator
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 
@@ -103,7 +103,7 @@ object WeChatServiceLocator {
     private fun channelScope(context: Context): CoroutineScope {
 
         return channelScope ?: synchronized(this) {
-            channelScope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO).also {
+            channelScope ?: CoroutineScope(SupervisorJob() + AppDispatchers.io).also {
                 channelScope = it
             }
         }

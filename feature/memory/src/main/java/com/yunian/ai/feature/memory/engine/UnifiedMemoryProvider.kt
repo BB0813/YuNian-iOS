@@ -2,11 +2,10 @@ package com.yunian.ai.feature.memory.engine
 
 import android.content.Context
 import android.util.Log
-import com.yunian.ai.common.DeviceIdProvider
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.model.DiaryEntry
 import com.yunian.ai.database.model.MemoryScope
-import com.yunian.ai.database.model.MemorySource
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.DiaryProvider
 import com.yunian.ai.database.repository.EmbeddingProvider
@@ -15,7 +14,6 @@ import com.yunian.ai.database.repository.UnifiedMemoryRepository
 import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.ServiceRegistry
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -38,7 +36,7 @@ class UnifiedMemoryProvider(
 
     private val lastCoreRecognition = ConcurrentHashMap<String, Long>()
 
-    private val memoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val memoryScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     private val repository: UnifiedMemoryRepository
         private val database = AppDatabase.getDatabase(context.applicationContext)

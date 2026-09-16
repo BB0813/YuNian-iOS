@@ -94,21 +94,24 @@ MODULE_ARCHITECTURE.pdf
 .playwright-mcp/
 nul
 
-# master 参考 worktree（迁移期临时，勿提交）
-_ref_master/
+# 项目根调试残留（防止再次污染仓库；根目录不放脚本，脚本请入 tools/）
+/_*.log
+/_*.txt
+/_*.diff
+/.gradle-*.log
+.superpowers/
 
-# Rust 构建产物（agent-native 交叉编译输出，勿提交）
-/agent-native/target/
+# 批次0 建议补充（原仅存于 .git/info/exclude，不随仓库共享）
+/releases/
+/*.log
+/bugreport-*.zip
 
-# 迁移期临时脚本 / 构建日志 / 文档备份（勿提交）
-_tmp_*
-_agent_*.log
-_agent_*.txt
-_cargo_*.log
-_q2_*.log
-_nb_*.log
-_ca_*.log
-_ap_*.log
-_aj_*.log
-docs/*.bak
-*.md.bak
+# 签名密钥严禁入库（安全事件 2026-09-16）
+*.jks
+*.keystore
+*.p12
+*.pfx
+/release.keystore
+
+# 本地参考项目副本（146M，不参与构建；此前仅存于 .git/info/exclude，换克隆即失效）
+/rikkahub/

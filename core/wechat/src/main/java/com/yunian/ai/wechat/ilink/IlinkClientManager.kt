@@ -1,6 +1,7 @@
 package com.yunian.ai.wechat.ilink
 
 import android.util.Log
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.wechat.wire.WireWeChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +46,7 @@ class IlinkClientManager(
 
     /** 每进程一次的 channel_version 异步刷新门禁（fire-and-forget，不阻塞登录/收发路径）。 */
     private val channelVersionRefreshTriggered = AtomicBoolean(false)
-    private val channelVersionRefreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val channelVersionRefreshScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     /** 二维码登录的内存状态（不再有 SDK 客户端对象；轮询 host 可随 IDC 重定向切换）。 */
     @Volatile

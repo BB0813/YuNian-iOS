@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.yunian.ai.common.ContentFilter
 import com.yunian.ai.database.AppDatabase
-import com.yunian.ai.database.model.KeywordEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean

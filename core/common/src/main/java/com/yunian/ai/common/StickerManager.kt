@@ -9,7 +9,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import com.yunian.ai.common.image.ImageFormatSniffer
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 class StickerManager(private val context: Context) {
@@ -265,17 +268,48 @@ class StickerManager(private val context: Context) {
             if (entries.size >= MAX_IMPORTED_COUNT) {
                 return@withContext Result.failure(IllegalStateException("自定义表情已达上限 ${MAX_IMPORTED_COUNT} 个，请先清理不需要的表情"))
             }
-            val extension = resolveImageExtension(uri)
-                ?: return@withContext Result.failure(IllegalArgumentException("仅支持图片文件（png/jpg/gif/webp）"))
+            // Bug2：一次打开 + mark/reset —— 先嗅探文件头（provider 无关），再完整拷贝。
+            // 旧实现先 resolveImageExtension（仅 DISPLAY_NAME/MIME）再二次 openInputStream；
+            // SAF/微信/QQ/华为相册等 provider 不给后缀或返回 octet-stream 时，
+            // 合法 jpg/png 会被误判为「仅支持图片文件」直接拒绝。
+            val rawInput = context.contentResolver.openInputStream(uri)
+                ?: return@withContext Result.failure(IllegalStateException("读取图片失败"))
+            val bufferedInput = BufferedInputStream(rawInput)
+            val header = try {
+                bufferedInput.mark(SNIFF_MARK_LIMIT)
+                val sniffed = readHeader(bufferedInput, ImageFormatSniffer.HEADER_SIZE)
+                bufferedInput.reset()
+                sniffed
+            } catch (e: Exception) {
+                runCatching { bufferedInput.close() }
+                return@withContext Result.failure(IllegalStateException("读取图片失败"))
+            }
+
+            // 三级判定：DISPLAY_NAME 后缀 → MIME 映射 → 魔数嗅探
+            val nameExt = resolveExtensionFromDisplayName(uri)
+            val mimeExt = resolveExtensionFromMime(uri)
+            val sniffExt = ImageFormatSniffer.detect(header)
+            val extension = resolveImageExtension(nameExt, mimeExt, sniffExt)
+            if (extension == null || extension !in IMAGE_EXTENSIONS) {
+                runCatching { bufferedInput.close() }
+                val detected = nameExt ?: mimeExt ?: sniffExt ?: "未知"
+                return@withContext Result.failure(
+                    IllegalArgumentException("无法识别的图片格式（检测到: $detected，仅支持 png/jpg/gif/webp）")
+                )
+            }
 
             val fileName = "custom_${System.currentTimeMillis()}_${(0..999).random()}.$extension"
             val destFile = File(importedDir, fileName)
-            val input = context.contentResolver.openInputStream(uri)
-                ?: return@withContext Result.failure(IllegalStateException("读取图片失败"))
-            input.use { source ->
-                destFile.outputStream().use { output ->
-                    source.copyTo(output)
+            // reset 后流已回到头部，拷贝内容完整（嗅探不吃掉头部）
+            try {
+                bufferedInput.use { source ->
+                    destFile.outputStream().use { output ->
+                        source.copyTo(output)
+                    }
                 }
+            } catch (e: Exception) {
+                destFile.delete()
+                return@withContext Result.failure(IllegalStateException("保存图片失败: ${e.message}"))
             }
 
             val entry = StickerRuleStore.Entry(
@@ -642,10 +676,27 @@ class StickerManager(private val context: Context) {
             .map { it.take(12) }
     }
 
-    /** 解析导入图片的扩展名：优先 DISPLAY_NAME 后缀，其次 MIME 映射 */
-    private fun resolveImageExtension(uri: Uri): String? {
-        var extension: String? = null
-        try {
+    /**
+     * 三级解析导入图片的扩展名（Bug2 修复 + P2 内容优先）：
+     *  ① DISPLAY_NAME 后缀（jpeg/jfif/jpe 归一为 jpg）
+     *  ② MIME 映射（含 image/xxx 已知子类型）
+     *  ③ 魔数嗅探兜底 [sniffedExtension]（来自文件头，与 provider 无关）
+     *
+     * 内容优先于文件名：三级信号**只接受白名单扩展名**（png/jpg/gif/webp）；
+     * 后缀 / MIME 若不是白名单（如误命名的 .bmp / .heic），不短路、继续让后续信号说话。
+     * 返回 null 表示白名单内均无法识别，由调用方 [importStickerFile] 依 [IMAGE_EXTENSIONS] 拒绝。
+     */
+    private fun resolveImageExtension(
+        displayNameExtension: String?,
+        mimeExtension: String?,
+        sniffedExtension: String?
+    ): String? {
+        return selectStickerImageExtension(displayNameExtension, mimeExtension, sniffedExtension)
+    }
+
+    /** ① DISPLAY_NAME 后缀解析：未知后缀返回 null（交棒给 MIME / 魔数）。 */
+    private fun resolveExtensionFromDisplayName(uri: Uri): String? {
+        return try {
             context.contentResolver.query(
                 uri,
                 arrayOf(OpenableColumns.DISPLAY_NAME),
@@ -654,29 +705,50 @@ class StickerManager(private val context: Context) {
                 if (cursor.moveToFirst()) {
                     val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (idx >= 0) {
-                        val candidate = cursor.getString(idx)
-                            ?.substringAfterLast('.', "")
-                            ?.lowercase()
-                        if (!candidate.isNullOrBlank() && candidate in IMAGE_EXTENSIONS) {
-                            extension = candidate
-                        }
-                    }
-                }
+                        val candidate = cursor.getString(idx)?.substringAfterLast('.', "")
+                        normalizeStickerImageExtension(candidate)
+                    } else null
+                } else null
             }
         } catch (e: Exception) {
             SecureLog.w("StickerManager", "query display name failed: ${e.message}")
+            null
         }
-        if (extension == null) {
-            val mime = try { context.contentResolver.getType(uri) } catch (e: Exception) { null }
-            extension = when (mime) {
-                "image/png" -> "png"
-                "image/jpeg", "image/jpg" -> "jpg"
-                "image/gif" -> "gif"
-                "image/webp" -> "webp"
-                else -> null
+    }
+
+    /** ② MIME 映射：provider 返回的 content type → 扩展名。 */
+    private fun resolveExtensionFromMime(uri: Uri): String? {
+        val mime = try { context.contentResolver.getType(uri) } catch (e: Exception) { null }
+        return mimeToExtension(mime)
+    }
+
+    /** MIME → 扩展名（含 image/xxx 已知子类型；未知返回 null）。 */
+    private fun mimeToExtension(mime: String?): String? {
+        return when (mime?.lowercase()?.substringBefore(';')?.trim()) {
+            "image/png" -> "png"
+            "image/jpeg", "image/jpg", "image/pjpeg" -> "jpg"
+            "image/gif" -> "gif"
+            "image/webp" -> "webp"
+            "image/bmp", "image/x-ms-bmp" -> "bmp"
+            "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence" -> "heic"
+            else -> null
+        }
+    }
+
+    /** 读取文件头（最多 [maxBytes] 字节），不足则返回实际长度；读取异常不抛出，返回已读部分。 */
+    private fun readHeader(input: InputStream, maxBytes: Int): ByteArray {
+        val buffer = ByteArray(maxBytes)
+        var offset = 0
+        while (offset < maxBytes) {
+            val read = try {
+                input.read(buffer, offset, maxBytes - offset)
+            } catch (e: Exception) {
+                -1
             }
+            if (read <= 0) break
+            offset += read
         }
-        return extension
+        return if (offset == maxBytes) buffer else buffer.copyOf(offset)
     }
 
     private fun isImageFile(filename: String): Boolean {
@@ -688,7 +760,11 @@ class StickerManager(private val context: Context) {
         /** 自定义表情落盘软上限（主理人拍板：200 条） */
         const val MAX_IMPORTED_COUNT = 200
 
-        private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp")
+        /** 导入白名单（其余格式如 heic/bmp 仍按不支持处理，但拒绝提示明确）；与 [STICKER_IMAGE_WHITELIST] 同源 */
+        private val IMAGE_EXTENSIONS = STICKER_IMAGE_WHITELIST
+
+        /** 嗅探头部读取上限（mark/reset 的 readlimit，需 ≥ 魔数所需字节数） */
+        private const val SNIFF_MARK_LIMIT = 64
 
         @Volatile
         private var instance: StickerManager? = null
@@ -714,3 +790,36 @@ data class StickerInfo(
      */
     val tags: List<String>? = null
 )
+
+// ================== 导入格式判定（纯函数，内容优先于文件名，便于 JVM 单测） ==================
+
+/** 导入白名单（大小写已归一；jpeg 会先归并为 jpg）。 */
+internal val STICKER_IMAGE_WHITELIST = setOf("png", "jpg", "jpeg", "gif", "webp")
+
+/** 已知图片后缀（含 bmp/heic/heif，仅用于「检测到」提示；非白名单者不参与接受）。 */
+private val STICKER_KNOWN_IMAGE_EXTENSIONS = setOf("png", "jpg", "gif", "webp", "bmp", "heic", "heif")
+
+/** 后缀别名 → 规范后缀。 */
+private val STICKER_EXTENSION_ALIASES = mapOf("jpeg" to "jpg", "jfif" to "jpg", "jpe" to "jpg")
+
+/** 后缀归一：统一小写、别名映射（jpeg/jfif/jpe → jpg），仅保留已知图片后缀，其余返回 null。 */
+internal fun normalizeStickerImageExtension(raw: String?): String? {
+    val lower = raw?.trim()?.lowercase()?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
+        ?: return null
+    val normalized = STICKER_EXTENSION_ALIASES[lower] ?: lower
+    return normalized.takeIf { it in STICKER_KNOWN_IMAGE_EXTENSIONS }
+}
+
+/**
+ * 三级内容优先选择：DISPLAY_NAME 后缀 → MIME → 魔数嗅探，**只接受白名单扩展名**。
+ *
+ * 任一级若不是白名单（如误命名的 `.bmp` / `.heic`），**不短路**，继续让后续信号（最终是魔数嗅探）说话。
+ * 例：真实 JPEG 但名为 `x.bmp` → 后缀 bmp（跳过）→ 嗅探 jpg → 返回 `jpg`。
+ * 三者都不是白名单则返回 null（交由调用方按「无法识别」拒绝）。
+ */
+internal fun selectStickerImageExtension(
+    displayNameExtension: String?,
+    mimeExtension: String?,
+    sniffedExtension: String?
+): String? = listOf(displayNameExtension, mimeExtension, sniffedExtension)
+    .firstOrNull { it != null && it in STICKER_IMAGE_WHITELIST }
