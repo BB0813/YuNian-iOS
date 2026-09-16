@@ -39,7 +39,6 @@ import com.yunian.ai.domain.ImageGenerationProvider
 import com.yunian.ai.domain.CoffeeOrderProvider
 import com.yunian.ai.domain.BuiltinCloudAccessPolicy
 import com.yunian.ai.domain.imagegen.ImageGenService
-import com.yunian.ai.domain.LocalModelProvider
 import com.yunian.ai.domain.LorebookProvider
 import com.yunian.ai.domain.McpManager
 import com.yunian.ai.domain.MemoryProvider
@@ -298,7 +297,9 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             //   · warmUp 延迟 5s 后台预热（提前 dlopen liblianyu_agent.so，消除首次对话卡顿）。
             //   · registerGlobalTools 注册委派/汇聚工具（执行端在 AgentToolHost 特判分支）。
             initAgentRuntime(app)
-            ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
+            // D4：本地模型（feature:localmodel）已删除 → LLM 安全分类器退役；
+            // ContentFilter 保留正则 + BayesianClassifier(fallback) 两重判定（安全基线不回退）。
+            ContentFilter.setSafetyClassifier(null)
             PerformanceTrace.markStartupStage("ib_safety_classifier")
             bgScope.launch { initSafetyVerifier(app) }
 
@@ -565,9 +566,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 UserRepository(app)
             }
 
-            ServiceRegistry.registerSingleton(LocalModelProvider::class.java) {
-                com.yunian.ai.feature.localmodel.LocalModelProviderImpl(app)
-            }
             ServiceRegistry.registerSingleton(UserProfileProvider::class.java) {
 
                 com.yunian.ai.feature.profile.UserProfileProviderImpl(
@@ -682,7 +680,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             // ── Q6 技能体系收敛：把本地技能资产桥接给 Rust SkillSelector ──
             // 必须在首个 Agent 回合（首次 SkillSelector 创建）之前注入：
             // 之后 Rust 才能按「L1 目录 / L2 load_skill」渐进式披露本地 assets/skills
-            // 与 filesDir/external_skills（含技能市场新装技能），从而退役 use_skill。
+            // 与 filesDir/external_skills（含技能市场新装技能），从而退役 use_skill（Q6 已完成）。
             runCatching {
                 com.yunian.ai.agent.AgentFacade.installSkillStoreProvider(
                     com.yunian.ai.feature.skills.repository.SkillStoreAdapter(
@@ -705,15 +703,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             com.yunian.ai.feature.skills.tools.registerAccessibilityTools()
             // Shizuku 特权通道状态检测
             com.yunian.ai.feature.skills.tools.registerShizukuTools(app)
-            // 刷新技能索引：把可用技能清单注入系统提示词，AI 才会自主调用 use_skill
-            bgScope.launch {
-                runCatching {
-                    com.yunian.ai.feature.skills.tools.refreshSkillIndex(
-                        ServiceRegistry.getOrThrow(SkillManager::class.java)
-                    )
-                }.onFailure { SecureLog.e("YuNianApplication", "Skill index refresh failed", it) }
-            }
-
             com.yunian.ai.feature.chat.tools.ConversationTools.registerAll(
                 AppDatabase.getDatabase(app)
             )
@@ -776,34 +765,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         private fun clearUpdateIgnore(app: Application) {
             app.getSharedPreferences("update_config", android.content.Context.MODE_PRIVATE)
                 .edit().remove("ignored_version").apply()
-        }
-
-        private class LazyLocalSafetyClassifier(
-            app: Application
-        ) : SafetyClassifier {
-            private val appContext = app.applicationContext
-            private var delegate: SafetyClassifier? = null
-
-            override suspend fun classify(text: String): ContentFilter.ViolationLevel {
-                val classifier = delegate ?: buildClassifier().also { delegate = it }
-                    ?: return ContentFilter.ViolationLevel.NONE
-                return classifier.classify(text)
-            }
-
-            private fun buildClassifier(): SafetyClassifier? {
-                return runCatching {
-                    if (!com.yunian.ai.feature.localmodel.LocalAiService.isNativeLibrarySupported) return null
-                    val svc = com.yunian.ai.feature.localmodel.LocalAiService.getInstance(appContext)
-                    val model = com.yunian.ai.feature.localmodel.LocalModelCatalog.all
-                        .firstOrNull { it.modelFile(appContext).exists() }
-                        ?: return null
-                    svc.setActiveModel(model)
-                    com.yunian.ai.feature.localmodel.LocalSafetyClassifier(svc)
-                }.getOrElse {
-                    SecureLog.e("YuNianApplication", "Lazy safety classifier init failed", it)
-                    null
-                }
-            }
         }
 
         private fun applyStoredLanguage(app: Application) {

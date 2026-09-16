@@ -61,7 +61,7 @@ fun SkillsScreen(onNavigateBack: () -> Unit) {
                     Icon(AppIcons.Book, null, Modifier.size(64.dp), tint = colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                     Spacer(Modifier.height(16.dp))
                     Text("暂无可用技能", color = colorScheme.onSurfaceVariant, fontSize = 16.sp)
-                    Text("AI 可通过 use_skill 工具加载技能文档，获得专业领域的操作方法", color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
+                    Text("AI 可通过 load_skill 工具加载技能文档，获得专业领域的操作方法", color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
                 }
             }
         } else {
