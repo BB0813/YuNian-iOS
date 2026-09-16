@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
+import com.yunian.ai.common.concurrent.DuplicateSendGuard
 
 class GroupChatViewModel(
     application: Application,
@@ -169,8 +170,11 @@ class GroupChatViewModel(
         }
     }
 
-    fun sendMessage(content: String) {
+    // 防连击：同内容 2 秒窗口内重复提交静默忽略（第一条已发出，双击/回车连按误触）
+    private val duplicateSendGuard = DuplicateSendGuard()
 
+    fun sendMessage(content: String) {
+        if (duplicateSendGuard.shouldReject(content)) return
         if (com.yunian.ai.common.BanManager.isBanned(getApplication())) return
 
         // P1 收尾：输入安全校验是 CPU 较重的同步逻辑（约 100+ 正则 + 语义预处理），

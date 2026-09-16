@@ -70,6 +70,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import com.yunian.ai.common.concurrent.DuplicateSendGuard
 
 class ChatGenerationManager private constructor(
     private val application: Application,
@@ -268,7 +269,11 @@ class ChatGenerationManager private constructor(
         companionInfoProvider = { latestCompanionInfo }
     } }
 
+    // 防连击：同内容 2 秒窗口内重复提交静默忽略（第一条已发出，双击/回车连按误触）
+    private val duplicateSendGuard = DuplicateSendGuard()
+
     fun sendText(content: String) {
+        if (duplicateSendGuard.shouldReject(content)) return
         startMessageConsumer()
         // 新一轮对话开始：清掉上一轮的工具过程气泡（常驻展示一轮）
         _toolActivity.value = emptyList()
