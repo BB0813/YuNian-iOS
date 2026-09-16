@@ -97,8 +97,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunian.ai.database.model.ApiConfig
 import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.database.model.ApiProviderPreset
-import com.yunian.ai.domain.ModelState
-import com.yunian.ai.domain.ModelStatus
 import com.yunian.ai.feature.settings.R
 import com.yunian.ai.feature.settings.ui.viewmodel.SettingsViewModel
 import com.yunian.ai.uicommon.theme.PetalPrimary
@@ -114,18 +112,6 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 import androidx.compose.foundation.isSystemInDarkTheme
 
-/**
- * 本地模型卡片 UI 开关。
- *
- * 本地模型的实际使用体验较差，暂时隐藏该区域入口；为保证「不影响任何现有功能」，
- * 逻辑层（SettingsViewModel 的 modelStates / downloadModel / selectModel / enableGemma /
- * disableGemma / deleteGemma 等）与数据流、localmodel 模块、ServiceRegistry 注册均保持不变。
- * 仅隐藏 UI 入口，隐藏时零渲染、零占位（连专属的 16dp Spacer 一并隐藏，避免底部留白）。
- *
- * 如需恢复入口，将本常量改为 true 即可（组件 ModelSelectionCard 仍完整保留）。
- */
-private const val SHOW_LOCAL_MODEL_CARDS = false
-
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
@@ -133,8 +119,6 @@ fun SettingsScreen(
 ) {
     val configs by viewModel.configs.collectAsState(initial = emptyList())
     val providerPresets by viewModel.providerPresets.collectAsState(initial = emptyList())
-    val modelStates by viewModel.modelStates.collectAsState()
-    val localModelState by viewModel.localModelState.collectAsState()
     val fetchedModels by viewModel.fetchedModels.collectAsState()
     val modelFetchStates by viewModel.modelFetchStates.collectAsState()
     val balanceInfo by viewModel.balanceInfo.collectAsState()
@@ -185,7 +169,6 @@ fun SettingsScreen(
     val pageBackdrop = LocalPageBackdrop.current
 
     LaunchedEffect(Unit) {
-        viewModel.refreshLocalModel()
         viewModel.refreshConnectionStatus()
         viewModel.refreshPartnerQuota()
         delay(100)
@@ -453,37 +436,6 @@ fun SettingsScreen(
                         tint = textSecondaryColor,
                         modifier = Modifier.size(20.dp)
                     )
-                }
-            }
-
-            if (SHOW_LOCAL_MODEL_CARDS) {
-                Spacer(modifier = Modifier.height(16.dp))
-
-                AnimatedVisibility(
-                    visible = isVisible,
-                    enter = fadeIn(tween(400, delayMillis = 250)) +
-                            slideInVertically(tween(400, delayMillis = 250)) { it / 4 }
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        val modelEntries = modelStates.entries.toList()
-                        modelEntries.forEach { (modelId, state) ->
-                            ModelSelectionCard(
-                                state = state,
-                                onSelect = { viewModel.selectModel(modelId) },
-                                onDownload = { viewModel.downloadModel(modelId) },
-                                onCancel = { viewModel.cancelGemmaDownload() },
-                                onEnable = { viewModel.enableGemma() },
-                                onDisable = { viewModel.disableGemma() },
-                                onDelete = { viewModel.deleteGemma() },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
                 }
             }
 

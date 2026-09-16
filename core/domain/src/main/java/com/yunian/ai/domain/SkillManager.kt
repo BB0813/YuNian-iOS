@@ -43,8 +43,3 @@ interface SkillManager {
     /** 是否为外部安装的技能（内置技能返回 false） */
     suspend fun isExternalSkill(name: String): Boolean = false
 }
-
-data class UseSkillArgs(
-    val name: String,
-    val path: String? = null
-)

@@ -42,7 +42,7 @@ include(":feature:memory")
 include(":feature:notification")
 include(":feature:profile")
 include(":feature:settings")
-include(":feature:localmodel")
+// D4：feature:localmodel 已删除（本地推理统一由 core:agent 的 Rust Cordis Agent 承担）
 include(":feature:wechat")
 include(":feature:qqbot")
 include(":feature:backup")

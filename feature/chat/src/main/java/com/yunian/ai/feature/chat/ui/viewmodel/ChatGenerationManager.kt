@@ -29,7 +29,6 @@ import com.yunian.ai.domain.AiMessageRole
 import com.yunian.ai.domain.AiMessageType
 import com.yunian.ai.domain.AiOperationalMessages
 import com.yunian.ai.domain.AiServiceProvider
-import com.yunian.ai.domain.LocalModelProvider
 import com.yunian.ai.domain.imagegen.ImageGenService
 import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.ServiceRegistry
@@ -959,8 +958,9 @@ class ChatGenerationManager private constructor(
             // ── 文本主路径：全面 Agent 化（Cordis Agent 架构） ──
             // 决策（分段/表情/工具/确认）全部下沉 Rust `AgentFacade.runTurn`；
             // 本方法只负责：运行时配置热同步 → 组装请求 → 消费事件流 → 落库。
-            // vision（imagePath != null）与本地模型（D4 待退役）仍保留各自分支。
-            if (imagePath == null && !isLocalModelEnabled()) {
+            // vision（imagePath != null）仍保留各自分支（图片理解尚未下沉）。
+            // D4：本地模型路径已随 `feature:localmodel` 删除，不再存在分支。
+            if (imagePath == null) {
                 val activeApi = syncAgentRuntimeConfig()
                 val conversationId = java.util.UUID.randomUUID().toString()
                 val (agentTools, availableTools, orchestrationOptions) = buildAgentTools(
@@ -1137,7 +1137,7 @@ class ChatGenerationManager private constructor(
             }
 
             // OpenMinis 模式：只要不是图片/本地模型路径就带工具，由模型自主决定是否调用
-            val useTools = imagePath == null && !isLocalModelEnabled() && ToolRegistry.isNotEmpty()
+            val useTools = imagePath == null && ToolRegistry.isNotEmpty()
             val streamEvents = when {
                 imagePath != null -> {
                     val aiResponse = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
@@ -1153,18 +1153,6 @@ class ChatGenerationManager private constructor(
                         turnId = pendingTurn.turnId,
                         reasoning = aiResponse.reasoningContent,
                         content = aiResponse.content,
-                        startedAtMs = requestStartedAt,
-                        completedAtMs = System.currentTimeMillis(),
-                    )
-                }
-                isLocalModelEnabled() -> {
-                    val content = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                        generateWithLocalModel(companion, modelHistory, stickerProbability, ntpTimeEnabled)
-                    } ?: throw java.util.concurrent.TimeoutException("Local model timeout")
-                    NonStreamingAssistantStreamAdapter.fromCompleted(
-                        turnId = pendingTurn.turnId,
-                        reasoning = null,
-                        content = content,
                         startedAtMs = requestStartedAt,
                         completedAtMs = System.currentTimeMillis(),
                     )
@@ -1290,7 +1278,7 @@ class ChatGenerationManager private constructor(
                 enabled = imageGenEnabled,
             )
 
-            val enableBubbleChain = imagePath == null && !isLocalModelEnabled()
+            val enableBubbleChain = imagePath == null
             val followUpBubbles = if (enableBubbleChain) {
                 bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
                     val appendedHistory = modelHistory + alreadyGenerated.map { text ->
@@ -1477,137 +1465,6 @@ class ChatGenerationManager private constructor(
 
     private fun broadcastWeChatMessage(messageId: Long, finalContent: String? = null) {
         WeChatProactiveSync.enqueue(companionId, messageId, finalContent)
-    }
-
-    private suspend fun isLocalModelEnabled(): Boolean {
-        val provider = ServiceRegistry.get(LocalModelProvider::class.java) ?: return false
-        return provider.isAvailable()
-    }
-
-    private suspend fun generateWithLocalModel(
-        companion: CompanionEntity,
-        history: List<AiChatMessage>,
-        stickerProbability: Int,
-        ntpTimeEnabled: Boolean = false
-    ): String {
-
-        val sortedHistory = history.sortedBy { it.timestamp }
-        val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-        val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, 50).take(500)
-        val role = userRepository?.selectedRole?.value ?: CompanionRole.GIRLFRIEND
-        val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-        val recentAiTexts = sortedHistory
-            .asReversed()
-            .asSequence()
-            .filter { !it.isFromUser }
-            .take(ChatConstants.ENV_ANCHOR_RECENT_LOOKBACK)
-            .map { it.content }
-            .toList()
-        val allowEnvAnchor = envAnchorStore.allowEnvAnchor(companion.id, recentAiTexts)
-        val dialogueContext = sortedHistory
-            .takeLast(12)
-            .joinToString("\n") { msg ->
-                val speaker = if (msg.isFromUser) "用户" else companion.name
-                "$speaker：${msg.content.take(200)}"
-            }
-            .take(1200)
-        val personality = companion.personality?.take(300).orEmpty()
-        val rawPrompt = companion.rawPrompt?.take(300).orEmpty()
-        val customSystem = companion.systemPrompt?.take(4000).orEmpty()
-        val systemPrompt = buildString {
-            appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
-            appendLine()
-            appendLine(com.yunian.ai.network.AiContextTools.buildDeliveryBudgetPriority(lastUserMessage))
-            personality.takeIf { it.isNotBlank() }?.let { appendLine("性格：$it") }
-            companion.speakingStyle?.take(100)?.takeIf { it.isNotBlank() }?.let { appendLine("说话风格：$it") }
-            companion.backstory?.take(200)?.takeIf { it.isNotBlank() }?.let { appendLine("背景：$it") }
-            if (rawPrompt.isNotBlank() &&
-                rawPrompt != personality &&
-                !personality.contains(rawPrompt) &&
-                !rawPrompt.contains(personality)
-            ) {
-                appendLine("补充设定：$rawPrompt")
-            }
-            if (customSystem.isNotBlank()) {
-                appendLine("自定义角色指令：$customSystem")
-            }
-            if (memoryContext.isNotBlank()) appendLine("\n关于用户的记忆：$memoryContext")
-            if (dialogueContext.isNotBlank()) {
-                appendLine("\n最近对话（仅供参考，不要复读系统错误或自言自语）：")
-                appendLine(dialogueContext)
-            }
-            appendLine()
-            appendLine("回复规则：")
-            appendLine("1. 单次单动作：每轮只做一个核心社交意图（纯共情/纯反问/纯表态/纯答问；求方案才给一步），完整说完。严禁问好+共情+反问+方案打包，也严禁半截残句。")
-            appendLine("2. 长度服从动作数：闲聊通常一句完整口语即可；解释可稍长。不要为凑字再塞第二个动作；写完自查意图数，不要按 30 字砍成残句。")
-            appendLine("3. 活人语气，自然口语化，不要AI腔。")
-            appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
-            appendLine("5. 不要重复同样的话。")
-            appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
-            appendLine("7. 每条回复默认 = 一条气泡：把同一动作用一句完整口语说完并收尾；如果用户明确要求发多条、或你的回复由多条独立短消息组成，把每条消息写成一句完整的话并用标点（。！？～）收尾，系统会按句末标点自动拆成多条气泡连发。")
-            if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
-            RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
-            if (stickerProbability > 0) {
-                appendLine("12. 表情包：可按语境偶尔使用[名称]格式。")
-                // P5 修复：本地模型路径注入自定义表情语义清单（修「本地模型不知道有哪些表情」）；
-                // gated：概率=0 或未导入任何自定义表情时整段不拼，保持提示词零变化
-                val customStickers = stickerManager.getPromptStickers().filter { it.isCustom }
-                if (customStickers.isNotEmpty()) {
-                    appendLine("13. 用户还教了你专属表情包，含义如下，请在语境匹配时优先使用：")
-                    com.yunian.ai.common.CustomStickerPrompt.buildLines(customStickers).forEach { appendLine("    $it") }
-                }
-            }
-            appendLine("\n记住：你不是AI，你是活人。直接回复内容，不要输出思考过程。")
-            appendLine()
-            appendLine(com.yunian.ai.network.AiContextTools.buildConversationTimingRules())
-            appendLine(com.yunian.ai.network.AiContextTools.buildDeliveryBudgetRules())
-
-            val phaseHistory = sortedHistory.map { msg ->
-                com.yunian.ai.database.model.ChatMessage(
-                    companionId = companion.id,
-                    content = msg.content,
-                    isFromUser = msg.isFromUser,
-                    timestamp = msg.timestamp,
-                )
-            }
-            val phase = com.yunian.ai.network.ConversationPhaseDetector.detect(phaseHistory)
-            val effectivePhase =
-                if (!allowEnvAnchor && phase == com.yunian.ai.network.ConversationPhase.OPENING) {
-                    com.yunian.ai.network.ConversationPhase.TOPIC
-                } else {
-                    phase
-                }
-            appendLine(com.yunian.ai.network.AiContextTools.buildConversationPhaseSection(effectivePhase))
-            appendLine(com.yunian.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled, effectivePhase))
-            val cooldown = EnvAnchorCooldown.buildCooldownDirective(allowEnvAnchor)
-            if (cooldown.isNotBlank()) {
-                appendLine()
-                appendLine(cooldown)
-            }
-            appendLine()
-            appendLine(com.yunian.ai.network.AiContextTools.buildDeliveryBudgetEndCap(lastUserMessage))
-        }
-        val localProvider = ServiceRegistry.get(LocalModelProvider::class.java)
-            ?: throw Exception(application.getString(R.string.api_error_generic))
-        val response = localProvider.generateResponse(prompt = lastUserMessage.take(2000), context = systemPrompt)
-
-        val cleaned = com.yunian.ai.network.ResponsePostProcessor
-            .trimIdleEmotionOverDelivery(
-                com.yunian.ai.network.ResponsePostProcessor.stripThinkingContent(response),
-                lastUserMessage,
-            )
-            .ifBlank {
-                SecureLog.w(
-                    "ChatGenerationManager",
-                    "Local model returned only thinking/empty after strip, rawLen=${response.length}",
-                )
-                ""
-            }
-        if (EnvAnchorCooldown.looksLikeEnvCare(cleaned)) {
-            envAnchorStore.markEnvAnchor(companion.id)
-            SecureLog.d("ChatGenerationManager", "Marked env anchor companion=${companion.id} (local)")
-        }
-        return cleaned
     }
 
     private fun CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
