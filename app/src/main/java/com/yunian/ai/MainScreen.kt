@@ -31,6 +31,7 @@ import com.yunian.ai.common.BatteryOptimizationHelper
 import com.yunian.ai.common.HardwareInfo
 import com.yunian.ai.common.PerformanceTrace
 import com.yunian.ai.feature.chat.data.ChatDetailSettingsStore
+import com.yunian.ai.common.update.UpdateMode
 import com.yunian.ai.feature.update.AppUpdateManager
 import com.yunian.ai.uicommon.component.ChatBackgroundCache
 import com.yunian.ai.uicommon.component.UpdateDialog
@@ -235,19 +236,22 @@ fun MainScreen(mainActivity: Activity) {
             }
         }
 
-        if (showUpdateDialog && updateInfo != null) {
+        val activeUpdate = updateInfo
+        if (showUpdateDialog && activeUpdate != null) {
             UpdateDialog(
-                updateInfo = updateInfo!!,
+                updateInfo = activeUpdate,
                 downloadProgress = downloadProgress,
                 onUpdate = {
-                    updateInfo?.let { info ->
-                        if (info.updateUrl.isNotEmpty()) {
-                            if (updateManager.checkInstallPermission()) updateManager.startDownload(info.updateUrl)
-                            else updateManager.requestInstallPermission(valActivity)
-                        }
+                    if (!updateManager.checkInstallPermission()) {
+                        updateManager.requestInstallPermission(valActivity)
+                    } else {
+                        updateManager.startDownload(activeUpdate, UpdateMode.IMMEDIATE)
                     }
                 },
-                onCancel = { updateManager.ignoreThisVersion() },
+                onBackgroundUpdate = {
+                    updateManager.startDownload(activeUpdate, UpdateMode.BACKGROUND)
+                },
+                onNotNow = { updateManager.ignoreThisVersion() },
                 onDismiss = { updateManager.dismissUpdate() }
             )
         }
