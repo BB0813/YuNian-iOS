@@ -14,11 +14,11 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.domain.AutomationTickProvider
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.feature.notification.R
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -30,7 +30,7 @@ open class CompanionKeepAliveService : Service() {
 
     @Volatile private var stopRequested = false
     private val handler = Handler(Looper.getMainLooper())
-    private val tickScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val tickScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
     private val wakeLockRunnable = object : Runnable {
         override fun run() {
             acquireWakeLock()

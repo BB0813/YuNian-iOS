@@ -3,10 +3,8 @@ package com.yunian.ai.uicommon.component
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import kotlinx.coroutines.CoroutineScope
+import com.yunian.ai.common.ApplicationScopeProvider
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.io.File
@@ -27,8 +25,6 @@ import java.util.concurrent.ConcurrentHashMap
  * 5. [getCachedBitmap] / [loadBitmap] / [preload] / [clear] 保留，向后兼容既有调用方。
  */
 object ChatBackgroundCache {
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private const val MAX_ENTRY_COUNT = 4
     private const val MAX_TOTAL_BYTES = 24 * 1024 * 1024L
@@ -83,7 +79,7 @@ object ChatBackgroundCache {
 
         val appContext = context.applicationContext
         val deferred = inFlight.computeIfAbsent(key) {
-            scope.async {
+            ApplicationScopeProvider.scope.async {
                 val bitmap = decode(appContext, key)
                 if (bitmap != null) putInCache(key, bitmap)
                 bitmap
@@ -100,7 +96,7 @@ object ChatBackgroundCache {
     fun preload(context: Context, key: String) {
         if (!isCustomBackground(key)) return
         val appContext = context.applicationContext
-        scope.launch { load(appContext, key) }
+        ApplicationScopeProvider.scope.launch { load(appContext, key) }
     }
 
     /**

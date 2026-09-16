@@ -1,12 +1,12 @@
 package com.yunian.ai.feature.qqbot.data.network
 
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.feature.qqbot.data.QQBotTokenStore
 import com.yunian.ai.feature.qqbot.data.model.QQGatewayPayload
 import com.yunian.ai.feature.qqbot.data.model.QQHelloData
 import com.yunian.ai.feature.qqbot.data.model.QQReadyData
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -47,7 +47,7 @@ class QQBotWebSocketClient(
         AUTH_FAILED
     }
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
     private val client = OkHttpClient.Builder()
         .connectTimeout(NetworkConstants.QQ_BOT_WS_CONNECT_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)
         .readTimeout(NetworkConstants.QQ_BOT_WS_READ_TIMEOUT_SECONDS.toLong(), TimeUnit.SECONDS)

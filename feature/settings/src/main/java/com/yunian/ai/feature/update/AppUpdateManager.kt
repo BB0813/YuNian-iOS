@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.common.update.DownloadProgress
 import com.yunian.ai.common.update.DownloadStatus
 import com.yunian.ai.common.update.UpdateCheckState
@@ -41,7 +42,7 @@ class AppUpdateManager(private val context: Context) {
 
     private val okHttpClient = OkHttpClient()
 
-    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val downloadScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     @Volatile
     private var downloadJob: Job? = null

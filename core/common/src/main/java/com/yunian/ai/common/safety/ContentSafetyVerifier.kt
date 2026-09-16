@@ -2,7 +2,7 @@ package com.yunian.ai.common.safety
 
 import android.content.Context
 import android.content.SharedPreferences
-import kotlinx.coroutines.Dispatchers
+import com.yunian.ai.common.concurrent.AppDispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -129,7 +129,7 @@ object ContentSafetyVerifier {
         rawText: String,
         kwResult: com.yunian.ai.common.ContentFilter.CheckResult,
         vecResult: com.yunian.ai.common.ContentFilter.CheckResult?
-    ): SafetyScore = withContext(Dispatchers.Default) {
+    ): SafetyScore = withContext(AppDispatchers.cpu) {
         verifyUserInput(rawText, kwResult, vecResult)
     }
 
@@ -159,7 +159,7 @@ object ContentSafetyVerifier {
         kwResult: com.yunian.ai.common.ContentFilter.CheckResult,
         vecResult: com.yunian.ai.common.ContentFilter.CheckResult?,
         userContext: String = ""
-    ): SafetyScore = withContext(Dispatchers.Default) {
+    ): SafetyScore = withContext(AppDispatchers.cpu) {
         verifyModelOutput(rawText, kwResult, vecResult, userContext)
     }
 

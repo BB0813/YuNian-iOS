@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
 import com.yunian.ai.common.AppForegroundTracker
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.common.ContentFilter
 import com.yunian.ai.common.DeviceIdProvider
 import com.yunian.ai.common.HardwareInfo
@@ -76,7 +77,6 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -178,7 +178,7 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         lateinit var instance: YuNianApplication
             private set
 
-        private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val bgScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
         fun initBusiness(app: Application) {
             PerformanceTrace.markStartupStage("initbusiness_begin")
             SaltStore.init(app)

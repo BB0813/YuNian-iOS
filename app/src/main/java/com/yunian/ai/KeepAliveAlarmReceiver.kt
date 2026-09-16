@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.PowerManager
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.TimeoutBudgets
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.domain.AutomationTickProvider
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.feature.notification.CompanionKeepAliveService
@@ -19,7 +20,6 @@ import com.yunian.ai.feature.wechat.service.WeChatChannelKeeper
 import com.yunian.ai.feature.wechat.service.WeChatChannelRuntime
 import com.yunian.ai.feature.wechat.service.WeChatServiceLocator
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -30,7 +30,7 @@ class KeepAliveAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != KeepAliveAlarmScheduler.ACTION_KEEP_ALIVE) return
         val pendingResult = goAsync()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val scope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
         scope.launch {
             var wakeLock: PowerManager.WakeLock? = null
             try {

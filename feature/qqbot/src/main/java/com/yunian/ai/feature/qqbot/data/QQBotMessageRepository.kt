@@ -2,6 +2,7 @@ package com.yunian.ai.feature.qqbot.data
 
 import android.content.Context
 import android.util.Log
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.feature.qqbot.data.model.QQBotAccount
 import com.yunian.ai.feature.qqbot.data.model.QQGatewayPayload
 import com.yunian.ai.feature.qqbot.data.model.QQInboundEvent
@@ -43,7 +44,7 @@ class QQBotMessageRepository(
     private val apiClient: QQBotApiClient
 ) {
     private val appContext = context.applicationContext
-    private val processScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val processScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
     private val json = Json { ignoreUnknownKeys = true }
 
     private val _incomingEvents = MutableSharedFlow<QQInboundEvent>(

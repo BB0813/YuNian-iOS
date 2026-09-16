@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.net.Uri
 import androidx.core.net.toUri
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.common.localmodel.LocalModelPreferencesState
 import java.io.File
 import java.security.MessageDigest
@@ -29,7 +30,7 @@ class LocalModelManager(context: Context) {
     private val preferences = LocalModelPreferences(appContext)
     private val downloadManager =
         appContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     private val _state = MutableStateFlow(LocalModelUiState(model = model))
     val state: StateFlow<LocalModelUiState> = _state.asStateFlow()
