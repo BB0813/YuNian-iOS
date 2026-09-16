@@ -1,30 +1,21 @@
 package com.yunian.ai.feature.chat.ui.screen
-import com.yunian.ai.uicommon.icon.AppIcons
-
 
 import android.app.Application
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -55,6 +46,8 @@ import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.component.glass.drawGlass
 import com.yunian.ai.uicommon.theme.AppTheme
 import java.util.Locale
+import com.yunian.ai.uicommon.component.SettingsRow
+import com.yunian.ai.uicommon.component.SettingsToggleRow
 
 internal fun formatMinutesToTime(minutes: Int): String {
     val safe = minutes.coerceAtLeast(0) % (24 * 60)
@@ -98,7 +91,7 @@ fun DndSettingsScreen(
 
             DndSectionTitle("免打扰")
             DndSettingsCard {
-                DndSettingsToggleRow(
+                SettingsToggleRow(
                     title = "开启免打扰",
                     subtitle = "开启后，AI 将在设定时间段内暂停主动消息",
                     checked = settings.doNotDisturbEnabled,
@@ -112,14 +105,14 @@ fun DndSettingsScreen(
 
             DndSectionTitle("时间段")
             DndSettingsCard {
-                DndSettingsRow(
+                SettingsRow(
                     title = "开始时间",
                     subtitle = formatMinutesToTime(settings.dndStartMinutes)
                 ) {
                     showStartPicker = true
                 }
                 HorizontalDivider(modifier = Modifier.padding(start = 16.dp), color = colors.outlineVariant)
-                DndSettingsRow(
+                SettingsRow(
                     title = "结束时间",
                     subtitle = formatMinutesToTime(settings.dndEndMinutes)
                 ) {
@@ -194,56 +187,6 @@ private fun DndSettingsCard(content: @Composable () -> Unit) {
             )
     ) {
         content()
-    }
-}
-
-@Composable
-private fun DndSettingsRow(title: String, subtitle: String? = null, onClick: () -> Unit) {
-    val colors = AppTheme.colors
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column {
-            Text(text = title, fontSize = 15.sp, color = colors.onSurface)
-            if (subtitle != null) {
-                Text(text = subtitle, fontSize = 13.sp, color = colors.metadataContent)
-            }
-        }
-        Text(text = "›", fontSize = 18.sp, color = colors.outline)
-    }
-}
-
-@Composable
-private fun DndSettingsToggleRow(title: String, subtitle: String? = null, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    val colors = AppTheme.colors
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, fontSize = 15.sp, color = colors.onSurface)
-            if (subtitle != null) {
-                Text(text = subtitle, fontSize = 12.sp, color = colors.metadataContent)
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.primary,
-                checkedTrackColor = colors.primary.copy(alpha = 0.5f)
-            )
-        )
     }
 }
 

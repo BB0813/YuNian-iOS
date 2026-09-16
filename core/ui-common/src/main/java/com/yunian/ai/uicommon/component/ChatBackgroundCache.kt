@@ -3,10 +3,8 @@ package com.yunian.ai.uicommon.component
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import kotlinx.coroutines.CoroutineScope
+import com.yunian.ai.common.ApplicationScopeProvider
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.io.File
@@ -27,8 +25,6 @@ import java.util.concurrent.ConcurrentHashMap
  * 5. [getCachedBitmap] / [loadBitmap] / [preload] / [clear] 保留，向后兼容既有调用方。
  */
 object ChatBackgroundCache {
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private const val MAX_ENTRY_COUNT = 4
     private const val MAX_TOTAL_BYTES = 24 * 1024 * 1024L
@@ -57,11 +53,11 @@ object ChatBackgroundCache {
     }
 
     /**
-     * 同步加载（兼容 [WindowMainBackground] 这类非挂起调用点）。
+     * 同步加载（**当前已无调用方，保留仅为向后兼容**）。
      *
-     * 命中缓存直接返回；否则同步解码并写入缓存。注意：本方法**不参与 single-flight**
-     * （同步无法等待异步任务），仅用于窗口背景这类一次性初始化路径。
-     * 组合（Compose）侧请统一走挂起的 [load]。
+     * ⚠️ 本方法会在调用线程同步解码（`BitmapFactory.decodeFile` 两遍），**不得在主线程调用**。
+     * 窗口背景路径（[WindowMainBackground]）已改为「占位 + 后台挂起版 [load] 换图」，不再使用本方法；
+     * 若未来确有同步需求，请确认处于后台线程并明确注释原因。
      */
     fun loadBitmap(context: Context, key: String): Bitmap? {
         if (key.isEmpty() || !isCustomBackground(key)) return null
@@ -83,7 +79,7 @@ object ChatBackgroundCache {
 
         val appContext = context.applicationContext
         val deferred = inFlight.computeIfAbsent(key) {
-            scope.async {
+            ApplicationScopeProvider.scope.async {
                 val bitmap = decode(appContext, key)
                 if (bitmap != null) putInCache(key, bitmap)
                 bitmap
@@ -100,7 +96,7 @@ object ChatBackgroundCache {
     fun preload(context: Context, key: String) {
         if (!isCustomBackground(key)) return
         val appContext = context.applicationContext
-        scope.launch { load(appContext, key) }
+        ApplicationScopeProvider.scope.launch { load(appContext, key) }
     }
 
     /**

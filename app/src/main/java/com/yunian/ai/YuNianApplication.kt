@@ -4,16 +4,16 @@ import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
 import com.yunian.ai.common.AppForegroundTracker
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.common.ContentFilter
 import com.yunian.ai.common.DeviceIdProvider
 import com.yunian.ai.common.HardwareInfo
 import com.yunian.ai.common.PerformanceTrace
 import com.yunian.ai.common.RomUtils
+import com.yunian.ai.common.perf.PerfBoost
 import com.yunian.ai.common.SaltStore
-import com.yunian.ai.common.SafetyClassifier
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.embedding.VectorLibrary
-import com.yunian.ai.common.safety.ContentSafetyVerifier
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.DefaultCompanionSeeder
 import com.yunian.ai.database.SecurityDataSeeder
@@ -63,7 +63,6 @@ import com.yunian.ai.feature.wechat.service.WeChatChannelKeeper
 import com.yunian.ai.feature.wechat.service.WeChatNotificationHelper
 import com.yunian.ai.network.AiService
 import com.yunian.ai.network.NtpTimeProvider
-import com.yunian.ai.security.G0
 import com.yunian.ai.security.NativeBridge
 import com.yunian.ai.security.SecurityState
 import android.content.ComponentCallbacks2
@@ -76,7 +75,6 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -178,13 +176,17 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         lateinit var instance: YuNianApplication
             private set
 
-        private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val bgScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
         fun initBusiness(app: Application) {
             PerformanceTrace.markStartupStage("initbusiness_begin")
             SaltStore.init(app)
             PerformanceTrace.markStartupStage("ib_salt")
             SecureLog.init(com.yunian.ai.BuildConfig.DEBUG)
             PerformanceTrace.markStartupStage("ib_securelog")
+            // ADPF（Performance Hint API）：注入应用上下文并捕获主线程 native tid。
+            // 运行在主线程，幂等，内部全部 runCatching；API < 31 / 服务缺失时自动降级 no-op。
+            runCatching { PerfBoost.init(app) }
+            PerformanceTrace.markStartupStage("ib_perfboost")
             applyStoredLanguage(app)
             PerformanceTrace.markStartupStage("ib_language")
             AiService.initialize(app)
@@ -297,11 +299,10 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             //   · warmUp 延迟 5s 后台预热（提前 dlopen liblianyu_agent.so，消除首次对话卡顿）。
             //   · registerGlobalTools 注册委派/汇聚工具（执行端在 AgentToolHost 特判分支）。
             initAgentRuntime(app)
-            // D4：本地模型（feature:localmodel）已删除 → LLM 安全分类器退役；
-            // ContentFilter 保留正则 + BayesianClassifier(fallback) 两重判定（安全基线不回退）。
-            ContentFilter.setSafetyClassifier(null)
-            PerformanceTrace.markStartupStage("ib_safety_classifier")
-            bgScope.launch { initSafetyVerifier(app) }
+            // 安全基线（合并后事实）：L3 本地语义安全链已随 feature:localmodel 一并退役
+            // （N0 / BayesianClassifier / ContentSafetyVerifier / SafetyClassifier 接口全部删除）。
+            // 内容判定统一由 ContentFilter 的正则关键词 + 向量库（initVectorLibrary）承担。
+            PerformanceTrace.markStartupStage("ib_safety_l3_retired")
 
             com.yunian.ai.database.cleanup.DataCleanupManager.schedulePeriodicCleanup(app)
             PerformanceTrace.markStartupStage("ib_cleanup_schedule")
@@ -397,16 +398,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 app.assets.open("safety/violation_vectors.bin").use { it.readBytes() }
                     .let { VectorLibrary.Loader().load(it) }
                     ?.let { ContentFilter.setVectorLibrary(it) }
-            }
-        }
-
-        private suspend fun initSafetyVerifier(app: Application) {
-            runCatching {
-                ContentSafetyVerifier.init(app)
-                val keywords = SecurityDataSeeder.getEnabledKeywords(app)
-                if (keywords.isNotEmpty()) {
-                    ContentSafetyVerifier.bootstrap(keywords)
-                }
             }
         }
 

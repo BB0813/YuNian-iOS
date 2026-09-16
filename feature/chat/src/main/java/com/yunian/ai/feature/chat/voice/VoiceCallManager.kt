@@ -14,7 +14,9 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import com.yunian.ai.common.HardwareInfo
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.concurrent.AppDispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,11 +35,28 @@ class VoiceCallManager(private val context: Context) {
         private const val TAG = "VoiceCallManager"
         private const val SAMPLE_RATE = 16000
         private const val FEATURE_DIM = 80
-        private const val NUM_THREADS = 4
 
         private const val RULE1_TRAILING_SILENCE = 2.4f
         private const val RULE2_UTTERANCE_LENGTH = 1.2f
         private const val RULE3_MAX_UTTERANCE = 20.0f
+
+        /**
+         * ASR 解码线程数：按硬件档位分档，替代原硬编码 4。
+         *
+         * 理由：sherpa-onnx 解码为 CPU 密集型，线程过多会相互抢占大核、放大上下文切换；
+         * 线程过少则低端机解码跟不上实时率。分档后 LOW 降到 2、ULTRA 提到 6，
+         * HIGH/MEDIUM 基本保持原 4/3 的体感，并以物理核数为硬上限兜底（避免超订阅）。
+         */
+        private fun resolveAsrThreads(): Int {
+            val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+            val desired = when (HardwareInfo.tier) {
+                HardwareInfo.Tier.LOW -> 2
+                HardwareInfo.Tier.MEDIUM -> 3
+                HardwareInfo.Tier.HIGH -> 4
+                HardwareInfo.Tier.ULTRA -> 6
+            }
+            return desired.coerceIn(1, cores)
+        }
 
         private val MODEL_FILES = listOf(
             "encoder-epoch-20-avg-1-chunk-16-left-128.int8.onnx",
@@ -53,7 +72,13 @@ class VoiceCallManager(private val context: Context) {
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private var recordingJob: Job? = null
-    private var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * ASR 录音/解码专用受限调度：CPU 密集的 `rec.decode` 不再挤在 IO 池（默认 64 线程）里，
+     * 用 [AppDispatchers.asr]（串行 view），与网络/文件阻塞任务隔离、避免抢占大核。
+     */
+    private val asrDispatcher = AppDispatchers.asr
+    private var scope = CoroutineScope(SupervisorJob() + asrDispatcher)
     private val initialized = AtomicBoolean(false)
     private val destroyed = AtomicBoolean(false)
     private val initLock = Any()
@@ -107,7 +132,7 @@ class VoiceCallManager(private val context: Context) {
                 val modelConfig = OnlineModelConfig(
                     transducer = transducerConfig,
                     tokens = tokensPath,
-                    numThreads = NUM_THREADS
+                    numThreads = resolveAsrThreads()
                 )
                 val endpointConfig = EndpointConfig(
                     rule1 = EndpointRule(false, RULE1_TRAILING_SILENCE, 0.0f),

@@ -1,6 +1,5 @@
 package com.yunian.ai.feature.qqbot.data.network
 
-import com.yunian.ai.network.NetworkConstants
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.Response

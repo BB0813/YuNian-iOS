@@ -1,7 +1,6 @@
 package com.yunian.ai.feature.groupchat
 
 import android.app.Application
-import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -12,12 +11,13 @@ import com.yunian.ai.domain.wechat.WeChatProactiveSync
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.common.MessageBodyState
 import com.yunian.ai.database.model.ChatGroup
-import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.model.CompanionEntity
 import com.yunian.ai.database.model.GroupMessage
 import com.yunian.ai.database.model.Message
 import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.StickerInfo
+import com.yunian.ai.common.text.BubbleTextSplitter
+import com.yunian.ai.common.text.DedupGuard
 import com.yunian.ai.database.repository.ChatGroupRepository
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.GroupMessageRepository
@@ -46,17 +46,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
+import com.yunian.ai.common.concurrent.DuplicateSendGuard
 
 class GroupChatViewModel(
     application: Application,
@@ -93,25 +92,27 @@ class GroupChatViewModel(
         for ((id, name) in map) obj.put(id.toString(), name)
         return obj.toString()
     }
-    private val cachedRecent = groupMessageRepository.getCachedRecent(groupId).orEmpty()
-    private val _messages = MutableStateFlow(cachedRecent)
-    val messages: StateFlow<List<GroupMessage>> = _messages.asStateFlow()
 
-    private val _messageMetadata = MutableStateFlow(
-        cachedRecent.takeLast(ChatConstants.GROUP_CHAT_MESSAGE_LIMIT).map { it.toMetadataMessage() }
+    // ── 上帝类拆分第二轮：分页/正文状态机外提 ────────────────────────────────
+    // 闭包分析（全量读码，非 grep 抽样）：该簇只读写自己的 5 个状态流 +
+    // groupMessageRepository + groupId + 协程作用域，与用户资料/群数据/成员表/
+    // 发送循环/记忆/AI/保活零交叉，故整体外提至 GroupChatPager，行为逐行等价。
+    private val pager = GroupChatPager(
+        scope = viewModelScope,
+        groupId = groupId,
+        repository = groupMessageRepository
     )
-    val messageMetadata: StateFlow<List<Message>> = _messageMetadata.asStateFlow()
+    val messages: StateFlow<List<GroupMessage>> get() = pager.messages
+    val messageMetadata: StateFlow<List<Message>> get() = pager.messageMetadata
+    val messageBodies: StateFlow<Map<Long, MessageBodyState<GroupMessage>>> get() = pager.messageBodies
+    val hasMore: StateFlow<Boolean> get() = pager.hasMore
+    val isLoadingMore: StateFlow<Boolean> get() = pager.isLoadingMore
 
-    private val _messageBodies = MutableStateFlow<Map<Long, MessageBodyState<GroupMessage>>>(
-        cachedRecent.associate { it.id to MessageBodyState.Ready(it) }
-    )
-    val messageBodies: StateFlow<Map<Long, MessageBodyState<GroupMessage>>> = _messageBodies.asStateFlow()
+    fun loadVisibleMessageBodies(messageIds: Set<Long>) = pager.loadVisibleMessageBodies(messageIds)
 
-    private val _hasMore = MutableStateFlow(cachedRecent.size >= ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-    val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+    fun retryMessageBody(messageId: Long) = pager.retryMessageBody(messageId)
 
-    private val _isLoadingMore = MutableStateFlow(false)
-    val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
+    fun loadMoreMessages() = pager.loadMoreMessages()
 
     private val _userName = MutableStateFlow("我")
     val userName: StateFlow<String> = _userName.asStateFlow()
@@ -120,122 +121,7 @@ class GroupChatViewModel(
 
     init {
         loadUserProfile()
-        viewModelScope.launch(Dispatchers.IO) {
-            var metadataSeeded = cachedRecent.isNotEmpty()
-            if (!metadataSeeded) {
-                runCatching {
-                    groupMessageRepository.hydrateRecent(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-                }
-                val hydrated = groupMessageRepository.getCachedRecent(groupId).orEmpty()
-                if (hydrated.isNotEmpty()) {
-                    _messages.value = hydrated
-                    _messageBodies.value = hydrated.associate { it.id to MessageBodyState.Ready(it) }
-                    _messageMetadata.value =
-                        hydrated.takeLast(ChatConstants.GROUP_CHAT_MESSAGE_LIMIT).map { it.toMetadataMessage() }
-                    metadataSeeded = true
-                }
-            }
-
-            if (!metadataSeeded) {
-                val recentMetadata = groupMessageRepository
-                    .getRecentMetadata(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-                    .reversed()
-                _messageMetadata.value = recentMetadata
-                seedBodiesFromCache(recentMetadata)
-            }
-            _hasMore.value =
-                _messageMetadata.value.size < groupMessageRepository.getMessageCount(groupId)
-            groupMessageRepository.observeRecentMetadata(
-                groupId,
-                ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-            ).collectLatest { recent ->
-                val older = _messageMetadata.value.filterNot { current ->
-                    recent.any { it.id == current.id }
-                }
-                val merged = (older + recent.reversed())
-                    .distinctBy { it.id }
-                    .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
-                if (merged != _messageMetadata.value) {
-                    _messageMetadata.value = merged
-                    seedBodiesFromCache(merged)
-                }
-                _hasMore.value = merged.size < groupMessageRepository.getMessageCount(groupId)
-                if (recent.isNotEmpty()) groupMessageRepository.markReadThroughLatest(groupId)
-            }
-        }
-    }
-
-    private fun seedBodiesFromCache(metadata: List<Message>) {
-        if (metadata.isEmpty()) return
-        val cachedById = groupMessageRepository.getCachedRecent(groupId)
-            ?.associateBy { it.id }
-            .orEmpty()
-        if (cachedById.isEmpty()) return
-        val ready = metadata.mapNotNull { item ->
-            val body = cachedById[item.id] ?: return@mapNotNull null
-            when (_messageBodies.value[item.id]) {
-                is MessageBodyState.Ready -> null
-                else -> item.id to MessageBodyState.Ready(body)
-            }
-        }
-        if (ready.isNotEmpty()) {
-            _messageBodies.value = _messageBodies.value + ready
-            publishLoadedMessages()
-        }
-    }
-
-    private fun GroupMessage.toMetadataMessage(): Message = Message(
-        id = id,
-        conversationId = groupId,
-        conversationType = "group",
-        isFromUser = companionId == -1L,
-        senderId = companionId,
-        timestamp = timestamp,
-        fileFormat = fileFormat
-    )
-
-    fun loadVisibleMessageBodies(messageIds: Set<Long>) {
-        val pending = _messageMetadata.value.filter { metadata ->
-            metadata.id in messageIds && when (_messageBodies.value[metadata.id]) {
-                null, is MessageBodyState.Error -> true
-                else -> false
-            }
-        }
-        if (pending.isEmpty()) return
-
-        _messageBodies.value = _messageBodies.value + pending.associate {
-            it.id to MessageBodyState.Loading
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { groupMessageRepository.loadMessages(pending) }
-                .onSuccess { loaded ->
-                    _messageBodies.value = _messageBodies.value + pending.associate { metadata ->
-                        val message = loaded[metadata.id]
-                        metadata.id to if (message != null) {
-                            MessageBodyState.Ready(message)
-                        } else {
-                            MessageBodyState.Error("正文不存在")
-                        }
-                    }
-                    publishLoadedMessages()
-                }
-                .onFailure { error ->
-                    _messageBodies.value = _messageBodies.value + pending.associate {
-                        it.id to MessageBodyState.Error(error.message ?: "正文加载失败")
-                    }
-                }
-        }
-    }
-
-    fun retryMessageBody(messageId: Long) {
-        _messageBodies.value = _messageBodies.value - messageId
-        loadVisibleMessageBodies(setOf(messageId))
-    }
-
-    private fun publishLoadedMessages() {
-        _messages.value = _messageMetadata.value.mapNotNull { metadata ->
-            (_messageBodies.value[metadata.id] as? MessageBodyState.Ready)?.value
-        }
+        pager.start()
     }
 
     private var avatarUnsubscribe: (() -> Unit)? = null
@@ -249,38 +135,6 @@ class GroupChatViewModel(
         nicknameUnsubscribe?.invoke()
         avatarUnsubscribe = provider?.observeAvatar { _userAvatar.value = it }
         nicknameUnsubscribe = provider?.observeNickname { _userName.value = it }
-    }
-
-    fun loadMoreMessages() {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (_isLoadingMore.value) return@launch
-            _isLoadingMore.value = true
-            try {
-                val oldest = _messageMetadata.value.firstOrNull()
-                if (oldest != null) {
-                    val older = groupMessageRepository.getMetadataBefore(
-                        groupId = groupId,
-                        beforeTimestamp = oldest.timestamp,
-                        beforeId = oldest.id,
-                        limit = ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                    )
-                    if (older.isNotEmpty()) {
-                        _messageMetadata.value = (older.reversed() + _messageMetadata.value)
-                            .distinctBy { it.id }
-                    }
-                    _hasMore.value = older.size == ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                } else {
-                    val recent = groupMessageRepository.getRecentMetadata(
-                        groupId,
-                        ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                    )
-                    _messageMetadata.value = recent.reversed()
-                    _hasMore.value = recent.size == ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                }
-            } finally {
-                _isLoadingMore.value = false
-            }
-        }
     }
 
     private val _groupData = MutableStateFlow<ChatGroup?>(null)
@@ -321,23 +175,31 @@ class GroupChatViewModel(
         }
     }
 
-    fun sendMessage(content: String) {
+    // 防连击：同内容 2 秒窗口内重复提交静默忽略（第一条已发出，双击/回车连按误触）
+    private val duplicateSendGuard = DuplicateSendGuard()
 
+    fun sendMessage(content: String) {
+        if (duplicateSendGuard.shouldReject(content)) return
         if (com.yunian.ai.common.BanManager.isBanned(getApplication())) return
 
-        val inputCheck = com.yunian.ai.common.ContentFilter.checkInput(content)
-        if (inputCheck.isViolating) {
-            android.util.Log.w("GroupChatViewModel", "Input blocked by safety filter: ${inputCheck.reason}")
-            com.yunian.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
-            return
-        }
+        // P1 收尾：输入安全校验是 CPU 较重的同步逻辑（约 100+ 正则 + 语义预处理），
+        // 原先在 Compose 回调（主线程）同步执行会造成输入/首帧抖动。现整体移入 applicationScope(IO)，
+        // 并严格保持原顺序语义：校验输入 → 通过后再申请门控 → 再取消旧 job → 启动新一轮。
+        val previousJob = sendMessageJob
+        val job = applicationScope.launch {
+            val inputCheck = com.yunian.ai.common.ContentFilter.checkInput(content)
+            if (inputCheck.isViolating) {
+                android.util.Log.w("GroupChatViewModel", "Input blocked by safety filter: ${inputCheck.reason}")
+                com.yunian.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
+                return@launch
+            }
 
-        if (!isLoadingLock.compareAndSet(false, true)) {
-            Log.w("GroupChatViewModel", "sendMessage ignored: already processing")
-            return
-        }
-        sendMessageJob?.cancel()
-        sendMessageJob = applicationScope.launch {
+            // 门控在协程内、校验之后申请：原子 CAS 保证快速连点发送时只有一个能通过并启动生成。
+            if (!isLoadingLock.compareAndSet(false, true)) {
+                Log.w("GroupChatViewModel", "sendMessage ignored: already processing")
+                return@launch
+            }
+            previousJob?.cancel()
             try {
                 _isLoading.value = true
 
@@ -369,6 +231,7 @@ class GroupChatViewModel(
                 isLoadingLock.set(false)
             }
         }
+        sendMessageJob = job
     }
 
     /**
@@ -554,19 +417,22 @@ class GroupChatViewModel(
         val firstContent = bubbles.firstOrNull()?.trim() ?: return
         val aiContent = firstContent.replace(Regex("\n{2,}"), "\n")
 
-        // 自查重：不要复读自己刚说过的话
+        // 自查重：不要复读自己刚说过的话。
+        // 口径与单聊/跨角色统一为 DedupGuard.isDuplicate（P1-5）：精确相等或 ≥10 字双向包含，
+        // 旧的「>5 字子串包含」会把「哈哈哈哈」类短句误杀。
         val recentRepliesFromThisChar = isolatedHistory
             .filter { it.companionId == companion.id }
             .takeLast(3)
             .map { normalizeForDedup(it.content) }
         val normalizedNew = normalizeForDedup(aiContent)
-        val isDuplicate = recentRepliesFromThisChar.any {
-            it == normalizedNew ||
-                it.length > 5 && normalizedNew.contains(it) ||
-                normalizedNew.length > 5 && it.contains(normalizedNew)
-        }
-        if (isDuplicate) {
-            Log.d("GroupChatM", "[${companion.name}] 跳过重复回复")
+        val isSelfDuplicate = DedupGuard.isDuplicate(normalizedNew, recentRepliesFromThisChar)
+        if (isSelfDuplicate) {
+            // 静默轮兜底（skipDedupCheck=true）落库前同样过这道自查重：命中即放弃本轮（P1-3）。
+            if (skipDedupCheck) {
+                Log.w("GroupChatM", "[${companion.name}] 兜底放行命中自查重，放弃本轮")
+            } else {
+                Log.d("GroupChatM", "[${companion.name}] 跳过重复回复")
+            }
             return
         }
 
@@ -665,13 +531,8 @@ class GroupChatViewModel(
             .takeLast(ChatConstants.GROUP_CHAT_CONTEXT_WINDOW)
     }
 
-    /** 查重规范化：剥 @、空白、标点、引号括号后小写，取前 40 字。 */
-    private fun normalizeForDedup(text: String): String {
-        return text
-            .replace(Regex("[@\\s，。！？!?,.～~…、:：;；\"'「」『』()（）\\[\\]【】]"), "")
-            .lowercase()
-            .take(40)
-    }
+    /** 查重规范化：委托 [DedupGuard.normalize]（剥 @、空白、标点、引号括号后小写，取前 40 字），与单聊统一口径。 */
+    private fun normalizeForDedup(text: String): String = DedupGuard.normalize(text)
 
     /**
      * 与本轮其他角色的回复比对，近似重复则不发言。
@@ -1313,7 +1174,13 @@ class GroupChatViewModel(
         val stickerManager = StickerManager.getInstance(getApplication())
         val systemTags = setOf("语音", "图片", "视频", "文件", "位置", "红包", "转账")
         val stickerRegex = Regex("\\[([^\\]]+)\\]")
-        val matches = stickerRegex.findAll(cleaned)
+        // 先剥系统标签（P1-7）：[图片]/[文件] 等系统标签不应出现在文本气泡里。
+        // 旧实现仅在抽取贴纸时跳过它们，但子串游标仍基于原文——夹在中间的系统标签会漏进文本段。
+        // 剥离后 systemTags 在 systemTagFree 中已不存在，下游游标问题自然消失。
+        val systemTagFree = stickerRegex.replace(cleaned) { m ->
+            if (m.groupValues[1].trim() in systemTags) "" else m.value
+        }
+        val matches = stickerRegex.findAll(systemTagFree)
 
         val textSegments = mutableListOf<String>()
         val stickerNames = mutableListOf<String>()
@@ -1322,7 +1189,7 @@ class GroupChatViewModel(
         for (match in matches) {
             val description = match.groupValues[1].trim()
             if (description !in systemTags) {
-                val beforeText = cleaned.substring(lastIndex, match.range.first).trim()
+                val beforeText = systemTagFree.substring(lastIndex, match.range.first).trim()
                 if (beforeText.isNotBlank()) {
                     textSegments.add(beforeText)
                 }
@@ -1330,7 +1197,7 @@ class GroupChatViewModel(
                 lastIndex = match.range.last + 1
             }
         }
-        val remainingText = cleaned.substring(lastIndex).trim()
+        val remainingText = systemTagFree.substring(lastIndex).trim()
         if (remainingText.isNotBlank()) {
             textSegments.add(remainingText)
         }
@@ -1340,17 +1207,23 @@ class GroupChatViewModel(
         }
 
         if (stickerNames.isEmpty() && textSegments.size <= 1) {
-            val msg = GroupMessage(groupId = groupId, companionId = companionId, content = cleaned, timestamp = System.currentTimeMillis())
-            val msgId = messageWriter.enqueueGroup(msg)
-            broadcastWeChatMessage(companionId, msgId)
+            // 按 AI 自己敲的换行拆分：单行即一条；成员在回复里敲了回车就逐条发出（群聊同样尊重 AI 的分条意图）
+            val textBubbles = BubbleTextSplitter.splitByParagraphs(systemTagFree)
+            textBubbles.forEachIndexed { index, bubbleText ->
+                if (index > 0) delay(Random.nextLong(600L, 1600L))
+                if (bubbleText.isBlank()) return@forEachIndexed
+                val msg = GroupMessage(groupId = groupId, companionId = companionId, content = bubbleText, timestamp = System.currentTimeMillis())
+                val msgId = messageWriter.enqueueGroup(msg)
+                broadcastWeChatMessage(companionId, msgId)
+            }
         } else {
 
             val orderedItems = mutableListOf<Either<String, String>>()
             var cursor = 0
-            for (match in stickerRegex.findAll(cleaned)) {
+            for (match in stickerRegex.findAll(systemTagFree)) {
                 val description = match.groupValues[1].trim()
                 if (description !in systemTags) {
-                    val beforeText = cleaned.substring(cursor, match.range.first).trim()
+                    val beforeText = systemTagFree.substring(cursor, match.range.first).trim()
                     if (beforeText.isNotBlank()) {
                         orderedItems.add(Either.Left(beforeText))
                     }
@@ -1358,7 +1231,7 @@ class GroupChatViewModel(
                     cursor = match.range.last + 1
                 }
             }
-            val remaining = cleaned.substring(cursor).trim()
+            val remaining = systemTagFree.substring(cursor).trim()
             if (remaining.isNotBlank()) {
                 orderedItems.add(Either.Left(remaining))
             }
@@ -1372,22 +1245,41 @@ class GroupChatViewModel(
                 orderedItems.add(Either.Left(textSegments[textCount + i]))
             }
 
-            Log.d("GroupChatViewModel", "AI回复按原文顺序发送 ${orderedItems.size} 项 (text=${textSegments.size}, sticker=${stickerNames.size})")
+            // 文本段再按 AI 自己敲的换行展开（保持与贴纸的交错顺序：文本按序拆行、贴纸位置不变）
+            val expandedItems = orderedItems.flatMap { item ->
+                when (item) {
+                    is Either.Left -> BubbleTextSplitter.splitByParagraphs(item.value)
+                        .filter { it.isNotBlank() }
+                        .map { Either.Left(it) }
+                    is Either.Right -> listOf(item)
+                }
+            }
+
+            Log.d("GroupChatViewModel", "AI回复按原文顺序发送 ${expandedItems.size} 项 (text=${textSegments.size}, sticker=${stickerNames.size})")
+            // P2-C1：本批查重小窗（思路同 CompanionMessageWorker.sendMessage）——左向文本气泡
+            // enqueue 前与本批已发内容比对，命中复读即跳过，避免同一批里整行复读。
+            val batchSentNorms = mutableListOf<String>()
             var segmentIndex = 0
-            for (item in orderedItems) {
+            for (item in expandedItems) {
                 delay(Random.nextLong(600L, 1600L))
                 when (item) {
                     is Either.Left -> {
-                        val msg = GroupMessage(groupId = groupId, companionId = companionId, content = item.value, timestamp = System.currentTimeMillis())
-                        val msgId = messageWriter.enqueueGroup(msg)
-                        broadcastWeChatMessage(companionId, msgId)
+                        val norm = DedupGuard.normalize(item.value)
+                        if (norm.isNotEmpty() && DedupGuard.isDuplicate(norm, batchSentNorms)) {
+                            Log.w("GroupChatViewModel", "dedup hit in batch, skip bubble: ${item.value.take(30)}")
+                        } else {
+                            if (norm.isNotEmpty()) batchSentNorms.add(norm)
+                            val msg = GroupMessage(groupId = groupId, companionId = companionId, content = item.value, timestamp = System.currentTimeMillis())
+                            val msgId = messageWriter.enqueueGroup(msg)
+                            broadcastWeChatMessage(companionId, msgId)
+                        }
                     }
                     is Either.Right -> {
                         sendStickerMessage(groupId, companionId, item.value)
                     }
                 }
                 segmentIndex++
-                Log.d("GroupChatViewModel", "发送 $segmentIndex/${orderedItems.size}")
+                Log.d("GroupChatViewModel", "发送 $segmentIndex/${expandedItems.size}")
             }
         }
     }

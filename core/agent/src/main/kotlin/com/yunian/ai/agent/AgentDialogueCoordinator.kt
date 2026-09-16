@@ -16,13 +16,13 @@ import com.yunian.ai.database.model.MessageType
 import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.database.repository.ChatRepository
 import com.yunian.ai.database.repository.CompanionRepository
-import com.yunian.ai.database.repository.MemoryRepository
 import com.yunian.ai.database.repository.MessageWriteCoordinator
 import com.yunian.ai.database.repository.filterDecrypted
 import com.yunian.ai.domain.AiChatMessage
 import com.yunian.ai.domain.AiMessageRole
 import com.yunian.ai.domain.AiMessageType
 import com.yunian.ai.domain.DialogueCoordinator
+import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.DialogueRequest
 import com.yunian.ai.domain.DialogueResult
 import com.yunian.ai.domain.ServiceRegistry
@@ -56,8 +56,13 @@ class AgentDialogueCoordinator(
     private val companionRepository: CompanionRepository
         get() = ServiceRegistry.getOrThrow(CompanionRepository::class.java)
 
-    private val memoryRepository: MemoryRepository
-        get() = ServiceRegistry.getOrThrow(MemoryRepository::class.java)
+    // 合并自 origin/linzihan：远端已删除 @Deprecated 的 MemoryRepository
+    // （memory_entries / temp_memory 旧仓），统一走 core:domain 的 MemoryProvider
+    // （实现 = UnifiedMemoryProvider，内部写 unified_memory 并自动同步 GLOBAL 作用域）。
+    // 与 ChatGenerationManager / GroupChatViewModel 保持同一接线模式。
+    private val memoryProvider: MemoryProvider by lazy {
+        ServiceRegistry.getOrThrow(MemoryProvider::class.java).also { it.initialize() }
+    }
 
     private val apiConfigRepository: ApiConfigRepository
         get() = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
@@ -143,7 +148,11 @@ class AgentDialogueCoordinator(
             companionRepository.updateTimestamp(companionId)
             companionRepository.increaseIntimacy(companionId, 2)
             runCatching {
-                memoryRepository.extractAndSaveMemories(companionId, text, aiText)
+                memoryProvider.extractAndSaveFromConversation(
+                    userInput = text,
+                    aiResponse = aiText,
+                    companionId = companionId,
+                )
             }.onFailure {
                 SecureLog.e(TAG, "Memory save failed: ${it.message}")
             }
@@ -209,7 +218,12 @@ class AgentDialogueCoordinator(
             companionRepository.updateTimestamp(companionId)
             companionRepository.increaseIntimacy(companionId, 2)
             runCatching {
-                memoryRepository.extractAndSaveMemories(companionId, imagePath, aiText)
+                // 视觉轮次无文本输入，用图片路径作为「用户输入」写入工作记忆。
+                memoryProvider.extractAndSaveFromConversation(
+                    userInput = imagePath,
+                    aiResponse = aiText,
+                    companionId = companionId,
+                )
             }.onFailure {
                 SecureLog.e(TAG, "Memory save failed: ${it.message}")
             }

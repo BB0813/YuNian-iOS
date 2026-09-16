@@ -18,7 +18,12 @@ object LocaleHelper {
 
     fun saveLanguage(context: Context, code: String): Boolean {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.edit().putString(KEY_LANGUAGE, code).commit()
+        // apply()：内存态同步更新（同进程后续 applyToResources / recreate 读得到），
+        // 磁盘写入异步，避免在主线程/设置回调里 fsync 阻塞。返回值保留为兼容签名。
+        return runCatching {
+            prefs.edit().putString(KEY_LANGUAGE, code).apply()
+            true
+        }.getOrDefault(false)
     }
 
     fun toLocale(code: String): Locale = when (code) {

@@ -4,8 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.concurrent.AppDispatchers
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class WeChatBootReceiver : BroadcastReceiver() {
@@ -19,7 +19,7 @@ class WeChatBootReceiver : BroadcastReceiver() {
         }
 
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(AppDispatchers.io).launch {
             try {
                 val started = WeChatChannelKeeper.ensureRunning(context.applicationContext)
                 SecureLog.i(TAG, "boot/replace action=$action ensureRunning=$started")

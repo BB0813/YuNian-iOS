@@ -4,9 +4,6 @@ import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.McpManager
 import com.yunian.ai.domain.McpTool
 import com.yunian.ai.domain.ToolRegistry
-import kotlinx.coroutines.flow.Flow
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 
 class McpToolAdapter(
     private val mcpManager: McpManager,

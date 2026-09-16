@@ -2,7 +2,6 @@ package com.yunian.ai.feature.chat.ui.viewmodel
 
 import androidx.compose.runtime.Stable
 
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 interface MessagePipeline {

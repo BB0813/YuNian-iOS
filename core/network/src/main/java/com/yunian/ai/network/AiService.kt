@@ -2,20 +2,18 @@ package com.yunian.ai.network
 
 import android.content.Context
 import com.yunian.ai.common.AppSettingsStore
-import com.yunian.ai.common.BanManager
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.common.CompanionRole
 import com.yunian.ai.common.ContentFilter
 import com.yunian.ai.common.DeviceIdProvider
 import com.yunian.ai.common.EnvAnchorCooldown
 import com.yunian.ai.common.EnvAnchorStore
-import com.yunian.ai.common.RolePromptProvider
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.TimeoutBudgets
 import com.yunian.ai.common.YandereModeManager
-import com.yunian.ai.common.SuFlowApi
 import com.yunian.ai.common.RemoteKeyProvider
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.model.ApiConfig
 import com.yunian.ai.database.model.ApiProvider
@@ -36,6 +34,7 @@ import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.domain.PlaceholderProvider
 import com.yunian.ai.domain.PlaceholderContext
 import com.yunian.ai.network.Message
+import com.yunian.ai.network.bubble.BubbleJsonProtocol
 import com.yunian.ai.network.transformers.MessageTransformer
 import com.yunian.ai.network.transformers.PlaceholderTransformer
 
@@ -46,9 +45,6 @@ import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.TokenUsageRepository
 import com.yunian.ai.database.repository.UserRepository
-import com.yunian.ai.network.provider.AiProvider
-import com.yunian.ai.network.provider.ClaudeProvider
-import com.yunian.ai.network.provider.OpenAiCompatibleProvider
 import com.yunian.ai.domain.stream.AssistantStreamEvent
 import com.yunian.ai.domain.timeline.TurnId
 import com.yunian.ai.network.stream.ChatBodyAdapter
@@ -71,8 +67,6 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
@@ -108,7 +102,7 @@ class AiService(context: Context) : AiServiceProvider {
             summaryProvider?.summarizeRollingMerge(oldSummary, deltaText, memoryContext, selfName)
         },
         backgroundScope = kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+            kotlinx.coroutines.SupervisorJob() + AppDispatchers.io
         ),
         gapFetcher = { conversationId, afterId ->
             ServiceRegistry.getOrThrow(ChatRepository::class.java)
@@ -460,31 +454,6 @@ class AiService(context: Context) : AiServiceProvider {
         private val keyLastUsed = ConcurrentHashMap<String, Long>()
         private val keyCooldownUntil = ConcurrentHashMap<String, Long>()
 
-        private val providers: Map<ApiProvider, AiProvider> = mapOf(
-            ApiProvider.OPENAI to OpenAiCompatibleProvider(),
-            ApiProvider.DEEPSEEK to OpenAiCompatibleProvider(),
-            ApiProvider.DASHSCOPE to OpenAiCompatibleProvider(),
-            ApiProvider.KIMI to OpenAiCompatibleProvider(),
-            ApiProvider.GEMINI to OpenAiCompatibleProvider(),
-            ApiProvider.XIAOMI to OpenAiCompatibleProvider(),
-            ApiProvider.ZHIPU to OpenAiCompatibleProvider(),
-            ApiProvider.SILICONFLOW to OpenAiCompatibleProvider(),
-            ApiProvider.OPENROUTER to OpenAiCompatibleProvider(),
-            ApiProvider.GROQ to OpenAiCompatibleProvider(),
-            ApiProvider.CUSTOM to OpenAiCompatibleProvider(),
-            ApiProvider.PARTNER to OpenAiCompatibleProvider(),
-            ApiProvider.IFLYTEK to OpenAiCompatibleProvider(),
-            ApiProvider.ANTHROPIC to ClaudeProvider(),
-        )
-
-        private fun providerFor(config: ApiConfig): AiProvider {
-
-            if (config.provider == ApiProvider.CUSTOM && config.formatHint == "anthropic") {
-                return ClaudeProvider()
-            }
-            return providers[config.provider] ?: OpenAiCompatibleProvider()
-        }
-
         fun usesAnthropicProtocol(config: ApiConfig): Boolean {
             return config.provider == ApiProvider.ANTHROPIC ||
                 (config.provider == ApiProvider.CUSTOM && config.formatHint == "anthropic")
@@ -492,12 +461,6 @@ class AiService(context: Context) : AiServiceProvider {
 
         fun supportsOpenAiModelList(config: ApiConfig): Boolean {
             return !usesAnthropicProtocol(config)
-        }
-
-        init {
-            AiProvider.okHttpClient = okHttpClient
-            AiProvider.keySelector = ::selectApiKey
-            AiProvider.keyFailureHandler = ::markKeyFailed
         }
 
         const val KEY_MIN_INTERVAL_MS = 800L
@@ -684,8 +647,8 @@ class AiService(context: Context) : AiServiceProvider {
                     - 未完结且感兴趣：可自然延伸，但不要复读、不要为了承接而追问已答完的内容。
                     - 已完结或不感兴趣：可轻转、只回情绪/态度，或输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}；不要硬续旧话题。
                     若决定发消息，要求：
-                    1. 像真人聊天一样自然；单次单动作且句式完整，不要长文堆共情+方案+追问，也不要半截残句
-                    2. 优先 1 条消息，不要拆成很多短句连发
+                    1. 像真人在微信连发那样说话：口语、自然，不要长文堆共情+方案+大道理，也不要半截残句
+                    2. 消息条数不限：换行即下一条。话多就多敲几行（真人会连发），话少一条也行——由你的性格与此刻想说的话决定，不硬凑条数，也不要把全部内容塞进一条
                     3. 不要重新开场、不要念日程
                     4. 语气与互动方式严格服从角色性格，不要统一撒娇/催促
                     5. 禁止括号，禁止AI感词汇，禁止说教
@@ -704,13 +667,12 @@ class AiService(context: Context) : AiServiceProvider {
 
                 val semantic = AiPromptBuilder.parseProactiveGenerationResult(rawResponse)
                     ?: return@withContext null
-                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages)
-                val singleLine = cleaned
-                    .replace(Regex("\\r\\n|\\r|\\n+"), "，")
-                    .replace(Regex("，{2,}"), "，")
-                    .trimStart('，', ',', '.', '。', ' ')
-                    .trim()
-                val finalText = AiPromptBuilder.parseProactiveGenerationResult(singleLine)
+                // preserveRaw = true：保留 AI 自己敲的换行（换行即「想连发下一条」的信号），
+                // 并避免长文本被后处理截断。不再把换行压平成单条。
+                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages, preserveRaw = true)
+                // parseProactiveGenerationResult 按行检查 NO_PROACTIVE_MARKER，可直接用于含换行的多行文本；
+                // 多行文本交由发送端 BubbleTextSplitter 拆成多条气泡连发。
+                val finalText = AiPromptBuilder.parseProactiveGenerationResult(cleaned)
                     ?: return@withContext null
 
                 val safetyResult = ContentFilter.checkOutputSafety(finalText)
@@ -983,7 +945,8 @@ class AiService(context: Context) : AiServiceProvider {
                 jsonBody.put("messages", jsonArray)
                 jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", temperature)
+                    // temperature: Double —— 经助手取 2 位小数，防 Float 派生值带伪影
+                    jsonBody.put("temperature", temperature.toApiTemperature())
                 }
 
                 val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
@@ -1480,7 +1443,7 @@ class AiService(context: Context) : AiServiceProvider {
 
                 jsonBody.put("stream_options", org.json.JSONObject().put("include_usage", true))
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
@@ -1617,7 +1580,7 @@ class AiService(context: Context) : AiServiceProvider {
                 jsonBody.put("messages", jsonArray)
                 jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
@@ -1892,7 +1855,7 @@ class AiService(context: Context) : AiServiceProvider {
         jsonBody.put("messages", jsonArray)
         jsonBody.put("stream", false)
         if (!requiresFixedTemperature(config.model)) {
-            jsonBody.put("temperature", 0.7)
+            jsonBody.put("temperature", 0.7.toApiTemperature())
         }
 
         val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
@@ -2265,7 +2228,7 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
                 jsonBody.put("stream", false)
 
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 // 同聊天路径：未显式配置则不发送 max_tokens，避免推理模型的思考过程挤占额度
                 config.maxTokens?.takeIf { it > 0 }?.let { maxTokens ->
@@ -2372,7 +2335,7 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
         requestBody.put("messages", anthropicMessages)
         requestBody.put("system", systemPrompt)
         requestBody.put("max_tokens", config.maxTokens ?: 800)
-        requestBody.put("temperature", config.temperature)
+        requestBody.put("temperature", config.temperature.toApiTemperature())
 
         val baseUrl = config.baseUrl.trim().removeSuffix("/")
         val url = "$baseUrl/messages"
@@ -2589,6 +2552,8 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
             }
 
             val lineFlow = openAiCompatibleSseLineFlow(config, messages)
+            // 气泡协议模式：系统提示词含协议标记时，保留模型原始 JSON，交由上层 parseStrict 判定。
+            val bubbleMode = BubbleJsonProtocol.isProtocolEnabled(systemPrompt)
             var contentLen = 0
             var finalCleaned: String? = null
             var streamInputTokens = 0L
@@ -2607,7 +2572,7 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
                     reasoningFields = reasoningFields,
                     completedAtMs = { System.currentTimeMillis() },
                     postProcessText = { raw ->
-                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(raw, sortedHistory)
+                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(raw, sortedHistory, preserveRaw = bubbleMode)
                         contentLen = cleaned.length
                         val safety = ContentFilter.checkOutputSafety(cleaned)
                         if (!safety.isSafe) {
@@ -2910,9 +2875,9 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
             appendLine()
             appendLine("现在考虑是否追加一条追问。规则：")
             appendLine("1. 先判断：你刚才的回复是否已把话接完、是否已把话题抛回给用户？如果是，只输出「无需追问」，不要追加。")
-            appendLine("2. 追问只能基于用户最后一句的真实内容，禁止曲解、禁止无中生有编造问题、禁止把对话中「我/你」的角色搞反。")
+            appendLine("2. 追问只能基于【用户最后一句】的真实内容向用户发问，禁止曲解、禁止无中生有编造问题、禁止把对话中「我/你」的角色搞反；严禁复述、延伸或总结你自己刚才说的话（那是自问自答）。")
             appendLine("3. 需要追问时：5-15字，口语化，像真人随口追问，必须针对用户说的具体内容。")
-            appendLine("4. 必须是真正的问句（带问号），不要用陈述句冒充追问。")
+            appendLine("4. 必须是真正对用户发的问句（带问号），不是对自己叙述的补充；不要用陈述句冒充追问。")
             appendLine("5. 带语气词（呀/呢/啦/嘛/哼/嘿嘿/诶/哇），禁止万能开场白（在干嘛/想你了/好久不见）。")
             appendLine("6. 直接输出追问内容，不要解释不要思考。")
         }))

@@ -6,7 +6,6 @@ import android.app.Activity
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,10 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -43,13 +39,8 @@ import com.yunian.ai.uicommon.component.BackgroundSettingsViewModel
 import com.yunian.ai.uicommon.component.WindowMainBackground
 import com.yunian.ai.uicommon.component.getMainBackgroundKey
 import com.yunian.ai.uicommon.component.getChatBackgroundKey
-import com.yunian.ai.uicommon.component.getCustomBackgroundUri
-import com.yunian.ai.uicommon.component.isCustomBackground
-import com.yunian.ai.uicommon.component.rememberBackgroundBitmap
 import com.yunian.ai.uicommon.component.PageBackgroundContent
-import com.yunian.ai.uicommon.component.rememberBackgroundImageBitmap
 import com.yunian.ai.uicommon.component.resolveEffectiveChatBackgroundKey
-import com.yunian.ai.uicommon.component.resolveBackgroundPalette
 import com.yunian.ai.uicommon.theme.ThemeViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,8 +49,6 @@ import kotlinx.coroutines.withContext
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.yunian.ai.uicommon.component.glass.ProvidePageBackdrop
-import com.yunian.ai.uicommon.theme.WeChatDarkBackground
-import com.yunian.ai.uicommon.theme.WeChatLightBackground
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -154,7 +143,8 @@ fun MainScreen(mainActivity: Activity) {
     var bgTick by remember { mutableIntStateOf(0) }
     fun syncWindowMainBackground() {
         val key = getMainBackgroundKey(context)
-        WindowMainBackground.apply(mainActivity.window, context, key, isDark)
+        // 传入组合作用域：自定义背景的解码/裁剪在后台完成，绝不在主线程解码（B1）。
+        WindowMainBackground.apply(mainActivity.window, context, key, isDark, coroutineScope)
         bgTick++
     }
 

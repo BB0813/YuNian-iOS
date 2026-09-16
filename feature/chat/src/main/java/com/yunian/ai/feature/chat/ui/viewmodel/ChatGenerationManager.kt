@@ -1,6 +1,7 @@
 package com.yunian.ai.feature.chat.ui.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import com.yunian.ai.common.AppSettingsStore
 import com.yunian.ai.common.ApplicationScopeProvider
 import com.yunian.ai.common.BanManager
@@ -13,6 +14,7 @@ import com.yunian.ai.common.RolePromptProvider
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.TimeoutBudgets
+import com.yunian.ai.common.perf.PerfBoost
 import com.yunian.ai.domain.wechat.WeChatProactiveSync
 import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.database.model.ChatMessage
@@ -60,6 +62,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
@@ -71,6 +74,7 @@ import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import com.yunian.ai.common.concurrent.DuplicateSendGuard
 
 class ChatGenerationManager private constructor(
     private val application: Application,
@@ -98,6 +102,31 @@ class ChatGenerationManager private constructor(
 
         fun release(companionId: Long) {
             instances[companionId]?.onReleased()
+        }
+
+        /**
+         * 组装气泡连发第 N 轮的模型历史（P0-2）。
+         *
+         * 首条正文气泡已经送达/落库，但它不在首轮请求的 [modelHistory] 里——若不显式注入，
+         * 连发第 2 轮起的模型看不到第 1 条说了什么，会复读或自相矛盾。
+         *
+         * 去重约定：[alreadyGenerated] 只含连发循环追加生成的追尾气泡（[BubbleLoopRunner] 传入的
+         * 就是这份增量列表），首条由 [firstBubbleText] 恰好注入一次，二者不重叠。
+         *
+         * @return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
+         */
+        internal fun buildChainHistory(
+            modelHistory: List<AiChatMessage>,
+            firstBubbleText: String,
+            alreadyGenerated: List<String>,
+        ): List<AiChatMessage> {
+            fun assistant(text: String) = AiChatMessage(
+                isFromUser = false,
+                content = text,
+                timestamp = System.currentTimeMillis(),
+                role = com.yunian.ai.domain.AiMessageRole.ASSISTANT,
+            )
+            return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
         }
     }
 
@@ -244,7 +273,11 @@ class ChatGenerationManager private constructor(
         companionInfoProvider = { latestCompanionInfo }
     } }
 
+    // 防连击：同内容 2 秒窗口内重复提交静默忽略（第一条已发出，双击/回车连按误触）
+    private val duplicateSendGuard = DuplicateSendGuard()
+
     fun sendText(content: String) {
+        if (duplicateSendGuard.shouldReject(content)) return
         startMessageConsumer()
         // 新一轮对话开始：清掉上一轮的工具过程气泡（常驻展示一轮）
         _toolActivity.value = emptyList()
@@ -1136,8 +1169,10 @@ class ChatGenerationManager private constructor(
                 return@launch
             }
 
-            // OpenMinis 模式：只要不是图片/本地模型路径就带工具，由模型自主决定是否调用
+            // OpenMinis 模式：只要不是图片路径就带工具，由模型自主决定是否调用
             val useTools = imagePath == null && ToolRegistry.isNotEmpty()
+            // 流式分支是否接入了气泡协议（决定首条是否走「协议解析 + 单条送达」路径）
+            var appliedBubbleProtocol = false
             val streamEvents = when {
                 imagePath != null -> {
                     val aiResponse = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
@@ -1192,8 +1227,17 @@ class ChatGenerationManager private constructor(
                 }
                 else -> {
 
+                    // 气泡协议接入：把协议文本并入角色自定义系统提示词（复用生图范例），
+                    // 使 streamMessage 内部据此推导 preserveRaw，无需改动接口。
+                    appliedBubbleProtocol = true
+                    val streamCompanion = aiCompanion.copy(
+                        systemPrompt = listOfNotNull(
+                            aiCompanion.systemPrompt?.trim()?.takeIf { it.isNotEmpty() },
+                            BubbleJsonProtocol.systemRules(),
+                        ).joinToString("\n\n")
+                    )
                     aiService.streamMessage(
-                        companion = aiCompanion,
+                        companion = streamCompanion,
                         history = modelHistory,
                         stickerProbability = stickerProbability,
                         ntpTimeEnabled = ntpTimeEnabled,
@@ -1203,24 +1247,50 @@ class ChatGenerationManager private constructor(
                 }
             }
 
-            val streamResult = streamApplier.apply(
-                events = streamEvents,
-                turn = pendingTurn,
-                projectLive = showReasoning,
-                onReasoningSnapshot = { snapshot ->
-
-                    if (EventCommitRules.shouldProjectReasoningLive(showReasoning, snapshot)) {
-                        StreamingReasoningMessagePipeline.upsertStreaming(
-                            companionId = companionId,
-                            turnId = pendingTurn.turnId,
-                            text = snapshot,
-                            timestamp = pendingTurn.startedAtMs,
-                            eventIndex = pendingTurn.streamingReasoningEvent()?.eventIndex,
-                            anchorMessageId = pendingTurn.anchorMessageId,
-                        )
+            // ADPF：流式回复期间把「主线程 + 当前刷新周期」声明为关键工作负载，
+            // 让系统据此提频/摆核。每个流事件后上报一次「上一事件 → 本次」的实耗
+            // （频率克制：每事件一次）。仅在支持时创建，否则 perfSession 为 null → 零开销跳过。
+            val perfSession = if (PerfBoost.isSupported) {
+                PerfBoost.createSession(
+                    tag = "chat-stream",
+                    targetWorkDurationNanos = PerfBoost.frameIntervalNanos(application),
+                    threadIds = PerfBoost.withMainThread(),
+                )
+            } else {
+                null
+            }
+            val streamResult = try {
+                var lastEventNanos = SystemClock.elapsedRealtimeNanos()
+                val timedEvents = if (perfSession != null) {
+                    streamEvents.onEach {
+                        val nowNanos = SystemClock.elapsedRealtimeNanos()
+                        perfSession.reportActual(nowNanos - lastEventNanos)
+                        lastEventNanos = nowNanos
                     }
-                },
-            )
+                } else {
+                    streamEvents
+                }
+                streamApplier.apply(
+                    events = timedEvents,
+                    turn = pendingTurn,
+                    projectLive = showReasoning,
+                    onReasoningSnapshot = { snapshot ->
+
+                        if (EventCommitRules.shouldProjectReasoningLive(showReasoning, snapshot)) {
+                            StreamingReasoningMessagePipeline.upsertStreaming(
+                                companionId = companionId,
+                                turnId = pendingTurn.turnId,
+                                text = snapshot,
+                                timestamp = pendingTurn.startedAtMs,
+                                eventIndex = pendingTurn.streamingReasoningEvent()?.eventIndex,
+                                anchorMessageId = pendingTurn.anchorMessageId,
+                            )
+                        }
+                    },
+                )
+            } finally {
+                perfSession?.close()
+            }
 
             if (streamResult.failedMessage != null) {
                 StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
@@ -1232,17 +1302,27 @@ class ChatGenerationManager private constructor(
             }
 
             val aiContentRaw = streamResult.assistantText
+            // 协议模式：首条按气泡协议严格解析，正文取其 text；未遵守（非 JSON）则回落整段原文，
+            // 交回 deliverResponse 走「空行分段」兜底。
+            val firstReply = if (appliedBubbleProtocol) BubbleJsonProtocol.parseStrict(aiContentRaw) else null
+            // 协议模式下 parseStrict 失败时，用宽容提取清洗畸形/截断 JSON 残片，
+            // 避免把 {"text":"…","continue": 这类骨架直接展示给用户。
+            val sourceText = when {
+                firstReply != null -> firstReply.text
+                appliedBubbleProtocol -> BubbleJsonProtocol.extractTextLenient(aiContentRaw)
+                else -> aiContentRaw
+            }
             // 生图标签只用于提取画面描述，绝不允许进入气泡或会话列表摘要。
             // 若剥离后为空（模型整条回复只有标签/画面描述），也不能回落成原文——那正是标签泄漏的来源。
             val aiContent = if (imageGenEnabled) {
-                val stripped = ImageGenTriggerLogic.stripTags(aiContentRaw)
+                val stripped = ImageGenTriggerLogic.stripTags(sourceText)
                 when {
                     stripped.isNotBlank() -> stripped
-                    ImageGenTriggerLogic.isPromptOnly(aiContentRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
-                    else -> aiContentRaw
+                    ImageGenTriggerLogic.isPromptOnly(sourceText) -> IMAGE_GEN_ONLY_REPLY_TEXT
+                    else -> sourceText
                 }
             } else {
-                aiContentRaw
+                sourceText
             }
             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
             if (toastMsg != null) {
@@ -1266,6 +1346,9 @@ class ChatGenerationManager private constructor(
                 pendingTurn = pendingTurn,
                 reasoningStartedAtMs = requestStartedAt,
                 onCommitted = onCommitted,
+                // 始终允许按 AI 自己敲的换行拆分：AI 的回车 = 想换一条，无论协议是否遵守
+                // （协议 text 内若塞了换行，同样按回车拆分，防止「全部塞在一起」）。
+                allowParagraphSplit = true,
             )
 
             exitLoading()
@@ -1278,17 +1361,14 @@ class ChatGenerationManager private constructor(
                 enabled = imageGenEnabled,
             )
 
-            val enableBubbleChain = imagePath == null
+            // 连发门控：仅当接入协议且首条显式 continue=true 时才继续生成追尾气泡。
+            val enableBubbleChain = appliedBubbleProtocol && firstReply?.continueChat == true &&
+                imagePath == null
             val followUpBubbles = if (enableBubbleChain) {
                 bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
-                    val appendedHistory = modelHistory + alreadyGenerated.map { text ->
-                        AiChatMessage(
-                            isFromUser = false,
-                            content = text,
-                            timestamp = System.currentTimeMillis(),
-                            role = com.yunian.ai.domain.AiMessageRole.ASSISTANT,
-                        )
-                    }
+                    // 链发历史必须含首条正文（P0-2）：否则第 2 轮看不到第 1 条说了什么。
+                    // alreadyGenerated 只含本循环追加的追尾气泡，首条由 aiContent 恰好注入一次。
+                    val appendedHistory = buildChainHistory(modelHistory, aiContent, alreadyGenerated)
                     val resp = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
                         aiService.sendMessage(
                             companion = aiCompanion,
@@ -1312,15 +1392,20 @@ class ChatGenerationManager private constructor(
 
             followUpBubblesDelivered.forEach { bubble ->
                 delay(800L + kotlin.random.Random.nextLong(1200L))
-                runCatching {
+                try {
                     responseFinalizer.deliverResponse(
                         aiContent = bubble,
                         reasoning = null,
                         userContentForMemory = null,
                         pendingTurn = pendingTurn,
                         onCommitted = onCommitted,
+                        // 追尾气泡同样按 AI 的回车拆分（若模型把多句塞进一条 text，回车意图照发）。
+                        allowParagraphSplit = true,
                     )
-                }.onFailure { e ->
+                } catch (e: CancellationException) {
+                    // 取消必须向上传播（runCatching 会把它当普通失败吞掉，P1-2）。
+                    throw e
+                } catch (e: Exception) {
                     SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)
                 }
             }

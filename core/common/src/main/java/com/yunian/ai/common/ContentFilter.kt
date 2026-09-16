@@ -59,7 +59,6 @@ object ContentFilter {
             fallbackKeywords = null
             injectedKeywords = null
             compiledPatterns = null
-            safetyClassifier = null
             initialized = false
         }
     }
@@ -302,19 +301,6 @@ object ContentFilter {
                      else "语义匹配(${"%.2f".format(match.score)})",
             matchedKeywords = listOf("[VECTOR_${match.level}]")
         )
-    }
-
-    @Volatile
-    private var safetyClassifier: SafetyClassifier? = null
-
-    fun setSafetyClassifier(classifier: SafetyClassifier?) {
-        safetyClassifier = classifier
-        if (classifier != null) Log.i(TAG, "L3语义分类器已激活")
-    }
-
-    suspend fun classifyAsync(text: String): ViolationLevel {
-        val c = safetyClassifier ?: return ViolationLevel.NONE
-        return c.classify(text)
     }
 
     data class OutputSafetyResult(

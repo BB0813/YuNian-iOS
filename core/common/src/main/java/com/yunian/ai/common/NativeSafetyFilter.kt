@@ -1,7 +1,6 @@
 package com.yunian.ai.common
 
 import android.util.Log
-import com.yunian.ai.common.safety.SafetySample
 
 object NativeSafetyFilter {
 

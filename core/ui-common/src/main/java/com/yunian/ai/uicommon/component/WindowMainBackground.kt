@@ -14,8 +14,15 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.Window
 import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import com.yunian.ai.common.ApplicationScopeProvider
 import com.yunian.ai.uicommon.theme.WeChatDarkBackground
 import com.yunian.ai.uicommon.theme.WeChatLightBackground
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object WindowMainBackground {
 
@@ -28,36 +35,118 @@ object WindowMainBackground {
     @Volatile
     private var appliedDark: Boolean? = null
 
+    /**
+     * 自定义背景「成品 Drawable」单条记忆（进程级、跨 Activity 生命周期保留）。
+     *
+     * 作用：使**同一 key** 背景再次应用（返回主页、`activity.recreate()`、深浅色切换重设等）
+     * 时可瞬时复用，做到零解码、零裁剪、零闪烁。
+     *
+     * 生命周期归属：[WindowMainBackground] 是进程级 `object`，只持 1 条；
+     * 背景 key 变更时被子条目替换、旧对象交 GC；窗口仍在绘制的那张位图本就需常驻，
+     * 因此不引入额外泄漏。`ChatBackgroundCache.clear()`（内存压力）只清缓存引用，
+     * 不影响本记忆，保证正在显示的窗口背景不被回收掉引用。
+     */
+    @Volatile
+    private var lastCustomKey: String? = null
+
+    @Volatile
+    private var lastCustomDrawable: Drawable? = null
+
+    /**
+     * 应用窗口主背景（带缓存去重）。**绝不在调用线程做位图解码/裁剪。**
+     *
+     * @param scope 受控协程作用域，用于后台解码后回主线程换图。
+     *   - Activity 路径请传 `activity.lifecycleScope`（随 Activity 销毁自动取消）；
+     *   - Compose 路径请传 `rememberCoroutineScope()`。
+     */
     fun applyFromPrefs(activity: Activity) {
         val key = getMainBackgroundKey(activity)
         val isDark = resolveIsDarkTheme(activity)
-        forceApply(activity.window, activity, key, isDark)
+        forceApply(activity.window, activity, key, isDark, activityScope(activity))
     }
 
-    fun apply(window: Window, context: Context, key: String, isDark: Boolean) {
+    /**
+     * 取得受控协程作用域：优先 Activity 的 lifecycleScope（随 Activity 销毁自动取消，
+     * 不会泄漏、不会在已销毁窗口上换图）；仅在 Activity 非 [LifecycleOwner] 的极端情况下，
+     * 回落到应用级作用域（[ApplicationScopeProvider]）。
+     */
+    internal fun activityScope(activity: Activity): CoroutineScope =
+        (activity as? LifecycleOwner)?.lifecycleScope ?: ApplicationScopeProvider.scope
+
+    fun apply(
+        window: Window,
+        context: Context,
+        key: String,
+        isDark: Boolean,
+        scope: CoroutineScope
+    ) {
         if (appliedKey == key && appliedDark == isDark) return
-        val drawable = createDrawable(context, key, isDark)
-        window.setBackgroundDrawable(drawable)
-        appliedKey = key
-        appliedDark = isDark
+        applyInternal(window, context, key, isDark, scope)
     }
 
-    fun forceApply(window: Window, context: Context, key: String, isDark: Boolean) {
+    fun forceApply(
+        window: Window,
+        context: Context,
+        key: String,
+        isDark: Boolean,
+        scope: CoroutineScope
+    ) {
         appliedKey = null
         appliedDark = null
-        apply(window, context, key, isDark)
+        applyInternal(window, context, key, isDark, scope)
     }
 
-    fun createDrawable(context: Context, key: String, isDark: Boolean): Drawable {
-        if (isCustomBackground(key)) {
-            val bitmap = ChatBackgroundCache.loadBitmap(context, key)
-            if (bitmap != null && !bitmap.isRecycled) {
-                val covered = centerCropToDisplay(context, bitmap)
-                return BitmapDrawable(context.resources, covered)
-            }
-            return ColorDrawable(fallbackSolid(isDark))
+    private fun applyInternal(
+        window: Window,
+        context: Context,
+        key: String,
+        isDark: Boolean,
+        scope: CoroutineScope
+    ) {
+        appliedKey = key
+        appliedDark = isDark
+
+        if (!isCustomBackground(key)) {
+            // 预设色块 / 纯色 / 渐变：纯内存构造，零解码，直接同步设置。
+            window.setBackgroundDrawable(createPresetDrawable(context, key, isDark))
+            return
         }
 
+        // 自定义背景：优先复用「成品记忆」，避免任何解码与裁剪。
+        lastCustomDrawable?.takeIf { lastCustomKey == key }?.let { memo ->
+            window.setBackgroundDrawable(memo)
+            return
+        }
+
+        // 冷路径：先设零成本的纯色占位（绝不解码），再于后台解码 + 裁剪，完成后回主线程换图。
+        window.setBackgroundDrawable(ColorDrawable(fallbackSolid(isDark)))
+        scope.launch {
+            val built = buildCustomDrawable(context, key) ?: return@launch
+            withContext(Dispatchers.Main.immediate) {
+                // 期间背景可能已被切换：丢弃过期结果，避免用旧图覆盖新背景。
+                if (appliedKey != key) return@withContext
+                lastCustomKey = key
+                lastCustomDrawable = built
+                window.setBackgroundDrawable(built)
+            }
+        }
+    }
+
+    /**
+     * 兼容保留：仅做「零解码」的同步构造。
+     *
+     * 自定义背景在无成品记忆时返回纯色占位（**真实位图请走 [apply] / [forceApply] 的异步换图路径**），
+     * 因此本方法可安全地挂在主线程调用，不再触发 `BitmapFactory.decodeFile` 与全屏 `createBitmap`。
+     */
+    fun createDrawable(context: Context, key: String, isDark: Boolean): Drawable {
+        if (isCustomBackground(key)) {
+            return lastCustomDrawable?.takeIf { lastCustomKey == key }
+                ?: ColorDrawable(fallbackSolid(isDark))
+        }
+        return createPresetDrawable(context, key, isDark)
+    }
+
+    private fun createPresetDrawable(context: Context, key: String, isDark: Boolean): Drawable {
         parseColorBackground(key)?.let { color ->
             return ColorDrawable(color.toArgb())
         }
@@ -76,6 +165,19 @@ object WindowMainBackground {
 
         return ColorDrawable(fallbackSolid(isDark))
     }
+
+    /**
+     * 后台解码 + 居中裁剪，返回成品 [Drawable]；失败返回 `null`。
+     *
+     * 位图解码复用 [ChatBackgroundCache.load]（挂起版、single-flight，同一 key 全应用只解一次）；
+     * 裁剪（全屏 `createBitmap` + `drawBitmap`）同样在后台线程完成，绝不占用主线程。
+     */
+    private suspend fun buildCustomDrawable(context: Context, key: String): Drawable? =
+        withContext(Dispatchers.IO) {
+            val bitmap = ChatBackgroundCache.load(context, key) ?: return@withContext null
+            if (bitmap.isRecycled) return@withContext null
+            BitmapDrawable(context.resources, centerCropToDisplay(context, bitmap))
+        }
 
     private fun fallbackSolid(isDark: Boolean): Int {
         return if (isDark) WeChatDarkBackground.toArgb() else WeChatLightBackground.toArgb()

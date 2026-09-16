@@ -1,7 +1,6 @@
 package com.yunian.ai.feature.chat.ui.viewmodel
 
 import com.yunian.ai.common.ChatConstants
-import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.TimeoutBudgets
 import com.yunian.ai.domain.AiChatMessage
 import com.yunian.ai.domain.AiCompanionInfo

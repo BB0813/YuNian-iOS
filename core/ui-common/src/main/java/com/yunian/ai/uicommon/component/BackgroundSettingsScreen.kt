@@ -22,24 +22,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,11 +44,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,16 +63,8 @@ import coil.compose.AsyncImage
 import com.yunian.ai.uicommon.image.cropper.ImageCropperDialog
 import com.yunian.ai.uicommon.image.viewer.FullscreenImageViewer
 import com.yunian.ai.uicommon.picker.ui.CustomImagePicker
-import androidx.compose.foundation.layout.RowScope
 import com.yunian.ai.uicommon.component.glass.LiquidBottomTab
 import com.yunian.ai.uicommon.component.glass.LiquidBottomTabs
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.layout.offset
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.lens
-import com.kyant.capsule.ContinuousCapsule
-import com.yunian.ai.uicommon.theme.PinkPrimary
 import com.yunian.ai.uicommon.component.glass.GlassPageScaffold
 import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.component.glass.drawGlass
@@ -111,7 +92,8 @@ fun setMainBackgroundKey(context: android.content.Context, key: String) {
             activity.window,
             activity,
             key,
-            WindowMainBackground.resolveIsDarkTheme(activity)
+            WindowMainBackground.resolveIsDarkTheme(activity),
+            WindowMainBackground.activityScope(activity)
         )
     }
 }

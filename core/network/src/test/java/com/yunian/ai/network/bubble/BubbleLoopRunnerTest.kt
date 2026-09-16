@@ -59,7 +59,7 @@ class BubbleLoopRunnerTest {
     }
 
     @Test
-    fun `runFollowingBubbles - 连发上限 16 条`() = runBlocking {
+    fun `runFollowingBubbles - 连发达到兜底上限即停`() = runBlocking {
         var count = 0
         val runner = BubbleLoopRunner()
         val bubbles = runner.runFollowingBubbles {
@@ -67,8 +67,9 @@ class BubbleLoopRunnerTest {
             """{"text":"第${count}条","continue":true}"""
         }
 
-        assertEquals(15, bubbles.size)
-        assertEquals(15, count)
+        // 上限由 BubbleLoopRunner.MAX_BUBBLES 兜底（产品上条数不限，模型 continue:false 才停）
+        assertEquals(BubbleLoopRunner.MAX_BUBBLES - 1, bubbles.size)
+        assertEquals(BubbleLoopRunner.MAX_BUBBLES - 1, count)
 
         assertTrue(bubbles.all { it.startsWith("第") })
     }
@@ -96,8 +97,8 @@ class BubbleLoopRunnerTest {
             """{"text":"气泡$count","continue":true}"""
         }
 
-        assertEquals(15, bubbles.size)
-        assertEquals(16, count)
+        assertEquals(BubbleLoopRunner.MAX_BUBBLES - 1, bubbles.size)
+        assertEquals(BubbleLoopRunner.MAX_BUBBLES, count)
     }
 
     @Test

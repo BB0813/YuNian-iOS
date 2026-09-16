@@ -7,7 +7,6 @@
     <string name="dialog_battery_title">需要电池优化白名单</string>
     <string name="dialog_battery_message">为了防止系统杀死后台服务，导致虚拟恋人无法发送消息，请将应用加入电池优化白名单。</string>
     <string name="nav_love">予念</string>
-    <string name="nav_message">消息</string>
     <string name="nav_contacts">通讯录</string>
     <string name="nav_profile">我</string>
 </resources>

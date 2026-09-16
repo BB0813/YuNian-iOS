@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
-import android.media.MediaRecorder
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -16,8 +15,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 class AndroidSttProvider : SttProviderInterface {
 

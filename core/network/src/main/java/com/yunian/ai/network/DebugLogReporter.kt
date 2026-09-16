@@ -2,8 +2,6 @@ package com.yunian.ai.network
 
 import android.util.Log
 import com.yunian.ai.network.BuildConfig
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request

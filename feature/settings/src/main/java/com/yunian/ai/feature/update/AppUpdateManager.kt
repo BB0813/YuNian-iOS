@@ -13,6 +13,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.common.security.DeviceRequestSigner
 import com.yunian.ai.common.update.DownloadProgress
 import com.yunian.ai.common.update.DownloadStatus
@@ -73,7 +74,7 @@ class AppUpdateManager(private val context: Context) {
         )
         .build()
 
-    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val downloadScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     @Volatile
     private var downloadJob: Job? = null

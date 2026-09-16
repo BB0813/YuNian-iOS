@@ -2,7 +2,6 @@ package com.yunian.ai.security
 
 import org.junit.Assert.*
 import org.junit.Test
-import java.security.MessageDigest
 
 class CompositeVmpRuntimeTest {
 

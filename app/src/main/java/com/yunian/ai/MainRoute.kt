@@ -34,7 +34,7 @@ sealed class MainRoute(val route: String) {
     object SettingsGeneralCategory : MainRoute("settings_general_category")
     object SettingsTools : MainRoute("settings_tools")
     object SettingsPermissions : MainRoute("settings_permissions")
-    object SettingsAboutYuNian : MainRoute("settings_about_lianyu")
+    object SettingsAboutYuNian : MainRoute("settings_about_yunian")
 
     object RoleManager : MainRoute("role_manager")
 
@@ -109,7 +109,7 @@ sealed class MainRoute(val route: String) {
             route == "settings_general_category" -> SettingsGeneralCategory
             route == "settings_tools" -> SettingsTools
             route == "settings_permissions" -> SettingsPermissions
-            route == "settings_about_lianyu" -> SettingsAboutYuNian
+            route == "settings_about_yunian" -> SettingsAboutYuNian
             route == "team" -> Team
             route == "support" -> Support
             route == "thanks" -> Thanks

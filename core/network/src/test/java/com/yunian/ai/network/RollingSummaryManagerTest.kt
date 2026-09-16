@@ -9,6 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -310,6 +311,50 @@ class RollingSummaryManagerTest {
 
         assertNull(manager.loadState(scopeOf()))
         assertEquals(1, summarizer.calls.size)
+    }
+
+    // ---------- P2-B1/B2：inFlight 释放 + 失败退避 ----------
+
+    @Test
+    fun `requestIncrementalMerge backs off after failure and skips retry within window`() = runBlocking {
+        val summarizer = RecordingSummarizer { _, _ -> null } // 合并失败（返回空）
+        val (manager, _) = newManager(summarizer = summarizer)
+
+        // 首次触发：合并失败计入退避状态；协程同步跑完后 inFlight 已释放
+        manager.requestIncrementalMerge(scopeOf(), listOf(msg(1, "a")), batchEndId = 1L)
+        assertEquals(1, summarizer.calls.size)
+        assertTrue("失败后 inFlight 标记必须释放", inFlightKeys(manager).isEmpty())
+
+        // 退避窗口内（首次失败 +5 分钟）再次触发被直接跳过，不打合并 API / 不占 inFlight
+        manager.requestIncrementalMerge(scopeOf(), listOf(msg(1, "a")), batchEndId = 1L)
+        assertEquals(1, summarizer.calls.size)
+    }
+
+    @Test
+    fun `requestIncrementalMerge inFlight released even when job body never runs`() {
+        // P2-B1：背景 scope 已取消时 launch 的协程体不会执行，旧 finally 不触发会永久滞留标记；
+        // invokeOnCompletion 保证标记释放（反射直读私有 inFlight 集作确定性断言）。
+        val cancelledScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        cancelledScope.cancel()
+        val summarizer = RecordingSummarizer()
+        val manager = RollingSummaryManager(
+            metaStore = AppMetaStore(FakeAppMetaDao()),
+            mergeSummarizer = { old, delta, _, _, _ -> summarizer.invoke(old, delta) },
+            backgroundScope = cancelledScope,
+            gapFetcher = null
+        )
+
+        manager.requestIncrementalMerge(scopeOf(), listOf(msg(1, "a")), batchEndId = 1L)
+        assertEquals(0, summarizer.calls.size) // 协程体从未执行
+        assertTrue("inFlight 标记必须被 invokeOnCompletion 释放", inFlightKeys(manager).isEmpty())
+    }
+
+    /** 反射读取私有 inFlight 集的快照（仅测试用，验证 P2-B1 标记释放）。 */
+    @Suppress("UNCHECKED_CAST")
+    private fun inFlightKeys(manager: RollingSummaryManager): Set<String> {
+        val field = RollingSummaryManager::class.java.getDeclaredField("inFlight")
+        field.isAccessible = true
+        return (field.get(manager) as Set<String>).toSet()
     }
 
     // ---------- gapFetcher 补拉（仅 Single） ----------

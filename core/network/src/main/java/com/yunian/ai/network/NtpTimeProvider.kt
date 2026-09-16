@@ -1,18 +1,14 @@
 package com.yunian.ai.network
 
 import android.content.Context
+import com.yunian.ai.common.ApplicationScopeProvider
 import com.yunian.ai.common.SecureLog
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 
 object NtpTimeProvider {
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val NTP_HOSTS = listOf(
         "ntp.aliyun.com",
@@ -52,7 +48,7 @@ object NtpTimeProvider {
     fun isNtpSynced(): Boolean = synced
 
     fun syncInBackground() {
-        scope.launch {
+        ApplicationScopeProvider.scope.launch {
             performSync()
         }
     }

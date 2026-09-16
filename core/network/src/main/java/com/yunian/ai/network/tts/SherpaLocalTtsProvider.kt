@@ -6,12 +6,18 @@ import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.yunian.ai.common.SecureLog
-import kotlinx.coroutines.Dispatchers
+import com.yunian.ai.common.concurrent.AppDispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/**
+ * 本地 VITS 合成是 **CPU 密集型**：用 [AppDispatchers.tts]（串行 view）执行，
+ * 与 IO 池隔离（避免与网络/文件阻塞任务互相拖累），且同一时刻只跑一段合成（引擎串行）。
+ */
+private val TTS_INFERENCE_DISPATCHER = AppDispatchers.tts
 
 class SherpaLocalTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
 
@@ -31,7 +37,7 @@ class SherpaLocalTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
     }
 
     override suspend fun synthesize(context: Context, text: String, voiceId: String?): String? =
-        withContext(Dispatchers.IO) {
+        withContext(TTS_INFERENCE_DISPATCHER) {
             try {
                 val preferences = LocalTtsPreferences(context)
                 val modelId = preferences.selectedModelId.first()

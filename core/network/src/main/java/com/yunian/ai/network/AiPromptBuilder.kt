@@ -197,20 +197,32 @@ object AiPromptBuilder {
             "这是", "这是在", "顺着", "氛围", "接话", "回复", "回答", "思考过程",
             "内心独白", "不能让任何人", "知道你是AI", "你是AI", "作为AI", "模型"
         )
-        val sentences = trimmed.split(Regex("""[。！？!?]""")).map { it.trim() }.filter { it.isNotBlank() }
-        val filtered = sentences.filter { sentence ->
-            metaMarkers.none { marker -> sentence.contains(marker) }
-        }
-        return if (filtered.isNotEmpty()) filtered.joinToString("。") else trimmed
+        // 注意：必须**逐行**重建，不能把整段句子 joinToString("。")——那会把模型自己写的
+        // 换行（＝它想分条连发的意图）消灭掉，导致下游拆分器永远只看到一个气泡
+        // （用户反馈「永远一问一答」的机制根因之一）。行内句子用。连接，行间保留 \n。
+        val rebuilt = trimmed.split("\n").map { line ->
+            line.split(Regex("""[。！？!?]"""))
+                .map { it.trim() }
+                .filter { it.isNotBlank() && metaMarkers.none { marker -> it.contains(marker) } }
+                .joinToString("。")
+        }.filter { it.isNotBlank() }.joinToString("\n")
+        return rebuilt.ifEmpty { trimmed }
     }
 
-    internal fun applyPersonaPostProcessing(response: String, recentMessages: List<ChatMessage>): String {
+    internal fun applyPersonaPostProcessing(
+        response: String,
+        recentMessages: List<ChatMessage>,
+        preserveRaw: Boolean = false,
+    ): String {
 
         val thinkingStripped = ResponsePostProcessor.stripThinkingContent(response)
 
         if (BubbleJsonProtocol.parseStrict(thinkingStripped) != null) {
             return thinkingStripped
         }
+        // 气泡协议模式下模型理应输出 JSON；此处保留原文（仅剥离思考内容），
+        // 交回调用方用 parseStrict 判定是否遵守协议，避免拆句/截断破坏 JSON。
+        if (preserveRaw) return thinkingStripped
         var cleaned = thinkingStripped
             .replace(Regex("\\*.*?\\*"), "")
             .replace(Regex("<(?!\\[).*?>"), "")
@@ -521,7 +533,7 @@ object AiPromptBuilder {
 
 2. 回应菜单（优先级，不是每轮必填流水线）
 - 菜单只是可选动作池，不是流水线：①接情绪 ②共鸣/反问 ③表态/吐槽 ④答问 ⑤（仅用户求方案时）给一步建议。
-- 硬约束：每轮只落实其中一项（单次单动作），并用完整自然口语说完；不要半截残句。
+- 硬约束：每轮只落实其中一项（单次单动作），并用完整自然口语说完；可按真人微信习惯用换行分成多条短消息连发——**条数不限**（换行即分条），但不要把多项意图打包成一条长文；不要半截残句。
 - 不要为了「步骤完整」把 ①②③ 写成三段；也不要为了「少动作」把一句说残。
 - 例（闲聊 1 动作，完整句）：「今天好累」→「咋了？被项目折腾够呛了？」——停。不要泡脚/听歌/早睡。
 - 例（求方案 1 动作，完整句）：「那我该怎么办」→「先别硬撑，今晚把最急的一件收掉就行。」——停。不要三种方案+追问。
@@ -555,9 +567,9 @@ ${AiContextTools.buildConversationTimingRules()}
 ${AiContextTools.buildDeliveryBudgetRules()}
 
 === 表达约束 ===
-A. 长度服从动作数，不服从字数 KPI：闲聊单动作通常一句完整口语就够；解释/答问可以稍长。不要为了「写满 40–120 字」再塞第二个动作，也不要为了压字数写成半截话。整轮避免无意义长文灌水。
+A. 长度服从动作数，不服从字数 KPI：闲聊通常一两条完整口语；解释/答问可以稍长。不要为了「写满 40–120 字」再塞第二个动作，也不要为了压字数写成半截话。整轮避免无意义长文灌水。
 B. 断句：${punctuationRule}
-C. 格式：不要用 markdown（不要#标题、不要-列表、不要```代码块）。默认一条气泡把同一动作一句完整说清并收尾。如果用户明确要求你发多条消息、或你的回复由多条独立短消息组成（如逐条回应多个问题），把每条消息写成一句完整的话并用标点（。！？～）收尾，系统会按句末标点自动拆成多条气泡连发（每条间隔发出）。不要为凑条数硬拆同一句话。短肯定/语气（嗯、好、行、哦）单独成句即可，表意完整。
+C. 格式：不要用 markdown（不要#标题、不要-列表、不要```代码块）。像真人发微信那样自然分条连发：**条数不限**（想说几条就几条，由你此刻有多少层意思决定），一层意思一条；想说的内容多就多分几条（每条都是一句完整口语、标点收尾），不要把几句话挤进同一条长气泡；只有一句短回应时发一条即可；若是一段连贯的叙述/故事/说明，则整段合并成一条。用户要求「多发几句」时，按他要的条数分条发出。你的每一次回车 = 发出下一条气泡，不要假设系统会按标点拆；也不要为凑条数把同一句话硬拆开。短肯定/语气（嗯、好、行、哦）单独成条即可，表意完整。
 ${innerThoughtRule}
 ${stickerRule}
 F. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。人设固定词汇只是参考，不是每句必须套用的模板。
@@ -667,7 +679,7 @@ ${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
                 appendLine("但若旧话题已完结或你不感兴趣，允许自然收束/轻转，绝不要为了遵守偏好而硬续。")
             }
             if (settings != null && !settings.allowFollowUpMessage) {
-                appendLine("用户偏好（软约束）：本次尽量少追问；说完核心一句即可，除非角色性格强烈需要一句自然反问。")
+                appendLine("用户偏好（软约束）：本次尽量少追问；把核心意思说完即可（不必追加反问），可以说一条，也可以按真人习惯连发多条短消息（条数不限）。")
             }
         }
     }

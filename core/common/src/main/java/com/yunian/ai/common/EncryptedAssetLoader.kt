@@ -1,7 +1,6 @@
 package com.yunian.ai.common
 
 import android.content.Context
-import java.io.ByteArrayInputStream
 
 object EncryptedAssetLoader {
 

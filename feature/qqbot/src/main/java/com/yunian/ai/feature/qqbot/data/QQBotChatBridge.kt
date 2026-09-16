@@ -1,6 +1,7 @@
 package com.yunian.ai.feature.qqbot.data
 
 import android.content.Context
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.domain.DialogueCoordinator
@@ -35,7 +36,7 @@ class QQBotChatBridge(
     }
 
     private val bridgeJob = SupervisorJob()
-    private val bridgeScope = CoroutineScope(bridgeJob + Dispatchers.IO)
+    private val bridgeScope = CoroutineScope(bridgeJob + AppDispatchers.io)
 
     private var eventCollectionJob: kotlinx.coroutines.Job? = null
     private val activeReplyJobs = Any()

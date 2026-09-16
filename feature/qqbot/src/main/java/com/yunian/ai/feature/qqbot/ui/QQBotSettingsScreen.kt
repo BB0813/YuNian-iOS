@@ -4,7 +4,6 @@ import com.yunian.ai.uicommon.component.glass.drawGlass
 import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.icon.AppIcons
 
-
 import com.yunian.ai.uicommon.theme.AppTheme
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -31,14 +30,10 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -60,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunian.ai.feature.qqbot.data.network.BindStatus
 import com.yunian.ai.feature.qqbot.data.network.QQBotWebSocketClient
 import com.yunian.ai.uicommon.component.glass.GlassPageScaffold
+import com.yunian.ai.uicommon.component.SettingItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -749,37 +745,5 @@ private fun QQBotStatusCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SettingItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    trailing: @Composable () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = AppTheme.colors.onSurfaceVariant,
-            modifier = Modifier.size(20.dp)
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 12.dp)
-        ) {
-            Text(text = title, fontSize = 14.sp, color = AppTheme.colors.onSurface, maxLines = 1)
-            Text(text = subtitle, fontSize = 12.sp, color = AppTheme.colors.onSurfaceVariant, maxLines = 1)
-        }
-        trailing()
     }
 }

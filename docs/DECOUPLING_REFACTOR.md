@@ -320,8 +320,8 @@ AiService 原为 2835 行的上帝类，本次拆分为 4 个纯函数工具类�
 | AiContextTools 去重 | 删除 7 方法 + 1 data class，替换 10 处调用 | -138 行 |
 | AiPromptBuilder 去重 | 删除 7 private + 3 public 委托，替换 10 处调用 | -391 行 |
 | 删除死代码 | `extractDirectReply` + `findEchoEndIndex` | -68 行 |
-| 提取 ResponsePostProcessor | `stripThinkingContent` + `ensureNotHtml`，替换 8 处调用 | 新增 [ResponsePostProcessor.kt](file:///h:/lianyu/core/network/src/main/java/com/yunian/ai/network/ResponsePostProcessor.kt) |
-| 提取 ImageHelper | `encodeImageToBase64` + `getImageMimeType`，替换 2 处调用 | 新增 [ImageHelper.kt](file:///h:/lianyu/core/network/src/main/java/com/yunian/ai/network/ImageHelper.kt) |
+| 提取 ResponsePostProcessor | `stripThinkingContent` + `ensureNotHtml`，替换 8 处调用 | 新增 [ResponsePostProcessor.kt](../core/network/src/main/java/com/yunian/ai/network/ResponsePostProcessor.kt) |
+| 提取 ImageHelper | `encodeImageToBase64` + `getImageMimeType`，替换 2 处调用 | 新增 [ImageHelper.kt](../core/network/src/main/java/com/yunian/ai/network/ImageHelper.kt) |
 
 纯函数工具类从 2 个增至 4 个：`AiContextTools` / `AiPromptBuilder` / `ResponsePostProcessor` / `ImageHelper`。
 
