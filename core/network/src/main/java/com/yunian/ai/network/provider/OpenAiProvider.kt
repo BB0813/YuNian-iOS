@@ -6,6 +6,7 @@ import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.model.MessageType
 import com.yunian.ai.network.ChatCompletionResponse
 import com.yunian.ai.network.Message
+import com.yunian.ai.network.toApiTemperature
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -82,7 +83,7 @@ open class OpenAiCompatibleProvider : AiProvider {
                 if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 val maxTokens = config.maxTokens ?: 800
                 if (maxTokens > 0) {
@@ -172,7 +173,7 @@ open class OpenAiCompatibleProvider : AiProvider {
                 if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", temperature)
+                    jsonBody.put("temperature", temperature.toApiTemperature())
                 }
                 jsonBody.put(buildMaxTokensParam(config.provider), maxTokens)
 
@@ -230,7 +231,7 @@ open class OpenAiCompatibleProvider : AiProvider {
                 if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", jsonArray)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", 0.7)
+                    jsonBody.put("temperature", 0.7.toApiTemperature())
                 }
                 jsonBody.put(buildMaxTokensParam(config.provider), 100)
 
@@ -337,7 +338,7 @@ open class OpenAiCompatibleProvider : AiProvider {
                 if (config.model.isNotBlank()) jsonBody.put("model", config.model)
                 jsonBody.put("messages", messagesJson)
                 if (!AiProvider.requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 val maxTokens = config.maxTokens ?: 800
                 if (maxTokens > 0) {
