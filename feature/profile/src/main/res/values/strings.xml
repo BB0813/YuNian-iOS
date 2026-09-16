@@ -170,6 +170,8 @@
     <string name="app_brand">予念</string>
     <string name="app_slogan">YuNian - 你的AI虚拟恋人</string>
     <string name="version">版本 1.8</string>
+    <string name="version_format">版本 %1$s</string>
+    <string name="check_new_version_entry">检查新版本</string>
     <string name="about_desc_title">关于予念</string>
     <string name="about_desc">予念是一款AI虚拟恋人聊天应用，基于先进的大语言模型技术，为你打造专属的虚拟伴侣体验。</string>
     <string name="features">功能特性</string>

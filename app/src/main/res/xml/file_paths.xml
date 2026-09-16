@@ -5,4 +5,6 @@
     <cache-path name="shared_images" path="shared_images/"/>
     <cache-path name="camera_photos" path="."/>
     <external-cache-path name="external_shared_images" path="shared_images/"/>
+    <!-- APK 更新下载目录（对应 getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)） -->
+    <external-files-path name="downloads" path="Download/"/>
 </paths>
