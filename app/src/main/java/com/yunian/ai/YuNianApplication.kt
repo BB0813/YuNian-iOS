@@ -12,10 +12,8 @@ import com.yunian.ai.common.PerformanceTrace
 import com.yunian.ai.common.RomUtils
 import com.yunian.ai.common.perf.PerfBoost
 import com.yunian.ai.common.SaltStore
-import com.yunian.ai.common.SafetyClassifier
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.embedding.VectorLibrary
-import com.yunian.ai.common.safety.ContentSafetyVerifier
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.DefaultCompanionSeeder
 import com.yunian.ai.database.SecurityDataSeeder
@@ -284,9 +282,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initSecurityData(app) }
             bgScope.launch { autoBackupDatabase(app) }
             bgScope.launch { initVectorLibrary(app) }
-            ContentFilter.setSafetyClassifier(LazyLocalSafetyClassifier(app))
-            PerformanceTrace.markStartupStage("ib_safety_classifier")
-            bgScope.launch { initSafetyVerifier(app) }
 
             com.yunian.ai.database.cleanup.DataCleanupManager.schedulePeriodicCleanup(app)
             PerformanceTrace.markStartupStage("ib_cleanup_schedule")
@@ -382,16 +377,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 app.assets.open("safety/violation_vectors.bin").use { it.readBytes() }
                     .let { VectorLibrary.Loader().load(it) }
                     ?.let { ContentFilter.setVectorLibrary(it) }
-            }
-        }
-
-        private suspend fun initSafetyVerifier(app: Application) {
-            runCatching {
-                ContentSafetyVerifier.init(app)
-                val keywords = SecurityDataSeeder.getEnabledKeywords(app)
-                if (keywords.isNotEmpty()) {
-                    ContentSafetyVerifier.bootstrap(keywords)
-                }
             }
         }
 
@@ -604,34 +589,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         private fun clearUpdateIgnore(app: Application) {
             app.getSharedPreferences("update_config", android.content.Context.MODE_PRIVATE)
                 .edit().remove("ignored_version").apply()
-        }
-
-        private class LazyLocalSafetyClassifier(
-            app: Application
-        ) : SafetyClassifier {
-            private val appContext = app.applicationContext
-            private var delegate: SafetyClassifier? = null
-
-            override suspend fun classify(text: String): ContentFilter.ViolationLevel {
-                val classifier = delegate ?: buildClassifier().also { delegate = it }
-                    ?: return ContentFilter.ViolationLevel.NONE
-                return classifier.classify(text)
-            }
-
-            private fun buildClassifier(): SafetyClassifier? {
-                return runCatching {
-                    if (!com.yunian.ai.feature.localmodel.LocalAiService.isNativeLibrarySupported) return null
-                    val svc = com.yunian.ai.feature.localmodel.LocalAiService.getInstance(appContext)
-                    val model = com.yunian.ai.feature.localmodel.LocalModelCatalog.all
-                        .firstOrNull { it.modelFile(appContext).exists() }
-                        ?: return null
-                    svc.setActiveModel(model)
-                    com.yunian.ai.feature.localmodel.LocalSafetyClassifier(svc)
-                }.getOrElse {
-                    SecureLog.e("YuNianApplication", "Lazy safety classifier init failed", it)
-                    null
-                }
-            }
         }
 
         private fun applyStoredLanguage(app: Application) {
