@@ -50,9 +50,6 @@ import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.TokenUsageRepository
 import com.yunian.ai.database.repository.UserRepository
-import com.yunian.ai.network.provider.AiProvider
-import com.yunian.ai.network.provider.ClaudeProvider
-import com.yunian.ai.network.provider.OpenAiCompatibleProvider
 import com.yunian.ai.domain.stream.AssistantStreamEvent
 import com.yunian.ai.domain.timeline.TurnId
 import com.yunian.ai.network.stream.ChatBodyAdapter
@@ -462,31 +459,6 @@ class AiService(context: Context) : AiServiceProvider {
         private val keyLastUsed = ConcurrentHashMap<String, Long>()
         private val keyCooldownUntil = ConcurrentHashMap<String, Long>()
 
-        private val providers: Map<ApiProvider, AiProvider> = mapOf(
-            ApiProvider.OPENAI to OpenAiCompatibleProvider(),
-            ApiProvider.DEEPSEEK to OpenAiCompatibleProvider(),
-            ApiProvider.DASHSCOPE to OpenAiCompatibleProvider(),
-            ApiProvider.KIMI to OpenAiCompatibleProvider(),
-            ApiProvider.GEMINI to OpenAiCompatibleProvider(),
-            ApiProvider.XIAOMI to OpenAiCompatibleProvider(),
-            ApiProvider.ZHIPU to OpenAiCompatibleProvider(),
-            ApiProvider.SILICONFLOW to OpenAiCompatibleProvider(),
-            ApiProvider.OPENROUTER to OpenAiCompatibleProvider(),
-            ApiProvider.GROQ to OpenAiCompatibleProvider(),
-            ApiProvider.CUSTOM to OpenAiCompatibleProvider(),
-            ApiProvider.PARTNER to OpenAiCompatibleProvider(),
-            ApiProvider.IFLYTEK to OpenAiCompatibleProvider(),
-            ApiProvider.ANTHROPIC to ClaudeProvider(),
-        )
-
-        private fun providerFor(config: ApiConfig): AiProvider {
-
-            if (config.provider == ApiProvider.CUSTOM && config.formatHint == "anthropic") {
-                return ClaudeProvider()
-            }
-            return providers[config.provider] ?: OpenAiCompatibleProvider()
-        }
-
         fun usesAnthropicProtocol(config: ApiConfig): Boolean {
             return config.provider == ApiProvider.ANTHROPIC ||
                 (config.provider == ApiProvider.CUSTOM && config.formatHint == "anthropic")
@@ -494,12 +466,6 @@ class AiService(context: Context) : AiServiceProvider {
 
         fun supportsOpenAiModelList(config: ApiConfig): Boolean {
             return !usesAnthropicProtocol(config)
-        }
-
-        init {
-            AiProvider.okHttpClient = okHttpClient
-            AiProvider.keySelector = ::selectApiKey
-            AiProvider.keyFailureHandler = ::markKeyFailed
         }
 
         const val KEY_MIN_INTERVAL_MS = 800L
