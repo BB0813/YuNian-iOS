@@ -30,7 +30,6 @@ appUpdate = "2.1.0"
 workRuntimeKtx = "2.9.0"
 animation = "1.7.5"
 lottie = "6.5.0"
-litertLm = "0.11.0"
 zxing = "3.5.3"
 securityCrypto = "1.1.0-alpha06"
 tinkAndroid = "1.18.0"
@@ -98,7 +97,6 @@ androidx-animation = { group = "androidx.compose.animation", name = "animation",
 androidx-animation-core = { group = "androidx.compose.animation", name = "animation-core", version.ref = "animation" }
 androidx-animation-graphics = { group = "androidx.compose.animation", name = "animation-graphics", version.ref = "animation" }
 lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
-litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertLm" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 androidx-tracing = { group = "androidx.tracing", name = "tracing", version = "1.2.0" }
 huawei-hms-push = { group = "com.huawei.hms", name = "push", version.ref = "huaweiHmsPush" }

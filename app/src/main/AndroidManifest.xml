@@ -78,10 +78,9 @@
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
 
-        <uses-native-library android:name="libvndksupport.so"
-            android:required="false"
-            tools:ignore="TypoInNamespace" />
-        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <!-- libvndksupport.so / libOpenCL.so 的 uses-native-library 声明已随 LiteRT-LM 删除：
+             二者仅被 libLiteRt.so / libLiteRtClGlAccelerator.so / liblitertlm_jni.so 所需，
+             而这三个 .so 已随 feature:localmodel 退役（D4）。liblianyu_agent.so 不依赖它们。 -->
 
         <provider
             android:name="androidx.startup.InitializationProvider"
