@@ -46,7 +46,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -88,25 +87,26 @@ class GroupChatViewModel(
         isFromUser = companionId == -1L, content = content, timestamp = timestamp,
         companionId = companionId
     )
-    private val cachedRecent = groupMessageRepository.getCachedRecent(groupId).orEmpty()
-    private val _messages = MutableStateFlow(cachedRecent)
-    val messages: StateFlow<List<GroupMessage>> = _messages.asStateFlow()
-
-    private val _messageMetadata = MutableStateFlow(
-        cachedRecent.takeLast(ChatConstants.GROUP_CHAT_MESSAGE_LIMIT).map { it.toMetadataMessage() }
+    // ── 上帝类拆分第二轮：分页/正文状态机外提 ────────────────────────────────
+    // 闭包分析（全量读码，非 grep 抽样）：该簇只读写自己的 5 个状态流 +
+    // groupMessageRepository + groupId + 协程作用域，与用户资料/群数据/成员表/
+    // 发送循环/记忆/AI/保活零交叉，故整体外提至 GroupChatPager，行为逐行等价。
+    private val pager = GroupChatPager(
+        scope = viewModelScope,
+        groupId = groupId,
+        repository = groupMessageRepository
     )
-    val messageMetadata: StateFlow<List<Message>> = _messageMetadata.asStateFlow()
+    val messages: StateFlow<List<GroupMessage>> get() = pager.messages
+    val messageMetadata: StateFlow<List<Message>> get() = pager.messageMetadata
+    val messageBodies: StateFlow<Map<Long, MessageBodyState<GroupMessage>>> get() = pager.messageBodies
+    val hasMore: StateFlow<Boolean> get() = pager.hasMore
+    val isLoadingMore: StateFlow<Boolean> get() = pager.isLoadingMore
 
-    private val _messageBodies = MutableStateFlow<Map<Long, MessageBodyState<GroupMessage>>>(
-        cachedRecent.associate { it.id to MessageBodyState.Ready(it) }
-    )
-    val messageBodies: StateFlow<Map<Long, MessageBodyState<GroupMessage>>> = _messageBodies.asStateFlow()
+    fun loadVisibleMessageBodies(messageIds: Set<Long>) = pager.loadVisibleMessageBodies(messageIds)
 
-    private val _hasMore = MutableStateFlow(cachedRecent.size >= ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-    val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+    fun retryMessageBody(messageId: Long) = pager.retryMessageBody(messageId)
 
-    private val _isLoadingMore = MutableStateFlow(false)
-    val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
+    fun loadMoreMessages() = pager.loadMoreMessages()
 
     private val _userName = MutableStateFlow("我")
     val userName: StateFlow<String> = _userName.asStateFlow()
@@ -115,122 +115,7 @@ class GroupChatViewModel(
 
     init {
         loadUserProfile()
-        viewModelScope.launch(Dispatchers.IO) {
-            var metadataSeeded = cachedRecent.isNotEmpty()
-            if (!metadataSeeded) {
-                runCatching {
-                    groupMessageRepository.hydrateRecent(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-                }
-                val hydrated = groupMessageRepository.getCachedRecent(groupId).orEmpty()
-                if (hydrated.isNotEmpty()) {
-                    _messages.value = hydrated
-                    _messageBodies.value = hydrated.associate { it.id to MessageBodyState.Ready(it) }
-                    _messageMetadata.value =
-                        hydrated.takeLast(ChatConstants.GROUP_CHAT_MESSAGE_LIMIT).map { it.toMetadataMessage() }
-                    metadataSeeded = true
-                }
-            }
-
-            if (!metadataSeeded) {
-                val recentMetadata = groupMessageRepository
-                    .getRecentMetadata(groupId, ChatConstants.GROUP_CHAT_MESSAGE_LIMIT)
-                    .reversed()
-                _messageMetadata.value = recentMetadata
-                seedBodiesFromCache(recentMetadata)
-            }
-            _hasMore.value =
-                _messageMetadata.value.size < groupMessageRepository.getMessageCount(groupId)
-            groupMessageRepository.observeRecentMetadata(
-                groupId,
-                ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-            ).collectLatest { recent ->
-                val older = _messageMetadata.value.filterNot { current ->
-                    recent.any { it.id == current.id }
-                }
-                val merged = (older + recent.reversed())
-                    .distinctBy { it.id }
-                    .sortedWith(compareBy<Message> { it.timestamp }.thenBy { it.id })
-                if (merged != _messageMetadata.value) {
-                    _messageMetadata.value = merged
-                    seedBodiesFromCache(merged)
-                }
-                _hasMore.value = merged.size < groupMessageRepository.getMessageCount(groupId)
-                if (recent.isNotEmpty()) groupMessageRepository.markReadThroughLatest(groupId)
-            }
-        }
-    }
-
-    private fun seedBodiesFromCache(metadata: List<Message>) {
-        if (metadata.isEmpty()) return
-        val cachedById = groupMessageRepository.getCachedRecent(groupId)
-            ?.associateBy { it.id }
-            .orEmpty()
-        if (cachedById.isEmpty()) return
-        val ready = metadata.mapNotNull { item ->
-            val body = cachedById[item.id] ?: return@mapNotNull null
-            when (_messageBodies.value[item.id]) {
-                is MessageBodyState.Ready -> null
-                else -> item.id to MessageBodyState.Ready(body)
-            }
-        }
-        if (ready.isNotEmpty()) {
-            _messageBodies.value = _messageBodies.value + ready
-            publishLoadedMessages()
-        }
-    }
-
-    private fun GroupMessage.toMetadataMessage(): Message = Message(
-        id = id,
-        conversationId = groupId,
-        conversationType = "group",
-        isFromUser = companionId == -1L,
-        senderId = companionId,
-        timestamp = timestamp,
-        fileFormat = fileFormat
-    )
-
-    fun loadVisibleMessageBodies(messageIds: Set<Long>) {
-        val pending = _messageMetadata.value.filter { metadata ->
-            metadata.id in messageIds && when (_messageBodies.value[metadata.id]) {
-                null, is MessageBodyState.Error -> true
-                else -> false
-            }
-        }
-        if (pending.isEmpty()) return
-
-        _messageBodies.value = _messageBodies.value + pending.associate {
-            it.id to MessageBodyState.Loading
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { groupMessageRepository.loadMessages(pending) }
-                .onSuccess { loaded ->
-                    _messageBodies.value = _messageBodies.value + pending.associate { metadata ->
-                        val message = loaded[metadata.id]
-                        metadata.id to if (message != null) {
-                            MessageBodyState.Ready(message)
-                        } else {
-                            MessageBodyState.Error("正文不存在")
-                        }
-                    }
-                    publishLoadedMessages()
-                }
-                .onFailure { error ->
-                    _messageBodies.value = _messageBodies.value + pending.associate {
-                        it.id to MessageBodyState.Error(error.message ?: "正文加载失败")
-                    }
-                }
-        }
-    }
-
-    fun retryMessageBody(messageId: Long) {
-        _messageBodies.value = _messageBodies.value - messageId
-        loadVisibleMessageBodies(setOf(messageId))
-    }
-
-    private fun publishLoadedMessages() {
-        _messages.value = _messageMetadata.value.mapNotNull { metadata ->
-            (_messageBodies.value[metadata.id] as? MessageBodyState.Ready)?.value
-        }
+        pager.start()
     }
 
     private var avatarUnsubscribe: (() -> Unit)? = null
@@ -244,38 +129,6 @@ class GroupChatViewModel(
         nicknameUnsubscribe?.invoke()
         avatarUnsubscribe = provider?.observeAvatar { _userAvatar.value = it }
         nicknameUnsubscribe = provider?.observeNickname { _userName.value = it }
-    }
-
-    fun loadMoreMessages() {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (_isLoadingMore.value) return@launch
-            _isLoadingMore.value = true
-            try {
-                val oldest = _messageMetadata.value.firstOrNull()
-                if (oldest != null) {
-                    val older = groupMessageRepository.getMetadataBefore(
-                        groupId = groupId,
-                        beforeTimestamp = oldest.timestamp,
-                        beforeId = oldest.id,
-                        limit = ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                    )
-                    if (older.isNotEmpty()) {
-                        _messageMetadata.value = (older.reversed() + _messageMetadata.value)
-                            .distinctBy { it.id }
-                    }
-                    _hasMore.value = older.size == ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                } else {
-                    val recent = groupMessageRepository.getRecentMetadata(
-                        groupId,
-                        ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                    )
-                    _messageMetadata.value = recent.reversed()
-                    _hasMore.value = recent.size == ChatConstants.GROUP_CHAT_MESSAGE_LIMIT
-                }
-            } finally {
-                _isLoadingMore.value = false
-            }
-        }
     }
 
     private val _groupData = MutableStateFlow<ChatGroup?>(null)
