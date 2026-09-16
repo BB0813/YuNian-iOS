@@ -111,7 +111,8 @@ fun setMainBackgroundKey(context: android.content.Context, key: String) {
             activity.window,
             activity,
             key,
-            WindowMainBackground.resolveIsDarkTheme(activity)
+            WindowMainBackground.resolveIsDarkTheme(activity),
+            WindowMainBackground.activityScope(activity)
         )
     }
 }
