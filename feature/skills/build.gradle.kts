@@ -32,6 +32,8 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:ui-common"))
     implementation(project(":core:domain"))
+    // Agent 核心门面（SkillStoreAdapter 桥接 Rust SkillSelector）
+    implementation(project(":core:agent"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

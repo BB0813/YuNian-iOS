@@ -27,15 +27,20 @@ import com.yunian.ai.feature.groupchat.mention.MentionEnhancer
 import com.yunian.ai.feature.groupchat.mention.MentionMessageSnapshot
 import com.yunian.ai.feature.groupchat.mention.MentionNormalizer
 import com.yunian.ai.feature.groupchat.mention.MentionParser
-import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.domain.AiChatMessage
-import com.yunian.ai.domain.AiMessageRole
-import com.yunian.ai.domain.ConversationScope
 import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.ServiceRegistry
+import com.yunian.ai.domain.ToolRegistry
+import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.database.repository.UserRepository
-import com.yunian.ai.network.bubble.BubbleJsonProtocol
-import com.yunian.ai.network.bubble.BubbleLoopRunner
+import com.yunian.ai.database.model.ApiProvider
+import com.yunian.ai.common.DeviceIdProvider
+import com.yunian.ai.common.RemoteKeyProvider
+import com.yunian.ai.common.SecureLog
+import com.yunian.ai.agent.AgentFacade
+import com.yunian.ai.agent.host.AgentToolHost
+import com.yunian.ai.agent.uniffi.AgentTurnRequest
+import com.yunian.ai.agent.uniffi.PromptOrchestratorOptions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -68,27 +73,26 @@ class GroupChatViewModel(
     private val companionRepository = CompanionRepository(database.companionDao())
 
     private val userRepository = ServiceRegistry.getOrThrow(UserRepository::class.java)
-    private val aiServiceProvider: AiServiceProvider by lazy {
-        ServiceRegistry.get(AiServiceProvider::class.java)
-            ?: throw IllegalStateException("AiServiceProvider not registered")
-    }
+    private val apiConfigRepository = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
 
-    private val bubbleLoopRunner = BubbleLoopRunner()
+    /** 群聊单次 Agent 回合的并行气泡预算（Rust 多轮 emit_bubble 循环上界）。 */
+    private val bubbleLoopMaxRounds: UInt = 16u
 
     private val memoryProvider: MemoryProvider by lazy {
         ServiceRegistry.getOrThrow(MemoryProvider::class.java).also { it.initialize() }
     }
 
-    private fun CompanionEntity.toAiCompanionInfo() = com.yunian.ai.domain.AiCompanionInfo(
-        id = id, name = name, personality = personality,
-        age = age, backstory = backstory, speakingStyle = speakingStyle,
-        systemPrompt = systemPrompt
-    )
-
     private fun GroupMessage.toAiChatMessage() = com.yunian.ai.domain.AiChatMessage(
         isFromUser = companionId == -1L, content = content, timestamp = timestamp,
         companionId = companionId
     )
+
+    /** 角色 ID → 名称 映射 → JSON（AgentTurnRequest.companionNameMapJson）。 */
+    private fun serializeNameMap(map: Map<Long, String>): String {
+        val obj = org.json.JSONObject()
+        for ((id, name) in map) obj.put(id.toString(), name)
+        return obj.toString()
+    }
     private val cachedRecent = groupMessageRepository.getCachedRecent(groupId).orEmpty()
     private val _messages = MutableStateFlow(cachedRecent)
     val messages: StateFlow<List<GroupMessage>> = _messages.asStateFlow()
@@ -1000,34 +1004,125 @@ class GroupChatViewModel(
         } else {
             historySnapshot.filter { it.companionId == -1L || !excludeCompanionIds.contains(it.companionId) }
         }
-        val bubbles = mutableListOf<String>()
 
-        val first = aiServiceProvider.sendMessageWithCustomSystem(
-            companion.toAiCompanionInfo(), filteredSnapshot.map { it.toAiChatMessage() },
-            systemPrompt, companionNameMap = companionNameMap
-        ).trim().replace(Regex("\n{2,}"), "\n")
-        if (first.isBlank()) return emptyList()
-        bubbles.add(first)
+        val lastUserQuery = filteredSnapshot.lastOrNull { it.companionId == -1L }?.content
+            ?: filteredSnapshot.lastOrNull()?.content
+            ?: ""
 
-        val followUp = bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
-            val appendedHistory = filteredSnapshot.map { it.toAiChatMessage() } + alreadyGenerated.map { text ->
-                AiChatMessage(
-                    isFromUser = false,
-                    content = text,
-                    timestamp = System.currentTimeMillis(),
-                    role = AiMessageRole.ASSISTANT,
-                )
+        // 群聊回合走 Rust Cordis Agent：气泡/表情包由 emit_bubble / send_sticker 事件产出，
+        // 多轮循环预算 16 轮（替代旧的 Kotlin BubbleLoopRunner 跟进气泡）。
+        val memoryTools = AgentFacade.memoryToolDefinitions(getApplication())
+        val memoryNames = memoryTools.map { it.name }.toSet()
+        val skillTools = AgentFacade.skillToolDefinitions()
+        val availableTools = ToolRegistry.availableTools().map { it.name }
+            .toMutableList()
+            .apply {
+                addAll(memoryNames)
+                addAll(skillTools.map { it.name })
+                addAll(listOf("emit_segmented", "send_sticker", "emit_bubble"))
             }
-            aiServiceProvider.sendMessageWithCustomSystem(
-                companion.toAiCompanionInfo(),
-                appendedHistory,
-                systemPrompt + "\n\n" + BubbleJsonProtocol.systemRules(),
-                companionNameMap = companionNameMap,
-                scope = ConversationScope.Group(groupId),
-            )
+        val orchestrationOptions = PromptOrchestratorOptions(
+            memoryLimit = 5u,
+            skillLimit = 3u,
+            includeMemorySkill = true,
+            includeSafetyNote = true,
+            availableTools = availableTools,
+            deviceId = DeviceIdProvider.getDeviceId(getApplication()),
+            timezone = java.util.TimeZone.getDefault().id,
+            sessionId = null,
+            ownerName = null,
+            companionNameMapJson = serializeNameMap(companionNameMap),
+            workingMemoryLimit = 200u,
+        )
+        val globalTools = ToolRegistry.availableTools().map { AgentFacade.toolDefinition(it) }
+        val tools = buildList {
+            addAll(memoryTools)
+            addAll(skillTools)
+            addAll(globalTools.filter { it.name !in memoryNames })
         }
-        bubbles.addAll(followUp)
+        val turnRequest = AgentTurnRequest(
+            groupId = groupId,
+            historyJson = serializeHistoryJson(filteredSnapshot.map { it.toAiChatMessage() }),
+            tools = tools,
+            maxRounds = bubbleLoopMaxRounds,
+            toolChoice = "auto",
+            stickerProbability = 0u,
+            image = null,
+            systemPrompt = systemPrompt,
+            companionNameMapJson = serializeNameMap(companionNameMap),
+        )
+
+        val appContext = getApplication<Application>()
+        val activeApi = runCatching { apiConfigRepository.getActiveEnabledConfig() }.getOrNull()
+        val partnerSession = runCatching { RemoteKeyProvider.getPartnerSession(appContext) }.getOrNull()
+        val isPartner = activeApi?.provider == ApiProvider.PARTNER
+        AgentFacade.syncRuntimeConfig(
+            appContext,
+            AgentFacade.buildSettingsJson(role = "GIRLFRIEND"),
+            com.yunian.ai.agent.sticker.StickerPreferenceFacade.availableTagsWithFallback(appContext),
+            AgentFacade.buildCredentialsJson(
+                sessionToken = if (isPartner) partnerSession?.token else null,
+                clientId = if (isPartner) partnerSession?.clientId else null,
+                apiKey = activeApi?.apiKey?.takeIf { it.isNotBlank() },
+            ),
+        )
+
+        val toolHost = AgentToolHost(appContext)
+        val dispatchStartedAt = System.currentTimeMillis()
+        val agentResult = withContext(Dispatchers.IO) {
+            // Q4（R18）：群聊同样按「本回合发言人」实时合并世界书 ——
+            // 专属书 ∪ 绑定的全局书，合成单本 ST JSON 后幂等覆盖写入 Rust 单槽。
+            runCatching {
+                com.yunian.ai.agent.worldbook.WorldbookRepository(appContext)
+                    .syncActiveToRuntime(companion.id)
+            }.onFailure {
+                SecureLog.w("GroupChatViewModel", "worldbook sync failed: ${it.message}")
+            }
+            AgentFacade.runTurn(turnRequest, appContext, companion.id, toolHost)
+        }
+
+        AgentFacade.recordDispatchLog(
+            context = appContext, companionId = companion.id, groupId = groupId,
+            sessionId = null, dispatchId = "group_${groupId}_${dispatchStartedAt}",
+            provider = activeApi?.provider?.name ?: "", model = activeApi?.model ?: "",
+            startedAtMs = dispatchStartedAt, completedAtMs = System.currentTimeMillis(),
+            roundsUsed = agentResult.roundsUsed.toInt(), finishedReason = agentResult.finishedReason,
+            error = agentResult.error, toolNames = tools.map { it.name },
+            toolCalls = toolHost.collectedToolCalls(), events = agentResult.events,
+            querySummary = lastUserQuery,
+        )
+        AgentFacade.recordTurnAudit(
+            context = appContext, companionId = companion.id, groupId = groupId,
+            sessionId = null, options = orchestrationOptions, query = lastUserQuery,
+            roundsUsed = agentResult.roundsUsed.toInt(), toolNames = tools.map { it.name },
+        )
+
+        val bubbles = mutableListOf<String>()
+        for (event in agentResult.events) {
+            if (event.kind == "bubble" && event.text.isNotBlank()) {
+                bubbles.add(event.text.trim().replace(Regex("\\n{2,}"), "\n"))
+            }
+        }
+
+        // 兜底：模型只产出 finalText（未走 emit_bubble）时补一条，避免群聊静默。
+        val closing = agentResult.finalText.trim().replace(Regex("\\n{2,}"), "\n")
+        if (closing.isNotBlank() && bubbles.none { it == closing }) {
+            bubbles.add(closing)
+        }
         return bubbles
+    }
+
+    /** 领域历史 → OpenAI messages JSON（AgentTurnRequest.historyJson）。 */
+    private fun serializeHistoryJson(history: List<AiChatMessage>): String {
+        val arr = org.json.JSONArray()
+        for (msg in history) {
+            val m = org.json.JSONObject().apply {
+                put("role", if (msg.isFromUser) "user" else "assistant")
+                put("content", msg.content)
+            }
+            arr.put(m)
+        }
+        return arr.toString()
     }
 
     private suspend fun getGroupMemoryContext(historySnapshot: List<GroupMessage>): String {

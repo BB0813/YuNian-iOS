@@ -5,6 +5,8 @@ import com.yunian.ai.agent.host.AgentToolHost
 import com.yunian.ai.agent.sticker.StickerPreferenceFacade
 import com.yunian.ai.agent.uniffi.AgentTurnRequest
 import com.yunian.ai.agent.uniffi.ImageInput
+import com.yunian.ai.common.BanManager
+import com.yunian.ai.common.ContentFilter
 import com.yunian.ai.common.RemoteKeyProvider
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.StickerManager
@@ -24,6 +26,7 @@ import com.yunian.ai.domain.DialogueCoordinator
 import com.yunian.ai.domain.DialogueRequest
 import com.yunian.ai.domain.DialogueResult
 import com.yunian.ai.domain.ServiceRegistry
+import com.yunian.ai.domain.imagegen.ImageGenProtocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -65,6 +68,13 @@ class AgentDialogueCoordinator(
             val companion = companionRepository.getCompanionById(companionId)
                 ?: return@withContext DialogueResult(replyText = "", blocked = true)
 
+            // 封禁态：与旧桥接层（微信/QQ）一致，封禁期间不产生任何 AI 回合。
+            // 安全检查收敛在本中间层，通道桥接层不再自行判定（Plan §7.2 / 待办 C）。
+            if (BanManager.isBanned(context)) {
+                SecureLog.w(TAG, "generateReply blocked: device banned, companion=$companionId")
+                return@withContext DialogueResult(replyText = "", blocked = true)
+            }
+
             val imagePath = request.imagePath
             if (imagePath != null) {
                 return@withContext generateVisionReply(companionId, companion, imagePath)
@@ -84,6 +94,14 @@ class AgentDialogueCoordinator(
         companion: CompanionEntity,
         text: String,
     ): DialogueResult {
+        // 输入侧安全过滤：与本地 ContentFilter 基线保持一致（Rust 侧尚未下沉，见待办 C）
+        val inputCheck = ContentFilter.checkInput(text)
+        if (inputCheck.isViolating) {
+            SecureLog.w(TAG, "Input blocked by safety filter: ${inputCheck.level} - ${inputCheck.reason}")
+            BanManager.recordViolation(context, inputCheck.level)
+            return blockedReply(companionId, "抱歉，我无法处理这个话题。")
+        }
+
         val userMessage = ChatMessage(
             companionId = companionId,
             content = text,
@@ -96,8 +114,20 @@ class AgentDialogueCoordinator(
         val history = chatRepository.getRecentMessagesSync(companionId, limit = 30)
             .filterDecrypted()
 
-        val aiText = runTurn(companionId, history, imagePath = null)
+        val aiTextRaw = runTurn(companionId, history, imagePath = null)
             ?: return DialogueResult(replyText = "抱歉，我暂时无法处理这条消息。", blocked = true)
+
+        // 画面描述绝不能出现在消息或聊天记录里：统一走 ImageGenProtocol 清洗
+        val aiText = sanitizeImageGen(aiTextRaw)
+
+        if (aiText.isNotBlank()) {
+            val outputSafety = ContentFilter.checkOutputSafety(aiText)
+            if (!outputSafety.isSafe) {
+                SecureLog.w(TAG, "AI output blocked by safety filter: ${outputSafety.level} - ${outputSafety.reason}")
+                BanManager.recordViolation(context, outputSafety.level)
+                return blockedReply(companionId, "抱歉，我无法回应这个话题。")
+            }
+        }
 
         val contentToStore = aiText.ifBlank { "API返回空内容" }
         val aiMessageId = messageWriter.enqueueChat(
@@ -148,11 +178,22 @@ class AgentDialogueCoordinator(
         val history = chatRepository.getRecentMessagesSync(companionId, limit = 30)
             .filterDecrypted()
 
-        val aiText = runTurn(companionId, history, imagePath = imagePath)
+        val aiTextRaw = runTurn(companionId, history, imagePath = imagePath)
             ?: return DialogueResult(
                 replyText = "图片识别过程中出现错误，请稍后重试或发送文字描述。",
                 blocked = false,
             )
+
+        val aiText = sanitizeImageGen(aiTextRaw)
+
+        if (aiText.isNotBlank()) {
+            val outputSafety = ContentFilter.checkOutputSafety(aiText)
+            if (!outputSafety.isSafe) {
+                SecureLog.w(TAG, "Vision AI output blocked by safety filter: ${outputSafety.level} - ${outputSafety.reason}")
+                BanManager.recordViolation(context, outputSafety.level)
+                return blockedReply(companionId, "抱歉，我无法回应这个话题。")
+            }
+        }
 
         val contentToStore = aiText.ifBlank { "API返回空内容" }
         val aiMessageId = messageWriter.enqueueChat(
@@ -257,6 +298,19 @@ class AgentDialogueCoordinator(
         return arr.toString()
     }
 
+    /**
+     * 剥离生图标签/画面描述（与 App 内聊天、旧通道桥接层同一份清洗逻辑）。
+     * 剥离后为空且原文仅为画面描述时，返回占位文案（不含方括号，避免被当作表情包标签）。
+     */
+    private fun sanitizeImageGen(raw: String): String {
+        val stripped = ImageGenProtocol.sanitizeForDisplay(raw)
+        return when {
+            stripped.isNotBlank() -> stripped
+            ImageGenProtocol.isPromptOnly(raw) -> IMAGE_GEN_ONLY_REPLY_TEXT
+            else -> raw
+        }
+    }
+
     /** 安全拦截回复：落库 + 返回 blocked 结果。 */
     private suspend fun blockedReply(companionId: Long, text: String): DialogueResult {
         val blockedId = messageWriter.enqueueChat(
@@ -290,5 +344,8 @@ class AgentDialogueCoordinator(
 
     companion object {
         private const val TAG = "AgentDialogueCoordinator"
+
+        /** 模型整条回复只有画面描述时的占位文案（不含方括号，避免被当成表情包标签） */
+        private const val IMAGE_GEN_ONLY_REPLY_TEXT = "（正在为你配图…）"
     }
 }

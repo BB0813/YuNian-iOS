@@ -21,6 +21,7 @@ import com.yunian.ai.agent.uniffi.PromptOrchestratorOptions
 import com.yunian.ai.agent.uniffi.SkillContext
 import com.yunian.ai.agent.uniffi.SkillMenuEntry
 import com.yunian.ai.agent.uniffi.SkillSelector
+import com.yunian.ai.agent.uniffi.SkillStore
 import com.yunian.ai.agent.uniffi.SplitMode
 import com.yunian.ai.agent.uniffi.StreamSink
 import com.yunian.ai.agent.uniffi.ToolCategory
@@ -281,14 +282,35 @@ object AgentFacade {
     @Volatile
     private var skillSelector: SkillSelector? = null
 
+    /** 技能存储适配器覆盖位（Q6：本地技能体系桥接，见 [AgentFacade.installSkillStoreProvider]）。 */
+    @Volatile
+    private var skillStoreOverride: SkillStore? = null
+
+    /**
+     * 注册技能存储适配器（应在首次 [skillSelector] 创建**之前**调用）。
+     *
+     * Q6 双体系收敛：`feature:skills` 的 `SkillStoreAdapter` 把本地 `assets/skills` +
+     * `filesDir/external_skills` + 技能市场桥接到 Rust `SkillSelector`，从而退役 `use_skill`、
+     * 统一为 `load_skill`（防模型双调，R22）。
+     *
+     * 若在 [skillSelector] 首次创建后调用，则覆盖位只对**后续**新建的选择器生效
+     * （已建实例的 `SkillStore` 不可热替换）——故默认蓝图装载时机必须早于首次 Agent 回合。
+     */
+    fun installSkillStoreProvider(store: SkillStore) {
+        skillStoreOverride = store
+    }
+
     /**
      * 获取（惰性创建）共享 [SkillSelector]。
-     * Rust 侧持有 [com.yunian.ai.agent.uniffi.SkillStore] 回调，Kotlin 实现为
-     * [SkillStoreImpl]（Room 索引 + SkillFileStore 文件正文，纯 IO）。
+     * Rust 侧持有 [com.yunian.ai.agent.uniffi.SkillStore] 回调；
+     * 优先使用 [installSkillStoreProvider] 注册的适配器（本地技能体系），
+     * 缺省回退 [SkillStoreImpl]（Room 索引 + SkillFileStore 文件正文）。
      */
     fun skillSelector(context: Context): SkillSelector =
         skillSelector ?: synchronized(this) {
-            skillSelector ?: SkillSelector(SkillStoreImpl(context)).also { skillSelector = it }
+            skillSelector ?: SkillSelector(
+                skillStoreOverride ?: SkillStoreImpl(context)
+            ).also { skillSelector = it }
         }
 
     /** 技能选择（Rust 决策）：按 query 召回并读取正文。companionId=null 表示全局技能。 */

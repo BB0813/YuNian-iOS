@@ -1,22 +1,11 @@
 package com.yunian.ai.feature.qqbot.data
 
 import android.content.Context
-import com.yunian.ai.common.AppSettingsStore
 import com.yunian.ai.database.AppDatabase
-import com.yunian.ai.database.model.ChatMessage
-import com.yunian.ai.database.model.MessageType
-import com.yunian.ai.database.repository.ChatRepository
 import com.yunian.ai.database.repository.CompanionRepository
-import com.yunian.ai.database.repository.MessageWriteCoordinator
-import com.yunian.ai.database.repository.filterDecrypted
-import com.yunian.ai.domain.AiChatMessage
-import com.yunian.ai.domain.AiCompanionInfo
-import com.yunian.ai.domain.AiMessageType
-import com.yunian.ai.domain.AiResponse
-import com.yunian.ai.domain.AiServiceProvider
-import com.yunian.ai.domain.MemoryProvider
+import com.yunian.ai.domain.DialogueCoordinator
+import com.yunian.ai.domain.DialogueRequest
 import com.yunian.ai.domain.ServiceRegistry
-import com.yunian.ai.domain.imagegen.ImageGenProtocol
 import com.yunian.ai.domain.imagegen.ImageGenService
 import com.yunian.ai.feature.qqbot.data.model.QQInboundEvent
 import kotlinx.coroutines.CoroutineScope
@@ -36,18 +25,15 @@ class QQBotChatBridge(
     private val tokenStore: QQBotTokenStore
 ) {
     private val database = AppDatabase.getDatabase(context)
-    private val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
-    private val messageWriter = ServiceRegistry.getOrThrow(MessageWriteCoordinator::class.java)
     private val companionRepository = CompanionRepository(database.companionDao())
-    private val memoryProvider: MemoryProvider by lazy {
-        ServiceRegistry.getOrThrow(MemoryProvider::class.java)
-    }
     private val mappingManager = QQBotUserMappingManager(tokenStore, companionRepository)
-    private val appSettingsStore = AppSettingsStore(context.applicationContext)
-    private val aiServiceProvider: AiServiceProvider by lazy {
-        ServiceRegistry.get(AiServiceProvider::class.java)
-            ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
+
+    /** 统一 AI 对话中间层（core:agent 实现）：AI 回合 / 安全 / 落库 / 记忆全部内聚。 */
+    private val dialogueCoordinator: DialogueCoordinator by lazy {
+        ServiceRegistry.get(DialogueCoordinator::class.java)
+            ?: throw IllegalStateException("DialogueCoordinator not registered in ServiceRegistry")
     }
+
     private val bridgeJob = SupervisorJob()
     private val bridgeScope = CoroutineScope(bridgeJob + Dispatchers.IO)
 
@@ -156,11 +142,6 @@ class QQBotChatBridge(
 
             android.util.Log.d("QQBotBridge", "Extracted text: $text")
 
-            if (com.yunian.ai.common.BanManager.isBanned(context)) {
-                android.util.Log.w("QQBotBridge", "Banned, skip")
-                return@withContext
-            }
-
             val companionId = mappingManager.getOrCreateMapping(qqUserId) ?: run {
                 android.util.Log.w("QQBotBridge", "No companion mapping for $qqUserId")
                 notifyMissingCompanion(event)
@@ -171,61 +152,27 @@ class QQBotChatBridge(
                 android.util.Log.w("QQBotBridge", "Companion not found: $companionId")
                 return@withContext
             }
+            android.util.Log.d("QQBotBridge", "Mapped companion=${companion.name}")
 
-            val filterResult = com.yunian.ai.common.ContentFilter.checkInput(text)
-            if (filterResult.isViolating) {
-                android.util.Log.w("QQBotBridge", "Input blocked: ${filterResult.reason}")
-                com.yunian.ai.common.BanManager.recordViolation(context, filterResult.level)
-                val blockedResponse = "抱歉，我无法处理这个话题。"
-                sendReply(event, blockedResponse)
-                persistBlockedMessage(companionId, blockedResponse)
-                return@withContext
-            }
-
-            val userMessage = ChatMessage(
-                companionId = companionId,
-                content = text,
-                isFromUser = true,
-                timestamp = System.currentTimeMillis()
+            // 纯净桥接：封禁判定 / 输入安全检查 / AI 回合 / 输出安全检查 / 生图清洗 /
+            // 落库 / 记忆提取全部收敛在中间层（DialogueCoordinator，core:agent 实现）。
+            val result = dialogueCoordinator.generateReply(
+                DialogueRequest(
+                    companionId = companionId,
+                    text = text,
+                    imagePath = null,
+                )
             )
-            messageWriter.enqueueChat(userMessage)
-            companionRepository.updateTimestamp(companionId)
+            android.util.Log.d(
+                "QQBotBridge",
+                "Dialogue done blocked=${result.blocked} reply_len=${result.replyText.length}",
+            )
 
-            val history = chatRepository.getRecentMessagesSync(companionId, limit = 30).filterDecrypted()
-            android.util.Log.d("QQBotBridge", "Calling AI with ${history.size} history messages")
-
-            // 生图协议与 App 内聊天完全一致：总开关关闭时 rules 为空串（零行为变化）。
-            val aiCompanionInfo = companion.toAiCompanionInfo().withImageGenRules()
-            val response = try {
-                aiServiceProvider.sendMessage(aiCompanionInfo, history.toAiChatMessages(), 0)
-            } catch (e: Exception) {
-                android.util.Log.e("QQBotBridge", "sendMessage failed", e)
-                null
-            }
-
-            if (response == null || response.content.isBlank()) {
-                val fallback = "抱歉，我暂时无法处理这条消息。"
-                sendReply(event, fallback)
-                persistBlockedMessage(companionId, fallback)
+            val safeText = result.replyText
+            if (safeText.isBlank()) {
+                // 中间层未产出可发送内容（被拦截或上游错误）：不回灌任何消息，
+                // 拦截文案已由中间层落库并随首次 user 消息进入会话。
                 return@withContext
-            }
-
-            val outputSafety = com.yunian.ai.common.ContentFilter.checkOutputSafety(response.content)
-            val rawSafeText = if (!outputSafety.isSafe) {
-                android.util.Log.w("QQBotBridge", "AI output blocked: ${outputSafety.reason}")
-                "抱歉，我无法回应这个话题。"
-            } else {
-                response.content
-            }
-            // 画面描述绝不能出现在 QQ 消息或聊天记录里：统一走 ImageGenProtocol 清洗。
-            val safeText = ImageGenProtocol.sanitizeForDisplay(rawSafeText).let { stripped ->
-                if (stripped.isNotBlank()) {
-                    stripped
-                } else if (ImageGenProtocol.isPromptOnly(rawSafeText)) {
-                    IMAGE_GEN_ONLY_REPLY_TEXT
-                } else {
-                    rawSafeText
-                }
             }
 
             var lastSendTime = 0L
@@ -243,30 +190,11 @@ class QQBotChatBridge(
                 lastSendTime = System.currentTimeMillis()
             }
 
-            val aiMessage = ChatMessage(
-                companionId = companionId,
-                content = safeText,
-                isFromUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            messageWriter.enqueueChat(aiMessage)
-
             // 生图：判定逻辑与 App 内完全一致（复用 ImageGenService），失败绝不影响聊天主流程
             runCatching { generateAndSendImages(event, companionId, text, safeText) }
                 .onFailure { e ->
                     android.util.Log.e("QQBotBridge", "image gen failed: ${e.message}", e)
                 }
-
-            companionRepository.increaseIntimacy(companionId, 2)
-            bridgeScope.launch {
-                runCatching {
-                    memoryProvider.extractAndSaveFromConversation(
-                        userInput = text,
-                        aiResponse = safeText,
-                        companionId = companionId,
-                    )
-                }
-            }
 
         } catch (e: Exception) {
             android.util.Log.e("QQBotBridge", "Error handling incoming event", e)
@@ -321,26 +249,6 @@ class QQBotChatBridge(
         }
     }
 
-    /**
-     * 把生图协议并入系统提示词（复用 App 内聊天的同一份文案）。
-     * 总开关关闭时 [ImageGenProtocol.systemRules] 返回空串 → 零行为变化。
-     */
-    private suspend fun AiCompanionInfo.withImageGenRules(): AiCompanionInfo {
-        val rules = runCatching {
-            ImageGenProtocol.systemRules(
-                enabled = appSettingsStore.getImageGenEnabled(),
-                hasKeywordTrigger = appSettingsStore.getImageGenKeywords().isNotEmpty(),
-            )
-        }.getOrDefault("")
-        if (rules.isBlank()) return this
-        return copy(
-            systemPrompt = listOfNotNull(
-                systemPrompt?.trim()?.takeIf { it.isNotEmpty() },
-                rules,
-            ).joinToString("\n\n")
-        )
-    }
-
     private suspend fun notifyMissingCompanion(event: QQInboundEvent) {
         val key = qqBotRepository.getReplyKey(event)
         val now = System.currentTimeMillis()
@@ -358,17 +266,6 @@ class QQBotChatBridge(
         result.onFailure { e ->
             android.util.Log.e("QQBotBridge", "Failed to send QQ reply: ${e.message}", e)
         }
-    }
-
-    private suspend fun persistBlockedMessage(companionId: Long, text: String) {
-        messageWriter.enqueueChat(
-            ChatMessage(
-                companionId = companionId,
-                content = text,
-                isFromUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-        )
     }
 
     private fun cleanReplyText(text: String): String {
@@ -401,27 +298,5 @@ class QQBotChatBridge(
 
     fun close() {
         bridgeJob.cancel()
-    }
-
-    private fun com.yunian.ai.database.model.CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
-        id = id, name = name, personality = personality,
-        age = age, backstory = backstory, speakingStyle = speakingStyle,
-        systemPrompt = systemPrompt
-    )
-
-    private fun com.yunian.ai.database.model.ChatMessage.toAiChatMessage() = AiChatMessage(
-        isFromUser = isFromUser, content = content, timestamp = timestamp,
-        type = when (type) {
-            MessageType.IMAGE -> AiMessageType.IMAGE
-            else -> AiMessageType.TEXT
-        },
-        companionId = companionId
-    )
-
-    private fun List<com.yunian.ai.database.model.ChatMessage>.toAiChatMessages() = map { it.toAiChatMessage() }
-
-    private companion object {
-        /** 模型整条回复只有画面描述时的占位文案（不含方括号，避免被当成表情包标签） */
-        private const val IMAGE_GEN_ONLY_REPLY_TEXT = "（正在为你配图…）"
     }
 }
