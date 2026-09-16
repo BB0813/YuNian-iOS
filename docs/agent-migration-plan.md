@@ -840,6 +840,86 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 
 ---
 
+## 附：阶段 8 实况复核（2026-09-17，合并 `origin/linzihan` 之后）
+
+合并完成后重新核对阶段 8 表，发现**三处前提已失效**。以下为复核结论，覆盖上表对应行。
+
+### ✅ 待办 E —— 已裁决（不再是阻塞项）
+
+对 `ChatGenerationManager.startAiResponse()` 逐行核查后确认：**单聊文本路径已 100% Agent 化**。
+
+该函数在 Agent 分支末尾 `return@launch`（原 L1169），其后全部代码在 `imagePath == null` 时
+**语法上不可达**。因此以下三者均为**死代码**：
+
+| 死代码路径 | 原位置 | 说明 |
+|---|---|---|
+| `useTools` 分支（本地工具循环 `toolLoopRunner.executeWithToolLoop`） | 原 L1195-1227 | 前置条件 `imagePath == null` 已被 Agent 分支 `return` 排除 |
+| `else` 分支（本地流式 `aiService.streamMessage`） | 原 L1228-1247 | 同上 |
+| 追尾气泡链（`bubbleLoopRunner.runFollowingBubbles` + `aiService.sendMessage`） | 原 L1364-1409 | 门控条件显式含 `imagePath == null` → 恒 false |
+
+**仍存活**（不可删除）：`sendMessageWithImage`（vision 路径，`ChatViewModel:165` 经 `ChatIntent.SendImage` 真实可达）、
+`callGeneration`（`CreateCompanionViewModel:212`）、`callJudge`（`MentionEnhancer:75`）、
+`shouldProactivelyMessage(companion, recentMessages)`（`CompanionMessageWorker:228`）。
+
+**接口方法的真实归属（复核 2026-09-17）**
+
+| `AiServiceProvider` 方法 | 主源调用点 | 可否移除 |
+|---|---|---|
+| `sendMessage`（带 tools） | 原 `AiToolLoopRunner`（已删） | ✅ 死代码 → 本轮移除 |
+| `streamMessage` | 原 `ChatGenerationManager` else 分支（已删） | ✅ 死代码 → 本轮移除 |
+| `sendMessageWithCustomSystem` | **无主源调用**（仅 AiService 自身 + 测试 mock） | ✅ 死代码 → 本轮移除 |
+| `shouldProactivelyMessage`（`settings` 重载） | **无主源调用** | ⚠️ 保留（公开 API，`settings` 有默认实现） |
+| `sendMessage`（无 tools 重载） | **无主源调用** | ⚠️ 保留（`AiService` 内部/群聊仍有实现） |
+| `sendMessageWithImage` | `ChatGenerationManager` vision 分支 | ❌ 必须保留 |
+| `callGeneration` | `CreateCompanionViewModel:212` | ❌ 必须保留 |
+| `callJudge` | `MentionEnhancer:75` | ❌ 必须保留 |
+| `shouldProactivelyMessage`（2 参） | `CompanionMessageWorker:228` | ❌ 必须保留 |
+| `generateProactiveMessage` / `generateFollowUpReminder` | 无主源调用 | ⚠️ 保留（接口默认实现，零成本） |
+
+> **★ 更正 §1.4 的推论**：原文称「主动消息三方法不能删，删了就失去能力」。
+> 实测 `CompanionMessageWorker.kt:269` 注释表明**主动消息的 LLM 生成已在该 Worker 内本地实现**
+> （对齐旧 `AiService.generateFollowUpReminder` / `generateProactiveMessage` 语义），
+> 且它**只调用** `shouldProactivelyMessage`（单参，纯本地判定、无网络）。故
+> `generateProactiveMessage` / `generateFollowUpReminder` 在 `AiServiceProvider` 上已无调用方。
+
+### ❌ 更正 8.3 —— `AiPromptBuilder` 不可删
+
+上表 8.3 写「`AiPromptBuilder.kt`（若仅 AiService 使用）」。实测**前提不成立**：
+
+| 使用方 | 位置 | 性质 |
+|---|---|---|
+| `AiService.kt` | 30 处（L539…L2710） | 主要装配逻辑 |
+| `CompanionMessageWorker.kt` | L321、L525 | 主动消息提示词（`NO_PROACTIVE_MARKER` 语义） |
+
+→ `AiPromptBuilder` **必须保留**。`AiService.kt` 本身（2929 行、`core:network` 共 63 个源文件）
+在 vision / 群聊 / 主动消息 / MCP / 技能市场路径上仍有真实用途，**不做整体删除**。
+
+### ❌ 更正 8.5 —— `AiResponseFinalizer` 必须保留
+
+上表 8.5 将 `AiResponseFinalizer.kt` 与 `AiToolLoopRunner.kt` 并列为「master 已删」。
+实测 **`AiResponseFinalizer` 正在 Agent 活路径上使用**：
+
+| 位置 | 调用 |
+|---|---|
+| `ChatGenerationManager:1059` | `responseFinalizer.deliverResponse(...)`（bubble 事件） |
+| `ChatGenerationManager:1075` | `responseFinalizer.deliverSticker(...)` |
+| `ChatGenerationManager:1112` | `responseFinalizer.deliverResponse(...)`（finalText 兜底） |
+| `ChatGenerationManager:1149` | `responseFinalizer.afterDeliver(...)` |
+
+→ **`AiResponseFinalizer` 必须保留**。`ChatFollowUpTrigger.kt` 已由远端合删除 ✓，
+真正可删的只有 `AiToolLoopRunner.kt`（唯一主源引用在死代码里）。
+
+> 注：`SkillMarketTools.kt:34` 出现 `AiToolLoopRunner` 字样，但**仅位于 KDoc 注释**（"供
+> AiToolLoopRunner 判定工具失败状态"），不构成真实依赖 —— 该文件零改动，注释保留为历史说明。
+
+### 8.6 状态
+
+本地 `LorebookEntity` 注入路径（§5.4）**保持待办**：`lorebooks` / `lorebook_entries` 表按决策冻结保留，
+数据源已由 `core:agent/worldbook` 承接。本轮不动。
+
+
+---
+
 ## 6. 风险登记册
 
 | ID | 风险 | 等级 | 缓解 |
