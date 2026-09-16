@@ -2,6 +2,7 @@ package com.yunian.ai.feature.mcp
 
 import android.content.Context
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.domain.McpManager
 import com.yunian.ai.domain.McpServerConfig
 import com.yunian.ai.domain.McpServerStatus
@@ -41,7 +42,7 @@ import java.util.concurrent.TimeUnit
 
 class McpManagerImpl(
     private val appSettings: com.yunian.ai.common.AppSettingsStore? = null,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 ) : McpManager {
 
     private val okHttpClient = OkHttpClient.Builder()

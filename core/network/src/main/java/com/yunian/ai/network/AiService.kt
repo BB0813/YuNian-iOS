@@ -16,6 +16,7 @@ import com.yunian.ai.common.TimeoutBudgets
 import com.yunian.ai.common.YandereModeManager
 import com.yunian.ai.common.SuFlowApi
 import com.yunian.ai.common.RemoteKeyProvider
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.database.model.ApiConfig
 import com.yunian.ai.database.model.ApiProvider
@@ -111,7 +112,7 @@ class AiService(context: Context) : AiServiceProvider {
             summaryProvider?.summarizeRollingMerge(oldSummary, deltaText, memoryContext, selfName)
         },
         backgroundScope = kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+            kotlinx.coroutines.SupervisorJob() + AppDispatchers.io
         ),
         gapFetcher = { conversationId, afterId ->
             ServiceRegistry.getOrThrow(ChatRepository::class.java)

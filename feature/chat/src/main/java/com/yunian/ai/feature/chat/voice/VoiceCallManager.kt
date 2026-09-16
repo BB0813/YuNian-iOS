@@ -16,6 +16,7 @@ import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.yunian.ai.common.HardwareInfo
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.common.concurrent.AppDispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -74,9 +75,9 @@ class VoiceCallManager(private val context: Context) {
 
     /**
      * ASR 录音/解码专用受限调度：CPU 密集的 `rec.decode` 不再挤在 IO 池（默认 64 线程）里，
-     * 用 [Dispatchers.Default] 上并发度=1 的专用 view，与网络/文件阻塞任务隔离、避免抢占大核。
+     * 用 [AppDispatchers.asr]（串行 view），与网络/文件阻塞任务隔离、避免抢占大核。
      */
-    private val asrDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val asrDispatcher = AppDispatchers.asr
     private var scope = CoroutineScope(SupervisorJob() + asrDispatcher)
     private val initialized = AtomicBoolean(false)
     private val destroyed = AtomicBoolean(false)

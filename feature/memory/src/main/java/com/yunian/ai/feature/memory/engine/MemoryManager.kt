@@ -3,9 +3,9 @@ package com.yunian.ai.feature.memory.engine
 import android.content.Context
 import android.util.Log
 import com.yunian.ai.common.DeviceIdProvider
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.domain.MemoryProvider
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,7 +44,7 @@ class MemoryManager private constructor(
     }
 
     private val store = MemoryStore(context, deviceId)
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioScope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
 
     private val shortTermCache = ConcurrentHashMap<String, MutableList<MemoryItem>>()
 

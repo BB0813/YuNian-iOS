@@ -11,9 +11,9 @@ import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.common.perf.PerfBoost
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -28,13 +28,12 @@ class LocalAiService private constructor(private val context: Context) {
     /**
      * 本地 LLM 推理专用调度。
      *
-     * 本地大模型推理是**纯 CPU 密集型**工作，原实现跑在 [Dispatchers.IO] 上存在调度失配：
+     * 本地大模型推理是**纯 CPU 密集型**工作，原实现跑在 IO 池上存在调度失配：
      * IO 池默认上限 64 线程，CPU 密集任务挤进去既难以被调度到大核、又放大了线程竞争与
-     * 上下文切换开销。这里改用 [Dispatchers.Default] 上并发度=1 的专用 view：
+     * 上下文切换开销。现统一收敛到 [AppDispatchers.inference]（串行 view）：
      * 保证同一时刻只有一段推理在跑（引擎本身串行），且与 IO 池的阻塞任务相互隔离。
      */
-    private val inferenceDispatcher: CoroutineDispatcher =
-        Dispatchers.Default.limitedParallelism(1, "local-llm")
+    private val inferenceDispatcher: CoroutineDispatcher = AppDispatchers.inference
 
     @Volatile
     private var _activeModel: LocalModel = LocalModelCatalog.default
