@@ -85,3 +85,10 @@ MODULE_ARCHITECTURE.pdf
 .zcode/
 .playwright-mcp/
 nul
+
+# 项目根调试残留（防止再次污染仓库；根目录不放脚本，脚本请入 tools/）
+/_*.log
+/_*.txt
+/_*.diff
+/.gradle-*.log
+.superpowers/
