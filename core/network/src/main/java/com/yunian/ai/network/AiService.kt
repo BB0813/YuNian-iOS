@@ -983,7 +983,8 @@ class AiService(context: Context) : AiServiceProvider {
                 jsonBody.put("messages", jsonArray)
                 jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", temperature)
+                    // temperature: Double —— 经助手取 2 位小数，防 Float 派生值带伪影
+                    jsonBody.put("temperature", temperature.toApiTemperature())
                 }
 
                 val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
@@ -1480,7 +1481,7 @@ class AiService(context: Context) : AiServiceProvider {
 
                 jsonBody.put("stream_options", org.json.JSONObject().put("include_usage", true))
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
@@ -1617,7 +1618,7 @@ class AiService(context: Context) : AiServiceProvider {
                 jsonBody.put("messages", jsonArray)
                 jsonBody.put("stream", false)
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
@@ -1892,7 +1893,7 @@ class AiService(context: Context) : AiServiceProvider {
         jsonBody.put("messages", jsonArray)
         jsonBody.put("stream", false)
         if (!requiresFixedTemperature(config.model)) {
-            jsonBody.put("temperature", 0.7)
+            jsonBody.put("temperature", 0.7.toApiTemperature())
         }
 
         val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
@@ -2265,7 +2266,7 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
                 jsonBody.put("stream", false)
 
                 if (!requiresFixedTemperature(config.model)) {
-                    jsonBody.put("temperature", safeTemp.toDouble())
+                    jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
                 // 同聊天路径：未显式配置则不发送 max_tokens，避免推理模型的思考过程挤占额度
                 config.maxTokens?.takeIf { it > 0 }?.let { maxTokens ->
@@ -2372,7 +2373,7 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
         requestBody.put("messages", anthropicMessages)
         requestBody.put("system", systemPrompt)
         requestBody.put("max_tokens", config.maxTokens ?: 800)
-        requestBody.put("temperature", config.temperature)
+        requestBody.put("temperature", config.temperature.toApiTemperature())
 
         val baseUrl = config.baseUrl.trim().removeSuffix("/")
         val url = "$baseUrl/messages"

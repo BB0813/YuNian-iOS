@@ -349,7 +349,7 @@ class SummaryService(private val context: Context) : SummaryProvider {
             append("{\"role\":\"user\",\"content\":\"${escapeJson(prompt)}\"}")
             append("],")
             append("\"stream\":false,")
-            append("\"temperature\":$temperature,")
+            append("\"temperature\":${temperature.toApiTemperature()},")
             append("\"max_tokens\":$maxTokens")
             append('}')
         }

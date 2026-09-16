@@ -7,6 +7,7 @@ import com.yunian.ai.network.AnthropicMessage
 import com.yunian.ai.network.AnthropicRequest
 import com.yunian.ai.network.AnthropicResponse
 import com.yunian.ai.network.Message
+import com.yunian.ai.network.toApiTemperature
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -220,7 +221,7 @@ class ClaudeProvider : AiProvider {
         requestBody.put("messages", anthropicMessages)
         requestBody.put("system", systemPrompt)
         requestBody.put("max_tokens", config.maxTokens ?: 800)
-        requestBody.put("temperature", config.temperature.toDouble())
+        requestBody.put("temperature", config.temperature.toApiTemperature())
 
         val url = messagesUrl(config)
 
