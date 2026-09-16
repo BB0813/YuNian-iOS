@@ -163,6 +163,17 @@ object WorldbookJsonCodec {
         val ext = JSONObject()
         if (bookId != null) ext.put("_bookId", bookId)
         if (bookName != null) ext.put("_bookName", bookName)
+        // ★ UI 往返保真（§5.8）：`sortOrder`（拖拽排序）与 `createdAt`（稳定次序）在 ST
+        // World Info 规范中无对应字段，借 `extensions` 承载（与 `_bookId`/`_bookName` 同机制）。
+        // 否则结构化编辑器每次改动条目都会把拖拽顺序重置为 0。
+        ext.put("_sortOrder", entry.sortOrder)
+        // ★ `priority` 必须单独存：调用方可能把 `insertion_order` 重编号为 1..N
+        // 以保证**唯一**（Rust `sort_by_key(insertion_order)` 是稳定排序，键冲突时
+        // 依赖 map 迭代顺序 → 不确定）。若不另存，解码时 `insertionOrderToPriority`
+        // 会算出 `ORDER_BASE - idx` 这类巨大值，编辑器中的优先级数字会被污染。
+        ext.put("_priority", entry.priority)
+        if (entry.createdAt > 0L) ext.put("_createdAt", entry.createdAt)
+        if (entry.updatedAt > 0L) ext.put("_updatedAt", entry.updatedAt)
         if (ext.length() > 0) obj.put("extensions", ext)
         return obj
     }
@@ -171,6 +182,8 @@ object WorldbookJsonCodec {
      * 合成 ST World Info 顶层 JSON（map 格式 `entries`）。
      *
      * @param entryObjects 已由 [entryToJson] 产出（**其 `insertion_order` 应已全局唯一化**）
+     * @param createdAt 书本创建时间（写入顶层 `_createdAt`；`worldbooks` 表无此列，
+     *   仅靠 `updatedAt` 无法还原）。`0` 表示不写。
      */
     fun assemble(
         name: String,
@@ -178,21 +191,32 @@ object WorldbookJsonCodec {
         scanDepth: Long,
         tokenBudget: Long,
         entryObjects: List<JSONObject>,
+        createdAt: Long = 0L,
     ): String {
         val root = JSONObject()
         root.put("name", name)
         if (!description.isNullOrEmpty()) root.put("description", description)
         root.put("scan_depth", scanDepth.coerceAtLeast(1))
         root.put("token_budget", tokenBudget.coerceAtLeast(1))
+        if (createdAt > 0L) root.put("_createdAt", createdAt)
         // recursive_scanning 省略 → Rust `Option<bool>` 视为 false，与本地行为一致
         val entries = JSONObject()
+        val usedKeys = HashSet<String>(entryObjects.size)
         // 按 insertion_order 升序写入，保证产物稳定可 diff（Rust 侧不依赖此顺序）
         entryObjects
             .sortedBy { it.optLong("insertion_order", 0L) }
             .forEach { obj ->
-                val uid = obj.optLong("id", 0L).takeIf { it > 0L }?.toString()
+                val base = obj.optLong("id", 0L).takeIf { it > 0L }?.toString()
                     ?: "e${obj.optLong("insertion_order", 0L)}"
-                entries.put(uid, obj)
+                // ★ map 容器不允许重复键：多本书合并时（各书条目 id 各自从 1 开始）
+                // 直接 put 会**静默丢条目**，且合成后被 `entryCount` 自检捕获。
+                var key = base
+                var n = 2
+                while (!usedKeys.add(key)) {
+                    key = "${base}_${n}"
+                    n++
+                }
+                entries.put(key, obj)
             }
         root.put("entries", entries)
         return root.toString()
@@ -210,6 +234,7 @@ object WorldbookJsonCodec {
         scanDepth = dominantScanDepth(entries),
         tokenBudget = DEFAULT_TOKEN_BUDGET,
         entryObjects = entries.map { entryToJson(it, bookId = book.id, bookName = book.name) },
+        createdAt = book.createdAt,
     )
 
     /** 条目 `scanDepth` 众数（并列取较大值）；空列表 → [DEFAULT_SCAN_DEPTH]。 */
@@ -242,6 +267,14 @@ object WorldbookJsonCodec {
         val scanDepth: Long,
         val bookId: Long?,
         val bookName: String?,
+        /** UI 拖拽排序位（`extensions._sortOrder`）；ST 规范无此字段。 */
+        val sortOrder: Int = 0,
+        /** 摘要优先级（`extensions._priority`）；缺失时由 `insertion_order` 反推（兼容迁移产物）。 */
+        val priority: Int = WorldbookJsonCodec.insertionOrderToPriority(insertionOrder),
+        /** 条目创建时间（`extensions._createdAt`）；用于同 `sortOrder` 下的稳定次序。 */
+        val createdAt: Long = 0L,
+        /** 条目更新时间（`extensions._updatedAt`）。 */
+        val updatedAt: Long = 0L,
     ) {
         fun toEntity(lorebookId: Long): LorebookEntryEntity = LorebookEntryEntity(
             id = uid.toLongOrNull() ?: 0L,
@@ -249,15 +282,17 @@ object WorldbookJsonCodec {
             keywordsJson = encodeKeywords(keywords),
             content = content,
             injectionPosition = position,
-            priority = insertionOrderToPriority(insertionOrder),
+            priority = priority,
             injectDepth = depth.toInt(),
             role = role,
             caseSensitive = if (caseSensitive) 1 else 0,
             useRegex = if (useRegex) 1 else 0,
-            sortOrder = 0,
+            sortOrder = sortOrder,
             scanDepth = scanDepth.toInt(),
             constantActive = if (constant) 1 else 0,
             enabled = if (enabled) 1 else 0,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
         )
     }
 
@@ -267,6 +302,8 @@ object WorldbookJsonCodec {
         val description: String,
         val scanDepth: Long,
         val tokenBudget: Long,
+        /** 书本创建时间（顶层 `_createdAt`）；缺失 → `0`。 */
+        val createdAt: Long = 0L,
     )
 
     /** 解析顶层元信息；非法 JSON 回落安全默认值。 */
@@ -277,6 +314,7 @@ object WorldbookJsonCodec {
             description = root.optString("description", ""),
             scanDepth = root.optLong("scan_depth", DEFAULT_SCAN_DEPTH).coerceAtLeast(1),
             tokenBudget = root.optLong("token_budget", DEFAULT_TOKEN_BUDGET).coerceAtLeast(1),
+            createdAt = root.optLong("_createdAt", 0L).takeIf { it > 0L } ?: 0L,
         )
     }
 
@@ -328,7 +366,8 @@ object WorldbookJsonCodec {
         val ext = obj.optJSONObject("extensions")
         val position = stToPosition(obj.opt("position") as? String)
         return StEntry(
-            uid = uid,
+            // 优先取内层 `id`（归并过程中可能被重写以保唯一），缺失时回落 map 键
+            uid = obj.optLong("id", 0L).takeIf { it > 0L }?.toString() ?: uid,
             keywords = keywords,
             content = obj.optString("content", ""),
             enabled = obj.optBoolean("enabled", true),
@@ -342,6 +381,12 @@ object WorldbookJsonCodec {
             scanDepth = obj.optLong("scan_depth", DEFAULT_SCAN_DEPTH).coerceAtLeast(1),
             bookId = ext?.optLong("_bookId", 0L)?.takeIf { it > 0L },
             bookName = ext?.optString("_bookName", "")?.takeIf { it.isNotEmpty() },
+            sortOrder = ext?.optInt("_sortOrder", 0) ?: 0,
+            priority = ext?.optInt("_priority", Int.MIN_VALUE)
+                ?.takeIf { it != Int.MIN_VALUE }
+                ?: insertionOrderToPriority(obj.optLong("insertion_order", 0L)),
+            createdAt = ext?.optLong("_createdAt", 0L) ?: 0L,
+            updatedAt = ext?.optLong("_updatedAt", 0L) ?: 0L,
         )
     }
 }

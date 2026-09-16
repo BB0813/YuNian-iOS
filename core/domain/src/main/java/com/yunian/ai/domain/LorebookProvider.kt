@@ -49,21 +49,18 @@ data class LorebookEntry(
     val updatedAt: Long
 )
 
-@Serializable
-data class TriggeredEntry(
-    val entry: LorebookEntry,
-    val matchedKeyword: String,
-    val matchIndex: Int,
-)
-
+/**
+ * 世界书仓储契约（**不含触发/注入职责**）。
+ *
+ * 自阶段 5f 起，「关键词命中 → 条目激活 → 按 position 注入」全部由 Rust
+ * Cordis Agent 引擎承担（`core/agent/worldbook/WorldbookRepository.synthForCompanion`
+ * 每回合合成 ST World Info JSON → `AgentFacade.setWorldbook`）。
+ * 本接口只保留**结构化编辑所需的 CRUD**，供 `WorldbookScreens.kt` 使用。
+ *
+ * 数据源为 `worldbooks` 表（master 契约，整本 ST JSON）；
+ * 旧表 `lorebooks` / `lorebook_entries` 已冻结归档，仅作回滚数据源（§5.4）。
+ */
 interface LorebookProvider {
-
-    suspend fun getEnabledEntriesForCompanion(companionId: Long): List<LorebookEntry>
-
-    suspend fun getTriggeredEntries(
-        companionId: Long,
-        recentMessages: List<ContextMessage>
-    ): List<TriggeredEntry>
 
     suspend fun getLorebookWithEntries(lorebookId: Long): LorebookWithEntries?
 
@@ -96,13 +93,6 @@ interface LorebookProvider {
      */
     suspend fun setBoundLorebookIds(companionId: Long, ids: List<Long>): Boolean
 }
-
-@Serializable
-data class ContextMessage(
-    val role: String,
-    val content: String,
-    val timestamp: Long
-)
 
 @Serializable
 data class LorebookWithEntries(
