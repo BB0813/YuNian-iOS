@@ -119,7 +119,17 @@ class UseSkillTool(
 }
 
 fun registerSkillTools(skillManager: SkillManager) {
-    ToolRegistry.register(UseSkillTool(skillManager))
+    // ⚠️ Q6 技能收敛：`use_skill` 已退役，不再注册。
+    //
+    // 原因（计划文档 §1.5 / R22）：本地 `use_skill`（走 ToolRegistry，受 useTools 门控）与
+    // Rust `load_skill`（AgentToolHost 特判，无条件可用）并存时，模型可能**同时调用**二者 →
+    // 重复加载同一技能正文 + 提示词污染 + token 浪费。
+    //
+    // 技能正文改由 Rust `SkillSelector` 按需读取（渐进式披露 L1 目录 / L2 `load_skill`），
+    // 其 SkillStore 回调由 [com.yunian.ai.feature.skills.repository.SkillStoreAdapter]
+    // 桥接到本地 assets/skills + external_skills（装配于默认蓝图，早于首次 Agent 回合）。
+    @Suppress("UNUSED_EXPRESSION")
+    skillManager
 }
 
 /** 启动后调用：刷新技能索引缓存，使系统提示词中出现可用技能清单 */

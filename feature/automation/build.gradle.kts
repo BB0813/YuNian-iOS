@@ -31,6 +31,8 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:domain"))
     implementation(project(":core:ui-common"))
+    // Agent 核心门面（WorkflowEngine 的 AI 生成节点走 Rust Cordis Agent 回合）
+    implementation(project(":core:agent"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

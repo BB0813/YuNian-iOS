@@ -9,9 +9,15 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.yunian.ai.agent.AgentFacade
+import com.yunian.ai.agent.host.AgentToolHost
+import com.yunian.ai.agent.sticker.StickerPreferenceFacade
+import com.yunian.ai.agent.uniffi.AgentTurnRequest
 import com.yunian.ai.database.AppDatabase
+import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.model.MessageType
+import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.database.repository.ChatMessageCrypto
 import com.yunian.ai.database.repository.MessageWriteCoordinator
 import com.yunian.ai.database.repository.filterDecrypted
@@ -27,6 +33,7 @@ import com.yunian.ai.common.AppForegroundTracker
 import com.yunian.ai.common.BanManager
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.common.ChatDetailSettingsDataStoreProvider
+import com.yunian.ai.common.RemoteKeyProvider
 import com.yunian.ai.common.SecureLog
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -70,10 +77,17 @@ class CompanionMessageWorker(
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
+    /**
+     * 仅用于 [AiServiceProvider.shouldProactivelyMessage]（纯本地时间/角色判定，无网络调用）。
+     * 主动消息 / 跟进追问的 **LLM 生成** 已改走 Rust Cordis Agent（[AgentFacade.runTurn]）。
+     */
     private val aiServiceProvider: AiServiceProvider by lazy {
         ServiceRegistry.get(AiServiceProvider::class.java)
             ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
     }
+
+    private val apiConfigRepository: ApiConfigRepository
+        get() = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -182,10 +196,11 @@ class CompanionMessageWorker(
                 val nudgeCount = if (state.lastNudgeMessageId == lastMessage.id) state.nudgeCount else 0
 
                 if (elapsedMs >= settings.followUpIntervalMs() && nudgeCount < settings.maxNudgeTimes()) {
-                    val reminder = aiServiceProvider.generateFollowUpReminder(
-                        companion.toAiCompanionInfo(),
-                        recentMessages.toAiChatMessages(),
-                        domainSettings
+                    val reminder = generateWithAgent(
+                        companion = companion,
+                        recentMessages = recentMessages,
+                        settings = domainSettings,
+                        followUp = true,
                     )
                     val nudgeMsgId = reminder?.let { sendMessage(companion, it) }
                     if (nudgeMsgId != null) {
@@ -214,12 +229,16 @@ class CompanionMessageWorker(
                 return@withContext Result.success()
             }
 
-            val messageContent = aiServiceProvider.generateProactiveMessage(companion.toAiCompanionInfo(), recentMessages.toAiChatMessages(), domainSettings)
-                ?: run {
-                    SecureLog.w("CompanionMessageWorker", "Proactive message is null, skipping")
-                    scheduleNext(context, settings)
-                    return@withContext Result.success()
-                }
+            val messageContent = generateWithAgent(
+                companion = companion,
+                recentMessages = recentMessages,
+                settings = domainSettings,
+                followUp = false,
+            ) ?: run {
+                SecureLog.w("CompanionMessageWorker", "Proactive message is null, skipping")
+                scheduleNext(context, settings)
+                return@withContext Result.success()
+            }
 
             sendMessage(companion, messageContent)
 
@@ -241,6 +260,128 @@ class CompanionMessageWorker(
     private fun broadcastProactiveWeChatMessage(companionId: Long, messageId: Long) {
         WeChatProactiveSync.enqueue(companionId, messageId)
         SecureLog.d("CompanionMessageWorker", "Enqueue WeChat proactive message, companionId=$companionId, messageId=$messageId")
+    }
+
+    /**
+     * 主动消息 / 跟进追问的 LLM 生成 —— 改走 Rust Cordis Agent（[AgentFacade.runTurn]）。
+     *
+     * 与迁移前的 `AiService.generateFollowUpReminder` / `generateProactiveMessage` 语义对齐：
+     * 单轮、无工具、跟随角色人设；模型以 [NO_PROACTIVE_MARKER] 表示「本轮不发言」。
+     * 判定（DND / 频控 / 冷却 / 计数）与调度逻辑完全不变，仅生成路径替换。
+     */
+    private suspend fun generateWithAgent(
+        companion: com.yunian.ai.database.model.CompanionEntity,
+        recentMessages: List<ChatMessage>,
+        settings: ProactiveMessageSettings,
+        followUp: Boolean,
+    ): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val appContext = context.applicationContext
+            val activeApi = apiConfigRepository.getActiveEnabledConfig()
+            if (activeApi == null || activeApi.model.isBlank()) {
+                SecureLog.w("CompanionMessageWorker", "No active API config, skipping agent generation")
+                return@withContext null
+            }
+            val partnerSession = runCatching { RemoteKeyProvider.getPartnerSession(appContext) }.getOrNull()
+            val isPartner = activeApi.provider == ApiProvider.PARTNER
+            AgentFacade.syncRuntimeConfig(
+                appContext,
+                AgentFacade.buildSettingsJson(role = "GIRLFRIEND"),
+                StickerPreferenceFacade.availableTagsWithFallback(appContext),
+                AgentFacade.buildCredentialsJson(
+                    sessionToken = if (isPartner) partnerSession?.token else null,
+                    clientId = if (isPartner) partnerSession?.clientId else null,
+                    apiKey = activeApi.apiKey?.takeIf { it.isNotBlank() },
+                ),
+            )
+
+            val history = recentMessages.sortedBy { it.timestamp }.takeLast(10)
+            val lastUserMessage = history.lastOrNull { it.isFromUser }?.content.orEmpty()
+            val instruction = buildProactiveInstruction(companion, settings, followUp)
+            val turnRequest = AgentTurnRequest(
+                groupId = null,
+                historyJson = serializeHistoryJson(history.map { it.toAiChatMessage() }, instruction),
+                tools = emptyList(),
+                maxRounds = 1u,
+                toolChoice = "auto",
+                stickerProbability = 0u,
+                image = null,
+                // 主动消息必须由 Rust 编排器注入人设/记忆/世界书，故不传 systemPrompt
+                systemPrompt = null,
+                companionNameMapJson = null,
+            )
+            val result = AgentFacade.runTurn(
+                turnRequest, appContext, companion.id, AgentToolHost(appContext),
+            )
+            val raw = result.finalText.trim()
+                .ifBlank { result.events.filter { it.kind == "bubble" }.joinToString("\n") { it.text } }
+            if (raw.isBlank()) return@withContext null
+
+            // 与旧路径一致的「不发言」语义（AiPromptBuilder.NO_PROACTIVE_MARKER）
+            if (raw.contains(NO_PROACTIVE_MARKER)) {
+                val without = raw.replace(NO_PROACTIVE_MARKER, "", ignoreCase = true).trim()
+                if (without.length < 2) return@withContext null
+                return@withContext without
+            }
+            raw.replace(Regex("\\r\\n|\\r|\\n+"), "，")
+                .replace(Regex("，{2,}"), "，")
+                .trimStart('，', ',', '.', '。', ' ')
+                .trim()
+                .takeIf { it.length >= 2 }
+        }.onFailure {
+            SecureLog.w("CompanionMessageWorker", "Agent proactive generation failed: ${it.message}")
+        }.getOrNull()
+    }
+
+    /** 主动消息 / 追问的单轮指令（对齐旧 AiService 提示词的语义要点）。 */
+    private fun buildProactiveInstruction(
+        companion: com.yunian.ai.database.model.CompanionEntity,
+        settings: ProactiveMessageSettings,
+        followUp: Boolean,
+    ): String = if (followUp) {
+        """
+        你上一条消息发出后，用户一直没回复。
+        现在由你决定是否追问：
+        - 若判断用户可能在忙、已休息或对话已自然收尾，只输出 $NO_PROACTIVE_MARKER，不要硬催。
+        - 若决定追问：只发 1 条，10~30 字，简短自然，语气严格服从你的性格。
+        - 不要重复上一条消息的内容，不要堆叠追问，不要说教。禁止括号，禁止AI感词汇。
+        """.trimIndent()
+    } else {
+        """
+        以${companion.name}的身份决定是否、以及如何继续刚才的对话。
+        - 若用户此刻明显不想被打扰、对话已自然收束，只输出 $NO_PROACTIVE_MARKER，不要硬聊。
+        - 话题选择以性格优先：上一话题已完结或不感兴趣时，可轻转、只回情绪，或输出 $NO_PROACTIVE_MARKER。
+        若决定发消息：
+        1. 像真人聊天一样自然，单次单动作且句式完整；不要长文堆叠共情+方案+追问
+        2. 优先 1 条消息，不要拆成很多短句连发
+        3. 不要重新开场、不要念日程；语气严格服从角色性格
+        4. 禁止括号，禁止AI感词汇，禁止说教
+        5. 时间只是背景，不要机械报时或按时段派发固定关心任务
+        ${if (settings.allowLateNightMessage) "" else "6. 当前处于免打扰时段，只做话题延续或情绪轻触，禁止提睡/吃/到家/报时"}
+        """.trimIndent()
+    }
+
+    /** 领域历史 → OpenAI messages JSON，尾部追加一条 user 指令。 */
+    private fun serializeHistoryJson(
+        history: List<AiChatMessage>,
+        instruction: String,
+    ): String {
+        val arr = org.json.JSONArray()
+        for (msg in history) {
+            arr.put(
+                org.json.JSONObject().apply {
+                    put("role", if (msg.isFromUser) "user" else "assistant")
+                    put("content", msg.content)
+                }
+            )
+        }
+        arr.put(
+            org.json.JSONObject().apply {
+                put("role", "user")
+                put("content", instruction)
+            }
+        )
+        return arr.toString()
     }
 
     private suspend fun sendMessage(companion: com.yunian.ai.database.model.CompanionEntity, content: String): Long? {
@@ -343,6 +484,9 @@ class CompanionMessageWorker(
 
     companion object {
         private const val WORK_NAME = "companion_message_work"
+
+        /** 主动消息/追问的「本轮不发言」语义标记（与 AiPromptBuilder.NO_PROACTIVE_MARKER 同值）。 */
+        private const val NO_PROACTIVE_MARKER = "[NO_PROACTIVE]"
 
         private const val DAILY_COUNT_PREFS = "proactive_daily_count"
 

@@ -11,6 +11,9 @@
         },
         {
             "id": "sticker.preference"
+        },
+        {
+            "id": "automation.core"
         }
     ],
     "patches": [],

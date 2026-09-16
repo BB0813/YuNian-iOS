@@ -679,6 +679,18 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 ).syncTools()
             }
 
+            // ── Q6 技能体系收敛：把本地技能资产桥接给 Rust SkillSelector ──
+            // 必须在首个 Agent 回合（首次 SkillSelector 创建）之前注入：
+            // 之后 Rust 才能按「L1 目录 / L2 load_skill」渐进式披露本地 assets/skills
+            // 与 filesDir/external_skills（含技能市场新装技能），从而退役 use_skill。
+            runCatching {
+                com.yunian.ai.agent.AgentFacade.installSkillStoreProvider(
+                    com.yunian.ai.feature.skills.repository.SkillStoreAdapter(
+                        ServiceRegistry.getOrThrow(SkillManager::class.java)
+                    )
+                )
+            }.onFailure { SecureLog.e("YuNianApplication", "installSkillStoreProvider failed", it) }
+
             com.yunian.ai.feature.skills.tools.registerSkillTools(
                 ServiceRegistry.getOrThrow(SkillManager::class.java)
             )
@@ -709,9 +721,14 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             ServiceRegistry.registerSingleton(AutomationStore::class.java) {
                 com.yunian.ai.feature.automation.data.AutomationStore(app)
             }
-            com.yunian.ai.feature.automation.AutomationTools.registerAll(
-                ServiceRegistry.getOrThrow(AutomationStore::class.java),
-                app
+            // 5 个自动化工具改由 automation.core 插件装配（默认蓝图装载），
+            // 与 coffee.luckin 同一范式：逐工具注册 effect 注销副作用。
+            // ⚠️ 调度层（AutomationScheduler / AutomationFireWorker）不在插件范围内。
+            pluginHost.register(
+                com.yunian.ai.feature.automation.AutomationPlugin(
+                    ServiceRegistry.getOrThrow(AutomationStore::class.java),
+                    app,
+                )
             )
 
             ServiceRegistry.registerSingleton(com.yunian.ai.domain.AutomationTickProvider::class.java) {

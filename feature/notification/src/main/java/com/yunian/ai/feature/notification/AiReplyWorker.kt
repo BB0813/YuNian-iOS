@@ -18,10 +18,7 @@ import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.MessageWriteCoordinator
 import com.yunian.ai.database.repository.filterDecrypted
 import com.yunian.ai.domain.AiChatMessage
-import com.yunian.ai.domain.AiCompanionInfo
 import com.yunian.ai.domain.AiMessageType
-import com.yunian.ai.domain.AiServiceProvider
-import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.domain.imagegen.ImageGenProtocol
 import kotlinx.coroutines.Dispatchers
@@ -31,11 +28,6 @@ class AiReplyWorker(
     context: Context,
     params: WorkerParameters
 ) : CoroutineWorker(context, params) {
-
-    private val aiServiceProvider: AiServiceProvider by lazy {
-        ServiceRegistry.get(AiServiceProvider::class.java)
-            ?: throw IllegalStateException("AiServiceProvider not registered")
-    }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
@@ -59,7 +51,6 @@ class AiReplyWorker(
             val database = AppDatabase.getDatabase(applicationContext)
             val companionRepository = CompanionRepository(database.companionDao())
             val chatRepository = ServiceRegistry.getOrThrow(ChatRepository::class.java)
-            val memoryProvider = ServiceRegistry.getOrThrow(MemoryProvider::class.java)
 
             try {
                 val companionModel = companionRepository.getCompanionById(companionId)
@@ -70,11 +61,31 @@ class AiReplyWorker(
                 val history = chatRepository.getRecentMessagesSync(companionId, limit = 50)
                     .filterDecrypted()
 
-                val response = aiServiceProvider.sendMessage(
-                    companionModel.toAiCompanionInfo(),
-                    history.toAiChatMessages()
+                // Agent 回合（Rust Cordis）：通道/后台回复固定单轮，不启用气泡连发协议。
+                syncRuntimeConfig()
+                val turnRequest = com.yunian.ai.agent.uniffi.AgentTurnRequest(
+                    groupId = null,
+                    historyJson = serializeHistoryJson(history.toAiChatMessages()),
+                    tools = emptyList(),
+                    maxRounds = 1u,
+                    toolChoice = "auto",
+                    stickerProbability = 0u,
+                    image = null,
+                    systemPrompt = null,
+                    companionNameMapJson = null,
                 )
-                val trimmedResponse = response.content.trim()
+                val result = com.yunian.ai.agent.AgentFacade.runTurn(
+                    turnRequest,
+                    applicationContext,
+                    companionId,
+                    com.yunian.ai.agent.host.AgentToolHost(applicationContext),
+                )
+                // 兜底：模型经气泡事件产出内容但 finalText 为空时，从事件流拼接，
+                // 避免后台主动回复静默丢失。
+                val trimmedResponse = result.finalText.ifBlank {
+                    result.events.filter { it.kind == "bubble" && it.text.isNotBlank() }
+                        .joinToString("\n") { it.text.trim() }
+                }.trim()
 
                 if (trimmedResponse.isNotEmpty()) {
 
@@ -99,11 +110,12 @@ class AiReplyWorker(
                     companionRepository.updateTimestamp(companionId)
                     companionRepository.increaseIntimacy(companionId, 2)
 
-                    memoryProvider.extractAndSaveFromConversation(
-                        userInput = userMessageContent,
-                        aiResponse = safeResponse,
-                        companionId = companionId,
-                    )
+                    ServiceRegistry.getOrThrow(com.yunian.ai.domain.MemoryProvider::class.java)
+                        .extractAndSaveFromConversation(
+                            userInput = userMessageContent,
+                            aiResponse = safeResponse,
+                            companionId = companionId,
+                        )
 
                     if (!AppForegroundTracker.isInForeground) {
                         val notificationPreview = if (cleanResponse.length > 50) {
@@ -133,11 +145,50 @@ class AiReplyWorker(
         }
     }
 
-    private fun com.yunian.ai.database.model.CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(
-        id = id, name = name, personality = personality,
-        age = age, backstory = backstory, speakingStyle = speakingStyle,
-        systemPrompt = systemPrompt
-    )
+    /** 同步 Agent 全局配置（settings / stickers / credentials 热更新，对齐单聊与通道中间层）。 */
+    private suspend fun syncRuntimeConfig() {
+        val stickers = com.yunian.ai.agent.sticker.StickerPreferenceFacade
+            .availableTagsWithFallback(applicationContext)
+        val partnerSession = com.yunian.ai.common.RemoteKeyProvider
+            .getPartnerSession(applicationContext)
+        val activeApi = ServiceRegistry
+            .getOrThrow(com.yunian.ai.database.repository.ApiConfigRepository::class.java)
+            .getActiveEnabledConfig()
+        val isPartner = activeApi?.provider == com.yunian.ai.database.model.ApiProvider.PARTNER
+        com.yunian.ai.agent.AgentFacade.syncRuntimeConfig(
+            applicationContext,
+            com.yunian.ai.agent.AgentFacade.buildSettingsJson(role = "GIRLFRIEND"),
+            stickers,
+            com.yunian.ai.agent.AgentFacade.buildCredentialsJson(
+                sessionToken = if (isPartner) partnerSession?.token else null,
+                clientId = if (isPartner) partnerSession?.clientId else null,
+                apiKey = activeApi?.apiKey?.takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    /** 领域历史 → OpenAI messages JSON（AgentTurnRequest.historyJson）。 */
+    private fun serializeHistoryJson(history: List<AiChatMessage>): String {
+        val arr = org.json.JSONArray()
+        for (msg in history) {
+            val role = when (msg.role) {
+                com.yunian.ai.domain.AiMessageRole.SYSTEM -> "system"
+                com.yunian.ai.domain.AiMessageRole.TOOL -> "tool"
+                com.yunian.ai.domain.AiMessageRole.USER -> "user"
+                com.yunian.ai.domain.AiMessageRole.ASSISTANT -> "assistant"
+                null -> if (msg.isFromUser) "user" else "assistant"
+            }
+            val m = org.json.JSONObject().apply {
+                put("role", role)
+                put("content", msg.content)
+            }
+            if (role == "tool" && !msg.toolName.isNullOrBlank()) {
+                m.put("name", msg.toolName)
+            }
+            arr.put(m)
+        }
+        return arr.toString()
+    }
 
     private fun ChatMessage.toAiChatMessage() = AiChatMessage(
         isFromUser = isFromUser, content = content, timestamp = timestamp,
