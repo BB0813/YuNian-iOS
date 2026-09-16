@@ -1,9 +1,7 @@
 package com.yunian.ai.feature.qqbot.data.network
 
-import android.util.Log
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.yunian.ai.feature.qqbot.data.QQBotTokenStore
-import com.yunian.ai.feature.qqbot.data.model.AccessTokenResponse
 import com.yunian.ai.feature.qqbot.data.model.QQBotAccount
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

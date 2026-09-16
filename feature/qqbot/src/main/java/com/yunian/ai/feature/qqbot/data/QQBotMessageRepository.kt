@@ -1,7 +1,6 @@
 package com.yunian.ai.feature.qqbot.data
 
 import android.content.Context
-import android.util.Log
 import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.feature.qqbot.data.model.QQBotAccount
 import com.yunian.ai.feature.qqbot.data.model.QQGatewayPayload
@@ -15,7 +14,6 @@ import com.yunian.ai.feature.qqbot.data.model.SendMessageResponse
 import com.yunian.ai.feature.qqbot.data.model.SendTextRequest
 import com.yunian.ai.feature.qqbot.data.model.UploadFileRequest
 import com.yunian.ai.feature.qqbot.data.network.QQBotApiClient
-import com.yunian.ai.feature.qqbot.data.network.QQBotRestApi
 import com.yunian.ai.feature.qqbot.data.network.QQBotWebSocketClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,9 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement

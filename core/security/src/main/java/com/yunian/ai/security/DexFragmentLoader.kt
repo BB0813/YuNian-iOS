@@ -6,10 +6,7 @@ import dalvik.system.InMemoryDexClassLoader
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
-import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
-import java.util.zip.ZipFile
 
 object DexFragmentLoader {
     private const val FRAGMENT_COUNT = 4

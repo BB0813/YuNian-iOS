@@ -1,8 +1,5 @@
 package com.yunian.ai.feature.backup.model
 
-import com.yunian.ai.database.model.FileFormat
-import com.yunian.ai.database.model.MemoryCategory
-import com.yunian.ai.database.model.MessageType
 import kotlinx.serialization.Serializable
 
 @Serializable

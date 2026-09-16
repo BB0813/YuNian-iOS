@@ -1,7 +1,6 @@
 package com.yunian.ai.feature.groupchat
 
 import android.app.Application
-import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -12,7 +11,6 @@ import com.yunian.ai.domain.wechat.WeChatProactiveSync
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.common.MessageBodyState
 import com.yunian.ai.database.model.ChatGroup
-import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.model.CompanionEntity
 import com.yunian.ai.database.model.GroupMessage
 import com.yunian.ai.database.model.Message
@@ -43,7 +41,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

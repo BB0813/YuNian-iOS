@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
@@ -37,8 +36,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,7 +62,6 @@ import com.yunian.ai.common.SecureLog
 import com.yunian.ai.database.model.ApiConfig
 import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.feature.settings.ui.viewmodel.SettingsViewModel
-import com.yunian.ai.uicommon.component.AppListItemLayout
 import com.yunian.ai.uicommon.theme.AppTheme
 import kotlinx.coroutines.delay
 

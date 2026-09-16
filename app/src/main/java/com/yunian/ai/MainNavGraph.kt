@@ -31,7 +31,6 @@ import kotlinx.coroutines.launch
 import com.yunian.ai.common.PerformanceTrace
 import com.yunian.ai.common.YandereModeManager
 import com.yunian.ai.domain.ServiceRegistry
-import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.yunian.ai.feature.automation.ui.AutomationListScreen
 import com.yunian.ai.feature.backup.BackupScreen

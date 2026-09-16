@@ -30,10 +30,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.content.edit
-import com.yunian.ai.common.BatteryOptimizationHelper
 import com.yunian.ai.common.CompanionRole
 import com.yunian.ai.common.FrameRateManager
-import com.yunian.ai.common.RomUtils
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.feature.notification.CompanionKeepAliveService
 import com.yunian.ai.feature.notification.CompanionMessageWorker

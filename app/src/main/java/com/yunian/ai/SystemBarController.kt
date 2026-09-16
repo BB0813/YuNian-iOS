@@ -5,7 +5,6 @@ import android.content.res.Configuration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
-import com.yunian.ai.uicommon.theme.WeChatDarkSurface
 
 object SystemBarController {
 

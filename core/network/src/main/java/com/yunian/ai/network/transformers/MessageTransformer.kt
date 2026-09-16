@@ -1,8 +1,6 @@
 package com.yunian.ai.network.transformers
 
 import com.yunian.ai.domain.LorebookProvider
-import com.yunian.ai.domain.LorebookEntry
-import com.yunian.ai.domain.TriggeredEntry
 import com.yunian.ai.domain.PlaceholderProvider
 import com.yunian.ai.network.Message
 

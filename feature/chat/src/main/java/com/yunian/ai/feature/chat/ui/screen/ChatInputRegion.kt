@@ -2,7 +2,6 @@ package com.yunian.ai.feature.chat.ui.screen
 import com.yunian.ai.uicommon.icon.AppIcons
 
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column

@@ -1,11 +1,8 @@
 package com.yunian.ai.feature.chat.tools
 
-import com.yunian.ai.common.SecureLog
 import com.yunian.ai.database.AppDatabase
-import com.yunian.ai.database.model.ConversationSummary
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ConversationSearchArgs
-import com.yunian.ai.domain.ConversationSearchResult
 import com.yunian.ai.domain.ConversationSummary as DomainConversationSummary
 import com.yunian.ai.domain.RecentChatsArgs
 import com.yunian.ai.domain.ToolRegistry
@@ -13,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put

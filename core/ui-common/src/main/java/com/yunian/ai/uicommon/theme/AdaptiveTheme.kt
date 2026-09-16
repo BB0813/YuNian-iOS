@@ -5,7 +5,6 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.yunian.ai.uicommon.utils.DeviceScreenSize
 import com.yunian.ai.uicommon.utils.rememberDeviceScreenSize
 

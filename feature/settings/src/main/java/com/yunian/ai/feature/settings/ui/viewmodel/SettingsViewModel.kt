@@ -13,7 +13,6 @@ import com.yunian.ai.database.model.ApiProviderPreset
 import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.domain.LocalModelProvider
 import com.yunian.ai.domain.ModelState
-import com.yunian.ai.domain.ModelStatus
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.network.AiService
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +22,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

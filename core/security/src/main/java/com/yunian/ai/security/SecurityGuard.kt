@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.os.Debug
 import com.yunian.ai.common.PerformanceTrace
-import java.io.File
 
 object SecurityGuard {
 

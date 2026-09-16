@@ -69,7 +69,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunian.ai.common.AppSettingsStore
 import com.yunian.ai.database.model.ApiProvider
-import com.yunian.ai.database.model.ApiProviderPreset
 import com.yunian.ai.feature.settings.R
 import com.yunian.ai.feature.settings.ui.viewmodel.SettingsViewModel
 import com.yunian.ai.uicommon.theme.ThemeMode

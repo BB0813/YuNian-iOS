@@ -9,10 +9,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.security.KeyStore
 import java.security.SecureRandom
-import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
