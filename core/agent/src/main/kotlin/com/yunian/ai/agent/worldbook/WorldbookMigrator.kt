@@ -20,6 +20,11 @@ import org.json.JSONObject
 
  * 源表 `lorebooks` / `lorebook_entries` **保留不删**（§5.4 冻结归档 = 回滚数据源）。
  *
+ * ## 激活位语义
+ * `enabled` **逐本沿用源值**（不收敛为单激活）：运行时
+ * `WorldbookRepository.synthForCompanion` 会把该伴侣作用域下**全部启用行**按
+ * `(priority desc, id)` 合并（Q4），因此多本同时启用是有效状态而非脏数据。
+ *
  * ## 幂等
  * 以 `app_meta` 键 [FLAG_MIGRATED] 为一次性开关；已迁移过则直接返回
  * [Result.Skipped]，不触碰任何数据。**未迁移成功不写标记**，下次启动重试。
@@ -100,21 +105,15 @@ class WorldbookMigrator(private val context: Context) {
                 com.yunian.ai.database.model.WorldbookEntity(
                     name = book.name.takeIf { it.isNotBlank() } ?: "世界书 $srcId",
                     json = json,
-                    // 本地 enabled=1 的全局书 → worldbooks.enabled；伴侣专属书不抢全局唯一激活位
-                    enabled = false,
+                    // ★ 直接沿用源启用位（不做单激活收敛）：运行时由
+                    // `WorldbookRepository.synthForCompanion` 按 (priority desc, id)
+                    // **合并全部启用行**（Q4），本地多本同时启用是有效状态。
+                    // 若在此收敛为单本，用户已启用的其余世界书会静默失效。
+                    enabled = book.isEnabled(),
                     companionId = book.companionId,
                     updatedAt = book.updatedAt.takeIf { it > 0L } ?: System.currentTimeMillis(),
                 ),
             )
-        }
-
-        // 恢复激活位：取第一本「全局且启用」的书（master 单激活语义）
-        books.firstOrNull { it.companionId == null && it.isEnabled() }?.let { active ->
-            val row = worldbookDao.all().firstOrNull { it.name == (active.name.takeIf { n -> n.isNotBlank() } ?: "世界书 ${active.id}") }
-            if (row != null) {
-                worldbookDao.clearEnabled()
-                worldbookDao.upsert(row.copy(enabled = true, updatedAt = System.currentTimeMillis()))
-            }
         }
 
         metaStore.putString(FLAG_MIGRATED, STAMP)
@@ -122,16 +121,19 @@ class WorldbookMigrator(private val context: Context) {
         Result.Migrated(books = written.size, entries = dstEntryTotal)
     }
 
-    /** 本地允许多本同时启用；master 为同作用域单激活 → 仅记录告警，不阻断迁移。 */
+    /**
+     * 本地允许多本同时启用。运行时为**多本合并**（Q4），故多启用不是异常；
+     * 仅在同作用域内出现**同名**书本时告警（运行时会按 `content` 去重，可能盖掉其中一本）。
+     */
     private fun warnOnMultiActive(books: List<com.yunian.ai.database.model.LorebookEntity>) {
-        val multi = books.filter { it.isEnabled() }
-            .groupBy { it.companionId }
+        val dupNames = books.filter { it.isEnabled() }
+            .groupBy { it.companionId to it.name }
             .filterValues { it.size > 1 }
-        if (multi.isNotEmpty()) {
-            val detail = multi.entries.joinToString("; ") { (cid, list) ->
-                "companionId=${cid ?: "全局"} → ${list.size} 本: ${list.joinToString("/") { it.name }}"
+        if (dupNames.isNotEmpty()) {
+            val detail = dupNames.entries.joinToString("; ") { (key, list) ->
+                "companionId=${key.first ?: "全局"}「${key.second}」→ ${list.size} 本"
             }
-            Log.w(TAG, "检测到同作用域多本启用（迁移后仅 1 本可激活）: $detail")
+            Log.w(TAG, "检测到同作用域同名启用世界书（合并时按 content 去重，可能互相覆盖）: $detail")
         }
     }
 

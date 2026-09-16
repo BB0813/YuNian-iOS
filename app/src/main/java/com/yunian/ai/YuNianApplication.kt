@@ -593,9 +593,8 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             }
 
             ServiceRegistry.registerSingleton(LorebookProvider::class.java) {
-                com.yunian.ai.feature.worldbook.repository.WorldbookRepository(
-                    AppDatabase.getDatabase(app)
-                )
+                // 阶段 5g：数据源已切到 master 的 `worldbooks` 表，构造需 Context
+                com.yunian.ai.feature.worldbook.repository.WorldbookRepository(app)
             }
 
             ServiceRegistry.registerSingleton(McpManager::class.java) {
