@@ -323,19 +323,24 @@ class GroupChatViewModel(
 
         if (com.yunian.ai.common.BanManager.isBanned(getApplication())) return
 
-        val inputCheck = com.yunian.ai.common.ContentFilter.checkInput(content)
-        if (inputCheck.isViolating) {
-            android.util.Log.w("GroupChatViewModel", "Input blocked by safety filter: ${inputCheck.reason}")
-            com.yunian.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
-            return
-        }
+        // P1 收尾：输入安全校验是 CPU 较重的同步逻辑（约 100+ 正则 + 语义预处理），
+        // 原先在 Compose 回调（主线程）同步执行会造成输入/首帧抖动。现整体移入 applicationScope(IO)，
+        // 并严格保持原顺序语义：校验输入 → 通过后再申请门控 → 再取消旧 job → 启动新一轮。
+        val previousJob = sendMessageJob
+        val job = applicationScope.launch {
+            val inputCheck = com.yunian.ai.common.ContentFilter.checkInput(content)
+            if (inputCheck.isViolating) {
+                android.util.Log.w("GroupChatViewModel", "Input blocked by safety filter: ${inputCheck.reason}")
+                com.yunian.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
+                return@launch
+            }
 
-        if (!isLoadingLock.compareAndSet(false, true)) {
-            Log.w("GroupChatViewModel", "sendMessage ignored: already processing")
-            return
-        }
-        sendMessageJob?.cancel()
-        sendMessageJob = applicationScope.launch {
+            // 门控在协程内、校验之后申请：原子 CAS 保证快速连点发送时只有一个能通过并启动生成。
+            if (!isLoadingLock.compareAndSet(false, true)) {
+                Log.w("GroupChatViewModel", "sendMessage ignored: already processing")
+                return@launch
+            }
+            previousJob?.cancel()
             try {
                 _isLoading.value = true
 
@@ -367,6 +372,7 @@ class GroupChatViewModel(
                 isLoadingLock.set(false)
             }
         }
+        sendMessageJob = job
     }
 
     /**
