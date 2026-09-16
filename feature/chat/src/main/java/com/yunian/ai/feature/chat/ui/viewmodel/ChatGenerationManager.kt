@@ -1,6 +1,7 @@
 package com.yunian.ai.feature.chat.ui.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import com.yunian.ai.common.AppSettingsStore
 import com.yunian.ai.common.ApplicationScopeProvider
 import com.yunian.ai.common.BanManager
@@ -13,6 +14,7 @@ import com.yunian.ai.common.RolePromptProvider
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.StickerManager
 import com.yunian.ai.common.TimeoutBudgets
+import com.yunian.ai.common.perf.PerfBoost
 import com.yunian.ai.domain.wechat.WeChatProactiveSync
 import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.database.model.ChatMessage
@@ -59,6 +61,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
@@ -844,24 +847,50 @@ class ChatGenerationManager private constructor(
                 }
             }
 
-            val streamResult = streamApplier.apply(
-                events = streamEvents,
-                turn = pendingTurn,
-                projectLive = showReasoning,
-                onReasoningSnapshot = { snapshot ->
-
-                    if (EventCommitRules.shouldProjectReasoningLive(showReasoning, snapshot)) {
-                        StreamingReasoningMessagePipeline.upsertStreaming(
-                            companionId = companionId,
-                            turnId = pendingTurn.turnId,
-                            text = snapshot,
-                            timestamp = pendingTurn.startedAtMs,
-                            eventIndex = pendingTurn.streamingReasoningEvent()?.eventIndex,
-                            anchorMessageId = pendingTurn.anchorMessageId,
-                        )
+            // ADPF：流式回复期间把「主线程 + 当前刷新周期」声明为关键工作负载，
+            // 让系统据此提频/摆核。每个流事件后上报一次「上一事件 → 本次」的实耗
+            // （频率克制：每事件一次）。仅在支持时创建，否则 perfSession 为 null → 零开销跳过。
+            val perfSession = if (PerfBoost.isSupported) {
+                PerfBoost.createSession(
+                    tag = "chat-stream",
+                    targetWorkDurationNanos = PerfBoost.frameIntervalNanos(application),
+                    threadIds = PerfBoost.withMainThread(),
+                )
+            } else {
+                null
+            }
+            val streamResult = try {
+                var lastEventNanos = SystemClock.elapsedRealtimeNanos()
+                val timedEvents = if (perfSession != null) {
+                    streamEvents.onEach {
+                        val nowNanos = SystemClock.elapsedRealtimeNanos()
+                        perfSession.reportActual(nowNanos - lastEventNanos)
+                        lastEventNanos = nowNanos
                     }
-                },
-            )
+                } else {
+                    streamEvents
+                }
+                streamApplier.apply(
+                    events = timedEvents,
+                    turn = pendingTurn,
+                    projectLive = showReasoning,
+                    onReasoningSnapshot = { snapshot ->
+
+                        if (EventCommitRules.shouldProjectReasoningLive(showReasoning, snapshot)) {
+                            StreamingReasoningMessagePipeline.upsertStreaming(
+                                companionId = companionId,
+                                turnId = pendingTurn.turnId,
+                                text = snapshot,
+                                timestamp = pendingTurn.startedAtMs,
+                                eventIndex = pendingTurn.streamingReasoningEvent()?.eventIndex,
+                                anchorMessageId = pendingTurn.anchorMessageId,
+                            )
+                        }
+                    },
+                )
+            } finally {
+                perfSession?.close()
+            }
 
             if (streamResult.failedMessage != null) {
                 StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)

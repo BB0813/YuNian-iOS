@@ -9,6 +9,7 @@ import com.yunian.ai.common.DeviceIdProvider
 import com.yunian.ai.common.HardwareInfo
 import com.yunian.ai.common.PerformanceTrace
 import com.yunian.ai.common.RomUtils
+import com.yunian.ai.common.perf.PerfBoost
 import com.yunian.ai.common.SaltStore
 import com.yunian.ai.common.SafetyClassifier
 import com.yunian.ai.common.SecureLog
@@ -184,6 +185,10 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             PerformanceTrace.markStartupStage("ib_salt")
             SecureLog.init(com.yunian.ai.BuildConfig.DEBUG)
             PerformanceTrace.markStartupStage("ib_securelog")
+            // ADPF（Performance Hint API）：注入应用上下文并捕获主线程 native tid。
+            // 运行在主线程，幂等，内部全部 runCatching；API < 31 / 服务缺失时自动降级 no-op。
+            runCatching { PerfBoost.init(app) }
+            PerformanceTrace.markStartupStage("ib_perfboost")
             applyStoredLanguage(app)
             PerformanceTrace.markStartupStage("ib_language")
             AiService.initialize(app)
