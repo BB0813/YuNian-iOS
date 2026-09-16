@@ -4,7 +4,6 @@ import com.yunian.ai.uicommon.component.glass.drawGlass
 import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.icon.AppIcons
 
-
 import com.yunian.ai.uicommon.theme.AppTheme
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -56,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yunian.ai.feature.qqbot.data.network.BindStatus
 import com.yunian.ai.feature.qqbot.data.network.QQBotWebSocketClient
 import com.yunian.ai.uicommon.component.glass.GlassPageScaffold
+import com.yunian.ai.uicommon.component.SettingItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -745,37 +745,5 @@ private fun QQBotStatusCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SettingItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    trailing: @Composable () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = AppTheme.colors.onSurfaceVariant,
-            modifier = Modifier.size(20.dp)
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 12.dp)
-        ) {
-            Text(text = title, fontSize = 14.sp, color = AppTheme.colors.onSurface, maxLines = 1)
-            Text(text = subtitle, fontSize = 12.sp, color = AppTheme.colors.onSurfaceVariant, maxLines = 1)
-        }
-        trailing()
     }
 }
