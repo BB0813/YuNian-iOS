@@ -669,20 +669,21 @@ class StickerManager(private val context: Context) {
     }
 
     /**
-     * 三级解析导入图片的扩展名（Bug2 修复）：
+     * 三级解析导入图片的扩展名（Bug2 修复 + P2 内容优先）：
      *  ① DISPLAY_NAME 后缀（jpeg/jfif/jpe 归一为 jpg）
      *  ② MIME 映射（含 image/xxx 已知子类型）
      *  ③ 魔数嗅探兜底 [sniffedExtension]（来自文件头，与 provider 无关）
      *
-     * 返回 null 表示完全无法识别；返回的扩展名可能不在白名单内（如 heic/bmp），
-     * 是否接受由调用方 [importStickerFile] 依 [IMAGE_EXTENSIONS] 判定。
+     * 内容优先于文件名：三级信号**只接受白名单扩展名**（png/jpg/gif/webp）；
+     * 后缀 / MIME 若不是白名单（如误命名的 .bmp / .heic），不短路、继续让后续信号说话。
+     * 返回 null 表示白名单内均无法识别，由调用方 [importStickerFile] 依 [IMAGE_EXTENSIONS] 拒绝。
      */
     private fun resolveImageExtension(
         displayNameExtension: String?,
         mimeExtension: String?,
         sniffedExtension: String?
     ): String? {
-        return displayNameExtension ?: mimeExtension ?: sniffedExtension
+        return selectStickerImageExtension(displayNameExtension, mimeExtension, sniffedExtension)
     }
 
     /** ① DISPLAY_NAME 后缀解析：未知后缀返回 null（交棒给 MIME / 魔数）。 */
@@ -697,7 +698,7 @@ class StickerManager(private val context: Context) {
                     val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (idx >= 0) {
                         val candidate = cursor.getString(idx)?.substringAfterLast('.', "")
-                        normalizeImageExtension(candidate)
+                        normalizeStickerImageExtension(candidate)
                     } else null
                 } else null
             }
@@ -711,14 +712,6 @@ class StickerManager(private val context: Context) {
     private fun resolveExtensionFromMime(uri: Uri): String? {
         val mime = try { context.contentResolver.getType(uri) } catch (e: Exception) { null }
         return mimeToExtension(mime)
-    }
-
-    /** 后缀归一：统一小写、别名映射（jpeg/jfif/jpe → jpg），仅保留已知图片后缀，其余返回 null。 */
-    private fun normalizeImageExtension(raw: String?): String? {
-        val lower = raw?.trim()?.lowercase()?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
-            ?: return null
-        val normalized = EXTENSION_ALIASES[lower] ?: lower
-        return normalized.takeIf { it in KNOWN_IMAGE_EXTENSIONS }
     }
 
     /** MIME → 扩展名（含 image/xxx 已知子类型；未知返回 null）。 */
@@ -759,14 +752,8 @@ class StickerManager(private val context: Context) {
         /** 自定义表情落盘软上限（主理人拍板：200 条） */
         const val MAX_IMPORTED_COUNT = 200
 
-        /** 导入白名单（其余格式如 heic/bmp 仍按不支持处理，但拒绝提示明确） */
-        private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp")
-
-        /** DISPLAY_NAME 后缀可识别的图片格式（含归一后的别名） */
-        private val KNOWN_IMAGE_EXTENSIONS = setOf("png", "jpg", "gif", "webp", "bmp", "heic", "heif")
-
-        /** 后缀别名 → 规范后缀 */
-        private val EXTENSION_ALIASES = mapOf("jpeg" to "jpg", "jfif" to "jpg", "jpe" to "jpg")
+        /** 导入白名单（其余格式如 heic/bmp 仍按不支持处理，但拒绝提示明确）；与 [STICKER_IMAGE_WHITELIST] 同源 */
+        private val IMAGE_EXTENSIONS = STICKER_IMAGE_WHITELIST
 
         /** 嗅探头部读取上限（mark/reset 的 readlimit，需 ≥ 魔数所需字节数） */
         private const val SNIFF_MARK_LIMIT = 64
@@ -790,3 +777,36 @@ data class StickerInfo(
     val description: String? = null,
     val fileName: String? = null
 )
+
+// ================== 导入格式判定（纯函数，内容优先于文件名，便于 JVM 单测） ==================
+
+/** 导入白名单（大小写已归一；jpeg 会先归并为 jpg）。 */
+internal val STICKER_IMAGE_WHITELIST = setOf("png", "jpg", "jpeg", "gif", "webp")
+
+/** 已知图片后缀（含 bmp/heic/heif，仅用于「检测到」提示；非白名单者不参与接受）。 */
+private val STICKER_KNOWN_IMAGE_EXTENSIONS = setOf("png", "jpg", "gif", "webp", "bmp", "heic", "heif")
+
+/** 后缀别名 → 规范后缀。 */
+private val STICKER_EXTENSION_ALIASES = mapOf("jpeg" to "jpg", "jfif" to "jpg", "jpe" to "jpg")
+
+/** 后缀归一：统一小写、别名映射（jpeg/jfif/jpe → jpg），仅保留已知图片后缀，其余返回 null。 */
+internal fun normalizeStickerImageExtension(raw: String?): String? {
+    val lower = raw?.trim()?.lowercase()?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
+        ?: return null
+    val normalized = STICKER_EXTENSION_ALIASES[lower] ?: lower
+    return normalized.takeIf { it in STICKER_KNOWN_IMAGE_EXTENSIONS }
+}
+
+/**
+ * 三级内容优先选择：DISPLAY_NAME 后缀 → MIME → 魔数嗅探，**只接受白名单扩展名**。
+ *
+ * 任一级若不是白名单（如误命名的 `.bmp` / `.heic`），**不短路**，继续让后续信号（最终是魔数嗅探）说话。
+ * 例：真实 JPEG 但名为 `x.bmp` → 后缀 bmp（跳过）→ 嗅探 jpg → 返回 `jpg`。
+ * 三者都不是白名单则返回 null（交由调用方按「无法识别」拒绝）。
+ */
+internal fun selectStickerImageExtension(
+    displayNameExtension: String?,
+    mimeExtension: String?,
+    sniffedExtension: String?
+): String? = listOf(displayNameExtension, mimeExtension, sniffedExtension)
+    .firstOrNull { it != null && it in STICKER_IMAGE_WHITELIST }
