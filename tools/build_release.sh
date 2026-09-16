@@ -112,9 +112,9 @@ python3 tools/strip_metadata.py "$STRIPPED_APK"
 python3 tools/split_dex.py \
     --apk "$STRIPPED_APK" --splits 4 \
     --keystore "${KEYSTORE:-../release.keystore}" \
-    --storepass "${YUNIAN_STORE_PASSWORD:-3498762309}" \
+    --storepass "${YUNIAN_STORE_PASSWORD:?签名口令必须由环境变量提供，禁止写入仓库（见 gradle.properties 说明）}" \
     --keyalias "${YUNIAN_KEY_ALIAS:-your_alias}" \
-    --keypass "${YUNIAN_KEY_PASSWORD:-3498762309}"
+    --keypass "${YUNIAN_KEY_PASSWORD:?签名口令必须由环境变量提供，禁止写入仓库}"
 
 # ── Step 9: Re-sign final APK ──
 echo ""
@@ -123,9 +123,9 @@ cp "$STRIPPED_APK" "$APK_PATH"
 if command -v apksigner &> /dev/null && [ -f "../release.keystore" ]; then
     apksigner sign \
         --ks ../release.keystore \
-        --ks-pass pass:"${YUNIAN_STORE_PASSWORD:-3498762309}" \
+        --ks-pass pass:"${YUNIAN_STORE_PASSWORD:?签名口令必须由环境变量提供，禁止写入仓库}" \
         --ks-key-alias "${YUNIAN_KEY_ALIAS:-your_alias}" \
-        --key-pass pass:"${YUNIAN_KEY_PASSWORD:-3498762309}" \
+        --key-pass pass:"${YUNIAN_KEY_PASSWORD:?签名口令必须由环境变量提供，禁止写入仓库}" \
         --v1-signing-enabled false \
         --v2-signing-enabled true \
         --v3-signing-enabled true \

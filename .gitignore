@@ -97,3 +97,10 @@ nul
 /releases/
 /*.log
 /bugreport-*.zip
+
+# 签名密钥严禁入库（安全事件 2026-09-16）
+*.jks
+*.keystore
+*.p12
+*.pfx
+/release.keystore
