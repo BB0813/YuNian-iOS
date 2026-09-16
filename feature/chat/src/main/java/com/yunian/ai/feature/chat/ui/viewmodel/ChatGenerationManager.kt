@@ -44,7 +44,6 @@ import com.yunian.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
 import com.yunian.ai.feature.chat.voice.ChatTtsController
 import com.yunian.ai.feature.chat.voice.ChatTtsState
 import com.yunian.ai.network.ChatTypingState
-import com.yunian.ai.network.bubble.BubbleJsonProtocol
 import com.yunian.ai.network.bubble.BubbleLoopRunner
 import com.yunian.ai.network.stream.NonStreamingAssistantStreamAdapter
 import com.yunian.ai.network.tts.ChatTtsConfig
@@ -102,31 +101,6 @@ class ChatGenerationManager private constructor(
 
         fun release(companionId: Long) {
             instances[companionId]?.onReleased()
-        }
-
-        /**
-         * 组装气泡连发第 N 轮的模型历史（P0-2）。
-         *
-         * 首条正文气泡已经送达/落库，但它不在首轮请求的 [modelHistory] 里——若不显式注入，
-         * 连发第 2 轮起的模型看不到第 1 条说了什么，会复读或自相矛盾。
-         *
-         * 去重约定：[alreadyGenerated] 只含连发循环追加生成的追尾气泡（[BubbleLoopRunner] 传入的
-         * 就是这份增量列表），首条由 [firstBubbleText] 恰好注入一次，二者不重叠。
-         *
-         * @return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
-         */
-        internal fun buildChainHistory(
-            modelHistory: List<AiChatMessage>,
-            firstBubbleText: String,
-            alreadyGenerated: List<String>,
-        ): List<AiChatMessage> {
-            fun assistant(text: String) = AiChatMessage(
-                isFromUser = false,
-                content = text,
-                timestamp = System.currentTimeMillis(),
-                role = com.yunian.ai.domain.AiMessageRole.ASSISTANT,
-            )
-            return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
         }
     }
 
@@ -250,10 +224,8 @@ class ChatGenerationManager private constructor(
 
     val pipeline = MessagePipelineRunner { level -> BanManager.recordViolation(application, level) }
 
-    private val toolLoopRunner = AiToolLoopRunner(aiService, confirmationGate = ::requestToolConfirmation)
     private val streamApplier = PendingTurnStreamApplier()
 
-    private val bubbleLoopRunner = BubbleLoopRunner()
     private val responseFinalizer by lazy { AiResponseFinalizer(
         companionId = companionId,
         chatRepository = chatRepository,
@@ -1169,12 +1141,13 @@ class ChatGenerationManager private constructor(
                 return@launch
             }
 
-            // OpenMinis 模式：只要不是图片路径就带工具，由模型自主决定是否调用
-            val useTools = imagePath == null && ToolRegistry.isNotEmpty()
-            // 流式分支是否接入了气泡协议（决定首条是否走「协议解析 + 单条送达」路径）
-            var appliedBubbleProtocol = false
+            // ── vision 路径：图片理解尚未下沉 Rust，仍走本地 AiService ──
+            // 文本路径已在上方 Agent 分支内 `return@launch`，走到这里 imagePath 必非 null
+            // （Kotlin 已据该分支完成 smart-cast）。
+            // 旧 `useTools`（本地工具循环）与 `streamMessage`（本地流式）分支已随 Cordis Agent
+            // 全面接管文本路径而删除 —— 二者在 `imagePath == null` 成立时本就不可达。
             val streamEvents = when {
-                imagePath != null -> {
+                else -> {
                     val aiResponse = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
                         aiService.sendMessageWithImage(
                             aiCompanion,
@@ -1190,59 +1163,6 @@ class ChatGenerationManager private constructor(
                         content = aiResponse.content,
                         startedAtMs = requestStartedAt,
                         completedAtMs = System.currentTimeMillis(),
-                    )
-                }
-                useTools -> {
-                    val tools = ToolRegistry.all()
-                    // 轮次预算放大到 6，外层超时预算随之放大，避免多轮工具调用被总超时误杀。
-                    val toolLoopRounds = ChatConstants.CHAT_TOOL_LOOP_MAX_ROUNDS
-                    val aiResponse = runInterruptibleSafe(
-                        timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * toolLoopRounds,
-                    ) {
-                        toolLoopRunner.executeWithToolLoop(
-                            aiCompanion,
-                            modelHistory,
-                            stickerProbability,
-                            ntpTimeEnabled,
-                            tools,
-                            maxRounds = toolLoopRounds,
-                            onToolActivity = { event ->
-                                // 同 id 覆盖（RUNNING → 终态），保持先后顺序
-                                turnActivityMap[event.id] = event
-                                _toolActivity.value =
-                                    (_toolActivity.value.filterNot { it.id == event.id } + event)
-                                        .sortedBy { it.id }
-                            },
-                        )
-                    } ?: run {
-                        throw java.util.concurrent.TimeoutException("AI response timeout")
-                    }
-                    NonStreamingAssistantStreamAdapter.fromCompleted(
-                        turnId = pendingTurn.turnId,
-                        reasoning = aiResponse.reasoningContent,
-                        content = aiResponse.content,
-                        startedAtMs = requestStartedAt,
-                        completedAtMs = System.currentTimeMillis(),
-                    )
-                }
-                else -> {
-
-                    // 气泡协议接入：把协议文本并入角色自定义系统提示词（复用生图范例），
-                    // 使 streamMessage 内部据此推导 preserveRaw，无需改动接口。
-                    appliedBubbleProtocol = true
-                    val streamCompanion = aiCompanion.copy(
-                        systemPrompt = listOfNotNull(
-                            aiCompanion.systemPrompt?.trim()?.takeIf { it.isNotEmpty() },
-                            BubbleJsonProtocol.systemRules(),
-                        ).joinToString("\n\n")
-                    )
-                    aiService.streamMessage(
-                        companion = streamCompanion,
-                        history = modelHistory,
-                        stickerProbability = stickerProbability,
-                        ntpTimeEnabled = ntpTimeEnabled,
-                        turnId = pendingTurn.turnId,
-                        startedAtMs = requestStartedAt,
                     )
                 }
             }
@@ -1302,27 +1222,16 @@ class ChatGenerationManager private constructor(
             }
 
             val aiContentRaw = streamResult.assistantText
-            // 协议模式：首条按气泡协议严格解析，正文取其 text；未遵守（非 JSON）则回落整段原文，
-            // 交回 deliverResponse 走「空行分段」兜底。
-            val firstReply = if (appliedBubbleProtocol) BubbleJsonProtocol.parseStrict(aiContentRaw) else null
-            // 协议模式下 parseStrict 失败时，用宽容提取清洗畸形/截断 JSON 残片，
-            // 避免把 {"text":"…","continue": 这类骨架直接展示给用户。
-            val sourceText = when {
-                firstReply != null -> firstReply.text
-                appliedBubbleProtocol -> BubbleJsonProtocol.extractTextLenient(aiContentRaw)
-                else -> aiContentRaw
-            }
-            // 生图标签只用于提取画面描述，绝不允许进入气泡或会话列表摘要。
-            // 若剥离后为空（模型整条回复只有标签/画面描述），也不能回落成原文——那正是标签泄漏的来源。
+            // vision 路径不接入气泡协议：整段原文交由 `deliverResponse` 走「空行分段」兜底。
             val aiContent = if (imageGenEnabled) {
-                val stripped = ImageGenTriggerLogic.stripTags(sourceText)
+                val stripped = ImageGenTriggerLogic.stripTags(aiContentRaw)
                 when {
                     stripped.isNotBlank() -> stripped
-                    ImageGenTriggerLogic.isPromptOnly(sourceText) -> IMAGE_GEN_ONLY_REPLY_TEXT
-                    else -> sourceText
+                    ImageGenTriggerLogic.isPromptOnly(aiContentRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
+                    else -> aiContentRaw
                 }
             } else {
-                sourceText
+                aiContentRaw
             }
             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
             if (toastMsg != null) {
@@ -1361,66 +1270,20 @@ class ChatGenerationManager private constructor(
                 enabled = imageGenEnabled,
             )
 
-            // 连发门控：仅当接入协议且首条显式 continue=true 时才继续生成追尾气泡。
-            val enableBubbleChain = appliedBubbleProtocol && firstReply?.continueChat == true &&
-                imagePath == null
-            val followUpBubbles = if (enableBubbleChain) {
-                bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
-                    // 链发历史必须含首条正文（P0-2）：否则第 2 轮看不到第 1 条说了什么。
-                    // alreadyGenerated 只含本循环追加的追尾气泡，首条由 aiContent 恰好注入一次。
-                    val appendedHistory = buildChainHistory(modelHistory, aiContent, alreadyGenerated)
-                    val resp = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                        aiService.sendMessage(
-                            companion = aiCompanion,
-                            history = appendedHistory,
-                            stickerProbability = stickerProbability,
-                            ntpTimeEnabled = ntpTimeEnabled,
-                            extraSystemRules = BubbleJsonProtocol.systemRules(),
-                        )
-                    }
-                    resp?.content.orEmpty()
-                }
-            } else {
-                emptyList()
-            }
-
-            // 追尾气泡同样可能夹带生图标签：剥离后再落库，
-            // 否则标签会写进气泡、并污染会话列表摘要（用户看到的就是提示词原文）。
-            val followUpBubblesDelivered = followUpBubbles
-                .map { if (imageGenEnabled) ImageGenTriggerLogic.stripTags(it) else it }
-                .filter { it.isNotBlank() }
-
-            followUpBubblesDelivered.forEach { bubble ->
-                delay(800L + kotlin.random.Random.nextLong(1200L))
-                try {
-                    responseFinalizer.deliverResponse(
-                        aiContent = bubble,
-                        reasoning = null,
-                        userContentForMemory = null,
-                        pendingTurn = pendingTurn,
-                        onCommitted = onCommitted,
-                        // 追尾气泡同样按 AI 的回车拆分（若模型把多句塞进一条 text，回车意图照发）。
-                        allowParagraphSplit = true,
-                    )
-                } catch (e: CancellationException) {
-                    // 取消必须向上传播（runCatching 会把它当普通失败吞掉，P1-2）。
-                    throw e
-                } catch (e: Exception) {
-                    SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)
-                }
-            }
-
-            val allBubbleContent = (listOf(aiContent) + followUpBubblesDelivered).joinToString("\n")
+            // 气泡连发（追尾气泡）已由 Rust `AgentFacade.runTurn` 的 bubble 事件流承担：
+            // Agent 路径按 `BubbleLoopRunner.MAX_BUBBLES` 轮预算在 Rust 侧连发，
+            // 本 vision 分支为单轮图片理解，不产出追尾气泡。
+            val allBubbleContent = aiContent
             responseFinalizer.afterDeliver(
                 firstDelivered.copy(
                     aiContent = allBubbleContent,
-                    segments = listOf(aiContent) + followUpBubblesDelivered,
+                    segments = listOf(aiContent),
                     userContentForMemory = userContentForMemory,
                 )
             )
             // 所有气泡已落库后再写工具卡片：保证其时间戳最大，在消息流中排在本轮最后一条助手消息之后。
             persistToolActivities(pendingTurn.turnId.value, turnActivityMap.values.toList())
-            SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}, bubbles=${1 + followUpBubblesDelivered.size}")
+            SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}, bubbles=1")
         } catch (e: CancellationException) {
             StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
             // 被打断（如新一轮消息到达/再生成）：丢弃实时过程态，避免卡片残留在输入框上方。
