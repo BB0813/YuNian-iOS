@@ -56,7 +56,8 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
         if (mode == _themeMode.value) return
         _themeMode.value = mode
         _isDarkTheme.value = resolveIsDarkTheme(mode)
-        prefs.edit().putString("theme_mode", mode.name).commit()
+        // apply()：内存态同步更新（同进程后续 recreate 读得到），磁盘写入异步，避免主线程 fsync 阻塞。
+        prefs.edit().putString("theme_mode", mode.name).apply()
     }
 
     fun applyTheme(activity: android.app.Activity) {

@@ -153,7 +153,8 @@ fun MainScreen(mainActivity: Activity) {
     var bgTick by remember { mutableIntStateOf(0) }
     fun syncWindowMainBackground() {
         val key = getMainBackgroundKey(context)
-        WindowMainBackground.apply(mainActivity.window, context, key, isDark)
+        // 传入组合作用域：自定义背景的解码/裁剪在后台完成，绝不在主线程解码（B1）。
+        WindowMainBackground.apply(mainActivity.window, context, key, isDark, coroutineScope)
         bgTick++
     }
 
