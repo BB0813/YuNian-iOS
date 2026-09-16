@@ -31,7 +31,6 @@ import com.yunian.ai.domain.AiResponse
 import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ConversationScope
-import com.yunian.ai.domain.LorebookProvider
 import com.yunian.ai.domain.ProactiveMessageSettings
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.domain.PlaceholderProvider
@@ -39,7 +38,6 @@ import com.yunian.ai.domain.PlaceholderContext
 import com.yunian.ai.network.Message
 import com.yunian.ai.network.transformers.MessageTransformer
 import com.yunian.ai.network.transformers.PlaceholderTransformer
-import com.yunian.ai.network.transformers.PromptInjectionTransformer
 
 import com.yunian.ai.network.transformers.TimeReminderTransformer
 import com.yunian.ai.network.transformers.TransformerContext
@@ -125,8 +123,10 @@ class AiService(context: Context) : AiServiceProvider {
         rollingSummaryManager = rollingSummaryManager
     )
 
+    // 世界书注入已迁至 Rust Cordis Agent（`AgentFacade.runTurn` 回合前
+    // `WorldbookRepository.syncActiveToRuntime` 同步 → Rust 侧内联到 system），
+    // 故 `PromptInjectionTransformer` 已退役，不再参与管线。
     private val inputTransformers: List<MessageTransformer> = listOf(
-        PromptInjectionTransformer(),
         PlaceholderTransformer(),
         TimeReminderTransformer(),
     )
@@ -594,9 +594,8 @@ class AiService(context: Context) : AiServiceProvider {
                 val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
                 var messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig, turnContext = turnContext, scope = ConversationScope.Single(companion.id), selfName = companion.name)
 
-                val lorebookProvider = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.LorebookProvider::class.java)
                 val placeholderProvider = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.PlaceholderProvider::class.java)
-                if (lorebookProvider != null || placeholderProvider != null) {
+                if (placeholderProvider != null) {
                     val transformerContext = TransformerContext(
                         sessionId = companion.id,
                         isGroupChat = false,
@@ -605,7 +604,6 @@ class AiService(context: Context) : AiServiceProvider {
                         characterName = companion.name,
                         userNickname = userRepository.userName.value.ifEmpty { "用户" },
                         placeholderProvider = placeholderProvider,
-                        lorebookProvider = lorebookProvider,
                         currentTimeMillis = System.currentTimeMillis()
                     )
                     messages = inputTransformers.runPipeline(transformerContext, messages, isInput = true)
@@ -832,16 +830,18 @@ class AiService(context: Context) : AiServiceProvider {
                 val selfName = if (scope is ConversationScope.Group) null else companion.name
                 var messages = autoContextManager.build(sortedHistory, customSystemPrompt, memCtx, lastUserMessage, companionNameMap, contextConfig, scope = effectiveScope, selfName = selfName)
 
-                // 群聊（及自定义系统提示词路径）同样接入世界书注入管线，与单聊行为一致
-                val lorebookProviderForCustom = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.LorebookProvider::class.java)
-                if (lorebookProviderForCustom != null) {
+                // 群聊路径：世界书注入已随 `PromptInjectionTransformer` 退役（改由 Rust Agent 承担），
+                // 这里只保留占位符/时间管线的既有触发条件，避免行为外溢。
+                val placeholderProviderForCustom =
+                    com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.PlaceholderProvider::class.java)
+                if (placeholderProviderForCustom != null) {
                     val transformerContext = TransformerContext(
                         sessionId = companion.id,
                         isGroupChat = true,
                         modelId = config.model,
                         modelName = config.model,
                         characterName = companion.name,
-                        lorebookProvider = lorebookProviderForCustom,
+                        placeholderProvider = placeholderProviderForCustom,
                         currentTimeMillis = System.currentTimeMillis()
                     )
                     messages = inputTransformers.runPipeline(transformerContext, messages, isInput = true)
