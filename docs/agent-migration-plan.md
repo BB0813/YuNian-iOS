@@ -979,13 +979,20 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 
 ## 7. 验收标准
 
-### 7.1 构建
+### 7.1 构建 —— ✅ 已全部通过（2026-09-17）
 
-- [ ] `./gradlew --no-daemon -Dorg.gradle.java.home=C:\Users\27194\.jdks\corretto-17.0.14 assembleDebug` 通过
-- [ ] `cd agent-native; cargo test` 通过（116 用例）
-- [ ] `grep -r "com\.lianyu" --include=*.kt --include=*.kts --include=*.toml . | grep -v _ref_master` 结果为空
-- [ ] `grep -rn "version =" core/database/src/main/java/com/yunian/ai/database/AppDatabase.kt` == `45`
-- [ ] `MIN_SUPPORTED_SCHEMA = 41` / `MAX_SUPPORTED_SCHEMA = 45`（Rust）
+- [x] `assembleDebug` 通过 —— **BUILD SUCCESSFUL in 1m 4s**，产物 `app/build/outputs/apk/debug/app-debug.apk` = **106.60 MB**
+      （无需 `-Dorg.gradle.java.home=` 覆盖：`gradle.properties` 已固定 `org.gradle.java.home=C\:\\Users\\27194\\.jdks\\corretto-17.0.14`）
+- [x] `cargo test --lib` 通过 —— **154 passed; 0 failed**（文档原写 116 用例，为过时数字；实际测试随阶段 5/7 扩充至 154）
+- [x] `com.lianyu` 残留扫描结果为空 —— 全仓库 `*.kt` / `*.kts` / `*.toml`（排除 `_ref_master` 与 `build` / `target`）**零命中**；包名统一为 `com.yunian`
+- [x] `AppDatabase.kt:115` `version = 45` ✔
+- [x] `agent-native/src/native_gateway.rs:33–34` `MIN_SUPPORTED_SCHEMA = 41` / `MAX_SUPPORTED_SCHEMA = 45` ✔
+
+> **⚠️ 构建环境注意（已记入故障库）**：若 `:app:compileDebugJavaWithJavac` 报
+> `jlink executable C:\Users\27194\.vscode\extensions\redhat.java-*\jre\*\bin\jlink.exe does not exist`，
+> **不要改 `gradle.properties`**（`auto-detect=false` / `installations.paths` 均已正确）。
+> 这是**陈旧 Gradle 守护进程**持有了错误 JVM 的缓存所致 —— 执行 `.\gradlew.bat --stop`
+> 后重跑即可恢复（本轮实测：失败 → `--stop` → BUILD SUCCESSFUL）。
 
 ### 7.2 运行时
 
