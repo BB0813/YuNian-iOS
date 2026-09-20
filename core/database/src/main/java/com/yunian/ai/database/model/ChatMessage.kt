@@ -1,8 +1,10 @@
 package com.yunian.ai.database.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+@SerialName("E0")
 data class ChatMessage(
     val id: Long = 0,
     val companionId: Long,
