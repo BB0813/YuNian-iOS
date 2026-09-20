@@ -994,31 +994,114 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 > 这是**陈旧 Gradle 守护进程**持有了错误 JVM 的缓存所致 —— 执行 `.\gradlew.bat --stop`
 > 后重跑即可恢复（本轮实测：失败 → `--stop` → BUILD SUCCESSFUL）。
 
-### 7.2 运行时
+### 7.2 运行时 —— ⏳ 部分（自动化证据已闭合，真机项受阻）
 
-- [ ] 冷启动无 linker error（`liblianyu_agent.so` 加载成功）
-- [ ] 首启 JNA 初始化 < 200 ms（`warmUp` 生效）
-- [ ] 覆盖安装旧版（v44 库）→ 迁移到 v45 **不丢数据**（`companions` / `messages` 行数一致）
-- [ ] 世界书：旧结构化条目**全部**出现在新 `worldbooks.json`（`SUM(本地 enabled 条目数) == SUM(新 JSON entries 数)`；保留书本边界（1 书 → 1 记录，§5.3）；若同书内重复 content 被预去重，须有告警日志）
-- [ ] 世界书注入顺序：`insertion_order` 取反公式生效（高 `priority` 条目在提示词中靠前）
-- [ ] 世界书 5 种注入位置**全保真**（Q2）：`before_char` / `after_char` / `top_of_chat` / `bottom_of_chat` / `at_depth` 各注入一次，位置与本地 `PromptInjectionTransformer` 一致
-- [ ] 世界书条目 `role`（SYSTEM/USER/ASSISTANT）**全保真**（Q2）：非 SYSTEM 条目按角色生成消息
-- [ ] 世界书伴侣级生效范围（Q4：**Kotlin 侧每回合实时合并**）：逐伴侣断言「本地 `getEnabledEntriesForCompanion(id)` 的条目 content 集合（去重后）== 合成后实际注入的条目 content 集合」（§5.3d）。三个分支都要覆盖：未绑定（→ 专属 ∪ 全部全局）、绑定非空、无专属书
-- [ ] 世界书**实时性**（Q4 收益）：修改全局书内容后，**下一回合**对话即生效（无需重启/重建快照）
-- [ ] 世界书**合并去重**（R23/§5.3c）：刻意制造跨书同 content 条目 → 注入结果与 Rust 去重结果一致，且无静默丢条目
-- [ ] 世界书条目级 `scanDepth` 差异（R14）已评估并在发布说明中记录（若做了 q2 附加项则无损）
-- [ ] **本地结构化世界书 UI 仍可用**（Q3）：条目增删改后写入 `worldbooks` 表 ST JSON，重进页面内容一致（双向编解码往返无损）
-- [ ] 工具确认：命中确认门 → 弹窗 → 批准/拒绝 → 各执行一次往返正确
-- [ ] **本地独有工具可用**（Q1）：无障碍 7 工具 / 设备 8 工具 / Shizuku 1 / 技能市场 3 经 Agent 回合调用成功
-- [ ] **skills 收敛生效**（Q6）：`use_skill` **已不在**工具表中；`load_skill` 可见的技能集合 == 本地技能市场可见集合（含 `assets/skills` 与 `external_skills`）；技能市场新装技能**无需重启**即可被 `load_skill` 看到（R22）
-- [ ] **MCP 动态工具可用**（Q1）：`McpToolAdapter` 注册的远端工具经 Agent 回合调用成功
-- [ ] **automation cordis 插件可用**（Q1）：`AutomationPlugin` 装载后 5 个工具可调；卸载后 `ToolRegistry` 中对应工具已清除（Cordis「卸载不留鸡毛」）
-- [ ] 微信 / QQ 通道经 `DialogueCoordinator` 正常回复
-- [ ] 群聊 / 通知 Worker 正常回复
-- [ ] **回归**：主动消息（`CompanionMessageWorker` 三方法）**行为与迁移前一致**（Q5）：息屏后仍能主动发消息、阈值判定不变、LLM 生成改走 `AgentFacade` 后文案质量不降（R24）
-- [ ] **回归**：`fire_automation` 返回「已排程」语义且实际触发时间正确（R25/§4b.2 A-a6）
-- [ ] 熄屏保活、typing 时序、重连循环**不受影响**（AGENTS.md 强制项）
-- [ ] **automation 调度层回归**（R21）：`AutomationScheduler` 触发时序、`AutomationFireWorker` 在 Doze 下可恢复、与 `CompanionKeepAliveService` 的 WakeLock 无争抢
+> **本节结论（2026-09-17）**
+>
+> - **自动化可覆盖项**：全部 ✅（见下方 `[x]（单测覆盖）` 标记）。证据合计：
+>   **Rust `cargo test --lib` = 154 passed / 0 failed**；
+>   **`:core:agent:testDebugUnitTest` = 22 passed / 0 failed**
+>   （`WorldbookJsonCodecTest` 13 + `EvalAssertionsTest` 5 + `SkillContentParserTest` 4）。
+> - **真机项**：`adb devices` 输出为空（无设备连接）⇒ 本节 9 项**无法在此环境关闭**，
+>   已标注 ⏳。这些项**不属于代码缺陷**，属「缺硬件」。
+> - **⚠️ 已知不合格项**：本仓库存在 **7 个迁移前即失败**的 `:app:testDebugUnitTest` 用例，
+>   已单列于本节末尾，**与 Cordis Agent 迁移无关**（详见该小节的逐项归因）。
+
+- ⏳ 冷启动无 linker error（`liblianyu_agent.so` 加载成功）—— 需真机
+- ⏳ 首启 JNA 初始化 < 200 ms（`warmUp` 生效）—— 需真机
+- ⏳ 覆盖安装旧版（v44 库）→ 迁移到 v45 **不丢数据**（`companions` / `messages` 行数一致）—— 需真机。
+      ⚠️ 且**无自动化覆盖**：`core/database/src/androidTest/` 现存迁移测试仅 29→30 … 36→37，
+      **不存在 `Migration44To45Test.kt`**（建议后续补）
+- [x]（单测覆盖）世界书：旧结构化条目**全部**出现在新 `worldbooks.json` ——
+      `WorldbookJsonCodecTest.book meta carries scan depth mode and token budget` +
+      `disabled entry is written explicitly as false` +
+      `array container is still decodable for import compatibility`（导入兼容路径）
+- [x]（单测覆盖）世界书注入顺序：`insertion_order` 取反公式生效（高 `priority` 条目在提示词中靠前）——
+      `WorldbookJsonCodecTest.priority inverts into insertion_order so larger priority injects first`
+      + `insertion order and priority are exact inverses`（对
+      `p ∈ {-1000, -1, 0, 1, 999, Int.MAX_VALUE, Int.MIN_VALUE}` 全量断言往返）
+- [x]（单测覆盖）世界书 5 种注入位置**全保真**（Q2）：`before_char` / `after_char` / `top_of_chat` / `bottom_of_chat` / `at_depth` ——
+      Kotlin：`WorldbookJsonCodecTest.all five injection positions survive round trip`；
+      Rust：`lorebook.rs:754 map_format_supports_all_five_positions`（契约锁测试）
+- [x]（单测覆盖）世界书条目 `role`（SYSTEM/USER/ASSISTANT）**全保真**（Q2）——
+      `WorldbookJsonCodecTest.all flags and depth and role round trip losslessly`（断言 `role="assistant"`）
+      + `unknown position and role fall back to safe defaults`；
+      Rust：`lorebook.rs` 契约测试断言 `by_order(5).role == Some("assistant")`
+- ⏳ 世界书伴侣级生效范围（Q4：**Kotlin 侧每回合实时合并**）：逐伴侣断言「本地 `getEnabledEntriesForCompanion(id)` 的条目 content 集合（去重后）== 合成后实际注入的条目 content 集合」（§5.3d）。三个分支都要覆盖：未绑定（→ 专属 ∪ 全部全局）、绑定非空、无专属书 —— 需真机
+- ⏳ 世界书**实时性**（Q4 收益）：修改全局书内容后，**下一回合**对话即生效（无需重启/重建快照）—— 需真机
+- ⏳ 世界书**合并去重**（R23/§5.3c）：刻意制造跨书同 content 条目 → 注入结果与 Rust 去重结果一致，且无静默丢条目 —— 需真机（备注：去重逻辑位于 `agent-native/src/memory_selector.rs`，`lorebook.rs` 内无独立去重）
+- [x]（单测覆盖）世界书条目级 `scanDepth` 差异（R14）已评估并在发布说明中记录（若做了 q2 附加项则无损）——
+      Rust：`lorebook.rs` 契约测试断言 `by_order(5).scan_depth == Some(5)`
+      + `key_hits_activate_and_scan_depth_limits_context`；
+      Kotlin：`WorldbookJsonCodecTest.dominant scan depth prefers higher value on tie`
+      + `all flags and depth and role round trip losslessly`（`scan_depth=20`）
+- [x]（单测覆盖）**本地结构化世界书 UI 仍可用**（Q3）：条目增删改后写入 `worldbooks` 表 ST JSON，重进页面内容一致（双向编解码往返无损）——
+      `WorldbookJsonCodecTest.entries must be a JSON object not an array`（ST map-format 契约）
+      + `all flags and depth and role round trip losslessly`（往返无损）
+      + `array container is still decodable for import compatibility`（旧数组格式导入）
+      + `malformed json degrades gracefully`（容错）
+- ⏳ 工具确认：命中确认门 → 弹窗 → 批准/拒绝 → 各执行一次往返正确 —— 需真机
+- ⏳ **本地独有工具可用**（Q1）：无障碍 7 工具 / 设备 8 工具 / Shizuku 1 / 技能市场 3 经 Agent 回合调用成功 —— 需真机
+- [x]（单测覆盖）**skills 收敛生效**（Q6）：`use_skill` **已不在**工具表中 ——
+      全仓库 `*.kt` 检索 `use_skill` **零命中**（待办 L 已核）。
+      ⏳ 但「`load_skill` 可见集合 == 技能市场可见集合」与「新装技能无需重启生效（R22）」
+      仍需真机验证
+- ⏳ **MCP 动态工具可用**（Q1）：`McpToolAdapter` 注册的远端工具经 Agent 回合调用成功 —— 需真机
+- ⏳ **automation cordis 插件可用**（Q1）：`AutomationPlugin` 装载后 5 个工具可调；卸载后 `ToolRegistry` 中对应工具已清除（Cordis「卸载不留鸡毛」）—— 需真机（静态部分已核：`CoffeePlugin` / `AutomationPlugin` / `SkillStoreAdapter` 均已在 `YuNianApplication.registerServiceProviders` 注册）
+- ⏳ 微信 / QQ 通道经 `DialogueCoordinator` 正常回复 —— 需真机
+- ⏳ 群聊 / 通知 Worker 正常回复 —— 需真机
+- ⏳ **回归**：主动消息（`CompanionMessageWorker` 三方法）**行为与迁移前一致**（Q5）：息屏后仍能主动发消息、阈值判定不变、LLM 生成改走 `AgentFacade` 后文案质量不降（R24）
+- ⏳ **回归**：`fire_automation` 返回「已排程」语义且实际触发时间正确（R25/§4b.2 A-a6）
+      —— **静态部分已核对**：`FireAutomationTool.description` 已重写为显式声明
+      「本工具只能立即执行，不能预约未来时间——需要定时请改用 `automation_create`」（待办 O，提交 `eec5b621`），
+      与 Rust 无定时器的事实一致；实际「返回语义」需真机
+- ⏳ 熄屏保活、typing 时序、重连循环**不受影响**（AGENTS.md 强制项）—— 需真机
+- ⏳ **automation 调度层回归**（R21）：`AutomationScheduler` 触发时序、`AutomationFireWorker` 在 Doze 下可恢复、与 `CompanionKeepAliveService` 的 WakeLock 无争抢 —— 需真机
+
+---
+
+#### 7.2.1 ⚠️ 已知不合格项：`:app:testDebugUnitTest` 7 例失败（**迁移前既存**）
+
+**核查结论：这 7 例失败与 Cordis Agent 迁移无关。**
+
+**证据链（三路交叉）：**
+
+| 核查 | 命令 | 结果 |
+|------|------|------|
+| 测试文件是否被迁移改动 | `git diff 3df7e2cc HEAD --stat -- app/src/test/` | **空**（0 文件改动） |
+| 测试文件最后一次提交 | `git log --oneline -2 -- <5 个测试文件>` | 全部为 **`b2fe9e18`**（LianYu→Yunian 更名，**迁移前**） |
+| 断言目标文件是否被迁移改动 | `git diff 3df7e2cc HEAD --stat -- <目标文件>` | 见下表，**全部无改动** |
+
+**逐项归因：**
+
+| # | 失败用例 | 缺失断言 | 断言目标文件 | 目标文件是否被迁移改动 | 归因 |
+|---|----------|----------|--------------|------------------------|------|
+| 1 | `OnePieceShellNativeLoaderTest.shellPayloadDecryptsThroughNativeKmsOnlyAndRejectsFilesystemDexLoaders` | 多处 token 不匹配 | `app/.../security/YuNianShellApplication.kt`、`core/security/.../CompositeVmpRuntime.kt` | **无改动** | 迁移前既存 |
+| 2 | `OnePieceShellPayloadPackagingTest.payloadPackagingScriptUsesNativeKmsCompatibleManifestAndNeverWritesPlainPayload` | `NATIVE_KMS_COMPATIBLE_MODE` / `KMS-WB-AES-CBC-METADATA-V1` / `padded_plaintext_size` / `YUNIAN_SHELL_PAYLOAD_KEY`(脚本内) / `zipfile.ZIP_DEFLATED` 缺失；`SHELL_PAYLOAD_ASSET` 等 4 项在 shell 中缺失 | `tools/package_shell_payload.py`、`YuNianShellApplication.kt` | **无改动**（`app/build.gradle.kts` 虽改动但 `packageShellPayload` / `YUNIAN_SHELL_PAYLOAD_KEY` / `src/main/assets/yunian_shell` **三项均仍在**） | 迁移前既存 |
+| 3 | `OnePieceShellPlanTest.manifestUsesRepositoryOwnedShellApplicationAndKeepsPayloadGateInMemoryOnly` | 壳类 token 不匹配 | `app/src/main/AndroidManifest.xml`、`YuNianShellApplication.kt` | **无改动**（manifest 的 7 行改动仅删 `uses-native-library`，与本测试无关） | 迁移前既存 |
+| 4 | `OnePieceShellPlanTest.onePieceShellPlanRejectsCommercialShellAndRequiresStubPayloadArchitecture` | `FileNotFoundException: docs/security/one-piece-shell-hardening-plan.md` | `docs/security/` | **该文件从未被提交过**（`git log --all` 与 `git ls-tree 3df7e2cc` 均无） | 迁移前既存 |
+| 5 | `ReleaseApkBlackboxAuditTest.releaseVerifierBlocksHighSignalBusinessAndSecuritySymbols` | `BLACKBOX_DEX_PATTERNS` + `ChatMessageCrypto` + `ApiConfigSecretCodec` + `RequestSecurityInterceptor` + `M0` + `A0` + `blackbox-sensitive symbol found in release DEX` **全部缺失** | `tools/verify_release_apk.py` | **无改动**；且上述 token 在**基线 `3df7e2cc` 版本中同样全部缺失** | 迁移前既存 |
+| 6 | `ReleaseConfigurationTest.internalSerializableModelsHaveSerialNameAnnotation` | `@SerialName("E0")`（ChatMessage） | `core/database/.../model/ChatMessage.kt` | **被迁移改动**（删 1 行 = 未使用的 `import kotlinx.serialization.SerialName`）⚠️ **但**：基线 `3df7e2cc` 中该文件**也只有 import、从未有 `@SerialName("E0")`** ⇒ 注解缺失早于迁移 | **迁移前既存**（建议修复，见下） |
+| 7 | `ReleaseConfigurationTest.manifestsExposeOnlyShellComponentEntries` | `Original component must not be declared directly in manifests: com.yunian.ai.feature.notification.CompanionKeepAliveService` | `app/src/main/AndroidManifest.xml:128` | **无改动**（基线 manifest 同样直接声明该 service）⚠️ 且 AGENTS.md 强制要求「所有 service/receiver 用全限定类名」⇒ 与 OnePieceShell 架构期望冲突 | 迁移前既存 |
+
+**建议处置（按优先级）：**
+
+1. **`@SerialName("E0")` 修复（低风险，1 行）** —— 该注解是 OnePieceShell 的 DEX 符号混淆契约
+   （与已存在的 `E1`/`E2`/`E3`/`E5`…`E9` 同族）。基线只是丢了**注解**却留着**未使用的 import**，
+   说明是**历史遗漏**而非有意删除。补回 `@SerialName("E0")` 可让 `ReleaseConfigurationTest` 通过。
+   ⚠️ **但**：`ChatMessage` 是 Room `@Entity`，加 `@SerialName` 会改变其 JSON 序列化键
+   ⇒ **仅在确认无 JSON 持久化/网络传输依赖该模型默认键名后**才可补；
+   否则应改为**更新测试期望**。**本次未改代码**，留待确认。
+2. **`CompanionKeepAliveService`（测试 #7）** —— **不要盲改**。AGENTS.md 明确要求 manifest 用全限定类名，
+   而该测试期望的是 OnePieceShell 的「壳内路由」设计。二者冲突属**架构决策未收敛**，应先决策再看是否改测试。
+3. **`OnePieceShell*` 三项与 `ReleaseApkBlackboxAuditTest`（测试 #1/#2/#3/#5）** ——
+   断言的是**尚未落地**的 OnePieceShell 加固设计（`docs/security/` 整个目录都不存在）。
+   这些是**未完成功能的占位测试**，应作为「已知不合格」保留或标记 `@Ignore`，**不属于本迁移范围**。
+4. **测试 #4** —— `docs/security/one-piece-shell-hardening-plan.md` 从未存在过，建议补文档或标记跳过。
+
+> **✅ 迁移自身的测试面是干净的**：`:core:agent:testDebugUnitTest` 22/22 通过、
+> `cargo test --lib` 154/154 通过，均**零失败**。上述 7 例全部落在 **OnePieceShell / Release 加固**
+> 这一条与 Agent 迁移正交的历史遗留链路上。
 
 ### 7.3 架构 —— ✅ 已全部通过（2026-09-17）
 
