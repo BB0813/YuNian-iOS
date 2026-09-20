@@ -994,7 +994,7 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 > 这是**陈旧 Gradle 守护进程**持有了错误 JVM 的缓存所致 —— 执行 `.\gradlew.bat --stop`
 > 后重跑即可恢复（本轮实测：失败 → `--stop` → BUILD SUCCESSFUL）。
 
-### 7.2 运行时 —— ⏳ 部分（自动化证据已闭合，真机项受阻）
+### 7.2 运行时 —— ⏳ 部分（自动化与离线证据已闭合，真机项受阻）
 
 > **本节结论（2026-09-17）**
 >
@@ -1002,7 +1002,11 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 >   **Rust `cargo test --lib` = 154 passed / 0 failed**；
 >   **`:core:agent:testDebugUnitTest` = 22 passed / 0 failed**
 >   （`WorldbookJsonCodecTest` 13 + `EvalAssertionsTest` 5 + `SkillContentParserTest` 4）。
-> - **真机项**：`adb devices` 输出为空（无设备连接）⇒ 本节 9 项**无法在此环境关闭**，
+> - **离线静态证明项（1 项）**：`[x]（离线静态证明）v44→v45 迁移不丢数据` ——
+>   由新增的 `tools/verify_migration_schema.py` 对 `MIGRATION_44_45` 的 35 条 DDL
+>   与 Room 导出的 `45.json − 44.json` 差集做**逐字比对**，PASS（35/35）。
+>   这是**确定性证明**（Room 的运行时校验本质就是文本比对），不依赖设备。
+> - **真机项**：`adb devices` 输出为空（无设备连接）⇒ 本节剩余 8 项**无法在此环境关闭**，
 >   已标注 ⏳。这些项**不属于代码缺陷**，属「缺硬件」。
 > - **⚠️ 已知不合格项**：本仓库存在 **6 个迁移前即失败**的 `:app:testDebugUnitTest` 用例
 >   （另有 1 例 `@SerialName("E0")` 属历史遗漏，已顺手修复 ⇒ 修复前为 7 例），
@@ -1010,9 +1014,24 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 
 - ⏳ 冷启动无 linker error（`liblianyu_agent.so` 加载成功）—— 需真机
 - ⏳ 首启 JNA 初始化 < 200 ms（`warmUp` 生效）—— 需真机
-- ⏳ 覆盖安装旧版（v44 库）→ 迁移到 v45 **不丢数据**（`companions` / `messages` 行数一致）—— 需真机。
-      ⚠️ 且**无自动化覆盖**：`core/database/src/androidTest/` 现存迁移测试仅 29→30 … 36→37，
-      **不存在 `Migration44To45Test.kt`**（建议后续补）
+- [x]（离线静态证明）覆盖安装旧版（v44 库）→ 迁移到 v45 **不丢数据**（`companions` / `messages` 行数一致）——
+      新增 `tools/verify_migration_schema.py`，对 `MIGRATION_44_45` 做**确定性**校验：
+      ```
+      python tools/verify_migration_schema.py            # 默认 44 -> 45
+      ```
+      结果：**v44 对象 58 / v45 对象 93 / delta 新增 35 / delta 删除 0 / execSQL 35 条 → PASS**
+      （10 张表 + 25 个索引，逐字与 `45.json` 的 `createSql` 一致）。
+      **原理**：Room 导出的 `schemas/**/N.json` 中每个 entity/index 的 `createSql` 即 Room 的期望终态，
+      而 Room 运行时 schema 校验本质就是逐字比对 ⇒ 满足
+      `MIGRATION_44_45 的全部 execSQL == 45.json − 44.json` 即等价于「迁移后 DB 恰好等于 v45 期望 schema」，
+      **运行时校验必过**（无 `IllegalStateException` 风险）。
+      **反向检查**：`delta 删除 = 0` 且未重建任何 v44 既有表 ⇒ 满足「纯增量、不 `DROP`/`TRUNCATE`」红线。
+      **工具负向路径自检**（`--from 43 --to 44`，该迁移含 `ADD COLUMN`）：
+      因 `companions` 的 `createSql` 被 `ADD COLUMN` 改变、且迁移使用 `addColumnIfMissing` helper
+      （`execSQL` 字面量 0 条）⇒ 工具**正确 FAIL 并提示人工核对**，无假阳性。
+      📌 该方法可复用于后续任意「纯增量」迁移对，退出码 0/1 可直接接入 CI。
+      ⚠️ 仍**无 `androidTest` 覆盖** —— `core/database/src/androidTest/` 现存迁移测试仅 29→30 … 36→37，
+      **不存在 `Migration44To45Test.kt`**（设备到位后可补；当前 `adb devices` 为空，androidTest 不可执行）
 - [x]（单测覆盖）世界书：旧结构化条目**全部**出现在新 `worldbooks.json` ——
       `WorldbookJsonCodecTest.book meta carries scan depth mode and token budget` +
       `disabled entry is written explicitly as false` +
