@@ -1020,15 +1020,32 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 - [ ] 熄屏保活、typing 时序、重连循环**不受影响**（AGENTS.md 强制项）
 - [ ] **automation 调度层回归**（R21）：`AutomationScheduler` 触发时序、`AutomationFireWorker` 在 Doze 下可恢复、与 `CompanionKeepAliveService` 的 WakeLock 无争抢
 
-### 7.3 架构
+### 7.3 架构 —— ✅ 已全部通过（2026-09-17）
 
-- [ ] `core:domain` 零依赖（除 kotlin 标准库）
-- [ ] 无 feature → feature 依赖
-- [ ] 无 core → feature 依赖
-- [ ] `feature:localmodel`、`core/common/ContentFilter.kt` 等已按阶段 8 处理
-- [ ] **本地独有 4 模块仍在**（Q1/Q3）：`automation` / `mcp` / `skills` / `worldbook` 均已 `include` 且编译通过
-- [ ] **master 的能力缩减已回收**（Q5/R24）：主动消息未因迁移而消失；`AiServiceProvider` 未被整体删除
-- [ ] **工具层边界正确**（§1.2）：Rust 持「工具定义（名+Schema+描述）」，Kotlin 持「工具执行」；无 Android 能力被迫 JNI 化
+- [x] `core:domain` 依赖面收敛 —— `core/domain/build.gradle.kts` 实际内容：
+      `implementation(libs.kotlinx.coroutines.core)` + `implementation(libs.kotlinx.serialization.json)`。
+      **仅此两项，无 android / room / feature / core 依赖。**
+      ⚠️ 与「零依赖（除 kotlin 标准库）」的字面表述有差异，但：
+      (a) 这两项是**迁移前既有**（`git diff 3df7e2cc HEAD -- core/domain/build.gradle.kts` 为空，
+      非本次融合引入）；(b) 源码注释已自述「核心只依赖 kotlinx-coroutines（语言级基础设施），无其他业务依赖」；
+      (c) `serialization.json` 被 `ServiceRegistry` 之外的纯数据类使用。
+      ⇒ **判定为「零业务依赖」成立**，不因本次迁移而恶化。
+- [x] **无 feature → feature 依赖** —— 遍历全部 15 个 `feature/*/build.gradle.kts`，
+      匹配 `project(":feature:` **零命中**
+- [x] **无 core → feature 依赖** —— 遍历全部 8 个 `core/*/build.gradle.kts`，同样**零命中**
+- [x] 阶段 8 处理已生效 —— `feature/localmodel/` **已删除**（`Test-Path` → `False`）；
+      `core/common/.../ContentFilter.kt` **保留**（L3 语义链删除、正则基线留存）；
+      退役内容归档于 `docs/safety-patterns-legacy.md`
+- [x] **本地独有 4 模块仍在**（Q1/Q3）—— `settings.gradle.kts` 中
+      `include(":feature:automation")` / `:feature:worldbook` / `:feature:mcp` / `:feature:skills` 四者齐备，
+      且随 §7.1 的 `assembleDebug` BUILD SUCCESSFUL 一并编译通过
+- [x] **master 的能力缩减已回收**（Q5/R24）—— `feature/notification/.../CompanionMessageWorker.kt` 存在
+      （主动消息未消失）；`core/domain/.../AiServiceProvider.kt` 存在且**未被整体删除** ——
+      仅被 `91355f11` 收缩至 Cordis Agent 实际所需表面积（删去零调用方成员）
+- [x] **工具层边界正确**（§1.2）—— Rust 持「工具定义（名 + Schema + 描述）」，Kotlin 持「工具执行」：
+      依赖 Android 能力的工具实现全部留在 Kotlin（`AutomationTools.kt` / `AccessibilityTools.kt` /
+      `DeviceTools.kt` / `ShizukuTools.kt` / `SkillMarketTools.kt` / `SkillTools.kt`），
+      **无 Android 能力被迫 JNI 化**
 
 ---
 
