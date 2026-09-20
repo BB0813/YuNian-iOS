@@ -1004,7 +1004,8 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 >   （`WorldbookJsonCodecTest` 13 + `EvalAssertionsTest` 5 + `SkillContentParserTest` 4）。
 > - **真机项**：`adb devices` 输出为空（无设备连接）⇒ 本节 9 项**无法在此环境关闭**，
 >   已标注 ⏳。这些项**不属于代码缺陷**，属「缺硬件」。
-> - **⚠️ 已知不合格项**：本仓库存在 **7 个迁移前即失败**的 `:app:testDebugUnitTest` 用例，
+> - **⚠️ 已知不合格项**：本仓库存在 **6 个迁移前即失败**的 `:app:testDebugUnitTest` 用例
+>   （另有 1 例 `@SerialName("E0")` 属历史遗漏，已顺手修复 ⇒ 修复前为 7 例），
 >   已单列于本节末尾，**与 Cordis Agent 迁移无关**（详见该小节的逐项归因）。
 
 - ⏳ 冷启动无 linker error（`liblianyu_agent.so` 加载成功）—— 需真机
@@ -1060,9 +1061,9 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 
 ---
 
-#### 7.2.1 ⚠️ 已知不合格项：`:app:testDebugUnitTest` 7 例失败（**迁移前既存**）
+#### 7.2.1 ⚠️ 已知不合格项：`:app:testDebugUnitTest` 6 例失败（**迁移前既存**，修复前为 7 例）
 
-**核查结论：这 7 例失败与 Cordis Agent 迁移无关。**
+**核查结论：这 6 例失败与 Cordis Agent 迁移无关。**（第 7 例 `@SerialName("E0")` 已于提交 `ceb25e0b` 修复）
 
 **证据链（三路交叉）：**
 
@@ -1081,27 +1082,51 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 | 3 | `OnePieceShellPlanTest.manifestUsesRepositoryOwnedShellApplicationAndKeepsPayloadGateInMemoryOnly` | 壳类 token 不匹配 | `app/src/main/AndroidManifest.xml`、`YuNianShellApplication.kt` | **无改动**（manifest 的 7 行改动仅删 `uses-native-library`，与本测试无关） | 迁移前既存 |
 | 4 | `OnePieceShellPlanTest.onePieceShellPlanRejectsCommercialShellAndRequiresStubPayloadArchitecture` | `FileNotFoundException: docs/security/one-piece-shell-hardening-plan.md` | `docs/security/` | **该文件从未被提交过**（`git log --all` 与 `git ls-tree 3df7e2cc` 均无） | 迁移前既存 |
 | 5 | `ReleaseApkBlackboxAuditTest.releaseVerifierBlocksHighSignalBusinessAndSecuritySymbols` | `BLACKBOX_DEX_PATTERNS` + `ChatMessageCrypto` + `ApiConfigSecretCodec` + `RequestSecurityInterceptor` + `M0` + `A0` + `blackbox-sensitive symbol found in release DEX` **全部缺失** | `tools/verify_release_apk.py` | **无改动**；且上述 token 在**基线 `3df7e2cc` 版本中同样全部缺失** | 迁移前既存 |
-| 6 | `ReleaseConfigurationTest.internalSerializableModelsHaveSerialNameAnnotation` | `@SerialName("E0")`（ChatMessage） | `core/database/.../model/ChatMessage.kt` | **被迁移改动**（删 1 行 = 未使用的 `import kotlinx.serialization.SerialName`）⚠️ **但**：基线 `3df7e2cc` 中该文件**也只有 import、从未有 `@SerialName("E0")`** ⇒ 注解缺失早于迁移 | **迁移前既存**（建议修复，见下） |
+| 6 | `ReleaseConfigurationTest.internalSerializableModelsHaveSerialNameAnnotation` | `@SerialName("E0")`（ChatMessage） | `core/database/.../model/ChatMessage.kt` | **被迁移改动**（删 1 行 = 未使用的 `import kotlinx.serialization.SerialName`）⚠️ **但**：基线 `3df7e2cc` 中该文件**也只有 import、从未有 `@SerialName("E0")`** ⇒ 注解缺失早于迁移 | **✅ 已修复**（提交 `ceb25e0b`，见下） |
 | 7 | `ReleaseConfigurationTest.manifestsExposeOnlyShellComponentEntries` | `Original component must not be declared directly in manifests: com.yunian.ai.feature.notification.CompanionKeepAliveService` | `app/src/main/AndroidManifest.xml:128` | **无改动**（基线 manifest 同样直接声明该 service）⚠️ 且 AGENTS.md 强制要求「所有 service/receiver 用全限定类名」⇒ 与 OnePieceShell 架构期望冲突 | 迁移前既存 |
 
-**建议处置（按优先级）：**
+**修复结果：7 例 → 6 例（提交 `ceb25e0b`）**
 
-1. **`@SerialName("E0")` 修复（低风险，1 行）** —— 该注解是 OnePieceShell 的 DEX 符号混淆契约
-   （与已存在的 `E1`/`E2`/`E3`/`E5`…`E9` 同族）。基线只是丢了**注解**却留着**未使用的 import**，
-   说明是**历史遗漏**而非有意删除。补回 `@SerialName("E0")` 可让 `ReleaseConfigurationTest` 通过。
-   ⚠️ **但**：`ChatMessage` 是 Room `@Entity`，加 `@SerialName` 会改变其 JSON 序列化键
-   ⇒ **仅在确认无 JSON 持久化/网络传输依赖该模型默认键名后**才可补；
-   否则应改为**更新测试期望**。**本次未改代码**，留待确认。
-2. **`CompanionKeepAliveService`（测试 #7）** —— **不要盲改**。AGENTS.md 明确要求 manifest 用全限定类名，
+`@SerialName("E0")` 已按「1 行补回」方案落地并验证通过。安全性论证与完整依据见该提交信息；
+要点如下：
+
+- `@SerialName` 施加在**类级别**时**仅**作为 kotlinx.serialization **多态序列化的鉴别符**，
+  对本类自身序列化输出的键名**无任何影响**（键名由**属性级** `@SerialName` 决定，本类属性级注解为 0 个）
+  ⇒ 先前「会改变 JSON 键名」的担忧经核实**不成立**
+- 已实测排除两类潜在影响：全仓库**无** `SerializersModule` / `polymorphic` / `PolymorphicSerializer` 命中；
+  对 `ChatMessage` 的 `encodeToString` / `decodeFromString<ChatMessage>` / `ChatMessage.serializer`
+  **零命中**（`@Serializable` 仅作声明保留，当前无 JSON 使用点）
+- 同族一致性：`E1`(`GroupMessage`) / `E2`(`CompanionEntity`) / `E3`(`ChatGroup`) /
+  `E5`+`E6`(`MemoryEntry`) / `E7` / `E8` / `E9` 与 `M0`…`M7`(`IlinkModels`) **全部齐备**，
+  唯独 `E0` 缺失 ⇒ 属**历史遗漏**而非有意删除（基线只丢注解、却留着未使用的 import 即为旁证）
+- `CompanionEntity` 本身就是「`@Entity` + `@Serializable` + 类级 `@SerialName("E2")`」三件套，
+  与 `ChatMessage` 结构完全同构 ⇒ 注解与 Room 共存已被现有代码证明可行
+
+**验证：** `.\gradlew.bat :core:database:compileDebugKotlin :app:testDebugUnitTest`
+→ `15 tests completed, 6 failed`（原为 `7 failed`），
+且 `internalSerializableModelsHaveSerialNameAnnotation` **已从失败清单中消失**
+（`Select-String _c_fix.log -Pattern 'internalSerializable...'` → 不再命中）。
+
+**剩余 6 例的处置建议（按优先级）：**
+
+1. **`CompanionKeepAliveService`（原 #7）** —— **不要盲改**。AGENTS.md 明确要求 manifest 用全限定类名，
    而该测试期望的是 OnePieceShell 的「壳内路由」设计。二者冲突属**架构决策未收敛**，应先决策再看是否改测试。
-3. **`OnePieceShell*` 三项与 `ReleaseApkBlackboxAuditTest`（测试 #1/#2/#3/#5）** ——
-   断言的是**尚未落地**的 OnePieceShell 加固设计（`docs/security/` 整个目录都不存在）。
+2. **`OnePieceShell*` 三项（原 #1/#2/#3）与 `ReleaseApkBlackboxAuditTest`（原 #5）** ——
+   断言的是**尚未落地**的 OnePieceShell 加固设计（`docs/security/` 整个目录都不存在）。实测缺失 token 一览：
+   - `tools/package_shell_payload.py` 缺 `NATIVE_KMS_COMPATIBLE_MODE` / `KMS-WB-AES-CBC-METADATA-V1` /
+     `padded_plaintext_size` / `YUNIAN_SHELL_PAYLOAD_KEY` / `zipfile.ZIP_DEFLATED`
+   - `YuNianShellApplication.kt` 缺 `SHELL_PAYLOAD_ASSET` / `assets.open(SHELL_PAYLOAD_ASSET)` /
+     `ciphertextSha256` / `plaintextSha256` / `MessageDigest.getInstance("SHA-256")`
+   - `tools/verify_release_apk.py` 缺 `ChatMessageCrypto` / `ApiConfigSecretCodec` /
+     `RequestSecurityInterceptor` / `M0` / `A0` / `BLACKBOX_DEX_PATTERNS` / `blackbox-sensitive symbol...`
+
    这些是**未完成功能的占位测试**，应作为「已知不合格」保留或标记 `@Ignore`，**不属于本迁移范围**。
-4. **测试 #4** —— `docs/security/one-piece-shell-hardening-plan.md` 从未存在过，建议补文档或标记跳过。
+3. **原 #4** —— `docs/security/one-piece-shell-hardening-plan.md` 从未存在过（`git log --all` 亦无），
+   建议补文档或标记跳过。
 
 > **✅ 迁移自身的测试面是干净的**：`:core:agent:testDebugUnitTest` 22/22 通过、
-> `cargo test --lib` 154/154 通过，均**零失败**。上述 7 例全部落在 **OnePieceShell / Release 加固**
-> 这一条与 Agent 迁移正交的历史遗留链路上。
+> `cargo test --lib` 154/154 通过，均**零失败**。上述 6 例（修复前 7 例）全部落在
+> **OnePieceShell / Release 加固**这一条与 Agent 迁移正交的历史遗留链路上。
 
 ### 7.3 架构 —— ✅ 已全部通过（2026-09-17）
 
