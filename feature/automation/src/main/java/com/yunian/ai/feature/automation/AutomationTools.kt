@@ -248,7 +248,12 @@ object AutomationTools {
         private val app: Application
     ) : AiTool {
         override val name = "automation_fire"
-        override val description = "手动触发某个自动化或工作流（立即执行，不等定时）。参数 id 为自动化ID；或给 title 按名称模糊匹配唯一命中后触发。"
+        override val description =
+            "立即触发某个已存在的自动化或工作流并同步返回执行结果。参数 id 为自动化ID；" +
+                "或给 title 按名称模糊匹配唯一命中后触发。" +
+                "注意：本工具只能立即执行，不能预约未来时间——需要定时请改用 " +
+                "automation_create 创建带触发时间的自动化。"
+
         override val parametersJsonSchema = """
             {"type":"object","properties":{
                 "id":{"type":"string","description":"自动化ID"},
