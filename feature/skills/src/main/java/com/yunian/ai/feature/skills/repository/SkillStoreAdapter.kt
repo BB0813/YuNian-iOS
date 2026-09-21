@@ -76,7 +76,9 @@ class SkillStoreAdapter(
 
     /** 关键字搜索本地技能索引。 */
     override fun searchSkills(query: String, limit: UInt): String = runBlockingOnIo {
-        val capped = limit.toInt().coerceAtLeast(1)
+        // 先把 UInt 夹进 Int 区间再收敛下界：直接 `limit.toInt()` 在 limit > Int.MAX_VALUE
+        // 时会溢出成负数，再 `coerceAtLeast(1)` 就把「上限很大」误判成「只要 1 条」。
+        val capped = limit.coerceAtMost(Int.MAX_VALUE.toUInt()).toInt().coerceAtLeast(1)
         metaJsonArray(
             skillManager.searchSkills(query).take(capped).map { meta ->
                 JSONObject().apply {
