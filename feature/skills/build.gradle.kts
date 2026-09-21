@@ -49,4 +49,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.core)
+    // 本模块源码走 org.json（SkillStoreAdapter）。Android 的 org.json 只是抛 Stub! 的空壳，
+    // JVM 单测必须挂真实实现，否则 JSONObject/JSONArray 一调用就崩（同 :core:agent 处理方式）。
+    testImplementation(libs.org.json)
 }

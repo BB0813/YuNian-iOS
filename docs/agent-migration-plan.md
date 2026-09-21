@@ -1064,6 +1064,22 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
 - ⏳ **本地独有工具可用**（Q1）：无障碍 7 工具 / 设备 8 工具 / Shizuku 1 / 技能市场 3 经 Agent 回合调用成功 —— 需真机
 - [x]（单测覆盖）**skills 收敛生效**（Q6）：`use_skill` **已不在**工具表中 ——
       全仓库 `*.kt` 检索 `use_skill` **零命中**（待办 L 已核）。
+- [x]（单测覆盖）**`SkillStoreAdapter` 的 Rust 回调 JSON 契约**（Q6 新增的跨语言边界）——
+      `feature/skills/src/test/java/.../SkillStoreAdapterTest.kt`（10 例，纯 JVM 手写
+      `SkillManager` 替身，无需 Room/设备），锁定三项「写错也不编译报错、只会静默失效」的语义：
+      ```
+      .\gradlew.bat :feature:skills:testDebugUnitTest
+      ```
+      - `skill_id == SkillNames.normalize(name)` 且**能原样回喂** `getSkillContent`
+        （Rust 只回传 `skill_id`，不一致就「列得出、读不到」）；
+        规范化被拒时回退原始 `name`，不产出 `null` 丢字段
+      - `tools` 恒 `[]`、`enabled` 恒 `true`、`companion_id` 恒 `null`、`category` 恒 `CUSTOM`
+      - `saveSkill` 失败一律退化为 `-1`（绝不把异常抛回 Rust）；
+        `searchSkills` 的 `limit` 下界为 1 且 **UInt 上界不溢出**（见下）
+      📎 顺带修掉一处边界缺陷：`searchSkills` 原为 `limit.toInt().coerceAtLeast(1)`，
+      当 `limit > Int.MAX_VALUE` 时 `toInt()` 溢出为负 → 再夹回 1 → 「上限很大」被误判成
+      「只要 1 条」。已改为 `limit.coerceAtMost(Int.MAX_VALUE.toUInt()).toInt().coerceAtLeast(1)`
+      （由 `searchSkills_limitIsLowerBoundedToOne` 锁定）。
       ⏳ 但「`load_skill` 可见集合 == 技能市场可见集合」与「新装技能无需重启生效（R22）」
       仍需真机验证
 - ⏳ **MCP 动态工具可用**（Q1）：`McpToolAdapter` 注册的远端工具经 Agent 回合调用成功 —— 需真机
