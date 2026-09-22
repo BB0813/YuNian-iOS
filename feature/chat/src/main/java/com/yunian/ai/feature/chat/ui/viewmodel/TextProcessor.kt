@@ -4,6 +4,7 @@ import android.util.Log
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.StickerInfo
 import com.yunian.ai.common.StickerManager
+import com.yunian.ai.common.StickerReservedNames
 
 object TextProcessor {
 
@@ -12,7 +13,7 @@ object TextProcessor {
     private val STICKER_REGEX = Regex("\\[([^\\[\\]]+?)\\]")
     private val STICKER_FILE_REGEX = Regex("\\bsticker_\\w+\\.png\\b", RegexOption.IGNORE_CASE)
     private val MULTI_NEWLINE_REGEX = Regex("\\n{2,}")
-    private val SYSTEM_TAGS = setOf("语音", "图片", "视频", "文件", "位置", "红包", "转账")
+    private val SYSTEM_TAGS = StickerReservedNames.SYSTEM_TAGS
 
     fun removeLocalRepetition(text: String): String {
         if (text.length < 4) return text
