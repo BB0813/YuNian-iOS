@@ -65,9 +65,12 @@ SHELL_SOURCES = [
 ]
 
 
-def run(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
+def run(cmd: list[str], timeout: int = 120,
+        env: dict | None = None) -> subprocess.CompletedProcess:
+    # NOTE: never place credentials in `cmd` -- this line echoes argv verbatim
+    # into build logs. Secrets must travel via `env` (see sign_apk).
     print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout, env=env)
     if result.returncode != 0:
         if result.stdout:
             print(result.stdout.decode("utf-8", errors="replace"))
@@ -309,19 +312,24 @@ def sign_apk(apk_path: Path, keystore: Path, store_pass: str, key_pass: str, ali
     signed = apk_path.with_suffix(".signed.apk")
     if signed.exists():
         signed.unlink()
+    # Secrets travel via the child environment, never via argv: argv is visible
+    # to other processes and `run()` echoes it into build logs.
+    child_env = dict(os.environ)
+    child_env["YUNIAN_THIN_SHELL_KS_PASS"] = store_pass
+    child_env["YUNIAN_THIN_SHELL_KEY_PASS"] = key_pass
     cmd = [
         str(apksigner), "sign",
         "--ks", str(keystore),
-        "--ks-pass", f"pass:{store_pass}",
+        "--ks-pass", "env:YUNIAN_THIN_SHELL_KS_PASS",
         "--ks-key-alias", alias,
-        "--key-pass", f"pass:{key_pass}",
+        "--key-pass", "env:YUNIAN_THIN_SHELL_KEY_PASS",
         "--out", str(signed),
         str(apk_path),
     ]
     if os.name == "nt":
-        run(["cmd", "/c"] + cmd, timeout=120)
+        run(["cmd", "/c"] + cmd, timeout=120, env=child_env)
     else:
-        run(cmd, timeout=120)
+        run(cmd, timeout=120, env=child_env)
     shutil.move(str(signed), str(apk_path))
     print(f"  signed: {apk_path}")
 
