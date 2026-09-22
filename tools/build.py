@@ -8,7 +8,36 @@ SHELL_SRC = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/src/com/yunian/a
 STABLE_SHELL_SRC = os.path.join(PROJECT, "app/src/shell/java/com/yunian/ai/security")
 SHELL_WORK = os.path.join(PROJECT, "app/build/tmp/ultimate_shell")
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
-SDK = os.path.join(LOCALAPPDATA, "Android", "Sdk")
+
+def _resolve_sdk():
+    """按优先级解析 Android SDK 根目录。
+
+    1) ANDROID_HOME / ANDROID_SDK_ROOT 环境变量（CI 与本地通用）
+    2) 项目 local.properties 的 sdk.dir（Android Studio 写入的权威路径）
+    3) 兜底 %LOCALAPPDATA%/Android/Sdk
+
+    与 tools/package_thin_shell.py 的解析口径保持一致。
+    原先只认 LOCALAPPDATA，在 SDK 安装于其它盘（如 D:\\Android\\Sdk）的机器上
+    会解析到不存在的 android.jar，导致壳 DEX 编译时所有 Android 类"找不到符号"。
+    """
+    for key in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        candidate = os.environ.get(key)
+        if candidate and os.path.isdir(candidate):
+            return candidate
+    try:
+        with open(os.path.join(PROJECT, "local.properties"), "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("sdk.dir="):
+                    # Java properties 转义：\: -> : ，\\ -> \
+                    value = line[len("sdk.dir="):].strip().replace("\\:", ":").replace("\\\\", "\\")
+                    if os.path.isdir(value):
+                        return value
+    except OSError:
+        pass
+    return os.path.join(LOCALAPPDATA, "Android", "Sdk")
+
+SDK = _resolve_sdk()
 BT = os.path.join(SDK, "build-tools", "36.0.0")
 ANDROID_JAR = os.path.join(SDK, "platforms", "android-35", "android.jar")
 APKTOOL = os.path.join(PROJECT, "tools", "apktool.jar")
@@ -81,7 +110,11 @@ PACK_SO_LIST = ["liblianyu_shell.so", "liblianyu_security.so"]
 PACKED_SO_DIR = os.path.join(PROJECT, "app/build/tmp/ultimate_shell/packed_so")
 
 def run(cmd, timeout=120):
-    print(f"  $ {' '.join(cmd) if isinstance(cmd,list) else cmd}")
+    printable = ' '.join(cmd) if isinstance(cmd, list) else cmd
+    # 不回显签名口令：apksigner 等调用把 --ks-pass/--key-pass 的明文口令拼在命令行里，
+    # 原样打印会让口令落进构建日志。统一把 pass:XXX 脱敏为 pass:****。
+    printable = re.sub(r"pass:\S+", "pass:****", printable)
+    print(f"  $ {printable}")
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if result.returncode != 0:
         if result.stdout:
@@ -446,6 +479,7 @@ def main():
     args = p.parse_args()
     variant = "release" if args.release else "debug"
     print(f"═══ YuNian {variant.upper()} Build ═══")
+    print(f"  SDK: {SDK}")
     if VIVO_MULTIDEX:
         print(f"  VIVO mode: unencrypted multi-DEX (system auto-loads)")
 
