@@ -242,4 +242,47 @@ class StickerRuleStoreTest {
         assertEquals(1, result.merged.size)
         assertEquals("first.png", result.merged.single().fileName)
     }
+
+    // 【回归】按 fileName 建索引：即使 description 重名，每个文件仍能定位到**自己的**条目
+    @Test
+    fun buildFileNameIndex_keyedByFileName_evenWithDuplicateDescriptions() {
+        val index = newStore().buildFileNameIndex(
+            listOf(
+                StickerRuleStore.Entry("仔细思考", "custom_1_1.png", createdAt = 1L),
+                StickerRuleStore.Entry("仔细思考", "custom_2_2.png", createdAt = 2L), // 重名
+            )
+        )
+        assertEquals(2, index.size)
+        assertEquals("custom_1_1.png", index["custom_1_1.png"]?.fileName)
+        assertEquals("custom_2_2.png", index["custom_2_2.png"]?.fileName)
+        assertEquals(2L, index["custom_2_2.png"]?.createdAt)
+    }
+
+    @Test
+    fun buildFileNameIndex_blankFileNameIgnored() {
+        val index = newStore().buildFileNameIndex(
+            listOf(
+                StickerRuleStore.Entry("有名字", ""),
+                StickerRuleStore.Entry("正常", "a.png"),
+            )
+        )
+        assertEquals(1, index.size)
+        assertEquals("a.png", index.keys.single())
+    }
+
+    // 【回归】重名 description 检测（供日志留痕，避免「重名折叠」无感知）
+    @Test
+    fun duplicateDescriptions_reportsCollapsedKeys_once() {
+        val store = newStore()
+        val dup = store.duplicateDescriptions(
+            listOf(
+                StickerRuleStore.Entry("仔细思考", "a.png"),
+                StickerRuleStore.Entry("仔细思考", "b.png"),
+                StickerRuleStore.Entry("开心", "c.png"),
+                StickerRuleStore.Entry("", "d.png"), // 空描述不计
+            )
+        )
+        assertEquals(listOf("仔细思考"), dup)
+        assertTrue(store.duplicateDescriptions(listOf(StickerRuleStore.Entry("唯一", "a.png"))).isEmpty())
+    }
 }

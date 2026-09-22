@@ -127,6 +127,10 @@ object ChatBackgroundCache {
             options.inPreferredConfig = Bitmap.Config.RGB_565
 
             BitmapFactory.decodeFile(file.absolutePath, options)
+        } catch (_: OutOfMemoryError) {
+            // OOM 是 Error 非 Exception：MIUI/MTK 等激进机型上即便降采样仍可能 OOM，
+            // 不兜底会直接崩进程（修 FIX-1）。失败不入缓存，保证后续可重试。
+            null
         } catch (_: Exception) {
             null
         }

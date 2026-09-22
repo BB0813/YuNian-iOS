@@ -189,7 +189,14 @@ fun CheckUpdateScreen(
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(25.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = AppTheme.colors.staticWhite),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = AppTheme.colors.staticWhite,
+                    // 禁用态（检查中/下载中）显式透明，避免 Material3 默认 disabled 底色
+                    // 在自定义渐变 Box 后多画一层形成"双层按钮"
+                    disabledContainerColor = Color.Transparent,
+                    disabledContentColor = AppTheme.colors.staticWhite
+                ),
                 enabled = checkState != UpdateCheckState.CHECKING
             ) {
                 Box(
@@ -409,7 +416,12 @@ fun CheckUpdateScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth().height(44.dp),
                                         shape = RoundedCornerShape(22.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = AppTheme.colors.staticWhite),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.Transparent,
+                                            contentColor = AppTheme.colors.staticWhite,
+                                            disabledContainerColor = Color.Transparent,
+                                            disabledContentColor = AppTheme.colors.staticWhite
+                                        ),
                                         enabled = !isDownloading
                                     ) {
                                         Box(
