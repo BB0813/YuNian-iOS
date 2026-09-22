@@ -30,6 +30,9 @@ class StickerManager(private val context: Context) {
     /** 内存态：完整 v2 条目（语义 / 别名 / 时间戳 / 来源） */
     private var entries: List<StickerRuleStore.Entry> = emptyList()
 
+    /** 内存态：fileName → Entry（按文件名索引，杜绝「重名 description 折叠」） */
+    private var fileNameIndex: Map<String, StickerRuleStore.Entry> = emptyMap()
+
     /** 别名索引：alias → description（匹配链回退用，P6） */
     private var aliasIndex: Map<String, String> = emptyMap()
 
@@ -61,7 +64,9 @@ class StickerManager(private val context: Context) {
         try {
             val loaded = ruleStore.load()
             entries = loaded
+            fileNameIndex = ruleStore.buildFileNameIndex(loaded)
             aliasIndex = ruleStore.buildAliasIndex(loaded)
+            logDuplicateDescriptions(loaded)
             stickerRules = loaded
                 .filter { File(importedDir, it.fileName).exists() }
                 .associate { entry ->
@@ -76,14 +81,25 @@ class StickerManager(private val context: Context) {
             SecureLog.e("StickerManager", "Failed to load sticker rules", e)
             stickerRules = emptyMap()
             entries = emptyList()
+            fileNameIndex = emptyMap()
             aliasIndex = emptyMap()
         }
     }
 
-    /** 内存态统一刷新入口：Map + aliasIndex 重建 + version+1（修 P10：不再每次读盘） */
+    /** 重名 description 留痕（重名会在 [stickerRules] 的 `associate` 中互相覆盖，必须可观测）。 */
+    private fun logDuplicateDescriptions(source: List<StickerRuleStore.Entry>) {
+        val duplicated = ruleStore.duplicateDescriptions(source)
+        if (duplicated.isNotEmpty()) {
+            SecureLog.w("StickerManager", "Duplicate sticker descriptions collapsed in rule map: $duplicated")
+        }
+    }
+
+    /** 内存态统一刷新入口：Map + aliasIndex + fileNameIndex 重建 + version+1（修 P10：不再每次读盘） */
     private fun refreshState(newEntries: List<StickerRuleStore.Entry>) {
         entries = newEntries
+        fileNameIndex = ruleStore.buildFileNameIndex(newEntries)
         aliasIndex = ruleStore.buildAliasIndex(newEntries)
+        logDuplicateDescriptions(newEntries)
         stickerRules = newEntries
             .filter { File(importedDir, it.fileName).exists() }
             .associate { entry ->
@@ -115,23 +131,48 @@ class StickerManager(private val context: Context) {
             SecureLog.w("StickerManager", "No assets/stickers found")
         }
 
-        val rules = stickerRules
+        val index = fileNameIndex
         importedDir.listFiles()?.forEach { file ->
             if (isImageFile(file.name)) {
-
-                val rule = rules.values.find { it.fileName == file.name }
+                // 按 fileName 定位条目（而非按 description 建 Map.values 反查）：
+                // 重名 description 折叠时，每个文件仍能取到自己的 description，不会被静默降级成内部文件名。
+                val entry = index[file.name]
+                val description = entry?.description?.takeIf { it.isNotBlank() }
                 stickers.add(StickerInfo(
-                    name = rule?.description ?: file.nameWithoutExtension,
+                    name = description ?: file.nameWithoutExtension,
                     path = file.absolutePath,
                     category = "imported",
                     isBuiltIn = false,
-                    description = rule?.description,
+                    description = description,
                     fileName = file.name
                 ))
             }
         }
 
         stickers
+    }
+
+    /**
+     * 规则 E 的「可用表情名」名单（提示词层共用的唯一装配入口）。
+     *
+     * 取代 `AiService` 三处各自实现的 `mapNotNull { …length<=20… }.distinct()`：
+     * 后者会**静默丢弃**长度 > 20 的名字（无日志），使「规则丢失→退化成内部文件名」
+     * 的表情对 AI 隐形。装配规则见 [StickerPromptNames]（不按长度丢弃、自定义优先）。
+     */
+    suspend fun getStickerNamesForPrompt(): List<String> {
+        val all = getAllStickers()
+        val names = StickerPromptNames.build(all)
+        val blank = StickerPromptNames.blankNameCount(all)
+        if (blank > 0) {
+            SecureLog.w("StickerManager", "Dropped $blank sticker(s) with blank display name from prompt list")
+        }
+        if (names.size < all.size - blank) {
+            SecureLog.d(
+                "StickerManager",
+                "Prompt sticker names capped (built-ins only): total=${all.size}, emitted=${names.size}"
+            )
+        }
+        return names
     }
 
     fun findStickerByDescriptionExact(keyword: String): StickerInfo? {
@@ -220,9 +261,19 @@ class StickerManager(private val context: Context) {
         return null
     }
 
-    /** 读内存，不再每次重读磁盘（修 P10） */
+    /**
+     * 读内存，不再每次重读磁盘（修 P10）。
+     * 从 [entries] 派生（按 fileName 去重、只保留文件仍在者），杜绝「重名折叠」丢规则。
+     */
     fun getAllRules(): List<StickerRule> {
-        return stickerRules.values.toList()
+        return fileBackedEntries()
+            .map { entry ->
+                StickerRule(
+                    description = entry.description,
+                    fileName = entry.fileName,
+                    path = File(importedDir, entry.fileName).absolutePath
+                )
+            }
     }
 
     /** 名称唯一性查询（命名框实时校验用，修 P4） */
@@ -240,11 +291,24 @@ class StickerManager(private val context: Context) {
         return entries.find { it.fileName == fileName }
     }
 
-    /** 给提示词层用的结构化清单（按 createdAt 新→旧排序，供预算截断） */
+    /**
+     * 给提示词层用的结构化清单（按 createdAt 新→旧排序，供预算截断）。
+     *
+     * 只保留**文件仍存在且描述非空**的条目 —— 与反查侧（[stickerRules]）保持同一口径，
+     * 保证「提示词里宣传的表情 ⇒ 发送侧一定能反查到」，修「E2 宣传了发不出去的表情」的不一致。
+     * 按 fileName 去重，避免重名折叠重复宣传同一文件。
+     */
     fun getPromptStickers(): List<PromptSticker> {
-        return entries
+        return fileBackedEntries()
             .sortedByDescending { it.createdAt }
             .map { PromptSticker(name = it.description, semantic = it.semantic, aliases = it.aliases, isCustom = true) }
+    }
+
+    /** 文件仍在、描述非空、按 fileName 去重的条目（提示词侧与规则侧的公共真值来源）。 */
+    private fun fileBackedEntries(): List<StickerRuleStore.Entry> {
+        return entries
+            .filter { it.description.isNotBlank() && File(importedDir, it.fileName).exists() }
+            .distinctBy { it.fileName }
     }
 
     /**
@@ -258,9 +322,10 @@ class StickerManager(private val context: Context) {
         aliases: List<String> = emptyList(),
     ): Result<StickerInfo> = withContext(Dispatchers.IO) {
         try {
-            val name = sanitizeStickerName(customName)
-            if (name.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("表情名称不能为空"))
+            val name = sanitizeStickerNameText(customName)
+            // 校验（单一来源，纯函数）：空名 / 系统保留名（保留名会被发送侧无条件跳过 → AI 可见却发不出）
+            stickerNameValidationError(name)?.let {
+                return@withContext Result.failure(IllegalArgumentException(it))
             }
             if (isNameTaken(name)) {
                 return@withContext Result.failure(IllegalStateException("已有同名表情"))
@@ -315,8 +380,8 @@ class StickerManager(private val context: Context) {
             val entry = StickerRuleStore.Entry(
                 description = name,
                 fileName = fileName,
-                semantic = sanitizeSemantic(semantic),
-                aliases = sanitizeAliases(aliases),
+                semantic = sanitizeStickerSemanticText(semantic),
+                aliases = sanitizeStickerAliasList(aliases),
                 createdAt = System.currentTimeMillis(),
                 source = StickerRuleStore.SOURCE_FILE,
             )
@@ -352,9 +417,10 @@ class StickerManager(private val context: Context) {
         aliases: List<String>? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val name = sanitizeStickerName(newName)
-            if (name.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("表情名称不能为空"))
+            val name = sanitizeStickerNameText(newName)
+            // 校验（单一来源，纯函数）：空名 / 系统保留名（同导入，避免「AI 可见却永远发不出」）
+            stickerNameValidationError(name)?.let {
+                return@withContext Result.failure(IllegalArgumentException(it))
             }
             val target = entries.find { it.fileName == fileName }
                 ?: return@withContext Result.failure(NoSuchElementException("表情条目不存在"))
@@ -364,8 +430,8 @@ class StickerManager(private val context: Context) {
             }
             val updated = target.copy(
                 description = name,
-                semantic = semantic?.let { sanitizeSemantic(it) } ?: target.semantic,
-                aliases = aliases?.let { sanitizeAliases(it) } ?: target.aliases,
+                semantic = semantic?.let { sanitizeStickerSemanticText(it) } ?: target.semantic,
+                aliases = aliases?.let { sanitizeStickerAliasList(it) } ?: target.aliases,
             )
             val newEntries = entries.map { if (it.fileName == fileName) updated else it }
             if (!ruleStore.save(newEntries)) {
@@ -492,26 +558,13 @@ class StickerManager(private val context: Context) {
         }
     }
 
-    suspend fun loadStickerBitmap(stickerPath: String): Bitmap? = withContext(Dispatchers.IO) {
-        try {
-            when {
-                stickerPath.startsWith("asset://") -> {
-                    val assetPath = stickerPath.removePrefix("asset://")
-                    context.assets.open(assetPath).use { stream ->
-                        BitmapFactory.decodeStream(stream)
-                    }
-                }
-                else -> {
-                    BitmapFactory.decodeFile(stickerPath)
-                }
-            }
-        } catch (e: Exception) {
-            SecureLog.e("StickerManager", "Failed to load bitmap", e)
-            null
-        }
-    }
-
-    /** 降采样加载（P11）：网格 / 气泡显示尺寸 ≤512px 即可，避免全尺寸位图内存抖动 */
+    /**
+     * 降采样加载（P11）：网格 / 气泡显示尺寸 ≤512px 即可，避免全尺寸位图内存抖动。
+     *
+     * 说明：早期存在一个全尺寸 `loadStickerBitmap(path)`（`decodeFile` 不做 `inSampleSize`），
+     * 在 1080×2400 长图 / 截图类贴纸上会一次吃下十几 MB（MTK + MIUI 机型易触发内存清理/闪退），
+     * 且已无任何调用方，故删除，统一收口到本降采样入口。
+     */
     fun loadStickerBitmapSampled(stickerPath: String, maxDimension: Int = 512): Bitmap? {
         return try {
             if (stickerPath.startsWith("asset://")) {
@@ -519,6 +572,11 @@ class StickerManager(private val context: Context) {
             } else {
                 decodeSampledFile(stickerPath, maxDimension)
             }
+        } catch (e: OutOfMemoryError) {
+            // MIUI/MTK 等内存较激进的机型上，超大/畸形图片即便降采样仍可能 OOM（Error 非 Exception，
+            // 不捕获会直接崩进程）；此处兜底为 null，由 UI 退化为占位文字。
+            SecureLog.e("StickerManager", "Failed to load sampled bitmap (OOM): ${e.message}")
+            null
         } catch (e: Exception) {
             SecureLog.e("StickerManager", "Failed to load sampled bitmap", e)
             null
@@ -532,9 +590,12 @@ class StickerManager(private val context: Context) {
             BitmapFactory.decodeFile(path, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             val options = BitmapFactory.Options().apply {
-                inSampleSize = calcInSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
+                inSampleSize = calcSampleSizeForMaxDimension(bounds.outWidth, bounds.outHeight, maxDimension)
             }
             BitmapFactory.decodeFile(path, options)
+        } catch (e: OutOfMemoryError) {
+            SecureLog.e("StickerManager", "decodeSampledFile OOM: $path")
+            null
         } catch (e: Exception) {
             SecureLog.e("StickerManager", "decodeSampledFile failed: ${e.message}")
             null
@@ -550,23 +611,18 @@ class StickerManager(private val context: Context) {
             }
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             val options = BitmapFactory.Options().apply {
-                inSampleSize = calcInSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
+                inSampleSize = calcSampleSizeForMaxDimension(bounds.outWidth, bounds.outHeight, maxDimension)
             }
             context.assets.open(assetPath).use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)
             }
+        } catch (e: OutOfMemoryError) {
+            SecureLog.e("StickerManager", "decodeSampledAsset OOM: $assetPath")
+            null
         } catch (e: Exception) {
             SecureLog.e("StickerManager", "decodeSampledAsset failed: ${e.message}")
             null
         }
-    }
-
-    private fun calcInSampleSize(width: Int, height: Int, maxDimension: Int): Int {
-        var sampleSize = 1
-        while (width / (sampleSize * 2) >= maxDimension || height / (sampleSize * 2) >= maxDimension) {
-            sampleSize *= 2
-        }
-        return sampleSize
     }
 
     fun getImportedDir(): String = importedDir.absolutePath
@@ -650,30 +706,6 @@ class StickerManager(private val context: Context) {
         val picked = allAvailableStickers.random()
         SecureLog.d("StickerManager", "Random pick from ${allAvailableStickers.size} stickers: '${picked.name}'")
         return picked
-    }
-
-    /** 名称清洗：去协议方括号 / 换行，压缩空白，≤20 字 */
-    private fun sanitizeStickerName(raw: String): String {
-        return raw
-            .replace(Regex("[\\[\\]\\n\\r\\t]"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .take(20)
-    }
-
-    /** 语义描述清洗：去换行，≤40 字 */
-    private fun sanitizeSemantic(raw: String): String {
-        return raw.replace(Regex("[\\n\\r]"), " ").trim().take(40)
-    }
-
-    /** 别名清洗：去空白 / 方括号，去重，≤5 个每个 ≤12 字 */
-    private fun sanitizeAliases(raw: List<String>): List<String> {
-        return raw
-            .map { it.replace(Regex("[\\[\\]\\n\\r\\t]"), "").trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .take(5)
-            .map { it.take(12) }
     }
 
     /**

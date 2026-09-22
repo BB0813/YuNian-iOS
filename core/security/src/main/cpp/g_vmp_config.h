@@ -9,17 +9,17 @@
 
 // ── LCG parameters for scatter_key_positions ──────────────────────
 // state = (state * VMP_LCG_MUL + VMP_LCG_ADD) & 0xFFFFFFFF
-#define VMP_LCG_MUL  0x81B8DB31u
-#define VMP_LCG_ADD  0xE952B863u
+#define VMP_LCG_MUL  0x16571B57u
+#define VMP_LCG_ADD  0xEEB453EDu
 
 // ── XOR deobfuscation parameters for deobfuscate_key ──────────────
 // key_out[i] = obf_key[i] ^ seed[(i * VMP_XOR_STRIDE) & 3] ^ (i * VMP_XOR_MULT)
-#define VMP_XOR_MULT    0x29u
-#define VMP_XOR_STRIDE  0x03u
+#define VMP_XOR_MULT    0x15u
+#define VMP_XOR_STRIDE  0x01u
 
 // ── Integrity seed multiplier (vm-engine.cpp vm_init) ─────────────
 // Replaces hardcoded 1103515245 with per-build random value.
-#define VMP_INTEGRITY_MUL  0xBDE5E893u
+#define VMP_INTEGRITY_MUL  0x8F53AE29u
 
 // ── Seed (cert CRC32, for reference only — not used at runtime) ───
 #define VMP_BUILD_SEED  0xBDBEFB3Fu
@@ -29,12 +29,12 @@
 // C++:  RegisterNatives with VMP_SHELL_LOAD_PAYLOAD instead of "nativeLoadPayload"
 //       GetStaticFieldID with VMP_SHELL_DEX_LOADER instead of "sDexClassLoader"
 //       GetStaticFieldID with VMP_SHELL_REAL_APP_CLASS instead of "sRealAppClass"
-// Kotlin: external fun azG6V3WJqjjZvYr(...) replaces nativeLoadPayload
-//         @JvmStatic var c1ZSmeNBgdQ replaces sDexClassLoader
-//         @JvmStatic var dFA9bYDEtM3u replaces sRealAppClass
-#define VMP_SHELL_LOAD_PAYLOAD   "azG6V3WJqjjZvYr"
-#define VMP_SHELL_DEX_LOADER     "c1ZSmeNBgdQ"
-#define VMP_SHELL_REAL_APP_CLASS "dFA9bYDEtM3u"
+// Kotlin: external fun dUddtQUxyeYuNes3u(...) replaces nativeLoadPayload
+//         @JvmStatic var eMZiXFszzaCZ replaces sDexClassLoader
+//         @JvmStatic var dqbSAoMiwVovV replaces sRealAppClass
+#define VMP_SHELL_LOAD_PAYLOAD   "dUddtQUxyeYuNes3u"
+#define VMP_SHELL_DEX_LOADER     "eMZiXFszzaCZ"
+#define VMP_SHELL_REAL_APP_CLASS "dqbSAoMiwVovV"
 
 
 // ── Per-build VMP opcode mapping (randomized per APK) ──

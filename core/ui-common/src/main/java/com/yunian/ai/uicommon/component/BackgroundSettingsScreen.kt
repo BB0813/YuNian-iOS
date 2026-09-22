@@ -2,7 +2,7 @@ package com.yunian.ai.uicommon.component
 import com.yunian.ai.uicommon.icon.AppIcons
 
 
-import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.yunian.ai.uicommon.image.cropper.ImageCropperDialog
+import com.yunian.ai.uicommon.image.decodeUriSampledForCrop
 import com.yunian.ai.uicommon.image.viewer.FullscreenImageViewer
 import com.yunian.ai.uicommon.picker.ui.CustomImagePicker
 import com.yunian.ai.uicommon.component.glass.LiquidBottomTab
@@ -74,6 +75,37 @@ import kotlinx.coroutines.withContext
 
 private const val BG_PREFS_NAME = "chat_prefs"
 private const val MAIN_BG_KEY = "main_background"
+
+/**
+ * 背景裁剪输入的**解码长边上限**（像素），与 [com.yunian.ai.uicommon.image.CROP_SOURCE_MAX_DIMENSION]
+ * （头像 1200）分开取值，按用途分档：背景全屏显示 → 更大、且用 `RGB_565`（FIX-9，用户拍板）。
+ *
+ * 取值 2000 的理由（**注意采样器语义**）：[com.yunian.ai.common.calcSampleSizeForMaxDimension]
+ * 保证的是「采样后长边落在 `[max, 2*max)`」，即**实际长边可能达到约 `2*max`**，并非严格 `<= max`。
+ * 据此：
+ *  - `1080×2400`（本机型长截图）→ `sample=1` → **原生 1080×2400，不缩水**；
+ *  - `4000×3000`（相机横向）→ `sample=2` → `2000×1500`（565 ≈ 5.7MB）；
+ *  - `6000×4000`（相机超大）→ `sample=2` → `3000×2000`（565 ≈ 11.4MB）。
+ *
+ * **内存上界的真实情况（勿高估）**：因降采样只能按 2 的幂，**长边 < `2*max` = 4000 的图一律 `sample=1` 不降采样**，
+ * 所以上界不是 12MB，而是 `(2*max)² × 2B ≈ 32MB`（近方形极端）。典型值：
+ *  - `3840×2160`（4K 16:9，常见壁纸）→ `sample=1` → 原生 → 565 ≈ **16.6MB**；
+ *  - `3000×3000`（方形）→ `sample=1` → 原生 → 565 ≈ **18MB**；
+ *  - `3999×3999`（极端近方形）→ `sample=1` → 原生 → 565 ≈ **32MB**。
+ * 仍显著优于改前（ARGB_8888 全尺寸下上述分别为 33/36/64MB），且解码已带 `catch(OutOfMemoryError)` 优雅降级。
+ *
+ * **为何取 2000 而非更小的 1400**：1400 可把 4K 压到 ~4.2MB、最坏 ~13MB，但 `2*1400=2800` →
+ * 长边 >2800 的图会被降采样，**包括 1440p 机型壁纸（`3200×1440`）** → 全屏背景发虚。
+ * 本档的首要诉求是「清晰不缩水」，故取 2000（保住长边 <4000 的图原生），以更高的内存上界换取画质。
+ * 若日后以内存为先，可下调至 1400（代价即上述降采样）。
+ *
+ * **透明源注意**：`inPreferredConfig = RGB_565` 对**含 per-pixel alpha 的源**（透明 PNG/WebP）
+ * 可能被解码器升级回 `ARGB_8888`，「内存减半」对这类图不保证（截图/照片多为不透明，影响很小）。
+ *
+ * **为何不是字面的 2400**：若取 2400，按同一采样语义 `4000×3000` 会命中 `sample=1` → 仍为
+ * `4000×3000`（565 ≈ 22.9MB），**反而比 6000×4000 那档（11.4MB）更高**，与「内存兜底」意图相悖。
+ */
+private const val BACKGROUND_CROP_SOURCE_MAX_DIMENSION = 2000
 
 fun getMainBackgroundKey(context: android.content.Context): String {
     return context.getSharedPreferences(BG_PREFS_NAME, android.content.Context.MODE_PRIVATE)
@@ -398,14 +430,16 @@ fun BackgroundSettingsScreen(
 
     LaunchedEffect(pendingCropUri) {
         val uri = pendingCropUri ?: return@LaunchedEffect
+        // 采样解码 + OOM 兜底（修 FIX-1）。FIX-9：背景按用途采用「原生分辨率 + RGB_565」——
+        // 上限 BACKGROUND_CROP_SOURCE_MAX_DIMENSION（1080×2400 走 sample=1 不缩水），
+        // 色彩配置 RGB_565（内存减半；背景保存为 JPEG、显示链路亦为 RGB_565，全程无 alpha 依赖）。
         cropBitmap = withContext(Dispatchers.IO) {
-            try {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                }
-            } catch (_: Exception) {
-                null
-            }
+            decodeUriSampledForCrop(
+                context = context,
+                uri = uri,
+                maxDimension = BACKGROUND_CROP_SOURCE_MAX_DIMENSION,
+                config = Bitmap.Config.RGB_565,
+            )?.asImageBitmap()
         }
         if (cropBitmap == null) {
             pendingCropUri = null
