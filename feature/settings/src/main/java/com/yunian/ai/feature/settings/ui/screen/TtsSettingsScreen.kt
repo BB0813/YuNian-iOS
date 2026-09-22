@@ -582,7 +582,7 @@ fun TtsSettingsScreen(
                                             saveSettings()
                                             val result = ttsService.testProvider(selectedProvider)
                                             isTesting = false
-                                            testResult = if (result) "连接成功" else "连接失败，请检查配置"
+                                            testResult = if (result) "连接成功" else "连接失败：${ttsService.lastSynthesisError ?: "请检查配置"}"
                                             snackbarHostState.showSnackbar(testResult!!)
                                         }
                                     },

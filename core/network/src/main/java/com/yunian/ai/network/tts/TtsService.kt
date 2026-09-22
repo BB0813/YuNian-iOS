@@ -109,7 +109,14 @@ class TtsService(private val context: Context) {
                 return@withContext false
             }
 
-            p.testConnection(context)
+            val ok = p.testConnection(context)
+            // 透出 provider 的具体失败原因（如"请先选择音频样本再测试连接"），避免统一显示"请检查配置"造成误导。
+            lastSynthesisError = if (ok) {
+                null
+            } else {
+                p.lastError() ?: "连接失败（${provider.displayName}）"
+            }
+            ok
         } catch (e: Exception) {
             SecureLog.e("TtsService", "Test provider ${provider.displayName} failed", e)
             false
