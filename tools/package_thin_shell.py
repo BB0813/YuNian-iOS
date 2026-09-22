@@ -271,10 +271,16 @@ def assemble_thin_shell(
 
     kept = 0
     stripped_dex = 0
+    stripped_profile = 0
     with zipfile.ZipFile(apk_path, "r") as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
             name = item.filename
             if name.startswith("META-INF/"):
+                continue
+            # 见 STRIPPED_PROFILE_ENTRIES 注释：内嵌 baseline profile 绑定的是**原始业务
+            # DEX** 的 checksum，root classes.dex 换壳后必然失配，会导致整包安装失败。
+            if name in STRIPPED_PROFILE_ENTRIES:
+                stripped_profile += 1
                 continue
             if name.startswith("classes") and name.endswith(".dex") and "/" not in name:
                 if name == "classes.dex":
@@ -301,6 +307,7 @@ def assemble_thin_shell(
     shutil.move(str(tmp), str(out_apk))
     print(f"  replaced root classes.dex with shell ({len(shell_bytes):,} B)")
     print(f"  stripped secondary root DEX: {stripped_dex}")
+    print(f"  stripped stale baseline profile entries: {stripped_profile}")
     print(f"  injected encrypted assets: {len(encrypted_assets)}")
     print(f"  output: {out_apk} ({out_apk.stat().st_size / (1024 * 1024):.2f} MB)")
 
@@ -353,6 +360,24 @@ FORBIDDEN_ROOT_MARKERS = (
     "Lcom/yunian/ai/network/AiService;",
     "Lcom/yunian/ai/database/AppDatabase;",
     "Lcom/yunian/ai/security/YuNianShellApplication;",
+)
+
+# AGP 内嵌的 baseline profile（供 ART 在安装时 dexopt 使用）。profile 内部按 dex 文件
+# 记录 checksum（ProfileCompilationInfo，每 dex 一个 dex_checksum）。
+#
+# ⚠️ 瘦壳会把 root classes.dex 从业务 DEX（约 16 MB）替换为壳 DEX（约 13 KB），
+# 二者 checksum 必然不同 ⇒ 安装时 dexopt 加载 profile 失败：
+#     Warning: Error occurred during dexopt when processing external profiles:
+#       Failed to load profile '.../base.apk.prof': The profile does not match the APK
+#       (The checksums in the profile do not match the checksums of the .dex files in the APK)
+# vivo/OPPO 等 ROM 会把该 dexopt 警告当作**安装失败**（`pm` 返回非 0，`adb install` 报
+# `Completed with warning(s)` 后退出码 1）——即整包无法安装。
+#
+# 业务 DEX 此时已加密为 assets/shell/*.dat，不可能被 AOT 编译，profile 已完全无意义，
+# 因此直接在瘦壳打包时丢弃，并在黑盒门禁中断言其不存在（防回归）。
+STRIPPED_PROFILE_ENTRIES = (
+    "assets/dexopt/baseline.prof",
+    "assets/dexopt/baseline.profm",
 )
 
 
@@ -454,6 +479,16 @@ def verify_thin_shell(apk_path: Path, max_shell_bytes: int = 64 * 1024) -> None:
         print(f"  root classes.dex: {classes_size:,} bytes")
         if classes_size > max_shell_bytes:
             sys.exit(f"FAIL: root classes.dex too large ({classes_size} > {max_shell_bytes})")
+        # 门禁：内嵌 baseline profile 必须已被剥离，否则安装时 dexopt checksum 校验失败
+        # ⇒ vivo/OPPO 等 ROM 直接判安装失败（不是可忽略的警告）。详见 STRIPPED_PROFILE_ENTRIES。
+        leaked_profiles = [n for n in zf.namelist() if n in STRIPPED_PROFILE_ENTRIES]
+        if leaked_profiles:
+            sys.exit(
+                "FAIL: stale baseline profile still embedded "
+                f"{leaked_profiles} — its dex checksums no longer match the shell DEX; "
+                "installation will fail on ROMs that treat the dexopt warning as fatal."
+            )
+        print("  [OK] no stale baseline profile embedded (install-safe)")
         if "assets/shell/classes.dat" not in shell_assets:
             sys.exit("FAIL: missing assets/shell/classes.dat")
         if "assets/shell/app_meta.bin" not in shell_assets:
