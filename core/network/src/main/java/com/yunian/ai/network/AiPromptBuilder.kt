@@ -418,7 +418,7 @@ object AiPromptBuilder {
             appendLine()
             appendLine("=== 当前话题轨迹（最近几轮）===")
             lines.forEach { appendLine(it) }
-            append("回复要贴合上述正在聊的话题并自然延续；除非用户明确换话题，否则不要自行跳转话题。")
+            append("回复要贴合上述正在聊的话题并自然延续；除非用户明确换话题，否则不要自行跳转话题。以上轨迹只用于把握话题走向，不要把其中已出现过的内容再复述一遍。")
         }
     }
 
@@ -496,7 +496,9 @@ object AiPromptBuilder {
             "每句话结尾必须用标点符号（。！？～…），句子之间也用标点连接，绝对不要用空格代替标点。"
 
         val stickerRule = if (availableStickers.isNotEmpty()) {
-            val stickerList = availableStickers.take(50).joinToString(" ") { "[$it]" }
+            // 名单口径的唯一截断点在 StickerPromptNames.build（自定义全量保留、只截内置）；
+            // 此处**不得**再 take(N)——否则自定义表情 >50 时会被二次截断丢掉（修 FIX-4）。
+            val stickerList = availableStickers.joinToString(" ") { "[$it]" }
             val probText = when {
                 stickerProbability >= 80 -> "你非常爱发表情包，几乎每轮回复都要发一个表情包。"
                 stickerProbability >= 50 -> "你喜欢发表情包，经常发一个表情包来表达情绪。"
@@ -572,7 +574,7 @@ B. 断句：${punctuationRule}
 C. 格式：不要用 markdown（不要#标题、不要-列表、不要```代码块）。像真人发微信那样自然分条连发：**条数不限**（想说几条就几条，由你此刻有多少层意思决定），一层意思一条；想说的内容多就多分几条（每条都是一句完整口语、标点收尾），不要把几句话挤进同一条长气泡；只有一句短回应时发一条即可；若是一段连贯的叙述/故事/说明，则整段合并成一条。用户要求「多发几句」时，按他要的条数分条发出。你的每一次回车 = 发出下一条气泡，不要假设系统会按标点拆；也不要为凑条数把同一句话硬拆开。短肯定/语气（嗯、好、行、哦）单独成条即可，表意完整。
 ${innerThoughtRule}
 ${stickerRule}
-F. 避免重复：同样的意思别重复说，换个说法。最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。人设固定词汇只是参考，不是每句必须套用的模板。
+F. 避免重复：自己或用户已经说过的内容，不要换种说法再讲一遍；最近5轮内不要重复用同一个特殊称呼或关键词（暧昧称呼和对方明确要求你叫的除外）。只说新信息，没新内容就别硬开口。人设固定词汇只是参考，不是每句必须套用的模板。
 G. ${RolePromptProvider.getParticleRule(role)}
 H. ${RolePromptProvider.getEmotionRule(role)}
 I. ${RolePromptProvider.getStyleRule(role)}
@@ -649,7 +651,7 @@ ${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
             append(memorySection)
             appendLine()
             appendLine("=== 追问纪律 ===")
-            appendLine("1. 追问短而自然（10~30字），一次一条，禁止堆叠追问、禁止复述已问过的问题。")
+            appendLine("1. 追问短而自然，可像真人微信连发那样一次发多条（换行即下一条）；条数由性格与想说的话决定，不硬凑也不封顶——黏人可多发两条，冷淡/傲娇一条即止。禁止堆叠同一句话、禁止复述已问过的问题。")
             appendLine("2. 语气严格服从角色性格：黏人可撒娇催促，冷淡/傲娇可轻戳一句或装作不在意，内向可简短试探。")
             appendLine("3. 不要替用户回答；不要说教；不要输出关心模板（吃没吃/睡没睡类）。")
             appendLine("4. 若判断对方在忙、已休息或不想被打扰，可以不追问，让对话自然安静（输出 ${NO_PROACTIVE_MARKER}）。")
@@ -682,6 +684,110 @@ ${innerThoughtExamples}${RolePromptProvider.getExamples(role)}
                 appendLine("用户偏好（软约束）：本次尽量少追问；把核心意思说完即可（不必追加反问），可以说一条，也可以按真人习惯连发多条短消息（条数不限）。")
             }
         }
+    }
+
+    /**
+     * 主动问候路径的用户决策指令（generateProactiveMessage 的第二条 user 消息）。
+     *
+     * 抽为可测纯函数：在「消息条数不限」规则后附 few-shot 格式示例，向模型演示
+     * 「换行 = 发出下一条气泡」（1 行版 + 3 行版），提升多行连发输出的稳定性。
+     * 示例采用「围栏 + 占位行」形态：每一行本身都不像聊天消息，模型即使照抄也
+     * 显然不应作为消息发出；万一仍被照抄，由 [stripProactiveDemoLeakLines]
+     * 按整行精确字面量兜底剔除（两层防御）。
+     */
+    internal fun buildProactiveDecisionInstruction(companionName: String, envUserHint: String): String {
+        return """
+        以${companionName}的身份决定是否、以及如何继续刚才的对话。
+        先做语义判断（看整段上下文，不要只看最后几个字）：
+        - 若用户此刻明显不想被打扰、对话已自然收束，只输出 $NO_PROACTIVE_MARKER，不要硬聊。
+        - 「晚安/再见/先忙/嗯/好/知道了」等不能单独当作结束标签，要结合前后文理解。
+        话题选择（性格优先，禁止机械承接）：
+        - 先判断：上一话题是否已完结？你是否还感兴趣？按角色性格会不会接？
+        - 未完结且感兴趣：可自然延伸，但不要复读、不要为了承接而追问已答完的内容。
+        - 已完结或不感兴趣：可轻转、只回情绪/态度，或输出 $NO_PROACTIVE_MARKER；不要硬续旧话题。
+        若决定发消息，要求：
+        1. 像真人在微信连发那样说话：口语、自然，不要长文堆共情+方案+大道理，也不要半截残句
+        2. 消息条数不限：换行即下一条。话多就多敲几行（真人会连发），话少一条也行——由你的性格与此刻想说的话决定，不硬凑条数，也不要把全部内容塞进一条
+        【格式演示：只演示「换行=发出下一条」，以下围栏内文字只是占位，你的输出禁止包含】
+        只想发一条时，输出占一行：
+        （占位：一行消息）
+        想连发几条时，占几行：
+        （占位：第一行）
+        （占位：第二行）
+        （占位：第三行）
+        【演示结束】
+        3. 不要重新开场、不要念日程
+        4. 语气与互动方式严格服从角色性格，不要统一撒娇/催促
+        5. 禁止括号，禁止AI感词汇，禁止说教
+        6. 时间只是背景；不要机械报时或按时段派发固定关心任务
+        $envUserHint
+        """.trimIndent()
+    }
+
+    /**
+     * 追问路径的用户决策指令（generateFollowUpReminder 的第二条 user 消息）。
+     *
+     * 抽为可测纯函数：已去掉「只发 1 条 / 10~30 字」单行硬限制——可像真人微信连发那样
+     * 一次发多条（换行即下一条），条数由性格与想说的话决定，不硬凑也不封顶；
+     * 保留「不重复上一条、不堆叠同一句话、不说教」纪律。
+     */
+    internal fun buildFollowUpReminderInstruction(): String {
+        return """
+        你上一条消息发出后，用户一直没回复。
+        现在由你决定是否追问：
+        - 若判断用户可能在忙、已休息或对话已自然收尾，只输出 $NO_PROACTIVE_MARKER，不要硬催。
+        - 若决定追问：可像真人微信连发那样一次发多条（换行即下一条），条数由你的性格与想说的话决定，不硬凑也不封顶；简短自然，语气严格服从你的性格（黏人可撒娇多戳两句，冷淡/傲娇一条即止）。
+        - 不要重复上一条消息的内容，不要堆叠同一句话，不要说教。
+        - 禁止括号，禁止AI感词汇。
+        """.trimIndent()
+    }
+
+    /**
+     * 主动消息（问候/追问）统一后处理：preserveRaw 保留 AI 自己敲的换行
+     * （换行 = 想连发下一条的信号），再按行检查 [NO_PROACTIVE_MARKER]；
+     * 多行文本交由发送端 BubbleTextSplitter 拆成多条气泡连发。
+     *
+     * 追问路径此前会把换行压缩成「，」（永远单气泡），已改为与问候路径一致走本函数。
+     */
+    internal fun postProcessProactiveReply(rawSemantic: String, recentMessages: List<ChatMessage>): String? {
+        val cleaned = applyPersonaPostProcessing(rawSemantic, recentMessages, preserveRaw = true)
+        // 防御性兜底：模型原样照抄 few-shot 演示文字（围栏/标签/占位行）时按整行精确字面量剔除
+        val demoStripped = stripProactiveDemoLeakLines(cleaned)
+        return parseProactiveGenerationResult(demoStripped)
+    }
+
+    /**
+     * few-shot 演示文字的整行字面量集合：模型照抄 [buildProactiveDecisionInstruction]
+     * 演示块时可能被复现的行；另含旧版行级标签（「话少时的输出：」「话多想连发时的输出：」——
+     * 旧 prompt 已下线，仍防旧样本/提示词回滚场景的同款泄漏）。
+     * 刻意只用「trim 后整行精确匹配」，不做子串/正则，避免误伤正常消息。
+     */
+    private val PROACTIVE_DEMO_LEAK_LINES: Set<String> = setOf(
+        "【格式演示：只演示「换行=发出下一条」，以下围栏内文字只是占位，你的输出禁止包含】",
+        "只想发一条时，输出占一行：",
+        "（占位：一行消息）",
+        "想连发几条时，占几行：",
+        "（占位：第一行）",
+        "（占位：第二行）",
+        "（占位：第三行）",
+        "【演示结束】",
+        "话少时的输出：",
+        "话多想连发时的输出：",
+    )
+
+    /**
+     * 剔除 [PROACTIVE_DEMO_LEAK_LINES] 命中行（QA 对抗实证：被照抄的标签行会独立成真实气泡）。
+     * 仅主动/追问两条路径经 [postProcessProactiveReply] 生效，不影响聊天路径；
+     * 全部命中时返回空串，交由 parseProactiveGenerationResult 走既有 null 兜底（本轮不发）。
+     * 命中时打 [SecureLog.w] 留痕，便于真机观察拦截情况。
+     */
+    internal fun stripProactiveDemoLeakLines(text: String): String {
+        val lines = text.split("\n")
+        val kept = lines.filterNot { it.trim() in PROACTIVE_DEMO_LEAK_LINES }
+        if (kept.size == lines.size) return text
+        val leaked = lines.filter { it.trim() in PROACTIVE_DEMO_LEAK_LINES }
+        SecureLog.w("AiService", "Proactive: few-shot demo-label leak filtered, removed=${leaked.size} lines=$leaked")
+        return kept.joinToString("\n")
     }
 
 }

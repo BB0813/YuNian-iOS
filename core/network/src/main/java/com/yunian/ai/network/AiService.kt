@@ -525,12 +525,9 @@ class AiService(context: Context) : AiServiceProvider {
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
                 val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
                 val stickerManager = StickerManager.getInstance(appContext)
-                val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
-                    val displayName = sticker.description?.takeIf {
-                        it.isNotBlank() && !it.startsWith("sticker_") && it.length <= 20
-                    } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
-                    if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
-                }.distinct()
+                // 收口到 StickerManager 唯一装配入口：不按长度静默丢弃（修「规则丢失→内部文件名→被丢」），
+                // 自定义表情优先占位、内置超预算才截断（见 StickerPromptNames）。
+                val availableStickers = stickerManager.getStickerNamesForPrompt()
                 val role = userRepository.selectedRole.value
                 val phase = ConversationPhaseDetector.detect(sanitizedHistory)
                 val allowEnvAnchor = resolveAllowEnvAnchor(companion.id, sanitizedHistory)
@@ -637,27 +634,8 @@ class AiService(context: Context) : AiServiceProvider {
             val messages = listOf(
                 Message("system", systemPrompt),
                 Message("user", contextMessages),
-                Message(
-                    "user",
-                    """
-                    以${companion.name}的身份决定是否、以及如何继续刚才的对话。
-                    先做语义判断（看整段上下文，不要只看最后几个字）：
-                    - 若用户此刻明显不想被打扰、对话已自然收束，只输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}，不要硬聊。
-                    - 「晚安/再见/先忙/嗯/好/知道了」等不能单独当作结束标签，要结合前后文理解。
-                    话题选择（性格优先，禁止机械承接）：
-                    - 先判断：上一话题是否已完结？你是否还感兴趣？按角色性格会不会接？
-                    - 未完结且感兴趣：可自然延伸，但不要复读、不要为了承接而追问已答完的内容。
-                    - 已完结或不感兴趣：可轻转、只回情绪/态度，或输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}；不要硬续旧话题。
-                    若决定发消息，要求：
-                    1. 像真人在微信连发那样说话：口语、自然，不要长文堆共情+方案+大道理，也不要半截残句
-                    2. 消息条数不限：换行即下一条。话多就多敲几行（真人会连发），话少一条也行——由你的性格与此刻想说的话决定，不硬凑条数，也不要把全部内容塞进一条
-                    3. 不要重新开场、不要念日程
-                    4. 语气与互动方式严格服从角色性格，不要统一撒娇/催促
-                    5. 禁止括号，禁止AI感词汇，禁止说教
-                    6. 时间只是背景；不要机械报时或按时段派发固定关心任务
-                    $envUserHint
-                    """.trimIndent()
-                )
+                // 决策指令抽至 AiPromptBuilder（含「换行=下一条」few-shot 示例），便于单测锁定口径
+                Message("user", AiPromptBuilder.buildProactiveDecisionInstruction(companion.name, envUserHint))
             )
 
             try {
@@ -669,12 +647,10 @@ class AiService(context: Context) : AiServiceProvider {
 
                 val semantic = AiPromptBuilder.parseProactiveGenerationResult(rawResponse)
                     ?: return@withContext null
-                // preserveRaw = true：保留 AI 自己敲的换行（换行即「想连发下一条」的信号），
-                // 并避免长文本被后处理截断。不再把换行压平成单条。
-                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages, preserveRaw = true)
-                // parseProactiveGenerationResult 按行检查 NO_PROACTIVE_MARKER，可直接用于含换行的多行文本；
-                // 多行文本交由发送端 BubbleTextSplitter 拆成多条气泡连发。
-                val finalText = AiPromptBuilder.parseProactiveGenerationResult(cleaned)
+                // 统一后处理（内部 preserveRaw = true）：保留 AI 自己敲的换行
+                // （换行即「想连发下一条」的信号），并避免长文本被后处理截断；
+                // 按行检查 NO_PROACTIVE_MARKER；多行文本交由发送端 BubbleTextSplitter 拆成多条气泡连发。
+                val finalText = AiPromptBuilder.postProcessProactiveReply(semantic, sortedMessages)
                     ?: return@withContext null
 
                 val safetyResult = ContentFilter.checkOutputSafety(finalText)
@@ -721,17 +697,8 @@ class AiService(context: Context) : AiServiceProvider {
             val messages = listOf(
                 Message("system", systemPrompt),
                 Message("user", contextMessages),
-                Message(
-                    "user",
-                    """
-                    你上一条消息发出后，用户一直没回复。
-                    现在由你决定是否追问：
-                    - 若判断用户可能在忙、已休息或对话已自然收尾，只输出 ${AiPromptBuilder.NO_PROACTIVE_MARKER}，不要硬催。
-                    - 若决定追问：只发 1 条，10~30 字，简短自然，语气严格服从你的性格（黏人可撒娇，冷淡/傲娇可轻戳一句）。
-                    - 不要重复上一条消息的内容，不要堆叠追问，不要说教。
-                    - 禁止括号，禁止AI感词汇。
-                    """.trimIndent()
-                )
+                // 决策指令抽至 AiPromptBuilder：已去掉「只发 1 条 / 10~30 字」硬限制，允许多气泡连发
+                Message("user", AiPromptBuilder.buildFollowUpReminderInstruction())
             )
 
             try {
@@ -742,13 +709,9 @@ class AiService(context: Context) : AiServiceProvider {
                 }
                 val semantic = AiPromptBuilder.parseProactiveGenerationResult(rawResponse)
                     ?: return@withContext null
-                val cleaned = AiPromptBuilder.applyPersonaPostProcessing(semantic, sortedMessages)
-                val singleLine = cleaned
-                    .replace(Regex("\\r\\n|\\r|\\n+"), "，")
-                    .replace(Regex("，{2,}"), "，")
-                    .trimStart('，', ',', '.', '。', ' ')
-                    .trim()
-                val finalText = AiPromptBuilder.parseProactiveGenerationResult(singleLine)
+                // 与问候路径同一后处理（preserveRaw）：保留换行（换行=连发下一条），不再压缩成单行，
+                // 多行文本交由发送端 BubbleTextSplitter 拆成多条气泡。
+                val finalText = AiPromptBuilder.postProcessProactiveReply(semantic, sortedMessages)
                     ?: return@withContext null
 
                 val safetyResult = ContentFilter.checkOutputSafety(finalText)
@@ -1445,6 +1408,9 @@ class AiService(context: Context) : AiServiceProvider {
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
+                // 复读惩罚（provider 门控）：抑制「换种说法再讲一遍」的语义级复述。
+                // 仅标准 OpenAI 语义 provider 注入，其余不注入以免未知字段被 400（见 ApiPenalty.kt）。
+                jsonBody.applyRepetitionPenalty(config.provider)
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
                 // 行为说明：不配置就交给服务端使用模型默认输出上限。
@@ -1582,6 +1548,8 @@ class AiService(context: Context) : AiServiceProvider {
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
+                // 复读惩罚（provider 门控）：非流式聊天/工具生成路径同样注入（见 ApiPenalty.kt）。
+                jsonBody.applyRepetitionPenalty(config.provider)
                 // 仅当用户显式配置了 Max Tokens 才发送该字段：默认写死 800 会被推理模型
                 // 整个消耗在思考过程上，导致 content 为空（"模型仅返回了思考过程"）。
                 // 行为说明：不配置就交给服务端使用模型默认输出上限。
@@ -2048,12 +2016,9 @@ class AiService(context: Context) : AiServiceProvider {
                 val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
                 val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50)
                 val stickerManager = StickerManager.getInstance(appContext)
-                val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
-                    val displayName = sticker.description?.takeIf {
-                        it.isNotBlank() && !it.startsWith("sticker_") && it.length <= 20
-                    } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() && it.length <= 20 }
-                    if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
-                }.distinct()
+                // 收口到 StickerManager 唯一装配入口：不按长度静默丢弃（修「规则丢失→内部文件名→被丢」），
+                // 自定义表情优先占位、内置超预算才截断（见 StickerPromptNames）。
+                val availableStickers = stickerManager.getStickerNamesForPrompt()
                 val phase = ConversationPhaseDetector.detect(sortedHistory)
                 val allowEnvAnchor = resolveAllowEnvAnchor(companion.id, sortedHistory)
                 // 自定义表情语义清单（E2 段）：未导入时为空 → 提示词逐字节零变化
@@ -2230,6 +2195,8 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
                 if (!requiresFixedTemperature(config.model)) {
                     jsonBody.put("temperature", safeTemp.toApiTemperature())
                 }
+                // 复读惩罚（provider 门控）：识图生成同属聊天生成，注入（见 ApiPenalty.kt）。
+                jsonBody.applyRepetitionPenalty(config.provider)
                 // 同聊天路径：未显式配置则不发送 max_tokens，避免推理模型的思考过程挤占额度
                 config.maxTokens?.takeIf { it > 0 }?.let { maxTokens ->
                     val maxTokensParam = if (usesMaxCompletionTokens(config.provider)) {
@@ -2492,13 +2459,8 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
             val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
             val memoryContext = memoryProvider.getMemoryContext(entity.id, null, lastUserMessage, limit = 50)
             val stickerManager = StickerManager.getInstance(appContext)
-            val availableStickers = stickerManager.getAllStickers().mapNotNull { sticker ->
-                val displayName = sticker.description?.takeIf {
-                    it.isNotBlank() && !it.startsWith("sticker_") && it.length <= 20
-                } ?: sticker.name.removePrefix("sticker_").removeSuffix(".png")
-                    .takeIf { it.isNotBlank() && it.length <= 20 }
-                if (displayName.isNullOrBlank() || displayName.length > 20) null else displayName
-            }.distinct()
+            // 收口到 StickerManager 唯一装配入口（见 StickerPromptNames）：不按长度静默丢弃。
+            val availableStickers = stickerManager.getStickerNamesForPrompt()
             val role = userRepository.selectedRole.value
             val phase = ConversationPhaseDetector.detect(sanitizedHistory)
             val allowEnvAnchor = resolveAllowEnvAnchor(entity.id, sanitizedHistory)
