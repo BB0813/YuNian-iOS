@@ -4,7 +4,6 @@ import com.yunian.ai.uicommon.icon.AppIcons
 
 
 import com.yunian.ai.uicommon.theme.AppTheme
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -94,6 +93,7 @@ import com.yunian.ai.common.CompanionRole
 import com.yunian.ai.database.model.CompanionEntity
 import com.yunian.ai.feature.companion.ui.viewmodel.CreateCompanionViewModel
 import com.yunian.ai.uicommon.image.cropper.ImageCropperDialog
+import com.yunian.ai.uicommon.image.decodeUriSampledForCrop
 import com.yunian.ai.uicommon.image.viewer.FullscreenImageViewer
 import com.yunian.ai.uicommon.picker.ui.CustomImagePicker
 import java.io.File
@@ -1148,14 +1148,10 @@ fun CreateCompanionScreen(
 
     LaunchedEffect(pendingCropUri) {
         val uri = pendingCropUri ?: return@LaunchedEffect
+        // 采样解码 + OOM 兜底（修 FIX-1）：全尺寸 1080×2400 截图解码即 ≈10MB，再进裁剪峰值翻倍，
+        // MIUI/MTK 机型易 OOM 闪退（OOM 是 Error，原 catch(Exception) 抓不到）。
         cropBitmap = withContext(Dispatchers.IO) {
-            try {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                }
-            } catch (_: Exception) {
-                null
-            }
+            decodeUriSampledForCrop(context, uri)?.asImageBitmap()
         }
         if (cropBitmap == null) {
             pendingCropUri = null

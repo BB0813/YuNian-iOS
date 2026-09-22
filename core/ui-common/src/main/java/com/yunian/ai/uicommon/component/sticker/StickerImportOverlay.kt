@@ -550,6 +550,9 @@ private suspend fun decodeUriSampled(context: Context, uri: Uri, maxDimension: I
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)
             }
+        } catch (_: OutOfMemoryError) {
+            // MIUI/MTK 上超大/畸形图即便降采样仍可能 OOM（Error 非 Exception）；兜底返回 null 走占位
+            null
         } catch (_: Exception) {
             null
         }
