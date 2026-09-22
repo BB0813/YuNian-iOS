@@ -127,18 +127,8 @@
 -keep,includedescriptorclasses class com.yunian.ai.security.NativeBridge { *; }
 -keep,includedescriptorclasses class com.yunian.ai.security.KmsProvider { *; }
 
-# ================================================================
-# Google AI Edge LiteRT-LM (litertlm-android) — CRITICAL
-# ================================================================
-# R8 does NOT understand native library loading side effects and WILL:
-#   1. Strip System.loadLibrary() calls from static initializers
-#   2. Rename JNI classes → native method names in .so won't match
-#   3. Remove "unused" native methods
-# This causes: No implementation found → SIGILL → instant crash.
-# Keep ALL litertlm classes, members, and native method signatures intact.
--keep,includedescriptorclasses class com.google.ai.edge.litertlm.** { *; }
--keep,includedescriptorclasses class com.google.ai.edge.litertlm.NativeLibraryLoader { *; }
--keep,includedescriptorclasses class com.google.ai.edge.litertlm.LiteRtLmJni { *; }
+# 说明：Google AI Edge LiteRT-LM 相关 keep 规则已随 feature:localmodel 一并删除
+# （D4 本地推理统一由 core:agent 的 Rust Cordis Agent / liblianyu_agent.so 承担）。
 
 # Prevent R8 from stripping System.loadLibrary calls in static initializers.
 # Even with -keep, R8 may optimize away side-effect-free-looking code paths

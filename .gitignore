@@ -115,3 +115,17 @@ nul
 
 # 本地参考项目副本（146M，不参与构建；此前仅存于 .git/info/exclude，换克隆即失效）
 /rikkahub/
+
+# ── Agent 迁移期临时产物（2026-09-17 收口，防止再次污染仓库）─────────────
+# 临时诊断脚本：一律以 _tmp_ 前缀写在仓库根，禁止入库
+/_tmp_*
+# 根目录 & docs 下的备份残留
+/*.bak
+/docs/*.bak
+# Rust / 构建输出（agent-native 是独立 cargo crate，target 不入库）
+/agent-native/target/
+# JVM 测试模块构建输出
+/shell/bin/
+/shell/build/
+# master 参考工作树（git worktree add 产物，约 146M）
+/_ref_master/

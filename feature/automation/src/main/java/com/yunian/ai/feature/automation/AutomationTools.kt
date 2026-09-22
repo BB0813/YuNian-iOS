@@ -3,6 +3,9 @@ package com.yunian.ai.feature.automation
 import android.app.Application
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ToolRegistry
+import com.yunian.ai.domain.plugin.LianYuPlugin
+import com.yunian.ai.domain.plugin.PluginContext
+import com.yunian.ai.domain.plugin.PluginServices
 import com.yunian.ai.feature.automation.data.Automation
 import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
 import com.yunian.ai.feature.automation.data.AutomationStore
@@ -21,6 +24,22 @@ object AutomationTools {
         ToolRegistry.register(ListAutomationsTool(store))
         ToolRegistry.register(FireAutomationTool(store, app))
     }
+
+    // ── 工具工厂（Cordis 插件装配用；与 registerAll 注册同一批实现） ──
+
+    fun createAutomationTool(store: AutomationStore, app: Application): AiTool =
+        CreateAutomationTool(store, app)
+
+    fun createWorkflowTool(store: AutomationStore, app: Application): AiTool =
+        CreateWorkflowTool(store, app)
+
+    fun cancelAutomationTool(store: AutomationStore, app: Application): AiTool =
+        CancelAutomationTool(store, app)
+
+    fun listAutomationsTool(store: AutomationStore): AiTool = ListAutomationsTool(store)
+
+    fun fireAutomationTool(store: AutomationStore, app: Application): AiTool =
+        FireAutomationTool(store, app)
 
     private class CreateAutomationTool(
         private val store: AutomationStore,
@@ -229,7 +248,12 @@ object AutomationTools {
         private val app: Application
     ) : AiTool {
         override val name = "automation_fire"
-        override val description = "手动触发某个自动化或工作流（立即执行，不等定时）。参数 id 为自动化ID；或给 title 按名称模糊匹配唯一命中后触发。"
+        override val description =
+            "立即触发某个已存在的自动化或工作流并同步返回执行结果。参数 id 为自动化ID；" +
+                "或给 title 按名称模糊匹配唯一命中后触发。" +
+                "注意：本工具只能立即执行，不能预约未来时间——需要定时请改用 " +
+                "automation_create 创建带触发时间的自动化。"
+
         override val parametersJsonSchema = """
             {"type":"object","properties":{
                 "id":{"type":"string","description":"自动化ID"},
@@ -254,6 +278,46 @@ object AutomationTools {
             val result = AutomationExecutor(app).execute(target)
             val ok = result is WorkflowEngine.Result.Success
             return """{"fired":true,"title":"${target.title}","success":$ok}"""
+        }
+    }
+}
+
+/**
+ * 自动化工具插件（Cordis 双层插件模板 · 代码插件，kind = TOOL）。
+ *
+ * 与 [AutomationTools.registerAll] 的差异：逐工具注册 [PluginContext.effect] 注销副作用，
+ * 插件卸载时工具随之清理（「卸载不留鸡毛」语义）。
+ * 装配契约：requires = [PluginServices.TOOLS]（宿主预置 ToolRegistry）。
+ *
+ * ⚠️ 调度层（AutomationScheduler / AutomationFireWorker / AutomationTickProviderImpl）
+ * 不在插件范围内 —— 定时器由 Kotlin 侧持有（Rust 无定时器）。
+ */
+class AutomationPlugin(
+    private val store: AutomationStore,
+    private val app: Application,
+) : LianYuPlugin {
+
+    companion object {
+        const val ID = "automation.core"
+    }
+
+    override val id: String = ID
+    override val name: String = "自动化工具"
+    override val requires: Set<String> = setOf(PluginServices.TOOLS)
+    override val configSchema: String? = null
+
+    override fun setup(ctx: PluginContext) {
+        val registry = ctx.inject<ToolRegistry>(PluginServices.TOOLS)
+        val tools = listOf(
+            AutomationTools.createAutomationTool(store, app),
+            AutomationTools.createWorkflowTool(store, app),
+            AutomationTools.cancelAutomationTool(store, app),
+            AutomationTools.listAutomationsTool(store),
+            AutomationTools.fireAutomationTool(store, app),
+        )
+        tools.forEach { registry.register(it) }
+        tools.forEach { tool ->
+            ctx.effect({ registry.unregister(tool.name) }, "unregister:${tool.name}")
         }
     }
 }

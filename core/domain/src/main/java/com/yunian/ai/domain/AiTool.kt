@@ -10,6 +10,20 @@ interface AiTool {
 
     val parametersJsonSchema: String
 
+    /**
+     * 工具归属的工具集（对齐 Hermes TOOLSETS 分组）。
+     * 如 `setOf("chat")` / `setOf("memory")` / `setOf("commerce")`。
+     * 空 = 归属「通用」工具集（domain）。装配 Agent 工具列表时按工具集展开/过滤。
+     */
+    val toolsets: Set<String> get() = emptySet()
+
+    /**
+     * 可用性检查（对齐 Hermes check_fn）：按当前环境实时判断工具是否可用。
+     * 默认恒可用；实现类可覆盖（如检测网络 / API 配置 / 权限 / 开关）。
+     * [ToolRegistry.availableTools] 会按 30s TTL 缓存结果，60s 内容忍抖动（flake）。
+     */
+    fun isAvailable(): Boolean = true
+
     suspend fun execute(argumentsJson: String): String
 
     fun systemPrompt(): String = ""
@@ -19,15 +33,57 @@ interface AiTool {
     fun summarizeArguments(argumentsJson: String): String = argumentsJson.take(120)
 }
 
+/**
+ * 将工具列表序列化为 OpenAI tools 数组 JSON 字符串。
+ *
+ * 格式：[{"type":"function","function":{"name","description","parameters":{...}}}]
+ *
+ * 与 [ToolRegistry.toolDefinitionsJson] 的区别：这里用**调用方显式传入的**工具列表，
+ * 而非全局注册池——标准 Agent 模式下每个会话注入自己的工具集（如气泡连发只注入 emit_bubble），
+ * 避免全局注册表污染其他对话。
+ */
+fun List<AiTool>.toToolDefinitionsJson(): String {
+    if (isEmpty()) return "[]"
+    val sb = StringBuilder("[")
+    forEachIndexed { index, tool ->
+        if (index > 0) sb.append(",")
+        sb.append("{\"type\":\"function\",\"function\":{")
+        sb.append("\"name\":\"").append(tool.name.escapeJson()).append("\",")
+        sb.append("\"description\":\"").append(tool.description.escapeJson()).append("\",")
+        sb.append("\"parameters\":").append(tool.parametersJsonSchema)
+        sb.append("}}")
+    }
+    sb.append("]")
+    return sb.toString()
+}
+
+internal fun String.escapeJson(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"")
+
 object ToolRegistry {
     private val tools = ConcurrentHashMap<String, AiTool>()
 
+    /** 可用性快照（check_fn 结果 + 检查时间戳） */
+    private data class Availability(val available: Boolean, val checkedAt: Long)
+
+    /** check_fn 结果 TTL（30s）：TTL 内直接用缓存，不重复求值 */
+    private const val AVAILABILITY_TTL_MS = 30_000L
+
+    /** flake 容忍窗口（60s）：上次可用、本次求值不可用时，窗口内容忍为可用 */
+    private const val FLAKE_GRACE_MS = 60_000L
+
+    private val availabilityCache = ConcurrentHashMap<String, Availability>()
+
+    /** 注册工具（同名覆盖） */
     fun register(tool: AiTool) {
         tools[tool.name] = tool
+        availabilityCache.remove(tool.name)
     }
 
+    /** 注销工具 */
     fun unregister(name: String) {
         tools.remove(name)
+        availabilityCache.remove(name)
     }
 
     fun get(name: String): AiTool? = tools[name]
@@ -36,23 +92,64 @@ object ToolRegistry {
 
     fun isNotEmpty(): Boolean = tools.isNotEmpty()
 
-    fun toolDefinitionsJson(): String {
-        if (tools.isEmpty()) return "[]"
-        val sb = StringBuilder("[")
-        tools.values.forEachIndexed { index, tool ->
-            if (index > 0) sb.append(",")
-            sb.append("{\"type\":\"function\",\"function\":{")
-            sb.append("\"name\":\"").append(escapeJson(tool.name)).append("\",")
-            sb.append("\"description\":\"").append(escapeJson(tool.description)).append("\",")
-            sb.append("\"parameters\":").append(tool.parametersJsonSchema)
-            sb.append("}}")
+    /**
+     * 当前可用的工具列表（对齐 Hermes check_fn + memo 缓存）。
+     *
+     * 对每个工具求值 [AiTool.isAvailable]，结果按 30s TTL 缓存；
+     * 上次可用、本次不可用且距上次检查 < 60s 时容忍为可用（避免瞬时抖动
+     * 把工具从模型工具列表里抖掉，破坏 prompt 缓存稳定性）。
+     *
+     * 装配 Agent 工具列表时应使用本方法而非 [all]。
+     */
+    fun availableTools(): List<AiTool> {
+        val now = System.currentTimeMillis()
+        return tools.values.filter { tool ->
+            val cached = availabilityCache[tool.name]
+            when {
+                cached == null -> {
+                    val fresh = tool.isAvailable()
+                    availabilityCache[tool.name] = Availability(fresh, now)
+                    fresh
+                }
+                now - cached.checkedAt < AVAILABILITY_TTL_MS -> cached.available
+                else -> {
+                    val fresh = tool.isAvailable()
+                    val final = if (!fresh && cached.available && now - cached.checkedAt < FLAKE_GRACE_MS) {
+                        true // flake 容忍：窗口内保持可用
+                    } else {
+                        fresh
+                    }
+                    availabilityCache[tool.name] = Availability(final, now)
+                    final
+                }
+            }
         }
-        sb.append("]")
-        return sb.toString()
     }
+
+    /** 清空可用性缓存（注册/配置变化后主动失效用） */
+    fun invalidateAvailabilityCache() {
+        availabilityCache.clear()
+    }
+
+    /**
+     * 查询归属指定工具集（TOOLSETS）的工具（对齐 Hermes toolsets 分组）。
+     * 空工具集名 = 通用集：返回未声明任何工具集的工具。
+     */
+    fun toolsInToolset(toolset: String): List<AiTool> =
+        if (toolset.isBlank()) {
+            tools.values.filter { it.toolsets.isEmpty() }
+        } else {
+            tools.values.filter { toolset in it.toolsets }
+        }
+
+    /** 当前注册的全部工具集名（不含空通用集） */
+    fun toolsetNames(): Set<String> = tools.values.flatMap { it.toolsets }.toSet()
+
+    fun toolDefinitionsJson(): String = tools.values.toList().toToolDefinitionsJson()
 
     fun clear() {
         tools.clear()
+        availabilityCache.clear()
     }
 
     fun systemPromptSection(): String {
@@ -85,7 +182,4 @@ object ToolRegistry {
             appendLine("6. 确实没有任何工具适用的纯聊天场景，才正常聊天回复。")
         }
     }
-
-    private fun escapeJson(s: String): String =
-        s.replace("\\", "\\\\").replace("\"", "\\\"")
 }

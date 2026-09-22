@@ -321,4 +321,8 @@ interface UnifiedMemoryDao {
 
     @Query("UPDATE unified_memories SET isDeleted = 1, updatedAt = :now WHERE id IN (:ids)")
     suspend fun softDeleteByIds(ids: List<Long>, now: Long = System.currentTimeMillis()): Int
+
+    /** 按主键查询（排除软删除），Agent Memory 层复核用 */
+    @Query("SELECT * FROM unified_memories WHERE id = :id AND isDeleted = 0")
+    suspend fun getByIdSync(id: Long): MemoryRecord?
 }

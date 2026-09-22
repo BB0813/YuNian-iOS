@@ -18,15 +18,20 @@
 ├── feature:settings (设置) ← 应用设置
 ├── feature:profile (个人页) ← 用户资料
 ├── feature:notification (通知/保活) ← 前台服务
-├── feature:localmodel (本地AI模型) ← LiteRT-LM推理
 ├── feature:wechat (微信风格) ← UI风格
 │
+├── core:agent (Cordis Agent) ← Rust 设备端推理运行时（原 feature:localmodel 已退役）
 ├── core:common (基础工具) ← ContentFilter, 通用工具
 ├── core:database (数据层) ← Room, 6个Entity
 ├── core:network (网络层) ← AI API多后端
 ├── core:security (安全模块) ← JNI+OLLVM防篡改
 └── core:ui-common (UI组件) ← 主题/动画组件
 ```
+
+> **修订（2026-09-17）**：本文档最初面向 `security/vmp-encryption` 分支撰写。
+> 模块拓扑仅列出当时存在的模块；当前仓库共 **25 个模块**（8 个 `core:*`：`agent, common,
+> database, domain, network, security, ui-common, wechat`；15 个 `feature:*`；1 个 `:shell`）。
+> `feature:localmodel` 已退役（D4），本地推理改由 `core:agent` 的 Rust Cordis Agent 承担。
 
 ### 1.2 安全性相关性排序
 
@@ -35,7 +40,7 @@
 | **P0** | **core:security** | 安全防线的执行层，所有防护的载体 |
 | **P0** | **core:database** | Room DB存储敏感数据（对话记录、API Key配置） |
 | **P0** | **core:network** | AI API通信信道，需防MITM和Key泄露 |
-| **P1** | **feature:localmodel** | 本地模型文件完整性，防模型替换攻击 |
+| **P1** | **core:agent** | 设备端推理运行时（`liblianyu_agent.so`）完整性，防替换攻击 |
 | **P1** | **:app (Application/Activity)** | 应用入口，初始化检测链 |
 | **P1** | **core:common** | ContentFilter等安全基线逻辑 |
 | **P2** | **feature:memory** | 记忆数据涉及用户隐私 |

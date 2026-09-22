@@ -6,9 +6,17 @@
 
 ## 一、冻结基线
 
-- 当前数据库 `yunian_database`，`version = 41`，共 22 个实体（Entity）。
-- v41 是**最后一次** schema 变更：新增了一张通用键值表 `app_meta`，用于承载未来所有新增功能的持久化数据。
-- 迁移链完整覆盖 1 → 41（`MIGRATION_1_6` … `MIGRATION_40_41`），`exportSchema = true`。
+- 冻结基线为 `yunian_database` 的 **version = 41**（`AppDatabase.SCHEMA_FROZEN_VERSION`）。
+- v41 是**最后一次常规** schema 变更：新增了一张通用键值表 `app_meta`，用于承载未来所有新增功能的持久化数据。
+- 迁移链完整覆盖 1 → 45（`MIGRATION_1_6` … `MIGRATION_44_45`），`exportSchema = true`。
+- **基线之上已批准的例外**（均走向后兼容迁移，见第七节）：
+
+| 版本 | 内容 | 性质 |
+|------|------|------|
+| 41 → 42 | `lorebook_entries.useRegex` | 加列 |
+| 42 → 43 | `lorebook_entries.sortOrder`、`companions.lorebookIdsJson` | 加列 |
+| 43 → 44 | `companions.apiConfigId`（角色级 API 隔离） | 加列 |
+| 44 → 45 | Agent 架构迁移：新增 10 张表 | 加表（纯增量） |
 
 ## 二、通用扩展机制（新增功能的数据落点）
 
@@ -52,8 +60,8 @@ store.contains("feature_x.config")
 
 | 位置 | 现状 | 冻结后的约定 |
 |------|------|--------------|
-| `AppDatabase.kt` `@Database(entities=…)` | 22 个实体，version 41 | 冻结，禁止增删实体 |
-| `AppDatabase.kt` `MIGRATIONS` 数组 | 1→41 全覆盖 | 冻结，禁止追加（除非走评审） |
+| `AppDatabase.kt` `@Database(entities=…)` | 32 个实体，version 45 | 冻结，禁止增删实体（除走第五节评审） |
+| `AppDatabase.kt` `MIGRATIONS` 数组 | 1→45 全覆盖 | 冻结，禁止追加（除非走评审） |
 | `AppDatabase.kt` `onCreate` 回调 | `seedApiProviderPresets`（`INSERT OR IGNORE`，幂等） | 保持幂等 |
 | `DefaultCompanionSeeder.kt` | 已有 `existing != null` 幂等判断 | 保持幂等 |
 | `SecurityDataSeeder.kt` | 安全基线种子 | 保持幂等，禁止重建 |
@@ -117,3 +125,32 @@ class MigrationTest {
 
 1. 连续多次启动 App，确认 `app_meta`、`api_provider_presets`、companion 种子等**不重复插入**（`INSERT OR IGNORE` 生效）。
 2. 用 `adb shell run-as <pkg> sqlite3 databases/yunian_database "SELECT COUNT(*) FROM app_meta"` 确认数值稳定。
+
+## 七、冻结例外记录
+
+按第五节流程批准过一次例外，必须留档：变更内容、理由、关键决策、验证方式。
+
+### 例外 #1：v44 → v45 Agent 架构迁移（新增 10 张表）
+
+**变更内容**：新增 `agent_skills`、`prompt_audit`、`agent_dispatch_log`、`sticker_entries`、`sticker_tags`、`sticker_usage_log`、`event_ledger`、`event_ledger_snapshot`、`delegation_records`、`worldbooks`。**未改动任何既有表/列/索引**。
+
+**为何 KV / ExtJson 不满足**：这 10 张表被 **Rust 侧（`agent-native`）通过 UniFFI 直读**，需要真实的关系表、索引与 `user_version` 契约；`app_meta` 的 KV 形态无法被 Rust 侧以 SQL 查询，也无法承载 `event_ledger` 的 `(streamId, sequence)` 唯一约束。
+
+**关键决策：为什么最终版本号是 45，而不是与 master 对齐的 48**
+
+- 本地 v44 与 master(lianyu) v44 **不是同一套 schema**——两边版本号巧合相同，但 master 的这批表分散建在它的 v38/v39/v43/v44 与 v45…v48 上，而本地 v38–v44 用在 quiz / lorebook / app_meta 上，因此本地**从未**存在这 10 张表。
+- 已核对：`agent_skills` / `prompt_audit` / `agent_dispatch_log` / `sticker_*` 在 master v44→v48 期间**结构无任何变更**；`event_ledger`、`event_ledger_snapshot`、`delegation_records`、`worldbooks` 是 master v45+ 才新建。故**一次建终态**即可，无需复刻 master 的 44→48 多步链。
+- 因此**不必**跳到 48：跳到 48 会让本地凭空多出 45→48 三个"空洞版本"，且本地 schema 与 master v48 本就不同（本地保留 5 张独有表、master 没有），版本号相同反而制造"结构相同"的错觉。**45 = 44 + 1**，迁移链最简洁、语义最诚实。
+- 代价：本地与 master 的版本号不再可比。**这是刻意接受的**——两套 schema 已分叉，版本号可比性本就不存在。
+
+**红线遵守情况**：
+
+- 仅 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`；无 `DROP TABLE`、无 `TRUNCATE`、无改列、无数据搬迁。
+- 未触碰本地既有 22 张表，包括本地独有的 `app_meta`、`keywords`、`quiz_questions`、`lorebooks`、`lorebook_entries`，以及 `companions.apiConfigId` / `companions.lorebookIdsJson`。
+
+**DDL 来源与索引命名**：逐字照抄 master `core/database/schemas/com.lianyu.ai.database.AppDatabase/48.json` 中 `entities[].createSql` / `indices[].createSql`——即 Room 迁移校验时比对的目标语句。注意 `sticker_entries` / `sticker_usage_log` 使用的是**自定义索引名** `idx_sticker_entries_hash` / `idx_sticker_entries_tags` / `idx_sticker_usage_sticker` / `idx_sticker_usage_time`，而非 Room 默认的 `index_<表>_<列>`。**照抄 JSON 是唯一可靠做法**，手写默认名会导致迁移校验报 `Migration didn't properly handle`。
+
+**验证方式**：按第六节方法 A/B。手动覆盖安装（方法 B）为本例主验证手段：装 v44 旧版 → 写聊天/记忆/日记 → 覆盖安装 → 确认原有数据完好且 10 张新表已建。
+
+> 注：Rust 侧 `agent-native/src/native_gateway.rs` 的 `MAX_SUPPORTED_SCHEMA` 必须 ≥ 本地最终版本号，否则 Agent 会以"schema 超出直读支持范围"拒绝工作。本次随 Agent 架构迁移一并调整。
+

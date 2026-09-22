@@ -92,7 +92,9 @@
 - **互动模式规则**：分别约束句式倾向与互动策略。
 - **回复示例**：提供成对的 Few-shot 示例，强化模型对性别风格的感知。
 
-这些规则被 `AiPromptBuilder.buildSystemPrompt()` 与 `ChatViewModel.generateWithLocalModel()` 同时引用，确保云端模型与本地 LiteRT-LM 模型输出风格一致。
+这些规则被 `AiPromptBuilder.buildSystemPrompt()` 统一引用（云端 API 路径与 Cordis Agent 路径共用同一份 `RolePromptProvider`），确保设备端推理与云端模型输出风格一致。
+
+> **修订（2026-09-17）**：原文提到的 `ChatViewModel.generateWithLocalModel()` 已随 `feature:localmodel` 退役（D4）一并删除，本地 LiteRT-LM 推理路径不再存在。设备端推理统一由 `core:agent` 的 Rust Cordis Agent（`liblianyu_agent.so`）承担，其角色规则注入仍走同一份 `RolePromptProvider`。
 
 ## 7. 角色切换与数据隔离
 

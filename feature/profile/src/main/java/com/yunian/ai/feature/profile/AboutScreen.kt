@@ -74,7 +74,6 @@ private val ossCategories = listOf(
     OssCategory(
         title = "AI 与语音",
         items = listOf(
-            OssItem("LiteRT-LM（Google AI Edge LiteRT）", "本地大模型推理"),
             OssItem("sherpa-onnx", "语音识别（ONNX Runtime）")
         )
     ),

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YuNian (予念) is an Android AI companion app built with Kotlin and Jetpack Compose. It uses a **feature-based modular architecture** with 16 Gradle modules: 1 `:app` entry, 9 `feature:*` modules, 6 `core:*` modules, and 1 `:shell` JVM test module.
+YuNian (予念) is an Android AI companion app built with Kotlin and Jetpack Compose. It uses a **feature-based modular architecture** with 25 Gradle modules: 1 `:app` entry, 15 `feature:*` modules, 8 `core:*` modules, and 1 `:shell` JVM test module.
 
 ## Build Commands
 
@@ -30,8 +30,8 @@ Gradle wrapper uses a Tencent mirror (`mirrors.cloud.tencent.com/gradle/gradle-9
 
 ```
 :app
-  └─→ feature:* (chat, companion, groupchat, localmodel, memory, notification, profile, settings, wechat)
-        └─→ core:* (common, database, domain, network, security, ui-common)
+  └─→ feature:* (automation, backup, chat, coffee, companion, groupchat, mcp, memory, notification, profile, qqbot, settings, skills, wechat, worldbook)
+        └─→ core:* (agent, common, database, domain, network, security, ui-common, wechat)
 
 :shell  (JVM test module, isolated — not part of Android build)
 ```
@@ -79,7 +79,7 @@ Pass arguments via navigation path parameters, not global state.
 
 ### Cross-Feature Communication (`core:domain`)
 
-- Shared interfaces (`LocalModelProvider`, `UserProfileProvider`, `CompanionProvider`) — consumed by feature modules.
+- Shared interfaces (`UserProfileProvider`, `CompanionProvider`) — consumed by feature modules.
 - `ServiceRegistry` in `app/YuNianApplication.kt` binds implementations, eliminating feature→feature dependencies.
 
 ### Network (`core:network`)
@@ -87,16 +87,11 @@ Pass arguments via navigation path parameters, not global state.
 - `AiService.kt` — AI dialogue gateway supporting OpenAI, DeepSeek, Claude, Gemini, DashScope, local model.
 - `RequestSecurityInterceptor` — TLS 1.2+1.3 pinning and request integrity.
 
-### Local AI Model (`feature:localmodel`)
+### Cordis Agent (`core:agent`)
 
-- Uses **LiteRT-LM** (`com.google.ai.edge.litertlm:litertlm-android:0.11.0`) for on-device inference with Gemma 4 E2B.
-- `LocalAiService` is a singleton with reference counting (`acquire()` / `close()`) because the native `Engine` is expensive to initialize.
-- `AndroidManifest.xml` declares two optional native libraries required by LiteRT-LM:
-  ```xml
-  <uses-native-library android:name="libvndksupport.so" android:required="false" />
-  <uses-native-library android:name="libOpenCL.so" android:required="false" />
-  ```
-- `LocalModelManager` handles downloading the model via `DownloadManager`, SHA-256 validation, and activation state persistence via DataStore.
+- `feature:localmodel` **has been retired** (local inference is now handled entirely by the Rust Cordis Agent runtime shipped as `liblianyu_agent.so`). There is no LiteRT-LM / Gemma on-device path anymore.
+- `AgentDialogueCoordinator` (with `:core:agent`) is the sole owner of `ContentFilter` / `BanManager` / `ImageGenProtocol` for bridge paths.
+- Memory reads/writes go through `core:domain`'s `MemoryProvider` (impl: `UnifiedMemoryProvider`).
 
 ### UI (`core:ui-common`)
 

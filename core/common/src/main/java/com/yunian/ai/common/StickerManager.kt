@@ -40,6 +40,14 @@ class StickerManager(private val context: Context) {
     private val _version = MutableStateFlow(0)
     val version: StateFlow<Int> get() = _version
 
+    /**
+     * 文件系统变更回调（导入 / 删除成功后触发）。
+     * 由应用启动时接线到 `StickerPreferenceFacade.syncMetadataFromFilesystem`，
+     * 实现「文件系统 → DB 元数据」回填 + 偏好引擎 rebuild。
+     */
+    @Volatile
+    var onStickerFilesChanged: (suspend () -> Unit)? = null
+
     init {
         stickersDir.mkdirs()
         importedDir.mkdirs()
@@ -807,7 +815,12 @@ data class StickerInfo(
     val category: String = "default",
     val isBuiltIn: Boolean = true,
     val description: String? = null,
-    val fileName: String? = null
+    val fileName: String? = null,
+    /**
+     * 偏好引擎用的语义标签（情绪 / 场景），由描述或规则派生。
+     * 内置表情包通常为 null（回落到名称/描述关键词匹配）。
+     */
+    val tags: List<String>? = null
 )
 
 // ================== 导入格式判定（纯函数，内容优先于文件名，便于 JVM 单测） ==================

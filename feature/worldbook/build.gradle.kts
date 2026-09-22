@@ -32,6 +32,9 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:ui-common"))
     implementation(project(":core:domain"))
+    // 阶段 5g：数据源切换为 `worldbooks` 表（master 契约），需复用 core:agent 的
+    // WorldbookJsonCodec（ST World Info 编解码）与 WorldbookRepository（运行时同步）
+    implementation(project(":core:agent"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

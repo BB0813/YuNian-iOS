@@ -32,6 +32,8 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:ui-common"))
     implementation(project(":core:domain"))
+    // Agent 核心门面（世界书数据层 / 设置页读 Agent 配置）
+    implementation(project(":core:agent"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

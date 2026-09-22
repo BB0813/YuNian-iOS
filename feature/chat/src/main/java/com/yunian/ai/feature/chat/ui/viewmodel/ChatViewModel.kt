@@ -72,6 +72,11 @@ class ChatViewModel(
 
     private val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
+
+    /** 统一 AI 对话中间层（core:agent 实现）：语音通话回复走 Agent 回合。 */
+    private val dialogueCoordinator: com.yunian.ai.domain.DialogueCoordinator
+        get() = ServiceRegistry.getOrThrow(com.yunian.ai.domain.DialogueCoordinator::class.java)
+
     private val sttService by lazy { SttService.getInstance(application) }
 
     private val cachedRecent = chatRepository.getCachedRecent(companionId).orEmpty()
@@ -264,40 +269,22 @@ class ChatViewModel(
     suspend fun sendVoiceCallMessage(text: String): String? {
         val companion = _companionData.value ?: return null
         return runCatching {
-            messageWriter.enqueueChat(
-                ChatMessage(companionId = companionId, content = text, isFromUser = true, timestamp = System.currentTimeMillis())
-            )
-            val rawHistory = contextResolver.getHistoryForAi(companionId)
-                .filterNot { !it.isFromUser && it.content.replace("\u200B", "").isBlank() }
-            val history = com.yunian.ai.domain.AiDialogueHistoryPolicy.sanitizeForModel(
-                rawHistory.map { it.toAiChatMessage() }
-            )
-            val tools = if (ChatToolIntent.shouldEnableTools(
-                    text,
-                    rawHistory.lastOrNull { it.isFromUser }?.content
+            // 通话语音回复走统一 AI 对话中间层（core:agent）：
+            // 安全过滤 / 落库 / 记忆提取全部内聚，UI 侧不再直连 AiService。
+            val result = dialogueCoordinator.generateReply(
+                com.yunian.ai.domain.DialogueRequest(
+                    companionId = companionId,
+                    text = text,
+                    imagePath = null,
                 )
-            ) {
-                ToolRegistry.all()
-            } else {
-                emptyList()
-            }
-            val response = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                if (tools.isEmpty()) {
-                    aiService.sendMessage(companion.toAiCompanionInfo(), history, 0, false)
-                } else {
-                    aiService.sendMessage(companion.toAiCompanionInfo(), history, 0, false, tools)
-                }
-            } ?: return null
-            val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(response.content)
+            )
+            val content = result.replyText.takeIf { it.isNotBlank() } ?: return@runCatching null
+            val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(content)
             if (toastMsg != null) {
                 _events.tryEmit(ChatUiEvent.Error(toastMsg))
                 return@runCatching null
             }
-            response.content.takeIf { it.isNotBlank() }?.also { content ->
-                messageWriter.enqueueChat(
-                    ChatMessage(companionId = companionId, content = content, isFromUser = false, timestamp = System.currentTimeMillis())
-                )
-            }
+            content
         }.onFailure { SecureLog.e("ChatViewModel", "Voice call message failed", it) }.getOrNull()
     }
 

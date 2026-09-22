@@ -424,4 +424,99 @@ class AiResponseFinalizer(
     }
 
     var companionInfoProvider: (() -> com.yunian.ai.domain.AiCompanionInfo?)? = null
+
+    /**
+     * 落地 Rust `send_sticker` 工具事件（Agent 架构贴纸链路）。
+     *
+     * - `entryId != null`：Rust `builtin_send_sticker` 已通过 `sticker_pick` 回调预选实际表情包
+     *   （事件 extra 携带 `entry_id`）→ 按 id **直达落地**，保证与工具回灌结果一致；
+     * - `entryId == null`：`description` 为逗号分隔的命中标签（1~3 个）→ 偏好引擎采样选一张。
+     * - 均未命中 → 降级为 `[描述]` 文本消息，保证模型意图可见（不丢消息）。
+     *
+     * 贴纸消息编码约定：**普通 TEXT 消息，内容为 `[stickerId]`**，由渲染层识别为表情包
+     * （`MessageType` 无 STICKER 枚举，全仓库统一此约定）。
+     *
+     * @return 落库后的消息 id；≤0 表示未落地。
+     */
+    suspend fun deliverSticker(description: String, entryId: Long? = null): Long {
+        if (description.isBlank() && entryId == null) return -1
+        val tags = description.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val dao = com.yunian.ai.database.AppDatabase.getDatabase(application).stickerEntryDao()
+
+        // ① entryId 直达：跳过重新采样，按工具预选 id 落地
+        if (entryId != null) {
+            val entry = dao.getById(entryId)
+            if (entry != null) {
+                val msgId = enqueueStickerMessage(stickerIdOf(entry))
+                if (msgId > 0) {
+                    com.yunian.ai.agent.sticker.StickerPreferenceFacade.recordUsage(
+                        context = application,
+                        stickerId = entryId,
+                        source = com.yunian.ai.agent.uniffi.StickerSource.MODEL,
+                        contextTags = tags,
+                    )
+                }
+                return msgId
+            }
+            // entry 不存在（资源被清理）→ 落到引擎/兜底路径重新匹配
+        }
+
+        // ② 偏好引擎采样：tags → OR 命中 + 加权随机 → DB 条目 → 落地 + 记 Model 使用
+        if (tags.isNotEmpty()) {
+            val sampledId = runCatching {
+                com.yunian.ai.agent.sticker.StickerPreferenceFacade
+                    .sampleCandidates(application, limit = 1, queryTags = tags)
+                    .firstOrNull()
+            }.getOrNull()
+            if (sampledId != null) {
+                val entry = dao.getById(sampledId)
+                if (entry != null) {
+                    val msgId = enqueueStickerMessage(stickerIdOf(entry))
+                    if (msgId > 0) {
+                        com.yunian.ai.agent.sticker.StickerPreferenceFacade.recordUsage(
+                            context = application,
+                            stickerId = sampledId,
+                            source = com.yunian.ai.agent.uniffi.StickerSource.MODEL,
+                            contextTags = tags,
+                        )
+                    }
+                    return msgId
+                }
+            }
+        }
+
+        // ③ 兜底：按描述匹配内置/未入库表情包；再不行退化为 [描述] 文本
+        val sticker = stickerManager.findStickerByDescriptionExact(description)
+            ?: stickerManager.findStickerByDescription(description)
+        if (sticker != null) {
+            return enqueueStickerMessage(stickerIdOf(sticker))
+        }
+        SecureLog.w("AiResponseFinalizer", "Sticker not matched: [$description], fallback to text")
+        return enqueueStickerMessage(description)
+    }
+
+    /** 贴纸 id 收敛：description 优先 → 文件名（去 sticker_/.png）→ name。 */
+    private fun stickerIdOf(entry: com.yunian.ai.database.model.StickerEntryEntity): String =
+        entry.description?.takeIf { it.isNotBlank() }
+            ?: entry.fileName.removePrefix("sticker_").removeSuffix(".png").takeIf { it.isNotBlank() }
+            ?: entry.fileName
+
+    private fun stickerIdOf(sticker: StickerInfo): String =
+        sticker.description
+            ?: sticker.fileName?.removePrefix("sticker_")?.removeSuffix(".png")?.takeIf { it.isNotBlank() }
+            ?: sticker.name
+
+    /** 落库单条贴纸/文本消息并做微信广播；贴纸内容统一编码为 `[id]`。 */
+    private suspend fun enqueueStickerMessage(rawId: String): Long {
+        val content = "[$rawId]"
+        val message = ChatMessage(
+            companionId = companionId,
+            content = content,
+            isFromUser = false,
+            timestamp = System.currentTimeMillis(),
+        )
+        val msgId = messageWriter.enqueueChat(message)
+        if (msgId > 0) broadcastWeChatMessage(msgId, content)
+        return msgId
+    }
 }

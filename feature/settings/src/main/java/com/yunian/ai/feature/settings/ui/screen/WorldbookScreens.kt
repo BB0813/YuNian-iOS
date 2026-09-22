@@ -87,7 +87,8 @@ fun WorldbookScreen(onNavigateBack: () -> Unit, onNavigateToDetail: (Long) -> Un
                         stream.readBytes().toString(Charsets.UTF_8)
                     } ?: throw IllegalStateException("无法读取文件")
                 }
-                val dto = WorldbookTransfer.parse(text).getOrThrow()
+                // 阶段 5g §5.10：自动识别 ST World Info JSON 与旧 lianyu-worldbook 格式
+                val dto = WorldbookTransfer.parseAny(text).getOrThrow()
                 val provider = ServiceRegistry.get(LorebookProvider::class.java)
                     ?: throw IllegalStateException("服务未初始化")
                 val taken = provider.getAllLorebooks().map { it.name }.toSet()
@@ -337,7 +338,9 @@ fun WorldbookDetailScreen(worldbookId: Long, onNavigateBack: () -> Unit) {
                             )
                         }
                     )
-                    WorldbookTransfer.serialize(dto)
+                    // 阶段 5g §5.10：导出为 ST World Info JSON（map 格式 entries），
+                    // 既可无损回导，也可直接投喂 SillyTavern / Rust 引擎
+                    WorldbookTransfer.serializeSt(dto)
                 }
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { out ->

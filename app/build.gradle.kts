@@ -336,6 +336,9 @@ dependencies {
     implementation(project(":core:ui-common"))
     // S6：OutboundPort 直接使用 core:wechat 清洗/出站类型（feature:wechat 为 implementation，不传递）
     implementation(project(":core:wechat"))
+    // ★ Agent 架构：AgentFacade 编排层 + UniFFI 绑定 + 4 ABI 的 liblianyu_agent.so。
+    // 必须由 :app 直接依赖，否则 feature 模块走 implementation 不会把 native 库透传到 APK。
+    implementation(project(":core:agent"))
 
     // Feature modules
     implementation(project(":feature:companion"))
@@ -345,7 +348,6 @@ dependencies {
     implementation(project(":feature:notification"))
     implementation(project(":feature:profile"))
     implementation(project(":feature:settings"))
-    implementation(project(":feature:localmodel"))
     implementation(project(":feature:wechat"))
     implementation(project(":feature:qqbot"))
     implementation(project(":feature:backup"))
