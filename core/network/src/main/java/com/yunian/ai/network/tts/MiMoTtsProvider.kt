@@ -80,7 +80,7 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
                 clientFor(text.length).newCall(request).execute().use { response ->
                     val body = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
-                        lastError = "HTTP ${response.code}"
+                        lastError = buildHttpError(response.code, extractServerMessage(body))
                         SecureLog.e(TAG, "HTTP ${response.code}, bodyBytes=${body.length}")
                         return@withContext null
                     }
@@ -132,6 +132,14 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         val apiKey = config.mimoApiKey.trim()
         val baseUrl = normalizeBaseUrl(config.mimoBaseUrl) ?: return@withContext false
         if (apiKey.isBlank()) return@withContext false
+        // 音色复刻模型缺样本时，直接给出可区分的提示，避免用户误判为 Key/网络问题。
+        if (normalizeModel(config.mimoModel) == MODEL_TTS_VOICECLONE &&
+            config.mimoVoiceClonePath.trim().isBlank()
+        ) {
+            lastError = "请先选择音频样本再测试连接"
+            SecureLog.w(TAG, "voiceclone test connection without sample")
+            return@withContext false
+        }
         probeSpeech(apiKey, baseUrl)
     }
 
@@ -157,7 +165,7 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             clientFor(2).newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    lastError = "HTTP ${response.code}"
+                    lastError = buildHttpError(response.code, extractServerMessage(body))
                     return false
                 }
                 val ok = extractAudioData(body).isNotBlank()
@@ -244,24 +252,80 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
             lastError = "音频样本文件不存在，请重新选择"
             return null
         }
-        if (file.length() <= 0L) {
+        val length = file.length()
+        if (length <= 0L) {
             lastError = "音频样本为空"
             return null
         }
-        if (file.length() > MAX_CLONE_BYTES) {
-            lastError = "音频样本超过 10MB 限制"
+        // 官方限制的是 base64 编码后的字符串长度（10MB）；按原始长度统一判据早退（与编码后判据恒等价）。
+        if (MimoVoiceSampleFormat.exceedsCloneLimit(length)) {
+            lastError = MimoVoiceSampleFormat.tooLargeMessage(length)
             return null
         }
-        val mime = when (file.extension.lowercase(Locale.US)) {
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/wav"
-            else -> {
-                lastError = "仅支持 mp3 / wav 格式的音频样本"
+        // 以文件头魔数为准判定真实格式（不轻信扩展名/MIME 声明）。
+        val header = try {
+            file.inputStream().use { readHeaderBytes(it, MimoVoiceSampleFormat.SNIFF_BYTES) }
+        } catch (e: Exception) {
+            lastError = "读取音频样本失败：${e.message ?: e.javaClass.simpleName}"
+            SecureLog.e(TAG, "read clone sample header failed", e)
+            return null
+        }
+        val format = MimoVoiceSampleFormat.detect(header, declaredMime = null, fileName = file.name)
+            ?: run {
+                lastError = MimoVoiceSampleFormat.unsupportedMessage(
+                    declaredMime = null,
+                    fileName = file.name
+                )
                 return null
             }
+        val raw = try {
+            file.readBytes()
+        } catch (e: Exception) {
+            lastError = "读取音频样本失败：${e.message ?: e.javaClass.simpleName}"
+            SecureLog.e(TAG, "read clone sample failed", e)
+            return null
         }
-        val base64Str = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
-        return "data:$mime;base64,$base64Str"
+        if (raw.isEmpty()) {
+            lastError = "音频样本为空"
+            return null
+        }
+        val base64Str = Base64.encodeToString(raw, Base64.NO_WRAP)
+        return "data:${format.apiMime};base64,$base64Str"
+    }
+
+    private fun readHeaderBytes(input: java.io.InputStream, maxBytes: Int): ByteArray {
+        val buffer = ByteArray(maxBytes)
+        var read = 0
+        while (read < maxBytes) {
+            val n = input.read(buffer, read, maxBytes - read)
+            if (n <= 0) break
+            read += n
+        }
+        return buffer.copyOf(read)
+    }
+
+    /** 解析服务端错误响应体中的 message，供设置页展示（不含任何本地敏感信息）。 */
+    private fun extractServerMessage(body: String): String? {
+        if (body.isBlank()) return null
+        return runCatching {
+            val root = JSONObject(body)
+            val error = root.optJSONObject("error")
+            error?.optString("message")?.takeIf { it.isNotBlank() }
+                ?: root.optString("message").takeIf { it.isNotBlank() }
+                ?: error?.optString("type")?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
+    /** 组装 HTTP 错误文案：`HTTP 400：<服务端 message（截断）>`。 */
+    private fun buildHttpError(code: Int, serverMessage: String?): String {
+        val head = "HTTP $code"
+        if (serverMessage.isNullOrBlank()) return head
+        val trimmed = if (serverMessage.length > MAX_ERROR_MESSAGE_CHARS) {
+            serverMessage.take(MAX_ERROR_MESSAGE_CHARS) + "…"
+        } else {
+            serverMessage
+        }
+        return "$head：$trimmed"
     }
 
     private fun extractAudioData(body: String): String {
@@ -280,7 +344,7 @@ class MiMoTtsProvider : TtsProviderInterface, ConfigurableTtsProvider {
         private const val DEFAULT_MODEL = MODEL_TTS
         private const val DEFAULT_VOICE = "mimo_default"
         private const val DEFAULT_VOICE_DESIGN_PROMPT = "清亮自然的中文女声，温柔亲切，语速适中，发音清晰。"
-        private const val MAX_CLONE_BYTES = 10 * 1024 * 1024L
+        private const val MAX_ERROR_MESSAGE_CHARS = 200
         private val ALLOWED_HOSTS = setOf(
             "api.xiaomimimo.com",
             "token-plan-cn.xiaomimimo.com",

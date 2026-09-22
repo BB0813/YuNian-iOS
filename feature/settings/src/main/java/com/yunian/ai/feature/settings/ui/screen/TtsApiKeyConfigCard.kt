@@ -12,6 +12,7 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
+import android.provider.OpenableColumns
 import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -78,6 +79,7 @@ import com.yunian.ai.network.tts.TtsConfig
 import com.yunian.ai.network.tts.TtsProvider
 import com.yunian.ai.network.tts.TtsVoice
 import com.yunian.ai.network.tts.MiMoTtsProvider
+import com.yunian.ai.network.tts.MimoVoiceSampleFormat
 import com.yunian.ai.network.tts.ChatTtsConfig
 import com.yunian.ai.network.tts.ChatTtsMode
 import com.yunian.ai.network.tts.LocalTtsCatalog
@@ -489,53 +491,76 @@ internal fun ApiKeyConfigCard(
                     MiMoTtsProvider.MODEL_TTS_VOICECLONE -> {
                         Spacer(modifier = Modifier.height(8.dp))
                         var clonePickError by remember { mutableStateOf<String?>(null) }
+                        var cloneSampleWarning by remember { mutableStateOf<String?>(null) }
+                        var cloneSampleInfo by remember { mutableStateOf<MimoVoiceSampleFormat.WavInfo?>(null) }
                         val cloneScope = rememberCoroutineScope()
                         val cloneLauncher = rememberLauncherForActivityResult(
-                            ActivityResultContracts.GetContent()
+                            ActivityResultContracts.OpenDocument()
                         ) { uri ->
                             if (uri != null) {
                                 cloneScope.launch {
+                                    // 清理前仍在被引用的旧路径（读取于导入/持久化之前）。
+                                    val previousPath = mimoVoiceClonePath
                                     val outcome = withContext(Dispatchers.IO) {
-                                        val mime = context.contentResolver.getType(uri) ?: ""
-                                        val ext = when (mime) {
-                                            "audio/mpeg", "audio/mp3" -> "mp3"
-                                            "audio/wav" -> "wav"
-                                            else -> ""
-                                        }
-                                        if (ext.isEmpty()) {
-                                            return@withContext Pair(false, "仅支持 mp3 / wav 格式的音频样本")
-                                        }
-                                        val targetDir = File(context.filesDir, "tts_mimo_clone").apply { mkdirs() }
-                                        val outFile = File(targetDir, "mimo_clone_sample.$ext")
-                                        runCatching {
-                                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                                outFile.outputStream().use { out -> input.copyTo(out) }
-                                            } ?: return@withContext Pair(false, "无法读取所选文件")
-                                            if (outFile.length() <= 0L) {
-                                                outFile.delete()
-                                                return@withContext Pair(false, "音频样本为空")
-                                            }
-                                            if (outFile.length() > 10 * 1024 * 1024L) {
-                                                outFile.delete()
-                                                return@withContext Pair(false, "音频样本超过 10MB 限制")
-                                            }
-                                            Pair(true, outFile.absolutePath)
-                                        }.getOrElse { e ->
-                                            outFile.delete()
-                                            Pair(false, "复制样本失败：${e.message ?: e.javaClass.simpleName}")
-                                        }
+                                        importMimoCloneSample(context, uri)
                                     }
-                                    if (outcome.first) {
-                                        onMimoVoiceClonePathChange(outcome.second)
-                                        clonePickError = null
-                                    } else {
-                                        clonePickError = outcome.second
+                                    when (outcome) {
+                                        is MimoCloneImportResult.Success -> {
+                                            // 先持久化新路径，再清理旧样本；并**保留 previousPath 指向的文件**。
+                                            // 这样即便 saveSettings() 尚未落盘就崩溃，prefs 指向的旧文件依然存在，
+                                            // 从根本上消除"prefs 指向已删文件"的时序窗口（不依赖落盘时序）。
+                                            onMimoVoiceClonePathChange(outcome.path)
+                                            withContext(Dispatchers.IO) {
+                                                val newFile = File(outcome.path)
+                                                val dir = newFile.parentFile ?: return@withContext
+                                                cleanupOldCloneSamples(
+                                                    dir = dir,
+                                                    keepNames = setOfNotNull(
+                                                        newFile.name,
+                                                        previousPath.takeIf { it.isNotBlank() }?.let { File(it).name }
+                                                    )
+                                                )
+                                            }
+                                            clonePickError = null
+                                        }
+                                        is MimoCloneImportResult.Failure -> {
+                                            clonePickError = outcome.message
+                                        }
                                     }
                                 }
                             }
                         }
+                        // 路径变化（含冷启动读取已保存路径）时解析一次样本信息 / 非 PCM 校验。
+                        LaunchedEffect(mimoVoiceClonePath) {
+                            val path = mimoVoiceClonePath
+                            if (path.isBlank()) {
+                                cloneSampleInfo = null
+                                cloneSampleWarning = null
+                                return@LaunchedEffect
+                            }
+                            withContext(Dispatchers.IO) {
+                                val file = File(path)
+                                if (!file.extension.equals(MimoVoiceSampleFormat.WAV_EXT, ignoreCase = true)) {
+                                    cloneSampleInfo = null
+                                    cloneSampleWarning = null
+                                    return@withContext
+                                }
+                                val header = runCatching {
+                                    file.inputStream().use { readHeaderBytes(it, WAV_HEADER_PROBE_BYTES) }
+                                }.getOrNull()
+                                val info = header?.let { MimoVoiceSampleFormat.parseWav(it) }
+                                cloneSampleInfo = info
+                                cloneSampleWarning = when {
+                                    info == null -> "无法解析样本信息（文件可能已损坏），仍可尝试合成"
+                                    info.pcmStatus == MimoVoiceSampleFormat.WavInfo.PcmStatus.NOT_PCM ->
+                                        "该 wav 使用非 PCM 编码（${info.formatName}），MiMo 可能无法识别，" +
+                                            "建议用音频软件另存为 16 位 PCM wav 后重试"
+                                    else -> null
+                                }
+                            }
+                        }
                         Button(
-                            onClick = { cloneLauncher.launch("audio/*") },
+                            onClick = { cloneLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
                             modifier = Modifier.fillMaxWidth().height(44.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -565,12 +590,24 @@ internal fun ApiKeyConfigCard(
                                     modifier = Modifier.weight(1f)
                                 )
                                 TextButton(onClick = {
+                                    deleteCloneSample(mimoVoiceClonePath)
                                     onMimoVoiceClonePathChange("")
                                     clonePickError = null
                                 }) {
                                     Text("移除", fontSize = 12.sp, color = PetalError)
                                 }
                             }
+                            cloneSampleInfo?.let { info ->
+                                Text(
+                                    text = "样本：${info.describe()}",
+                                    fontSize = 11.sp,
+                                    color = textSecondaryColor
+                                )
+                            }
+                        }
+                        cloneSampleWarning?.let {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(it, fontSize = 11.sp, color = PetalError)
                         }
                         clonePickError?.let {
                             Spacer(modifier = Modifier.height(4.dp))
@@ -578,7 +615,7 @@ internal fun ApiKeyConfigCard(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "支持 mp3 / wav，样本不超过 10MB。合成时读取该文件发送给 MiMo 复刻音色。",
+                            text = "支持 mp3 / wav，样本编码后不超过 10MB（原始约 7.5MB），建议 30 秒以内的清晰语音。合成时读取该文件发送给 MiMo 复刻音色。",
                             fontSize = 12.sp,
                             color = textSecondaryColor
                         )
@@ -715,5 +752,163 @@ internal fun TtsTextField(
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         singleLine = true
     )
+}
+
+/** 读取 WAV 头部用于解析 fmt/data chunk 的最大探测字节数。 */
+private const val WAV_HEADER_PROBE_BYTES = 64 * 1024
+
+/** MiMo 音色复刻样本导入结果。 */
+private sealed interface MimoCloneImportResult {
+    data class Success(val path: String) : MimoCloneImportResult
+    data class Failure(val message: String) : MimoCloneImportResult
+}
+
+/** 被选文件的元信息（来自 ContentResolver 查询，可能缺失）。 */
+private data class MimoPickedFileMeta(val displayName: String?, val size: Long?)
+
+/**
+ * 导入 MiMo 音色复刻样本为应用私有文件。
+ *
+ * 流程：查询声明 MIME / 文件名 → 边复制边按体积上限限流 → 读取落盘文件头做魔数嗅探
+ * （与声明的 MIME/扩展名冲突时以魔数为准）→ 按真实格式保存为带版本名的 `mimo_clone_sample_<epochMillis>.<ext>`。
+ *
+ * 注意：本函数**不做清理**。旧样本的清理由调用方在持久化新路径之后执行
+ * （见 `cleanupOldCloneSamples`），以保证 `mimo_voice_clone_path` 始终指向存在的文件。
+ */
+private fun importMimoCloneSample(context: Context, uri: Uri): MimoCloneImportResult {
+    val meta = queryFileMeta(context, uri)
+    val declaredMime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+
+    // 元信息可用时先行拒绝超大文件，避免无谓复制。
+    if (meta.size != null && meta.size > 0L && MimoVoiceSampleFormat.exceedsCloneLimit(meta.size)) {
+        return MimoCloneImportResult.Failure(MimoVoiceSampleFormat.tooLargeMessage(meta.size))
+    }
+
+    val targetDir = File(context.filesDir, "tts_mimo_clone").apply { mkdirs() }
+    // tmp 复用 mimo_clone_sample 前缀（不同扩展名），使崩溃残留也能被 cleanupOldCloneSamples 命中；不会与真实样本冲突。
+    val tmpFile = File(targetDir, "mimo_clone_sample.tmp")
+    var total = 0L
+    var tooLarge = false
+    try {
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: return MimoCloneImportResult.Failure("无法读取所选文件，请换一个音频样本")
+        stream.use { input ->
+            tmpFile.outputStream().use { out ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    total += read
+                    if (MimoVoiceSampleFormat.exceedsCloneLimit(total)) {
+                        tooLarge = true
+                        break
+                    }
+                    out.write(buffer, 0, read)
+                }
+            }
+        }
+    } catch (e: Exception) {
+        tmpFile.delete()
+        return MimoCloneImportResult.Failure("复制样本失败：${e.message ?: e.javaClass.simpleName}")
+    }
+
+    if (tooLarge) {
+        tmpFile.delete()
+        return MimoCloneImportResult.Failure(MimoVoiceSampleFormat.tooLargeMessage(meta.size ?: total))
+    }
+    if (total <= 0L) {
+        tmpFile.delete()
+        return MimoCloneImportResult.Failure("音频样本为空")
+    }
+
+    // 落盘后读取文件头，以魔数为准复核真实格式。
+    val header = runCatching {
+        tmpFile.inputStream().use { readHeaderBytes(it, MimoVoiceSampleFormat.SNIFF_BYTES) }
+    }.getOrNull() ?: ByteArray(0)
+    val format = MimoVoiceSampleFormat.detect(header, declaredMime, meta.displayName)
+    if (format == null) {
+        tmpFile.delete()
+        return MimoCloneImportResult.Failure(
+            MimoVoiceSampleFormat.unsupportedMessage(declaredMime, meta.displayName)
+        )
+    }
+
+    // 带版本文件名：同格式替换时路径也会变化，从而刷新 UI 信息与试听缓存，并顺带避免孤儿样本。
+    val outFile = File(targetDir, "${MIMO_CLONE_SAMPLE_PREFIX}_${System.currentTimeMillis()}.${format.ext}")
+    outFile.delete()
+    if (!tmpFile.renameTo(outFile)) {
+        val copied = runCatching {
+            tmpFile.copyTo(outFile, overwrite = true)
+            tmpFile.delete()
+        }.isSuccess
+        if (!copied || !outFile.exists()) {
+            tmpFile.delete()
+            outFile.delete()
+            return MimoCloneImportResult.Failure("保存音频样本失败")
+        }
+    }
+    return MimoCloneImportResult.Success(outFile.absolutePath)
+}
+
+/** MiMo 复刻样本文件名前缀（旧固定名、新版本名与崩溃残留 tmp 共用此前缀，便于清理）。 */
+private const val MIMO_CLONE_SAMPLE_PREFIX = "mimo_clone_sample"
+
+/**
+ * 删除同目录下不再需要的 MiMo 复刻样本（`mimo_clone_sample*`，含崩溃残留的 `*.tmp`）。
+ *
+ * best-effort，绝不抛异常。
+ *
+ * @param keepNames 必须**保留**的文件名集合：应包含新样本名，以及在清理发生时
+ *   `mimo_voice_clone_path` 仍可能指向的旧样本名。调用方须在**持久化新路径之后**调用本函数，
+ *   并保证 [keepNames] 覆盖所有可能被 prefs 引用的文件，从而不出现"prefs 指向已删文件"的窗口。
+ */
+internal fun cleanupOldCloneSamples(dir: File, keepNames: Set<String>) {
+    runCatching {
+        dir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name !in keepNames && file.name.startsWith(MIMO_CLONE_SAMPLE_PREFIX)) {
+                runCatching { file.delete() }
+            }
+        }
+    }
+}
+
+/** 删除指定样本文件本体（best-effort，绝不抛异常）。 */
+private fun deleteCloneSample(path: String) {
+    if (path.isBlank()) return
+    runCatching {
+        val file = File(path)
+        if (file.exists()) file.delete()
+    }
+}
+
+/** 查询被选文件的显示名与大小；query 返回 null 等异常情况回退到 [Uri.lastPathSegment]。 */
+private fun queryFileMeta(context: Context, uri: Uri): MimoPickedFileMeta {
+    val columns = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+    val fromResolver = runCatching {
+        context.contentResolver.query(uri, columns, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (!cursor.moveToFirst()) {
+                null
+            } else {
+                val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+                val size = if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) cursor.getLong(sizeIdx) else null
+                MimoPickedFileMeta(name, size)
+            }
+        }
+    }.getOrNull()
+    return fromResolver ?: MimoPickedFileMeta(uri.lastPathSegment, null)
+}
+
+/** 读取最多 [maxBytes] 字节头部（用于魔数嗅探 / WAV 信息解析）。 */
+private fun readHeaderBytes(input: java.io.InputStream, maxBytes: Int): ByteArray {
+    val buffer = ByteArray(maxBytes)
+    var read = 0
+    while (read < maxBytes) {
+        val n = input.read(buffer, read, maxBytes - read)
+        if (n <= 0) break
+        read += n
+    }
+    return buffer.copyOf(read)
 }
 
