@@ -42,9 +42,9 @@ import coil.compose.AsyncImage
 import com.yunian.ai.feature.profile.R
 import com.yunian.ai.uicommon.picker.ui.CustomImagePicker
 import com.yunian.ai.uicommon.image.cropper.ImageCropperDialog
+import com.yunian.ai.uicommon.image.decodeUriSampledForCrop
 import com.yunian.ai.uicommon.component.bounceVerticalScroll
 import android.net.Uri
-import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlin.math.abs
@@ -294,13 +294,9 @@ fun ProfileSettingsScreen(
     LaunchedEffect(pendingCropUri) {
         val uri = pendingCropUri ?: return@LaunchedEffect
         val ctx = context
+        // 采样解码 + OOM 兜底（修 FIX-1）：全尺寸截图解码 + 裁剪峰值易在 MIUI/MTK 机型 OOM 闪退。
         cropBitmap = withContext(Dispatchers.IO) {
-            try {
-                ctx.contentResolver.openInputStream(uri)?.use { stream ->
-                    val bmp = BitmapFactory.decodeStream(stream)
-                    bmp?.asImageBitmap()
-                }
-            } catch (_: Exception) { null }
+            decodeUriSampledForCrop(ctx, uri)?.asImageBitmap()
         }
     }
 

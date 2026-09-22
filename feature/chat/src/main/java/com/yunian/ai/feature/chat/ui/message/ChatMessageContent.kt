@@ -5,6 +5,7 @@ import com.yunian.ai.uicommon.icon.AppIcons
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.yunian.ai.common.SecureLog
 import com.yunian.ai.feature.chat.ui.viewmodel.ChatIntent
 import com.yunian.ai.feature.chat.ui.viewmodel.QuoteMediaType
 import com.yunian.ai.feature.chat.ui.viewmodel.QuoteReply
@@ -305,7 +307,26 @@ fun QuoteMediaThumbnail(
                         retriever.setDataSource(context, Uri.parse(path))
                     else -> retriever.setDataSource(path)
                 }
-                retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                // FIX-8：视频取帧同为「整图解码」路径，1080×2400 帧一次约 10MB，MIUI/MTK 机型易 OOM。
+                // API 27+ 直接按缩略图目标尺寸取帧（内存降一个数量级）；低版本退化为原始尺寸取帧。
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    retriever.getScaledFrameAtTime(
+                        VIDEO_FRAME_TIME_US,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        VIDEO_FRAME_TARGET_PX,
+                        VIDEO_FRAME_TARGET_PX,
+                    )
+                } else {
+                    retriever.getFrameAtTime(
+                        VIDEO_FRAME_TIME_US,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    )
+                }
+            } catch (e: OutOfMemoryError) {
+                // OutOfMemoryError 是 Error 而非 Exception，不捕获会直接崩进程；兜底为 null，
+                // 由下方 UI 退化为占位播放图标（失败可降级）。
+                SecureLog.e("ChatMessageContent", "Video frame extraction OOM: ${e.message}")
+                null
             } catch (_: Exception) {
                 null
             } finally {
@@ -481,3 +502,9 @@ fun VoiceMessageContent(
         contentColor = if (isMine) colors.primaryBubbleContent else colors.secondaryBubbleContent
     )
 }
+
+/** 引用媒体（视频）缩略帧取帧时刻（微秒）：取首帧。 */
+private const val VIDEO_FRAME_TIME_US = 0L
+
+/** 引用媒体（视频）缩略帧目标边长（px）：气泡内缩略图仅 40dp，无需全尺寸帧。 */
+private const val VIDEO_FRAME_TARGET_PX = 256

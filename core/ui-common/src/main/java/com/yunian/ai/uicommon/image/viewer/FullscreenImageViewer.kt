@@ -290,33 +290,49 @@ private fun decodePreviewBitmap(context: Context, model: Any): ImageBitmap? {
             }
             else -> null
         }
+    } catch (_: OutOfMemoryError) {
+        // 兜底（修 FIX-1）：Uri 分支 readBytes/decode 均可能 OOM（Error），不能只 catch Exception。
+        null
     } catch (_: Exception) {
         null
     }
 }
 
 private fun decodeFileSampled(file: File, maxSide: Int): ImageBitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(file.absolutePath, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    val sample = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxSide)
-    val opts = BitmapFactory.Options().apply {
-        inSampleSize = sample
-        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+    return try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val sample = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxSide)
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        BitmapFactory.decodeFile(file.absolutePath, opts)?.asImageBitmap()
+    } catch (_: OutOfMemoryError) {
+        // OOM 是 Error 非 Exception：不本地兜底会穿透到调用方（修 FIX-1）。
+        null
+    } catch (_: Exception) {
+        null
     }
-    return BitmapFactory.decodeFile(file.absolutePath, opts)?.asImageBitmap()
 }
 
 private fun decodeBytesSampled(bytes: ByteArray, maxSide: Int): ImageBitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    val sample = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxSide)
-    val opts = BitmapFactory.Options().apply {
-        inSampleSize = sample
-        inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+    return try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val sample = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxSide)
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
+    } catch (_: OutOfMemoryError) {
+        null
+    } catch (_: Exception) {
+        null
     }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
 }
 
 private fun calculateInSampleSize(width: Int, height: Int, maxSide: Int): Int {
