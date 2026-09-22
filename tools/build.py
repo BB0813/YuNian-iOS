@@ -524,6 +524,18 @@ def main():
     else:
         gradlew = os.path.join(PROJECT, "gradlew.bat")
         gradle_cmd = [gradlew, f"assemble{variant.capitalize()}", "--no-daemon", "-q"]
+        # 可选的 JDK 覆盖（机器无关）：gradle.properties 里的 org.gradle.java.home /
+        # org.gradle.java.installations.paths 可能是某台机器专有路径，其它机器上 Gradle 会
+        # 直接报 "Value ... is invalid (Java home supplied is invalid)" 而无法构建/打包。
+        # 通过环境变量注入 -D 覆盖，既不改动受跟踪的配置，也让各机器用自己的 JDK。
+        #   YUNIAN_GRADLE_JAVA_HOME   运行 Gradle 的 JDK（Windows 示例：D:/Android Studio/jbr）
+        #   YUNIAN_JDK_INSTALLATIONS  供 toolchain 解析的 JDK 列表（逗号分隔，可给多个）
+        _java_home = os.environ.get("YUNIAN_GRADLE_JAVA_HOME", "").strip()
+        if _java_home:
+            gradle_cmd.append(f"-Dorg.gradle.java.home={_java_home}")
+        _jdk_paths = os.environ.get("YUNIAN_JDK_INSTALLATIONS", "").strip()
+        if _jdk_paths:
+            gradle_cmd.append(f"-Dorg.gradle.java.installations.paths={_jdk_paths}")
         if args.release:
             # Skip Gradle's built-in thin-shell pipeline: build.py implements the
             # full Ultimate Shell hardening itself, and it must consume the PLAIN
