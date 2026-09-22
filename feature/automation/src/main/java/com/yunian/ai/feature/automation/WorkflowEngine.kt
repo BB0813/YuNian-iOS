@@ -1,13 +1,15 @@
 package com.yunian.ai.feature.automation
 
 import android.content.Context
+import com.yunian.ai.agent.AgentFacade
+import com.yunian.ai.agent.host.AgentToolHost
+import com.yunian.ai.agent.uniffi.AgentTurnRequest
 import com.yunian.ai.common.ContentFilter
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.TimeoutBudgets
 import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.repository.ChatRepository
 import com.yunian.ai.database.repository.MessageWriteCoordinator
-import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.feature.automation.data.Automation
 import com.yunian.ai.feature.automation.data.WorkflowNode
 import com.yunian.ai.feature.automation.data.WorkflowNodeType
@@ -17,7 +19,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class WorkflowEngine(
     private val context: Context,
-    private val aiService: AiServiceProvider,
     private val messageWriter: MessageWriteCoordinator,
     private val chatRepository: ChatRepository? = null
 ) {
@@ -64,7 +65,7 @@ class WorkflowEngine(
                             }
 
                             val generated = withTimeoutOrNull(TimeoutBudgets.AUTOMATION_AI_TIMEOUT_MS) {
-                                aiService.callGeneration(enrichedPrompt)
+                                callAgentGeneration(automation.companionId, enrichedPrompt)
                             } ?: ""
                             variables[current.outputVar.ifBlank { "result" }] = generated
                             outputMessage = generated
@@ -91,6 +92,40 @@ class WorkflowEngine(
             Result.Failure(e.message ?: "工作流执行异常")
         }
     }
+
+    /**
+     * 工作流 AI 生成节点 —— 改走 Rust Cordis Agent（[AgentFacade.runTurn]）。
+     *
+     * 单轮、无工具，`enrichedPrompt` 作为本轮 user 内容追加在历史尾部；
+     * 人设 / 记忆 / 世界书由 Rust 编排器注入（故不传 systemPrompt）。
+     */
+    private suspend fun callAgentGeneration(companionId: Long, prompt: String): String {
+        val appContext = context.applicationContext
+        val turnRequest = AgentTurnRequest(
+            groupId = null,
+            historyJson = serializeHistoryJson(prompt),
+            tools = emptyList(),
+            maxRounds = 1u,
+            toolChoice = "auto",
+            stickerProbability = 0u,
+            image = null,
+            systemPrompt = null,
+            companionNameMapJson = null,
+        )
+        val result = runCatching {
+            AgentFacade.runTurn(turnRequest, appContext, companionId, AgentToolHost(appContext))
+        }.onFailure {
+            SecureLog.e("WorkflowEngine", "agent generation failed", it)
+        }.getOrNull() ?: return ""
+        return result.finalText.trim()
+            .ifBlank { result.events.filter { it.kind == "bubble" }.joinToString("\n") { it.text }.trim() }
+    }
+
+    /** 单条 user 指令 → OpenAI messages JSON。 */
+    private fun serializeHistoryJson(prompt: String): String =
+        org.json.JSONArray()
+            .put(org.json.JSONObject().apply { put("role", "user"); put("content", prompt) })
+            .toString()
 
     private suspend fun buildPatrolContext(companionId: Long): String {
         val repo = chatRepository ?: return ""

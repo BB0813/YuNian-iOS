@@ -39,9 +39,4 @@ object RolePromptProvider {
         """.trimIndent()
     }
 
-    fun getLocalModelRoleLines(role: CompanionRole): List<String> = listOf(
-        getParticleRule(role),
-        getEmotionRule(role),
-        getStyleRule(role)
-    )
 }

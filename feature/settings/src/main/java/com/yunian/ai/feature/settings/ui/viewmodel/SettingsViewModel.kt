@@ -11,8 +11,6 @@ import com.yunian.ai.database.model.ApiConfig
 import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.database.model.ApiProviderPreset
 import com.yunian.ai.database.repository.ApiConfigRepository
-import com.yunian.ai.domain.LocalModelProvider
-import com.yunian.ai.domain.ModelState
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.network.AiService
 import kotlinx.coroutines.flow.Flow
@@ -33,17 +31,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             as com.yunian.ai.network.AiService
     }
 
-    private val localModelProvider by lazy {
-        ServiceRegistry.getOrThrow(LocalModelProvider::class.java)
-    }
     private val appSettingsStore = AppSettingsStore(application)
     private lateinit var repository: ApiConfigRepository
     val configs: Flow<List<ApiConfig>>
     val providerPresets: Flow<List<ApiProviderPreset>>
-    private val _localModelState = MutableStateFlow(ModelState())
-    val localModelState: StateFlow<ModelState> = _localModelState.asStateFlow()
-    private val _modelStates = MutableStateFlow<Map<String, ModelState>>(emptyMap())
-    val modelStates: StateFlow<Map<String, ModelState>> = _modelStates.asStateFlow()
 
     private val _connectionStatus = MutableStateFlow<Map<String, ConnectionResult>>(emptyMap())
     val connectionStatus: StateFlow<Map<String, ConnectionResult>> = _connectionStatus.asStateFlow()
@@ -331,22 +322,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
 
         refreshConnectionStatus()
-
-        viewModelScope.launch(Dispatchers.IO) {
-
-            val provider = localModelProvider
-            while (true) {
-                val states = provider.getAllModelStates()
-                if (states != _modelStates.value) {
-                    _modelStates.value = states
-                }
-                val selected = states.values.find { it.isSelected }
-                if (selected != null && selected != _localModelState.value) {
-                    _localModelState.value = selected
-                }
-                kotlinx.coroutines.delay(500)
-            }
-        }
     }
 
     fun saveConfig(config: ApiConfig) {
@@ -767,12 +742,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun selectModel(modelId: String) {
-        viewModelScope.launch {
-            localModelProvider.enableModel(modelId)
-        }
-    }
-
     private val _fetchedModels = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     val fetchedModels: StateFlow<Map<String, List<String>>> = _fetchedModels.asStateFlow()
 
@@ -901,71 +870,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     _balanceInfo.value = null
                     _balanceQueryFailed.value = true
                 }
-        }
-    }
-
-    fun startGemmaDownload() {
-        viewModelScope.launch {
-            val provider = localModelProvider
-            provider.let { provider ->
-                val selected = _modelStates.value.values.find { it.isSelected }?.modelId
-                if (selected != null) provider.downloadModel(selected)
-            }
-        }
-    }
-
-    fun downloadModel(modelId: String) {
-        viewModelScope.launch {
-            localModelProvider.downloadModel(modelId)
-        }
-    }
-
-    fun cancelGemmaDownload() {
-        viewModelScope.launch {
-            val provider = localModelProvider
-            provider.let { provider ->
-                val selected = _modelStates.value.values.find { it.isSelected }?.modelId
-                if (selected != null) provider.cancelDownload(selected)
-            }
-        }
-    }
-
-    fun enableGemma() {
-        viewModelScope.launch {
-            val provider = localModelProvider
-            provider.let { provider ->
-                val selected = _modelStates.value.values.find { it.isSelected }?.modelId
-                if (selected != null) provider.enableModel(selected)
-            }
-        }
-    }
-
-    fun disableGemma() {
-        viewModelScope.launch {
-            val provider = localModelProvider
-            provider.let { provider ->
-                val selected = _modelStates.value.values.find { it.isSelected }?.modelId
-                if (selected != null) provider.disableModel(selected)
-            }
-        }
-    }
-
-    fun deleteGemma() {
-        viewModelScope.launch {
-            val provider = localModelProvider
-            provider.let { provider ->
-                val selected = _modelStates.value.values.find { it.isSelected }?.modelId
-                if (selected != null) provider.deleteModel(selected)
-            }
-        }
-    }
-
-    fun refreshLocalModel() {
-        viewModelScope.launch {
-            val provider = localModelProvider
-            provider.let { provider ->
-                _modelStates.value = provider.getAllModelStates()
-            }
         }
     }
 

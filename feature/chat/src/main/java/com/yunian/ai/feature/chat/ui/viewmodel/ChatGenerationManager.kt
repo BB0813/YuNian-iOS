@@ -27,9 +27,10 @@ import com.yunian.ai.database.repository.MessageWriteCoordinator
 import com.yunian.ai.database.repository.UserRepository
 import com.yunian.ai.domain.AiChatMessage
 import com.yunian.ai.domain.AiCompanionInfo
+import com.yunian.ai.domain.AiMessageRole
 import com.yunian.ai.domain.AiMessageType
+import com.yunian.ai.domain.AiOperationalMessages
 import com.yunian.ai.domain.AiServiceProvider
-import com.yunian.ai.domain.LocalModelProvider
 import com.yunian.ai.domain.imagegen.ImageGenService
 import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.ServiceRegistry
@@ -43,7 +44,6 @@ import com.yunian.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
 import com.yunian.ai.feature.chat.voice.ChatTtsController
 import com.yunian.ai.feature.chat.voice.ChatTtsState
 import com.yunian.ai.network.ChatTypingState
-import com.yunian.ai.network.bubble.BubbleJsonProtocol
 import com.yunian.ai.network.bubble.BubbleLoopRunner
 import com.yunian.ai.network.stream.NonStreamingAssistantStreamAdapter
 import com.yunian.ai.network.tts.ChatTtsConfig
@@ -67,6 +67,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -98,31 +101,6 @@ class ChatGenerationManager private constructor(
 
         fun release(companionId: Long) {
             instances[companionId]?.onReleased()
-        }
-
-        /**
-         * 组装气泡连发第 N 轮的模型历史（P0-2）。
-         *
-         * 首条正文气泡已经送达/落库，但它不在首轮请求的 [modelHistory] 里——若不显式注入，
-         * 连发第 2 轮起的模型看不到第 1 条说了什么，会复读或自相矛盾。
-         *
-         * 去重约定：[alreadyGenerated] 只含连发循环追加生成的追尾气泡（[BubbleLoopRunner] 传入的
-         * 就是这份增量列表），首条由 [firstBubbleText] 恰好注入一次，二者不重叠。
-         *
-         * @return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
-         */
-        internal fun buildChainHistory(
-            modelHistory: List<AiChatMessage>,
-            firstBubbleText: String,
-            alreadyGenerated: List<String>,
-        ): List<AiChatMessage> {
-            fun assistant(text: String) = AiChatMessage(
-                isFromUser = false,
-                content = text,
-                timestamp = System.currentTimeMillis(),
-                role = com.yunian.ai.domain.AiMessageRole.ASSISTANT,
-            )
-            return modelHistory + assistant(firstBubbleText) + alreadyGenerated.map { assistant(it) }
         }
     }
 
@@ -246,10 +224,8 @@ class ChatGenerationManager private constructor(
 
     val pipeline = MessagePipelineRunner { level -> BanManager.recordViolation(application, level) }
 
-    private val toolLoopRunner = AiToolLoopRunner(aiService, confirmationGate = ::requestToolConfirmation)
     private val streamApplier = PendingTurnStreamApplier()
 
-    private val bubbleLoopRunner = BubbleLoopRunner()
     private val responseFinalizer by lazy { AiResponseFinalizer(
         companionId = companionId,
         chatRepository = chatRepository,
@@ -641,6 +617,227 @@ class ChatGenerationManager private constructor(
         }
     }
 
+    /**
+     * 领域历史 → OpenAI messages JSON（`AgentTurnRequest.historyJson`）。
+     *
+     * Rust 侧将其作为 messages 基座（system 状态内嵌 + 会话工具结果轮追加），
+     * 角色显式映射；TOOL 消息带 `name`，供 gateway 端补 `[工具调用结果]` 前缀。
+     */
+    private fun serializeHistoryJson(history: List<AiChatMessage>): String {
+        val arr = JSONArray()
+        for (msg in history) {
+            val role = when (msg.role) {
+                AiMessageRole.SYSTEM -> "system"
+                AiMessageRole.TOOL -> "tool"
+                AiMessageRole.USER -> "user"
+                AiMessageRole.ASSISTANT -> "assistant"
+                null -> if (msg.isFromUser) "user" else "assistant"
+            }
+            val m = JSONObject().apply {
+                put("role", role)
+                put("content", msg.content)
+            }
+            if (role == "tool" && !msg.toolName.isNullOrBlank()) {
+                m.put("name", msg.toolName)
+            }
+            arr.put(m)
+        }
+        return arr.toString()
+    }
+
+    /** `send_sticker` 事件 extra 中携带的预选表情包 id：`entry_id=123`。 */
+    private val stickerEntryIdPattern = Regex("entry_id=(\\d+)")
+
+    /**
+     * 运行 Agent 回合；命中确认门（`finishedReason == "confirm_pending"` 且含 `confirm_request`
+     * 事件）时，经本地 [_confirmationRequest] / [respondToConfirmation] 询问用户：
+     * 批准 → `approveTool` 后重跑；拒绝 → `rejectTool` 后重跑。
+     *
+     * 世界书在回合前同步注入 Rust（伴侣级优先，回退全局）；注入失败不影响回合。
+     */
+    private suspend fun runTurnWithConfirmation(
+        turnRequest: com.yunian.ai.agent.uniffi.AgentTurnRequest,
+        toolHost: com.yunian.ai.agent.host.AgentToolHost,
+        companionId: Long,
+    ): com.yunian.ai.agent.uniffi.AgentTurnResult? {
+        runCatching {
+            com.yunian.ai.agent.worldbook.WorldbookRepository(application)
+                .syncActiveToRuntime(companionId)
+        }.onFailure {
+            SecureLog.w("ChatGenerationManager", "worldbook sync failed: ${it.message}")
+        }
+        var result = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * 3) {
+            com.yunian.ai.agent.AgentFacade.runTurn(turnRequest, application, companionId, toolHost)
+        }
+        var guard = 0
+        while (result?.finishedReason == "confirm_pending") {
+            val pending = result.events.firstOrNull { it.kind == "confirm_request" } ?: break
+            guard += 1
+            if (guard > 3) break // 防呆：连续确认超限即放弃
+            val approved = requestToolConfirmation(pending.text, pending.extra)
+            if (approved) {
+                com.yunian.ai.agent.AgentFacade.approveTool(application, pending.text, pending.extra)
+            } else {
+                com.yunian.ai.agent.AgentFacade.rejectTool(application, pending.text, pending.extra)
+            }
+            result = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * 3) {
+                com.yunian.ai.agent.AgentFacade.runTurn(turnRequest, application, companionId, toolHost)
+            }
+        }
+        return result
+    }
+
+    /**
+     * 组装本轮 tools 列表（Rust 记忆工具 + 技能工具 + 可用全局工具），
+     * 并构建与 Rust `orchestration_options` 对齐的编排选项。
+     *
+     * ⚠️ 去重：Rust `memoryToolDefinitions` 已含 recall/save/consolidate_memory，
+     * feature:memory 的 `MemoryRecallTools` 也注册同名工具 → 同请求 tools 重名会被
+     * DeepSeek 拒绝（HTTP 400: Tool names must be unique）→ Rust 记忆工具优先。
+     */
+    private fun buildAgentTools(
+        useGlobalTools: Boolean,
+    ): Triple<
+        List<com.yunian.ai.agent.uniffi.ToolDefinition>,
+        List<String>,
+        com.yunian.ai.agent.uniffi.PromptOrchestratorOptions,
+        > {
+        val memoryTools = com.yunian.ai.agent.AgentFacade.memoryToolDefinitions(application)
+        val memoryNames = memoryTools.map { it.name }.toSet()
+        val skillTools = com.yunian.ai.agent.AgentFacade.skillToolDefinitions()
+        val availableTools = ToolRegistry.availableTools().map { it.name }
+            .toMutableList()
+            .apply {
+                addAll(memoryNames)
+                addAll(skillTools.map { it.name })
+                addAll(listOf("emit_segmented", "send_sticker", "emit_bubble"))
+            }
+        val options = com.yunian.ai.agent.uniffi.PromptOrchestratorOptions(
+            memoryLimit = 5u,
+            skillLimit = 3u,
+            includeMemorySkill = true,
+            includeSafetyNote = true,
+            availableTools = availableTools,
+            deviceId = com.yunian.ai.common.DeviceIdProvider.getDeviceId(application),
+            timezone = TimeZone.getDefault().id,
+            sessionId = null,
+            ownerName = null,
+            companionNameMapJson = null,
+            workingMemoryLimit = 200u,
+        )
+        val globalTools = ToolRegistry.availableTools().map {
+            com.yunian.ai.agent.AgentFacade.toolDefinition(it)
+        }
+        val tools = buildList {
+            addAll(memoryTools)
+            addAll(skillTools)
+            if (useGlobalTools) addAll(globalTools.filter { it.name !in memoryNames })
+        }
+        return Triple(tools, availableTools, options)
+    }
+
+    /**
+     * 同步全局可变配置到 Rust `AgentRuntime`（settings / stickers / credentials 热更新）。
+     *
+     * Rust 无法解密 SQLite 中的 Tink 加密 API Key（`enc:v4:...`），必须由 Kotlin 解密后经
+     * credentials 传入，否则 DeepSeek/CUSTOM 请求会带加密串 → 401。认证分离：`session`/
+     * `client_id` 仅用于 PARTNER 内置 API，其他 provider 走 OpenAI 标准 Bearer。
+     */
+    private suspend fun syncAgentRuntimeConfig(): com.yunian.ai.database.model.ApiConfig? {
+        var activeApi: com.yunian.ai.database.model.ApiConfig? = null
+        runCatching {
+            val role = userRepository?.selectedRole?.value?.name ?: CompanionRole.GIRLFRIEND.name
+            val settingsJson = com.yunian.ai.agent.AgentFacade.buildSettingsJson(role = role)
+            val stickers = com.yunian.ai.agent.sticker.StickerPreferenceFacade
+                .availableTagsWithFallback(application)
+            val partnerSession = com.yunian.ai.common.RemoteKeyProvider.getPartnerSession(application)
+            activeApi = apiConfigRepository.getActiveEnabledConfig()
+            val decryptedKey = activeApi?.apiKey?.takeIf { it.isNotBlank() }
+            val isPartner = activeApi?.provider == ApiProvider.PARTNER
+            val credentialsJson = com.yunian.ai.agent.AgentFacade.buildCredentialsJson(
+                sessionToken = if (isPartner) partnerSession?.token else null,
+                clientId = if (isPartner) partnerSession?.clientId else null,
+                apiKey = decryptedKey,
+            )
+            com.yunian.ai.agent.AgentFacade.syncRuntimeConfig(
+                application,
+                settingsJson,
+                stickers,
+                credentialsJson,
+            )
+        }.onFailure {
+            SecureLog.w("ChatGenerationManager", "syncRuntimeConfig failed: ${it.message}")
+        }
+        return activeApi
+    }
+
+    /**
+     * 落一条 Agent 调度日志（provider / model / 起止 / 回合数 / 完成原因 / 工具调用 / 事件流）。
+     *
+     * 与 [recordAgentTurnAudit] 互补：本方法回答「AI 是怎么跑的」，
+     * audit 回答「为什么这样回复」（编排 dry_run）。
+     */
+    private fun recordAgentDispatchLog(
+        sessionId: String,
+        startedAtMs: Long,
+        agentResult: com.yunian.ai.agent.uniffi.AgentTurnResult,
+        toolHost: com.yunian.ai.agent.host.AgentToolHost,
+        tools: List<com.yunian.ai.agent.uniffi.ToolDefinition>,
+        activeApi: com.yunian.ai.database.model.ApiConfig?,
+        querySummary: String,
+    ) {
+        runCatching {
+            com.yunian.ai.agent.AgentFacade.recordDispatchLog(
+                context = application,
+                companionId = companionId,
+                groupId = null,
+                sessionId = sessionId,
+                dispatchId = sessionId,
+                provider = activeApi?.provider?.name ?: "",
+                model = activeApi?.model ?: "",
+                startedAtMs = startedAtMs,
+                completedAtMs = System.currentTimeMillis(),
+                roundsUsed = agentResult.roundsUsed.toInt(),
+                finishedReason = agentResult.finishedReason,
+                error = agentResult.error,
+                toolNames = tools.map { it.name },
+                toolCalls = toolHost.collectedToolCalls(),
+                events = agentResult.events,
+                querySummary = querySummary,
+            )
+        }.onFailure {
+            SecureLog.w("ChatGenerationManager", "recordDispatchLog failed: ${it.message}")
+        }
+    }
+
+    /**
+     * 落一条回合审计（编排 dry_run 片段摘要 + 规则指纹 + 工具名快照）。
+     *
+     * 失败不影响主链路（审计是纯旁路）。
+     */
+    private fun recordAgentTurnAudit(
+        sessionId: String,
+        options: com.yunian.ai.agent.uniffi.PromptOrchestratorOptions,
+        query: String,
+        roundsUsed: Int,
+        toolNames: List<String>,
+    ) {
+        runCatching {
+            com.yunian.ai.agent.AgentFacade.recordTurnAudit(
+                context = application,
+                companionId = companionId,
+                groupId = null,
+                sessionId = sessionId,
+                options = options,
+                query = query,
+                roundsUsed = roundsUsed,
+                toolNames = toolNames,
+            )
+        }.onFailure {
+            SecureLog.w("ChatGenerationManager", "recordTurnAudit failed: ${it.message}")
+        }
+    }
+
     private suspend fun startSendMessage(batch: List<String>, commitSignal: TurnCommitSignal): Job? {
         val contentBatch = batch
         val content = if (contentBatch.size == 1) contentBatch[0] else contentBatch.joinToString("\n")
@@ -762,12 +959,195 @@ class ChatGenerationManager private constructor(
                 .sanitizeForModel(history.toAiChatMessages())
 
             val showReasoning = appSettingsStore.getShowReasoning()
-            // OpenMinis 模式：只要不是图片/本地模型路径就带工具，由模型自主决定是否调用
-            val useTools = imagePath == null && !isLocalModelEnabled() && ToolRegistry.isNotEmpty()
-            // 流式分支是否接入了气泡协议（决定首条是否走「协议解析 + 单条送达」路径）
-            var appliedBubbleProtocol = false
+
+            // ── 文本主路径：全面 Agent 化（Cordis Agent 架构） ──
+            // 决策（分段/表情/工具/确认）全部下沉 Rust `AgentFacade.runTurn`；
+            // 本方法只负责：运行时配置热同步 → 组装请求 → 消费事件流 → 落库。
+            // vision（imagePath != null）仍保留各自分支（图片理解尚未下沉）。
+            // D4：本地模型路径已随 `feature:localmodel` 删除，不再存在分支。
+            if (imagePath == null) {
+                val activeApi = syncAgentRuntimeConfig()
+                val conversationId = java.util.UUID.randomUUID().toString()
+                val (agentTools, availableTools, orchestrationOptions) = buildAgentTools(
+                    useGlobalTools = shouldEnableToolsFor(userContentForMemory, history),
+                )
+                val turnRequest = com.yunian.ai.agent.uniffi.AgentTurnRequest(
+                    groupId = null,
+                    historyJson = serializeHistoryJson(modelHistory),
+                    tools = agentTools,
+                    // 气泡轮次预算：Rust 每轮产出 bubble/sticker 事件，由 AgentEvent 驱动连发
+                    maxRounds = BubbleLoopRunner.MAX_BUBBLES.toUInt(),
+                    // 首轮用 auto（不用 required）：DeepSeek thinking 模式拒绝 required
+                    toolChoice = "auto",
+                    stickerProbability = 0u,
+                    image = null,
+                    systemPrompt = null,
+                    companionNameMapJson = null,
+                )
+                val toolHost = com.yunian.ai.agent.host.AgentToolHost(application)
+                val agentResult = runTurnWithConfirmation(turnRequest, toolHost, companionId)
+                    ?: throw java.util.concurrent.TimeoutException("AI response timeout")
+
+                // 主回合结束（非待确认）后驱动委派子回合：串行执行，失败不影响主链路
+                if (agentResult.finishedReason != "confirm_pending") {
+                    runCatching {
+                        val coordinator = ServiceRegistry.get(
+                            com.yunian.ai.domain.delegation.DelegationCoordinator::class.java
+                        )
+                        (coordinator as? com.yunian.ai.agent.delegation.DelegationCoordinatorImpl)
+                            ?.runPendingDelegations(application)
+                    }.onFailure {
+                        SecureLog.w("ChatGenerationManager", "runPendingDelegations failed: ${it.message}")
+                    }
+                }
+
+                recordAgentDispatchLog(
+                    sessionId = conversationId,
+                    startedAtMs = requestStartedAt,
+                    agentResult = agentResult,
+                    toolHost = toolHost,
+                    tools = agentTools,
+                    activeApi = activeApi,
+                    querySummary = userContentForMemory,
+                )
+
+                val emitted = mutableListOf<String>()
+                var stickerEmitted = 0
+                val stickerContents = mutableListOf<String>()
+                var lastDelivered: AiResponseFinalizer.DeliveredResponse? = null
+
+                for (event in agentResult.events) {
+                    when (event.kind) {
+                        "bubble" -> {
+                            val text = if (imageGenEnabled) {
+                                ImageGenTriggerLogic.stripTags(event.text)
+                            } else {
+                                event.text
+                            }
+                            if (text.isBlank()) continue
+                            val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(text)
+                            if (toastMsg != null) continue
+                            delay(800L + kotlin.random.Random.nextLong(1200L))
+                            lastDelivered = responseFinalizer.deliverResponse(
+                                aiContent = text,
+                                reasoning = null,
+                                userContentForMemory = null,
+                                pendingTurn = pendingTurn,
+                                reasoningStartedAtMs = requestStartedAt,
+                                onCommitted = onCommitted,
+                            )
+                            emitted.add(text)
+                        }
+                        "sticker" -> {
+                            val desc = event.text.trim()
+                            if (desc.isBlank()) continue
+                            val entryId = stickerEntryIdPattern.find(event.extra)
+                                ?.groupValues?.getOrNull(1)?.toLongOrNull()
+                            val msgId = runCatching {
+                                responseFinalizer.deliverSticker(desc, entryId)
+                            }.getOrElse { -1L }
+                            if (msgId > 0) {
+                                stickerEmitted++
+                                stickerContents.add("[$desc]")
+                            }
+                        }
+                        else -> Unit // status / confirm_request 仅过程态，不落库
+                    }
+                }
+
+                // Rust 侧以 error 结束且未产出任何输出 → 原样上报（消息可见 > 静默失败）。
+                // 已产出气泡的 error（例如 max_text/max_rounds 截断）不算失败，继续落地。
+                if (agentResult.finishedReason == "error" &&
+                    emitted.isEmpty() && stickerEmitted == 0
+                ) {
+                    StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
+                    val rawErr = agentResult.error?.takeIf { it.isNotBlank() } ?: "AI 请求失败，请重试"
+                    val errMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage("[TOAST]$rawErr")
+                        ?: rawErr
+                    _events.tryEmit(ChatUiEvent.Error(errMsg.removePrefix("[TOAST]")))
+                    SecureLog.e("ChatGenerationManager", "Agent turn failed: $rawErr")
+                    return@launch
+                }
+
+                // 兜底：Rust 对有正文的回合必然产出 bubble 事件（agent.rs 无需补发）；
+                // 仅当事件流完全无输出（异常路径）而 finalText 有内容时，才用 finalText 补救一条，
+                // 避免模型意图丢失。正常路径不会走到这里（防重复气泡）。
+                if (emitted.isEmpty() && stickerEmitted == 0) {
+                    val closing = if (imageGenEnabled) {
+                        ImageGenTriggerLogic.stripTags(agentResult.finalText.trim())
+                    } else {
+                        agentResult.finalText.trim()
+                    }
+                    val closingToast = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(closing)
+                    if (closing.isNotBlank() && closingToast == null) {
+                        delay(800L + kotlin.random.Random.nextLong(1200L))
+                        lastDelivered = responseFinalizer.deliverResponse(
+                            aiContent = closing,
+                            reasoning = null,
+                            userContentForMemory = null,
+                            pendingTurn = pendingTurn,
+                            reasoningStartedAtMs = requestStartedAt,
+                            onCommitted = onCommitted,
+                        )
+                        emitted.add(closing)
+                    }
+                }
+
+                if (emitted.isEmpty() && stickerEmitted == 0) {
+                    StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
+                    _events.tryEmit(ChatUiEvent.Error("AI 未返回有效内容，请重试"))
+                    return@launch
+                }
+
+                exitLoading()
+                loadingReleased = true
+
+                // 生图：Agent 路径输入仍为「用户输入 + 本轮全部气泡文本」
+                maybeTriggerImageGeneration(
+                    userText = userContentForMemory,
+                    aiText = (listOf(agentResult.finalText) + emitted).joinToString("\n"),
+                    enabled = imageGenEnabled,
+                )
+
+                val allBubbleContent = emitted.joinToString("\n")
+                    .ifBlank { stickerContents.joinToString("\n") }
+                val finalDelivered = lastDelivered ?: AiResponseFinalizer.DeliveredResponse(
+                    messageId = -1,
+                    aiContent = allBubbleContent,
+                    segments = emitted.ifEmpty { stickerContents },
+                    userContentForMemory = userContentForMemory,
+                    allowFollowUpMessage = true,
+                )
+                responseFinalizer.afterDeliver(
+                    finalDelivered.copy(
+                        aiContent = allBubbleContent,
+                        segments = emitted.ifEmpty { stickerContents },
+                        userContentForMemory = userContentForMemory,
+                    )
+                )
+                persistToolActivities(pendingTurn.turnId.value, turnActivityMap.values.toList())
+                recordAgentTurnAudit(
+                    sessionId = conversationId,
+                    options = orchestrationOptions,
+                    query = userContentForMemory,
+                    roundsUsed = agentResult.roundsUsed.toInt(),
+                    toolNames = availableTools,
+                )
+                SecureLog.d(
+                    "ChatGenerationManager",
+                    "Agent turn completed in ${System.currentTimeMillis() - requestStartedAt}ms, " +
+                        "reason=${agentResult.finishedReason}, bubbles=${emitted.size}, stickers=$stickerEmitted",
+                )
+                return@launch
+            }
+
+            // ── vision 路径：图片理解尚未下沉 Rust，仍走本地 AiService ──
+            // 文本路径已在上方 Agent 分支内 `return@launch`，走到这里 imagePath 必非 null
+            // （Kotlin 已据该分支完成 smart-cast）。
+            // 旧 `useTools`（本地工具循环）与 `streamMessage`（本地流式）分支已随 Cordis Agent
+            // 全面接管文本路径而删除 —— 二者在 `imagePath == null` 成立时本就不可达。
             val streamEvents = when {
-                imagePath != null -> {
+                else -> {
                     val aiResponse = withTimeoutOrNull(TimeoutBudgets.CHAT_VM_VISION_TIMEOUT_MS) {
                         aiService.sendMessageWithImage(
                             aiCompanion,
@@ -783,71 +1163,6 @@ class ChatGenerationManager private constructor(
                         content = aiResponse.content,
                         startedAtMs = requestStartedAt,
                         completedAtMs = System.currentTimeMillis(),
-                    )
-                }
-                isLocalModelEnabled() -> {
-                    val content = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                        generateWithLocalModel(companion, modelHistory, stickerProbability, ntpTimeEnabled)
-                    } ?: throw java.util.concurrent.TimeoutException("Local model timeout")
-                    NonStreamingAssistantStreamAdapter.fromCompleted(
-                        turnId = pendingTurn.turnId,
-                        reasoning = null,
-                        content = content,
-                        startedAtMs = requestStartedAt,
-                        completedAtMs = System.currentTimeMillis(),
-                    )
-                }
-                useTools -> {
-                    val tools = ToolRegistry.all()
-                    // 轮次预算放大到 6，外层超时预算随之放大，避免多轮工具调用被总超时误杀。
-                    val toolLoopRounds = ChatConstants.CHAT_TOOL_LOOP_MAX_ROUNDS
-                    val aiResponse = runInterruptibleSafe(
-                        timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS * toolLoopRounds,
-                    ) {
-                        toolLoopRunner.executeWithToolLoop(
-                            aiCompanion,
-                            modelHistory,
-                            stickerProbability,
-                            ntpTimeEnabled,
-                            tools,
-                            maxRounds = toolLoopRounds,
-                            onToolActivity = { event ->
-                                // 同 id 覆盖（RUNNING → 终态），保持先后顺序
-                                turnActivityMap[event.id] = event
-                                _toolActivity.value =
-                                    (_toolActivity.value.filterNot { it.id == event.id } + event)
-                                        .sortedBy { it.id }
-                            },
-                        )
-                    } ?: run {
-                        throw java.util.concurrent.TimeoutException("AI response timeout")
-                    }
-                    NonStreamingAssistantStreamAdapter.fromCompleted(
-                        turnId = pendingTurn.turnId,
-                        reasoning = aiResponse.reasoningContent,
-                        content = aiResponse.content,
-                        startedAtMs = requestStartedAt,
-                        completedAtMs = System.currentTimeMillis(),
-                    )
-                }
-                else -> {
-
-                    // 气泡协议接入：把协议文本并入角色自定义系统提示词（复用生图范例），
-                    // 使 streamMessage 内部据此推导 preserveRaw，无需改动接口。
-                    appliedBubbleProtocol = true
-                    val streamCompanion = aiCompanion.copy(
-                        systemPrompt = listOfNotNull(
-                            aiCompanion.systemPrompt?.trim()?.takeIf { it.isNotEmpty() },
-                            BubbleJsonProtocol.systemRules(),
-                        ).joinToString("\n\n")
-                    )
-                    aiService.streamMessage(
-                        companion = streamCompanion,
-                        history = modelHistory,
-                        stickerProbability = stickerProbability,
-                        ntpTimeEnabled = ntpTimeEnabled,
-                        turnId = pendingTurn.turnId,
-                        startedAtMs = requestStartedAt,
                     )
                 }
             }
@@ -907,27 +1222,16 @@ class ChatGenerationManager private constructor(
             }
 
             val aiContentRaw = streamResult.assistantText
-            // 协议模式：首条按气泡协议严格解析，正文取其 text；未遵守（非 JSON）则回落整段原文，
-            // 交回 deliverResponse 走「空行分段」兜底。
-            val firstReply = if (appliedBubbleProtocol) BubbleJsonProtocol.parseStrict(aiContentRaw) else null
-            // 协议模式下 parseStrict 失败时，用宽容提取清洗畸形/截断 JSON 残片，
-            // 避免把 {"text":"…","continue": 这类骨架直接展示给用户。
-            val sourceText = when {
-                firstReply != null -> firstReply.text
-                appliedBubbleProtocol -> BubbleJsonProtocol.extractTextLenient(aiContentRaw)
-                else -> aiContentRaw
-            }
-            // 生图标签只用于提取画面描述，绝不允许进入气泡或会话列表摘要。
-            // 若剥离后为空（模型整条回复只有标签/画面描述），也不能回落成原文——那正是标签泄漏的来源。
+            // vision 路径不接入气泡协议：整段原文交由 `deliverResponse` 走「空行分段」兜底。
             val aiContent = if (imageGenEnabled) {
-                val stripped = ImageGenTriggerLogic.stripTags(sourceText)
+                val stripped = ImageGenTriggerLogic.stripTags(aiContentRaw)
                 when {
                     stripped.isNotBlank() -> stripped
-                    ImageGenTriggerLogic.isPromptOnly(sourceText) -> IMAGE_GEN_ONLY_REPLY_TEXT
-                    else -> sourceText
+                    ImageGenTriggerLogic.isPromptOnly(aiContentRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
+                    else -> aiContentRaw
                 }
             } else {
-                sourceText
+                aiContentRaw
             }
             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
             if (toastMsg != null) {
@@ -966,66 +1270,20 @@ class ChatGenerationManager private constructor(
                 enabled = imageGenEnabled,
             )
 
-            // 连发门控：仅当接入协议且首条显式 continue=true 时才继续生成追尾气泡。
-            val enableBubbleChain = appliedBubbleProtocol && firstReply?.continueChat == true &&
-                imagePath == null && !isLocalModelEnabled()
-            val followUpBubbles = if (enableBubbleChain) {
-                bubbleLoopRunner.runFollowingBubbles { alreadyGenerated ->
-                    // 链发历史必须含首条正文（P0-2）：否则第 2 轮看不到第 1 条说了什么。
-                    // alreadyGenerated 只含本循环追加的追尾气泡，首条由 aiContent 恰好注入一次。
-                    val appendedHistory = buildChainHistory(modelHistory, aiContent, alreadyGenerated)
-                    val resp = runInterruptibleSafe(timeoutMs = TimeoutBudgets.CHAT_VM_API_TIMEOUT_MS) {
-                        aiService.sendMessage(
-                            companion = aiCompanion,
-                            history = appendedHistory,
-                            stickerProbability = stickerProbability,
-                            ntpTimeEnabled = ntpTimeEnabled,
-                            extraSystemRules = BubbleJsonProtocol.systemRules(),
-                        )
-                    }
-                    resp?.content.orEmpty()
-                }
-            } else {
-                emptyList()
-            }
-
-            // 追尾气泡同样可能夹带生图标签：剥离后再落库，
-            // 否则标签会写进气泡、并污染会话列表摘要（用户看到的就是提示词原文）。
-            val followUpBubblesDelivered = followUpBubbles
-                .map { if (imageGenEnabled) ImageGenTriggerLogic.stripTags(it) else it }
-                .filter { it.isNotBlank() }
-
-            followUpBubblesDelivered.forEach { bubble ->
-                delay(800L + kotlin.random.Random.nextLong(1200L))
-                try {
-                    responseFinalizer.deliverResponse(
-                        aiContent = bubble,
-                        reasoning = null,
-                        userContentForMemory = null,
-                        pendingTurn = pendingTurn,
-                        onCommitted = onCommitted,
-                        // 追尾气泡同样按 AI 的回车拆分（若模型把多句塞进一条 text，回车意图照发）。
-                        allowParagraphSplit = true,
-                    )
-                } catch (e: CancellationException) {
-                    // 取消必须向上传播（runCatching 会把它当普通失败吞掉，P1-2）。
-                    throw e
-                } catch (e: Exception) {
-                    SecureLog.e("ChatGenerationManager", "Follow-up bubble delivery failed", e)
-                }
-            }
-
-            val allBubbleContent = (listOf(aiContent) + followUpBubblesDelivered).joinToString("\n")
+            // 气泡连发（追尾气泡）已由 Rust `AgentFacade.runTurn` 的 bubble 事件流承担：
+            // Agent 路径按 `BubbleLoopRunner.MAX_BUBBLES` 轮预算在 Rust 侧连发，
+            // 本 vision 分支为单轮图片理解，不产出追尾气泡。
+            val allBubbleContent = aiContent
             responseFinalizer.afterDeliver(
                 firstDelivered.copy(
                     aiContent = allBubbleContent,
-                    segments = listOf(aiContent) + followUpBubblesDelivered,
+                    segments = listOf(aiContent),
                     userContentForMemory = userContentForMemory,
                 )
             )
             // 所有气泡已落库后再写工具卡片：保证其时间戳最大，在消息流中排在本轮最后一条助手消息之后。
             persistToolActivities(pendingTurn.turnId.value, turnActivityMap.values.toList())
-            SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}, bubbles=${1 + followUpBubblesDelivered.size}")
+            SecureLog.d("ChatGenerationManager", "AI request completed in ${System.currentTimeMillis() - requestStartedAt}ms, chars=${aiContent.length}, bubbles=1")
         } catch (e: CancellationException) {
             StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
             // 被打断（如新一轮消息到达/再生成）：丢弃实时过程态，避免卡片残留在输入框上方。
@@ -1155,137 +1413,6 @@ class ChatGenerationManager private constructor(
 
     private fun broadcastWeChatMessage(messageId: Long, finalContent: String? = null) {
         WeChatProactiveSync.enqueue(companionId, messageId, finalContent)
-    }
-
-    private suspend fun isLocalModelEnabled(): Boolean {
-        val provider = ServiceRegistry.get(LocalModelProvider::class.java) ?: return false
-        return provider.isAvailable()
-    }
-
-    private suspend fun generateWithLocalModel(
-        companion: CompanionEntity,
-        history: List<AiChatMessage>,
-        stickerProbability: Int,
-        ntpTimeEnabled: Boolean = false
-    ): String {
-
-        val sortedHistory = history.sortedBy { it.timestamp }
-        val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-        val memoryContext = memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, 50).take(500)
-        val role = userRepository?.selectedRole?.value ?: CompanionRole.GIRLFRIEND
-        val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-        val recentAiTexts = sortedHistory
-            .asReversed()
-            .asSequence()
-            .filter { !it.isFromUser }
-            .take(ChatConstants.ENV_ANCHOR_RECENT_LOOKBACK)
-            .map { it.content }
-            .toList()
-        val allowEnvAnchor = envAnchorStore.allowEnvAnchor(companion.id, recentAiTexts)
-        val dialogueContext = sortedHistory
-            .takeLast(12)
-            .joinToString("\n") { msg ->
-                val speaker = if (msg.isFromUser) "用户" else companion.name
-                "$speaker：${msg.content.take(200)}"
-            }
-            .take(1200)
-        val personality = companion.personality?.take(300).orEmpty()
-        val rawPrompt = companion.rawPrompt?.take(300).orEmpty()
-        val customSystem = companion.systemPrompt?.take(4000).orEmpty()
-        val systemPrompt = buildString {
-            appendLine(RolePromptProvider.getIdentityLine(companion.name, role))
-            appendLine()
-            appendLine(com.yunian.ai.network.AiContextTools.buildDeliveryBudgetPriority(lastUserMessage))
-            personality.takeIf { it.isNotBlank() }?.let { appendLine("性格：$it") }
-            companion.speakingStyle?.take(100)?.takeIf { it.isNotBlank() }?.let { appendLine("说话风格：$it") }
-            companion.backstory?.take(200)?.takeIf { it.isNotBlank() }?.let { appendLine("背景：$it") }
-            if (rawPrompt.isNotBlank() &&
-                rawPrompt != personality &&
-                !personality.contains(rawPrompt) &&
-                !rawPrompt.contains(personality)
-            ) {
-                appendLine("补充设定：$rawPrompt")
-            }
-            if (customSystem.isNotBlank()) {
-                appendLine("自定义角色指令：$customSystem")
-            }
-            if (memoryContext.isNotBlank()) appendLine("\n关于用户的记忆：$memoryContext")
-            if (dialogueContext.isNotBlank()) {
-                appendLine("\n最近对话（仅供参考，不要复读系统错误或自言自语）：")
-                appendLine(dialogueContext)
-            }
-            appendLine()
-            appendLine("回复规则：")
-            appendLine("1. 单次单动作：每轮只做一个核心社交意图（纯共情/纯反问/纯表态/纯答问；求方案才给一步），完整说完；可按真人习惯用换行分成多条短消息连发——条数不限，但严禁问好+共情+反问+方案打包成长文，也严禁半截残句。")
-            appendLine("2. 长度服从动作数：闲聊通常一句完整口语即可；解释可稍长。不要为凑字再塞第二个动作；写完自查意图数，不要按 30 字砍成残句。")
-            appendLine("3. 活人语气，自然口语化，不要AI腔。")
-            appendLine("4. 每句话用标点结尾（。！？～…），表意收住。")
-            appendLine("5. 不要重复同样的话。")
-            appendLine("6. 镜像前置：开口先接表层情绪或表层问句；未求方案时优先反问/接住，别主动结案。")
-            appendLine("7. 默认像真人连发：一层意思发一条，条数不限（内容多就换行多分几条，每条完整口语、标点收尾），不要把几句话挤进同一条；只有一句短回应时一条即可；一段连贯叙述/故事合并成一条。你的每一次回车 = 发出下一条气泡，不要假设系统会按标点拆。")
-            if (innerThoughtEnabled) appendLine("8. 每轮回复包含括号内的心理活动，如（脸红）（开心），放在回复开头或中间。") else appendLine("8. 禁止使用任何括号。禁止说教。")
-            RolePromptProvider.getLocalModelRoleLines(role).forEachIndexed { index, line -> appendLine("${9 + index}. $line") }
-            if (stickerProbability > 0) {
-                appendLine("12. 表情包：可按语境偶尔使用[名称]格式。")
-                // P5 修复：本地模型路径注入自定义表情语义清单（修「本地模型不知道有哪些表情」）；
-                // gated：概率=0 或未导入任何自定义表情时整段不拼，保持提示词零变化
-                val customStickers = stickerManager.getPromptStickers().filter { it.isCustom }
-                if (customStickers.isNotEmpty()) {
-                    appendLine("13. 用户还教了你专属表情包，含义如下，请在语境匹配时优先使用：")
-                    com.yunian.ai.common.CustomStickerPrompt.buildLines(customStickers).forEach { appendLine("    $it") }
-                }
-            }
-            appendLine("\n记住：你不是AI，你是活人。直接回复内容，不要输出思考过程。")
-            appendLine()
-            appendLine(com.yunian.ai.network.AiContextTools.buildConversationTimingRules())
-            appendLine(com.yunian.ai.network.AiContextTools.buildDeliveryBudgetRules())
-
-            val phaseHistory = sortedHistory.map { msg ->
-                com.yunian.ai.database.model.ChatMessage(
-                    companionId = companion.id,
-                    content = msg.content,
-                    isFromUser = msg.isFromUser,
-                    timestamp = msg.timestamp,
-                )
-            }
-            val phase = com.yunian.ai.network.ConversationPhaseDetector.detect(phaseHistory)
-            val effectivePhase =
-                if (!allowEnvAnchor && phase == com.yunian.ai.network.ConversationPhase.OPENING) {
-                    com.yunian.ai.network.ConversationPhase.TOPIC
-                } else {
-                    phase
-                }
-            appendLine(com.yunian.ai.network.AiContextTools.buildConversationPhaseSection(effectivePhase))
-            appendLine(com.yunian.ai.network.AiContextTools.buildCurrentTimeContext(ntpTimeEnabled, effectivePhase))
-            val cooldown = EnvAnchorCooldown.buildCooldownDirective(allowEnvAnchor)
-            if (cooldown.isNotBlank()) {
-                appendLine()
-                appendLine(cooldown)
-            }
-            appendLine()
-            appendLine(com.yunian.ai.network.AiContextTools.buildDeliveryBudgetEndCap(lastUserMessage))
-        }
-        val localProvider = ServiceRegistry.get(LocalModelProvider::class.java)
-            ?: throw Exception(application.getString(R.string.api_error_generic))
-        val response = localProvider.generateResponse(prompt = lastUserMessage.take(2000), context = systemPrompt)
-
-        val cleaned = com.yunian.ai.network.ResponsePostProcessor
-            .trimIdleEmotionOverDelivery(
-                com.yunian.ai.network.ResponsePostProcessor.stripThinkingContent(response),
-                lastUserMessage,
-            )
-            .ifBlank {
-                SecureLog.w(
-                    "ChatGenerationManager",
-                    "Local model returned only thinking/empty after strip, rawLen=${response.length}",
-                )
-                ""
-            }
-        if (EnvAnchorCooldown.looksLikeEnvCare(cleaned)) {
-            envAnchorStore.markEnvAnchor(companion.id)
-            SecureLog.d("ChatGenerationManager", "Marked env anchor companion=${companion.id} (local)")
-        }
-        return cleaned
     }
 
     private fun CompanionEntity.toAiCompanionInfo() = AiCompanionInfo(

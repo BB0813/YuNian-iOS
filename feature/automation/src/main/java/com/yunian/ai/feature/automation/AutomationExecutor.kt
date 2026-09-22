@@ -6,7 +6,6 @@ import com.yunian.ai.common.SecureLog
 import com.yunian.ai.database.model.ChatMessage
 import com.yunian.ai.database.repository.ChatRepository
 import com.yunian.ai.database.repository.MessageWriteCoordinator
-import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.feature.automation.data.Automation
 import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
@@ -45,12 +44,11 @@ class AutomationExecutor(private val context: Context) {
 
     private suspend fun doExecute(automation: Automation): WorkflowEngine.Result = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         val messageWriter = ServiceRegistry.get(MessageWriteCoordinator::class.java)
         val chatRepository = ServiceRegistry.get(ChatRepository::class.java)
 
-        val result = if (automation.isWorkflow && aiService != null && messageWriter != null) {
-            val engine = WorkflowEngine(context, aiService, messageWriter, chatRepository)
+        val result = if (automation.isWorkflow && messageWriter != null) {
+            val engine = WorkflowEngine(context, messageWriter, chatRepository)
             engine.execute(automation)
         } else {
             runLegacy(automation, messageWriter)

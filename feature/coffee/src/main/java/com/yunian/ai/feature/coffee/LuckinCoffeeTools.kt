@@ -3,6 +3,9 @@ package com.yunian.ai.feature.coffee
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.CoffeeOrderProvider
 import com.yunian.ai.domain.ToolRegistry
+import com.yunian.ai.domain.plugin.LianYuPlugin
+import com.yunian.ai.domain.plugin.PluginContext
+import com.yunian.ai.domain.plugin.PluginServices
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -26,6 +29,16 @@ object LuckinCoffeeTools {
         ToolRegistry.register(QueryOrderTool(provider))
         ToolRegistry.register(CancelOrderTool(provider))
     }
+
+    // ── 工具工厂（Cordis 插件装配用；与 registerAll 注册同一批实现） ──
+    // 嵌套工具类是 private，故由本 object 暴露构造入口给 CoffeePlugin。
+
+    internal fun queryShops(provider: CoffeeOrderProvider): AiTool = QueryShopsTool(provider)
+    internal fun searchProducts(provider: CoffeeOrderProvider): AiTool = SearchProductsTool(provider)
+    internal fun previewOrder(provider: CoffeeOrderProvider): AiTool = PreviewOrderTool(provider)
+    internal fun createOrder(provider: CoffeeOrderProvider): AiTool = CreateOrderTool(provider)
+    internal fun queryOrder(provider: CoffeeOrderProvider): AiTool = QueryOrderTool(provider)
+    internal fun cancelOrder(provider: CoffeeOrderProvider): AiTool = CancelOrderTool(provider)
 
     private class QueryShopsTool(private val provider: CoffeeOrderProvider) : AiTool {
         override val name = "luckin_query_shops"
@@ -133,6 +146,43 @@ object LuckinCoffeeTools {
             val obj = json.parseToJsonElement(argumentsJson).jsonObject
             val orderId = obj["orderId"]?.jsonPrimitive?.contentOrNull ?: ""
             return provider.cancelOrder(orderId)
+        }
+    }
+}
+
+/**
+ * 瑞幸咖啡工具插件（Cordis 双层插件模板 · 代码插件，kind = TOOL）。
+ *
+ * 与 [LuckinCoffeeTools.registerAll] 的差异：逐工具注册 [PluginContext.effect] 注销副作用，
+ * 插件卸载时工具随之清理（「卸载不留鸡毛」语义）。
+ * 装配契约：requires = [PluginServices.TOOLS]（宿主预置 ToolRegistry）。
+ */
+class CoffeePlugin(
+    private val provider: CoffeeOrderProvider,
+) : LianYuPlugin {
+
+    companion object {
+        const val ID = "coffee.luckin"
+    }
+
+    override val id: String = ID
+    override val name: String = "瑞幸咖啡"
+    override val requires: Set<String> = setOf(PluginServices.TOOLS)
+    override val configSchema: String? = null
+
+    override fun setup(ctx: PluginContext) {
+        val registry = ctx.inject<ToolRegistry>(PluginServices.TOOLS)
+        val tools = listOf(
+            LuckinCoffeeTools.queryShops(provider),
+            LuckinCoffeeTools.searchProducts(provider),
+            LuckinCoffeeTools.previewOrder(provider),
+            LuckinCoffeeTools.createOrder(provider),
+            LuckinCoffeeTools.queryOrder(provider),
+            LuckinCoffeeTools.cancelOrder(provider),
+        )
+        tools.forEach { registry.register(it) }
+        tools.forEach { tool ->
+            ctx.effect({ registry.unregister(tool.name) }, "unregister:${tool.name}")
         }
     }
 }

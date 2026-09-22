@@ -123,7 +123,7 @@ class SkillInstallTool(
         安装技能。两种用法：
         1) **首选**：先 skillhub_search 搜到技能，把结果里的 slug 与 version 传进来安装（SkillHub 下载走国内直连，最稳）。
         2) 兜底：传 url（SKILL.md 的原始文件链接），GitHub raw 会自动尝试 jsDelivr 镜像。
-        安装后该技能立即生效，出现在可用技能清单中，可直接用 use_skill 加载。
+        安装后该技能立即生效，Agent 下一回合即可通过 load_skill 加载。
     """.trimIndent()
     override val parametersJsonSchema = """
         {"type":"object","properties":{"slug":{"type":"string","description":"SkillHub 技能 slug（推荐，来自 skillhub_search）"},"version":{"type":"string","description":"推荐与 slug 一起传：skillhub_search 结果里的 version，缺省时用本地缓存补齐"},"namespace":{"type":"string","description":"可选：SkillHub 命名空间 handle"},"url":{"type":"string","description":"可选：SKILL.md 原始内容 URL（http/https）"},"name":{"type":"string","description":"可选：技能名，默认取 frontmatter 或 slug"}},"required":[]}
@@ -189,14 +189,14 @@ class SkillInstallTool(
             return@withContext buildError("安装失败：技能名无效或写入失败")
         }
 
-        // 刷新索引缓存，使新技能立即出现在系统提示词清单中
-        SkillIndexState.refresh(skillManager)
+        // Q6：技能索引缓存已退役（SkillIndexState 删除），技能目录改由 Rust
+        // `SkillSelector` 每回合从 SkillStore 现读，故此处无需刷新索引。
         SecureLog.i(TAG, "Skill installed via tool: $skillName (source=${if (slug.isNotBlank()) "skillhub" else "url"})")
         buildJsonObject {
             put("ok", true)
             put("name", skillName)
             put("bytes", content.length)
-            put("hint", "已安装，可直接用 use_skill 加载执行")
+            put("hint", "已安装，Agent 下一回合即可通过 load_skill 加载执行")
         }.toString()
     }
 
@@ -264,7 +264,7 @@ class SkillUninstallTool(
         if (!removed) {
             return buildError("未找到外部技能 $name（内置技能不可卸载）")
         }
-        SkillIndexState.refresh(skillManager)
+        // Q6：技能索引缓存已退役，卸载后无需刷新（Rust 侧每回合现读）。
         return buildJsonObject {
             put("ok", true)
             put("removed", name)
@@ -277,7 +277,7 @@ class SkillUninstallTool(
     }.toString()
 }
 
-/** 注册技能市场工具。需要已有 registerSkillTools（共享技能索引刷新）。 */
+/** 注册技能市场工具（技能本体存储与 registerSkillTools 共享同一 SkillManager）。 */
 fun registerSkillMarketTools(context: android.content.Context, skillManager: SkillManager) {
     // 目录缓存放在应用私有目录：商店搜索接口不稳定时，搜过的技能仍可离线安装
     val client = SkillHubClient(cacheDir = context.filesDir)

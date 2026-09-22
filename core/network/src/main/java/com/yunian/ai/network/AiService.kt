@@ -29,7 +29,6 @@ import com.yunian.ai.domain.AiResponse
 import com.yunian.ai.domain.AiServiceProvider
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ConversationScope
-import com.yunian.ai.domain.LorebookProvider
 import com.yunian.ai.domain.ProactiveMessageSettings
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.domain.PlaceholderProvider
@@ -38,7 +37,6 @@ import com.yunian.ai.network.Message
 import com.yunian.ai.network.bubble.BubbleJsonProtocol
 import com.yunian.ai.network.transformers.MessageTransformer
 import com.yunian.ai.network.transformers.PlaceholderTransformer
-import com.yunian.ai.network.transformers.PromptInjectionTransformer
 
 import com.yunian.ai.network.transformers.TimeReminderTransformer
 import com.yunian.ai.network.transformers.TransformerContext
@@ -47,19 +45,11 @@ import com.yunian.ai.database.repository.ApiConfigRepository
 import com.yunian.ai.database.repository.CompanionRepository
 import com.yunian.ai.database.repository.TokenUsageRepository
 import com.yunian.ai.database.repository.UserRepository
-import com.yunian.ai.domain.stream.AssistantStreamEvent
-import com.yunian.ai.domain.timeline.TurnId
 import com.yunian.ai.network.stream.ChatBodyAdapter
-import com.yunian.ai.network.stream.NonStreamingAssistantStreamAdapter
-import com.yunian.ai.network.stream.OpenAiSseChunkParser
-import com.yunian.ai.network.stream.OpenAiSseStreamAdapter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -119,8 +109,10 @@ class AiService(context: Context) : AiServiceProvider {
         rollingSummaryManager = rollingSummaryManager
     )
 
+    // 世界书注入已迁至 Rust Cordis Agent（`AgentFacade.runTurn` 回合前
+    // `WorldbookRepository.syncActiveToRuntime` 同步 → Rust 侧内联到 system），
+    // 故 `PromptInjectionTransformer` 已退役，不再参与管线。
     private val inputTransformers: List<MessageTransformer> = listOf(
-        PromptInjectionTransformer(),
         PlaceholderTransformer(),
         TimeReminderTransformer(),
     )
@@ -554,9 +546,8 @@ class AiService(context: Context) : AiServiceProvider {
                 val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
                 var messages = autoContextManager.build(sanitizedHistory, systemPrompt, memoryContext, lastUserMessage, emptyMap(), contextConfig, turnContext = turnContext, scope = ConversationScope.Single(companion.id), selfName = companion.name)
 
-                val lorebookProvider = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.LorebookProvider::class.java)
                 val placeholderProvider = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.PlaceholderProvider::class.java)
-                if (lorebookProvider != null || placeholderProvider != null) {
+                if (placeholderProvider != null) {
                     val transformerContext = TransformerContext(
                         sessionId = companion.id,
                         isGroupChat = false,
@@ -565,7 +556,6 @@ class AiService(context: Context) : AiServiceProvider {
                         characterName = companion.name,
                         userNickname = userRepository.userName.value.ifEmpty { "用户" },
                         placeholderProvider = placeholderProvider,
-                        lorebookProvider = lorebookProvider,
                         currentTimeMillis = System.currentTimeMillis()
                     )
                     messages = inputTransformers.runPipeline(transformerContext, messages, isInput = true)
@@ -725,76 +715,6 @@ class AiService(context: Context) : AiServiceProvider {
             } catch (e: Exception) {
                 SecureLog.w("AiService", "Follow-up reminder failed: ${e.message}")
                 null
-            }
-        }
-    }
-
-    suspend fun sendMessageWithCustomSystem(
-        companion: CompanionModel?,
-        history: List<ChatMessage>,
-        customSystemPrompt: String,
-        stickerProbability: Int = 30,
-        companionNameMap: Map<Long, String> = emptyMap(),
-        scope: ConversationScope? = null
-    ): String {
-        if (companion == null) return "抱歉，找不到角色信息。"
-
-        return SecureLog.timed("AiService", "sendMessageWithCustomSystem") {
-            withContext(Dispatchers.IO) {
-                val config = resolveConfig(companion.id)
-                    ?: return@withContext "[TOAST]请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。"
-
-                if (config.model.isBlank()) {
-                    return@withContext "[TOAST]模型名未配置，请在「API设置」中重新测试连接以自动选择模型。"
-                }
-
-                val sortedHistory = history.sortedBy { it.timestamp }
-                val lastUserMessage = sortedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-                val memCtx = if (companion != null) memoryProvider.getMemoryContext(companion.id, null, lastUserMessage, limit = 50) else ""
-                val contextConfig = AutoContextManager.ContextConfig(model = config.model, provider = config.provider, maxOutputTokens = config.maxTokens ?: 4096)
-                // scope 未指定时按单聊推断；selfName 口径：单聊传角色名、群聊传 null（无单一角色身份）
-                val effectiveScope = scope ?: ConversationScope.Single(companion.id)
-                val selfName = if (scope is ConversationScope.Group) null else companion.name
-                var messages = autoContextManager.build(sortedHistory, customSystemPrompt, memCtx, lastUserMessage, companionNameMap, contextConfig, scope = effectiveScope, selfName = selfName)
-
-                // 群聊（及自定义系统提示词路径）同样接入世界书注入管线，与单聊行为一致
-                val lorebookProviderForCustom = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.LorebookProvider::class.java)
-                if (lorebookProviderForCustom != null) {
-                    val transformerContext = TransformerContext(
-                        sessionId = companion.id,
-                        isGroupChat = true,
-                        modelId = config.model,
-                        modelName = config.model,
-                        characterName = companion.name,
-                        lorebookProvider = lorebookProviderForCustom,
-                        currentTimeMillis = System.currentTimeMillis()
-                    )
-                    messages = inputTransformers.runPipeline(transformerContext, messages, isInput = true)
-                }
-
-                SecureLog.api("SEND-CUSTOM", "provider=${config.provider}, model=${config.model}, messages=${messages.size}")
-
-                try {
-                    val rawResponse = if (usesAnthropicProtocol(config)) {
-                        callAnthropic(config, messages, customSystemPrompt).content
-                    } else {
-                        callOpenAiCompatible(config, messages)
-                    }
-                    if (rawResponse.isBlank()) throw Exception("API返回空内容")
-                    val cleaned = AiPromptBuilder.applyPersonaPostProcessing(rawResponse, sortedHistory)
-
-                    val safetyResult = ContentFilter.checkOutputSafety(cleaned)
-                    if (!safetyResult.isSafe) {
-                        SecureLog.w("AiService", "sendMessageWithCustomSystem output blocked: ${safetyResult.reason}")
-
-                        return@withContext "抱歉，我无法继续这个话题。"
-                    }
-
-                    cleaned
-                } catch (e: Exception) {
-                    SecureLog.e("AiService", "sendMessageWithCustomSystem failed", e)
-                    throw Exception(formatApiException(e))
-                }
             }
         }
     }
@@ -2398,180 +2318,6 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
         return sendMessageWithTools(entity, messages, stickerProbability, ntpTimeEnabled, tools, extraSystemRules)
     }
 
-    override fun streamMessage(
-        companion: AiCompanionInfo,
-        history: List<AiChatMessage>,
-        stickerProbability: Int,
-        ntpTimeEnabled: Boolean,
-        turnId: TurnId,
-        startedAtMs: Long,
-    ): Flow<AssistantStreamEvent> = flow {
-        try {
-            val entity = companion.toCompanionEntity()
-            val dbHistory = sanitizeDomainHistory(history)
-            val config = resolveConfig(entity.id)
-            if (config == null) {
-                emit(
-                    AssistantStreamEvent.TurnFailed(
-                        turnId = turnId,
-                        message = "请先配置并启用可用的API。在「我」->「API设置」中添加密钥并测试连接。",
-                    )
-                )
-                return@flow
-            }
-            if (config.model.isBlank()) {
-                emit(
-                    AssistantStreamEvent.TurnFailed(
-                        turnId = turnId,
-                        message = "模型名未配置，请在「API设置」中重新测试连接以自动选择模型。",
-                    )
-                )
-                return@flow
-            }
-
-            if (usesAnthropicProtocol(config)) {
-                val response = sendMessage(companion, history, stickerProbability, ntpTimeEnabled)
-                emitAll(
-                    NonStreamingAssistantStreamAdapter.fromCompleted(
-                        turnId = turnId,
-                        reasoning = response.reasoningContent,
-                        content = response.content,
-                        startedAtMs = startedAtMs,
-                        completedAtMs = System.currentTimeMillis(),
-                    )
-                )
-                return@flow
-            }
-
-            val sortedHistory = dbHistory.sortedBy { it.timestamp }
-            val sanitizedHistory = if (config.provider == ApiProvider.PARTNER) {
-                sortedHistory
-            } else {
-                sortedHistory.map { msg ->
-                    if (msg.isFromUser) {
-                        msg.copy(content = com.yunian.ai.common.safety.DifferentialPrivacyFilter.sanitize(msg.content))
-                    } else {
-                        msg
-                    }
-                }
-            }
-            val lastUserMessage = sanitizedHistory.lastOrNull { it.isFromUser }?.content ?: ""
-            val innerThoughtEnabled = appSettingsStore.getInnerThoughtEnabled()
-            val memoryContext = memoryProvider.getMemoryContext(entity.id, null, lastUserMessage, limit = 50)
-            val stickerManager = StickerManager.getInstance(appContext)
-            // 收口到 StickerManager 唯一装配入口（见 StickerPromptNames）：不按长度静默丢弃。
-            val availableStickers = stickerManager.getStickerNamesForPrompt()
-            val role = userRepository.selectedRole.value
-            val phase = ConversationPhaseDetector.detect(sanitizedHistory)
-            val allowEnvAnchor = resolveAllowEnvAnchor(entity.id, sanitizedHistory)
-            // 自定义表情语义清单（E2 段）：未导入时为空 → 提示词逐字节零变化
-            val customPromptStickers = stickerManager.getPromptStickers().filter { it.isCustom }
-            val baseSystemPrompt = AiPromptBuilder.buildStableSystemPrompt(
-                entity,
-                availableStickers,
-                stickerProbability,
-                innerThoughtEnabled,
-                role,
-                customPromptStickers,
-            )
-            val turnContext = AiPromptBuilder.buildTurnContext(
-                lastUserMessage = lastUserMessage,
-                ntpTimeEnabled = ntpTimeEnabled,
-                phase = phase,
-                allowEnvAnchor = allowEnvAnchor,
-                history = sanitizedHistory,
-            )
-            val systemPrompt = appendYanderePromptIfNeeded(baseSystemPrompt, entity).let { resolvePlaceholders(it, entity, config) }
-            val contextConfig = AutoContextManager.ContextConfig(
-                model = config.model,
-                provider = config.provider,
-                maxOutputTokens = config.maxTokens ?: 4096,
-            )
-            val messages = autoContextManager.build(
-                sanitizedHistory,
-                systemPrompt,
-                memoryContext,
-                lastUserMessage,
-                emptyMap(),
-                contextConfig,
-                turnContext = turnContext,
-                scope = ConversationScope.Single(entity.id),
-                selfName = entity.name,
-            )
-
-            SecureLog.api(
-                "STREAM",
-                "provider=${config.provider}, model=${config.model}, messages=${messages.size}, phase=$phase, allowEnv=$allowEnvAnchor",
-            )
-
-            val configuredField = runCatching { appSettingsStore.getReasoningResponseField() }
-                .getOrNull()
-                ?.trim()
-                .orEmpty()
-            val reasoningFields = linkedSetOf<String>().apply {
-                if (configuredField.isNotBlank()) add(configuredField)
-                addAll(OpenAiSseChunkParser.DEFAULT_REASONING_FIELDS)
-            }
-
-            val lineFlow = openAiCompatibleSseLineFlow(config, messages)
-            // 气泡协议模式：系统提示词含协议标记时，保留模型原始 JSON，交由上层 parseStrict 判定。
-            val bubbleMode = BubbleJsonProtocol.isProtocolEnabled(systemPrompt)
-            var contentLen = 0
-            var finalCleaned: String? = null
-            var streamInputTokens = 0L
-            var streamOutputTokens = 0L
-            val usageAwareLineFlow = lineFlow.onEach { line ->
-                val payload = OpenAiSseChunkParser.extractDataPayload(line) ?: return@onEach
-                val usage = OpenAiSseChunkParser.parseUsagePayload(payload) ?: return@onEach
-                if (usage.promptTokens > 0) streamInputTokens = usage.promptTokens
-                if (usage.completionTokens > 0) streamOutputTokens = usage.completionTokens
-            }
-            emitAll(
-                OpenAiSseStreamAdapter.fromSseLineFlow(
-                    turnId = turnId,
-                    lines = usageAwareLineFlow,
-                    startedAtMs = startedAtMs,
-                    reasoningFields = reasoningFields,
-                    completedAtMs = { System.currentTimeMillis() },
-                    postProcessText = { raw ->
-                        val cleaned = AiPromptBuilder.applyPersonaPostProcessing(raw, sortedHistory, preserveRaw = bubbleMode)
-                        contentLen = cleaned.length
-                        val safety = ContentFilter.checkOutputSafety(cleaned)
-                        if (!safety.isSafe) {
-                            SecureLog.w(
-                                "AiService",
-                                "Stream output safety violation: ${safety.level} - ${safety.reason}",
-                            )
-                            finalCleaned = null
-                            "抱歉，我无法继续这个话题。"
-                        } else {
-                            finalCleaned = cleaned
-                            cleaned
-                        }
-                    },
-                )
-            )
-            if (contentLen > 0) {
-                recordTokenUsage(
-                    entity.id,
-                    streamInputTokens.takeIf { it > 0 } ?: TokenEstimator.estimate(messages).toLong(),
-                    streamOutputTokens.takeIf { it > 0 } ?: TokenEstimator.estimate(finalCleaned ?: "").toLong().coerceAtLeast(1L)
-                )
-            }
-            finalCleaned?.let { maybeMarkEnvAnchor(entity.id, it) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            SecureLog.e("AiService", "streamMessage failed", e)
-            emit(
-                AssistantStreamEvent.TurnFailed(
-                    turnId = turnId,
-                    message = formatApiException(e).removePrefix("[TOAST]"),
-                )
-            )
-        }
-    }.flowOn(Dispatchers.IO)
-
     private fun sanitizeDomainHistory(history: List<AiChatMessage>): List<ChatMessage> {
         return com.yunian.ai.domain.AiDialogueHistoryPolicy
             .sanitizeForModel(history)
@@ -2784,19 +2530,6 @@ val systemPrompt = resolvePlaceholders(rawSystemPrompt, companion, config)
         val entity = companion.toCompanionEntity()
         val messages = recentMessages.map { it.toChatMessage() }
         return generateFollowUpReminder(entity, messages, settings)
-    }
-
-    override suspend fun sendMessageWithCustomSystem(
-        companion: AiCompanionInfo,
-        history: List<AiChatMessage>,
-        customSystemPrompt: String,
-        stickerProbability: Int,
-        companionNameMap: Map<Long, String>,
-        scope: ConversationScope?
-    ): String {
-        val entity = companion.toCompanionEntity()
-        val messages = history.map { it.toChatMessage() }
-        return sendMessageWithCustomSystem(entity, messages, customSystemPrompt, stickerProbability, companionNameMap, scope)
     }
 
     override suspend fun generateFollowUpQuestion(

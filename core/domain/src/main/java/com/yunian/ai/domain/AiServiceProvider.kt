@@ -1,9 +1,5 @@
 package com.yunian.ai.domain
 
-import com.yunian.ai.domain.stream.AssistantStreamEvent
-import com.yunian.ai.domain.timeline.TurnId
-import kotlinx.coroutines.flow.Flow
-
 data class AiResponse(
     val content: String,
     val reasoningContent: String? = null,
@@ -65,15 +61,6 @@ interface AiServiceProvider {
         extraSystemRules: String = ""
     ): AiResponse
 
-    fun streamMessage(
-        companion: AiCompanionInfo,
-        history: List<AiChatMessage>,
-        stickerProbability: Int = 0,
-        ntpTimeEnabled: Boolean = false,
-        turnId: TurnId,
-        startedAtMs: Long = System.currentTimeMillis(),
-    ): Flow<AssistantStreamEvent>
-
     suspend fun sendMessageWithImage(
         companion: AiCompanionInfo,
         history: List<AiChatMessage>,
@@ -118,20 +105,6 @@ interface AiServiceProvider {
 
         return generateProactiveMessage(companion, recentMessages, settings)
     }
-
-    /**
-     * 自定义系统提示词的会话生成。
-     * @param scope 会话范围（单聊/群聊），决定滚动摘要状态的持久化归属；
-     *   为 null 时由实现方按单聊推断（ConversationScope.Single(companion.id)）。
-     */
-    suspend fun sendMessageWithCustomSystem(
-        companion: AiCompanionInfo,
-        history: List<AiChatMessage>,
-        customSystemPrompt: String,
-        stickerProbability: Int = 30,
-        companionNameMap: Map<Long, String> = emptyMap(),
-        scope: ConversationScope? = null
-    ): String
 
     suspend fun generateFollowUpQuestion(
         companion: AiCompanionInfo,
