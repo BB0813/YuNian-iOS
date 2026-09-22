@@ -329,7 +329,12 @@ fun UpdateDialog(
                         shape = RoundedCornerShape(25.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.Transparent,
-                            contentColor = Color.White
+                            contentColor = Color.White,
+                            // 下载中/完成后按钮 disabled，必须显式透明禁用底——否则 Material3
+                            // 默认的 disabledContainerColor 会在自定义渐变 Box 后面再画一层，
+                            // 形成"双层按钮"（错位叠加的圆角矩形）。
+                            disabledContainerColor = Color.Transparent,
+                            disabledContentColor = Color.White
                         ),
                         enabled = !isDownloading && !isDownloaded
                     ) {
@@ -359,7 +364,7 @@ fun UpdateDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (isDownloading) stringResource(R.string.downloading)
+                                    text = if (isDownloading) stringResource(R.string.downloading_progress, downloadProgress.progress)
                                     else if (isDownloaded) stringResource(R.string.downloaded)
                                     else stringResource(R.string.update_now),
                                     style = MaterialTheme.typography.titleSmall.copy(
