@@ -834,6 +834,18 @@ class Dex2CCodeGen:
         final += f"    // Dex2C transpiled from {class_name}.{info['name']}\n"
         final += f"    // DEX: {len(instructions)} instructions, {code['registers_size']} registers\n"
 
+        # 解码异常即跳过：R8 压缩后个别方法的指令流会错位（出现 unknown_25 / 0x41 / 0xD2
+        # 这类不存在的 opcode）。错位后生成的代码既不正确、也可能无法编译
+        # （实测：寄存器声明为 jint 却被赋 const-string 的 jstring → C++ 硬错误，
+        #  直接打断 release 构建）。宁可少转译，也不能产出不可编译/不可信代码。
+        unknown_ops = sorted({
+            inst.get('name', '') for inst in instructions
+            if str(inst.get('name', '')).startswith('unknown_')
+        })
+        if unknown_ops:
+            print(f"  [skip] Method {info['index']}: 指令解码异常 {unknown_ops} —— 跳过")
+            return None
+
         # 解码异常防御：R8 压缩后的指令流偶发产生越界寄存器号，旧实现直接 regs[a]
         # 越界抛 IndexError，导致整个转译（乃至 release 构建）中断。
         # 这里逐条校验 vA/vB/vC，越界即判定该方法无法安全转译并跳过。
