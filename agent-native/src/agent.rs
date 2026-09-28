@@ -1669,6 +1669,27 @@ mod tests {
         (runtime, gw, transport)
     }
 
+    /// 生图协议经 settings 注入：Kotlin 下发 image_gen_rules 后，提示词组装必须读得到。
+    ///
+    /// 真机问题：提示词下沉 Rust 后，Kotlin 把协议拼进 aiCompanion.systemPrompt 的做法
+    /// 在 Agent 链路上失效 → 模型自称「不会画画」，而关键词触发照旧生图。
+    #[test]
+    fn settings_supply_image_gen_rules_for_prompt_assembly() {
+        let (runtime, _gw, _t) = mock_gateway(vec!["{}"]);
+        assert!(runtime.setting_str("image_gen_rules").is_none(), "默认不应带该键");
+        runtime.update_settings(
+            serde_json::json!({
+                "role": "GIRLFRIEND",
+                "image_gen_rules": "【生图协议】需要配图时输出 [[生图: 画面描述]]"
+            })
+            .to_string(),
+        );
+        let rules = runtime
+            .setting_str("image_gen_rules")
+            .expect("settings 热更新后应能读到生图协议");
+        assert!(rules.contains("[[生图"), "{rules}");
+    }
+
     #[test]
     fn runner_produces_events() {
         let req = AgentTurnRequest {
