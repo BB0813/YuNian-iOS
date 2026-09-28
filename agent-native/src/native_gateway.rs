@@ -1272,6 +1272,9 @@ fn parse_openai_response(body: &str) -> String {
         "reasoning_content": message.and_then(|m| m.get("reasoning_content")).and_then(Value::as_str).unwrap_or(""),
         "tool_calls": tool_calls,
         "finish_reason": finish_reason,
+        // token 用量：Agent 路径 HTTP 已下沉 Rust，Kotlin AiService 不再经过，
+        // 必须由这里带出，否则 token_usage 表永远为空（真机实测 0 行）。
+        "usage": v.get("usage").cloned().unwrap_or(Value::Null),
     })
     .to_string()
 }
@@ -1332,6 +1335,8 @@ fn parse_anthropic_response(body: &str) -> String {
             "max_tokens" => "length",
             _ => "stop",
         },
+        // Anthropic 用 input_tokens/output_tokens，原样带出由 Kotlin 归一
+        "usage": v.get("usage").cloned().unwrap_or(Value::Null),
     })
     .to_string()
 }
