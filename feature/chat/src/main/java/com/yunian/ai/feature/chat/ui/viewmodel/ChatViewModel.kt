@@ -70,6 +70,11 @@ class ChatViewModel(
         .map { companionId in it }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** 生图等待气泡的计时基准（本轮真实开始时间；离开会话再回来不重置，null = 未在生图） */
+    val imageGenStartedAtMs: StateFlow<Long?> = ImageGenGenerationStatus.startedAtMs
+        .map { it[companionId] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     private val aiService = ServiceRegistry.get(AiServiceProvider::class.java)
         ?: throw IllegalStateException("AiServiceProvider not registered in ServiceRegistry")
 

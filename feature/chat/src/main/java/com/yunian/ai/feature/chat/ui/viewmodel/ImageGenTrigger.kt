@@ -29,12 +29,26 @@ object ImageGenGenerationStatus {
     private val _activeCompanionIds = kotlinx.coroutines.flow.MutableStateFlow<Set<Long>>(emptySet())
     val activeCompanionIds: kotlinx.coroutines.flow.StateFlow<Set<Long>> = _activeCompanionIds
 
+    /**
+     * 会话 → 本轮生图**真实起始时间**（同为进程级状态）。
+     *
+     * 等待气泡的秒数必须以此为基准：此前它拿「composable 进入组装的时刻」当起点，
+     * 于是退出会话再进来会从 0 重新计时，而后台生图其实一直在跑（真机问题）。
+     */
+    private val _startedAtMs = kotlinx.coroutines.flow.MutableStateFlow<Map<Long, Long>>(emptyMap())
+    val startedAtMs: kotlinx.coroutines.flow.StateFlow<Map<Long, Long>> = _startedAtMs
+
     fun markStarted(companionId: Long) {
         _activeCompanionIds.value = _activeCompanionIds.value + companionId
+        // 已在生成中不得重置起点：重复触发与重入页面都必须沿用第一次的开始时间
+        if (_startedAtMs.value[companionId] == null) {
+            _startedAtMs.value = _startedAtMs.value + (companionId to System.currentTimeMillis())
+        }
     }
 
     fun markFinished(companionId: Long) {
         _activeCompanionIds.value = _activeCompanionIds.value - companionId
+        _startedAtMs.value = _startedAtMs.value - companionId
     }
 }
 
