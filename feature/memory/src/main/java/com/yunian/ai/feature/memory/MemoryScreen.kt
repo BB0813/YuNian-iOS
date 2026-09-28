@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
+import kotlinx.coroutines.launch
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -116,6 +117,17 @@ fun MemoryScreen(
                 }
 
                 selectedCompanion?.let { companion ->
+                    // 左右滑动切换（用户反馈）：Tab 与 Pager 双向同步，
+                    // 滑动手势与点击 Tab 等价；点 Tab 走 animateScrollToPage 保留动效。
+                    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+                        initialPage = selectedTab,
+                    ) { 3 }
+                    val pagerScope = androidx.compose.runtime.rememberCoroutineScope()
+                    androidx.compose.runtime.LaunchedEffect(pagerState.currentPage) {
+                        if (selectedTab != pagerState.currentPage) {
+                            selectedTab = pagerState.currentPage
+                        }
+                    }
 
                     TabRow(
                         selectedTabIndex = selectedTab,
@@ -129,7 +141,10 @@ fun MemoryScreen(
                     ) {
                         Tab(
                             selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
+                            onClick = {
+                                selectedTab = 0
+                                pagerScope.launch { pagerState.animateScrollToPage(0) }
+                            },
                             text = {
                                 Text(
                             stringResource(R.string.core_memory),
@@ -143,7 +158,10 @@ fun MemoryScreen(
                         )
                         Tab(
                             selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
+                            onClick = {
+                                selectedTab = 1
+                                pagerScope.launch { pagerState.animateScrollToPage(1) }
+                            },
                             text = {
                                 Text(
                             stringResource(R.string.temp_memory),
@@ -157,7 +175,10 @@ fun MemoryScreen(
                         )
                         Tab(
                             selected = selectedTab == 2,
-                            onClick = { selectedTab = 2 },
+                            onClick = {
+                                selectedTab = 2
+                                pagerScope.launch { pagerState.animateScrollToPage(2) }
+                            },
                             text = {
                                 Text(
                             stringResource(R.string.diary),
@@ -171,10 +192,16 @@ fun MemoryScreen(
                         )
                     }
 
-                    when (selectedTab) {
-                        0 -> CoreMemoryTab(companionId = companion.id, viewModel = viewModel)
-                        1 -> TempMemoryTab(companionId = companion.id, viewModel = viewModel)
-                        2 -> DiaryTab(companionId = companion.id, viewModel = viewModel)
+                    // 三个页面放进 Pager：支持左右滑动切换（内容与 Tab 一一对应）
+                    androidx.compose.foundation.pager.HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { page ->
+                        when (page) {
+                            0 -> CoreMemoryTab(companionId = companion.id, viewModel = viewModel)
+                            1 -> TempMemoryTab(companionId = companion.id, viewModel = viewModel)
+                            else -> DiaryTab(companionId = companion.id, viewModel = viewModel)
+                        }
                     }
                 } ?: run {
                     Box(

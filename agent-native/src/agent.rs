@@ -416,7 +416,10 @@ impl AgentToolRegistry {
         //    **实际发送的表情包名称**（fileName/description），模型可感知发送了哪一张；
         //    事件 extra 携带 entry_id → Kotlin 落地时按 id 直接落地（避免二次采样选不同图）。
         //    预选失败（Kotlin 未实现 / 无候选）→ 回退事件透传，由 Kotlin 落地时兜底采样。
-        let mut pick_and_emit = |pick_tags: &[String], fallback_text: &str| -> String {
+        // allow_passthrough：预选失败时是否仍透传 sticker 事件（旧行为）。
+        // 库为空（available 为空）时必须为 false——否则 Kotlin 落地时会走
+        // 「按描述模糊匹配内置表情」的兜底，于是恒发同一张默认图（真机问题：空库发刷子表情）。
+        let mut pick_and_emit = |pick_tags: &[String], fallback_text: &str, allow_passthrough: bool| -> String {
             match Self::sticker_pick(tool_host, pick_tags, ctx) {
                 Some(pick) => {
                     let entry_id = pick.get("entryId").and_then(|v| v.as_u64());
@@ -449,6 +452,12 @@ impl AgentToolRegistry {
                     format!("已发送表情包：{display}（标签：{}）", pick_tags.join(","))
                 }
                 None => {
+                    if !allow_passthrough {
+                        // 表情库为空且预选不到：绝不放行「默认表情包」，
+                        // 直接让模型改用文字表达（用户可见且不会误发内置图）。
+                        return "当前没有任何可用表情包（表情库为空），请不要发送表情包，改用文字气泡表达情绪。"
+                            .to_string();
+                    }
                     // 旧行为：事件透传（text=命中标签），Kotlin 落地时按标签采样兜底
                     events.push(AgentEvent {
                         kind: "sticker".to_string(),
@@ -459,14 +468,15 @@ impl AgentToolRegistry {
                 }
             }
         };
-        // ④ 可用标签为空（Kotlin 尚未注入）→ 直接交由 Kotlin 按 tags 预选/兜底
+        // ④ 可用标签为空（表情库为空）→ 只尝试预选；预选不到就明确告知模型「没有表情包」，
+        //    不允许回退成「默认表情包」（见 pick_and_emit 的 allow_passthrough 说明）。
         if available.is_empty() {
-            return pick_and_emit(&tags, &tags.join(","));
+            return pick_and_emit(&tags, &tags.join(","), false);
         }
         let hits: Vec<String> = tags.iter().filter(|t| available.contains(t)).cloned().collect();
         // ⑤ 有任一命中 → push sticker 事件 + 返回实际发送信息（多 tag → Kotlin 引擎加权随机选一张）
         if !hits.is_empty() {
-            return pick_and_emit(&hits, &hits.join(","));
+            return pick_and_emit(&hits, &hits.join(","), true);
         }
         // ⑥ 全部未命中 → 不输出 sticker 事件，返回无匹配报告（含可用标签 Top-30）
         let mut sorted = available.clone();
@@ -898,6 +908,16 @@ impl AgentRuntime {
 
     /// 组装编排器选项：静态元数据（device_id / timezone / session_id / owner_name）
     /// + 群聊成员映射（request）+ 短记忆上限（settings_json，默认 200）
+    /// 读取热更新 settings_json 中的字符串项（提示词组装期使用）。
+    ///
+    /// 用途：Kotlin 下发、随设置变化的文本（如生图协议）——提示词本体已由 Rust 组装。
+    fn setting_str(&self, key: &str) -> Option<String> {
+        let m = self.mutable.lock().unwrap();
+        serde_json::from_str::<serde_json::Value>(&m.settings_json)
+            .ok()
+            .and_then(|v| v.get(key).and_then(|x| x.as_str()).map(|s| s.to_string()))
+    }
+
     fn orchestration_options(
         &self,
         request: &AgentTurnRequest,
@@ -1127,6 +1147,15 @@ impl AgentRuntime {
                         }
                         sys.push_str("\n\n");
                         sys.push_str(&fragment.content);
+                    }
+                    // 生图协议（Kotlin 经 settings 下发）：提示词已下沉 Rust 组装，旧做法把协议
+                    // 拼进 aiCompanion.systemPrompt，Agent 链路不经过那里 → 模型不知道能生图，
+                    // 却仍被关键词触发生图（真机问题）。这里并入 system prompt。
+                    if let Some(rules) = self.setting_str("image_gen_rules") {
+                        if !rules.trim().is_empty() {
+                            sys.push_str("\n\n");
+                            sys.push_str(&rules);
+                        }
                     }
                     // 世界书注入（聊天陪伴）：Q2 重写 —— 5 个注入位置分流到
                     // system 文本（before_char / after_char）与 messages[] 消息流
@@ -1758,12 +1787,40 @@ mod tests {
         assert!(events.iter().filter(|e| e.kind == "bubble").count() >= 2, "{out} {events:?}");
     }
 
+    /// 空表情库（可用标签为空）且预选失败 → **绝不产出 sticker 事件**。
+    ///
+    /// 旧行为会透传事件，Kotlin 落地时按描述模糊匹配内置表情，于是恒发同一张
+    /// 「默认」表情包（真机问题：表情包列表为空时模型发固定刷子图）。
+    #[test]
+    fn empty_sticker_library_does_not_emit_default_sticker() {
+        let reg = AgentToolRegistry::new();
+        let ctx = ToolContext::default(); // available_sticker_tags 为空 = 表情库为空
+        let mut events = Vec::new();
+        let out = AgentToolRegistry::builtin_send_sticker(
+            &reg,
+            &ctx,
+            &NoopHost,
+            r#"{"tags":["开心"]}"#,
+            &mut events,
+        );
+        assert!(events.is_empty(), "空库不得产出 sticker 事件: {events:?}");
+        assert!(
+            out.contains("表情库为空") || out.contains("不要发送表情包"),
+            "应明确告知模型没有表情包: {out}"
+        );
+    }
+
     #[test]
     fn sticker_tool_cleans_tags() {
         let reg = AgentToolRegistry::new();
-        // 带标点/空白/大小写：清洗后应为无标点小写词，emoji 保留
+        // 带标点/空白/大小写：清洗后应为无标点小写词，emoji 保留。
+        // 必须给非空可用标签才能走「命中 → 产出 sticker 事件」路径；
+        // 空库路径由 empty_sticker_library_does_not_emit_default_sticker 覆盖。
+        let ctx = ToolContext {
+            available_sticker_tags: vec!["开心😊".to_string(), "happy".to_string()],
+            ..Default::default()
+        };
         let mut events = Vec::new();
-        let ctx = ToolContext::default();
         let out = AgentToolRegistry::builtin_send_sticker(
             &reg,
             &ctx,

@@ -8,7 +8,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -45,17 +47,22 @@ fun GlassPageScaffold(
     // ON_RESUME 兜底：返回页面时强制从 SharedPreferences 重读背景，
     // 不依赖 SP 监听器（跨 ViewModel 实例的通知链路任何环节失效都能被这里纠正）
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    // 后台返回时 LayerBackdrop 的 RenderNode 内容可能已被系统回收，表现为
+    // 「液态玻璃整片变透明」（真机问题：API 配置页切走再回来）。把 ON_RESUME 世代
+    // 并入下方捕获层 key，回前台即重建捕获，玻璃恢复不透明。
+    var backdropGeneration by remember { mutableIntStateOf(0) }
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 backgroundViewModel.refreshFromPrefs()
+                backdropGeneration++
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val backdrop = key(bgKey, isDark) {
+    val backdrop = key(bgKey, isDark, backdropGeneration) {
         rememberLayerBackdrop {
             drawContent()
         }
