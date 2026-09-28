@@ -216,22 +216,7 @@ impl PromptOrchestrator {
 
         // L4 技能注入层：技能目录（渐进式披露 L1，仅 name+description）+【记忆技能】程序性 Skill（任务信息）
         if let Some(skill) = &self.skill {
-            let menu = skill.discover(
-                companion_id,
-                options.skill_limit,
-                options.available_tools.clone(),
-            );
-            let text = skill.build_menu_context(menu);
-            if !text.trim().is_empty() {
-                frags.push(PromptFragment {
-                    layer: 4,
-                    id: "skill.injected".to_string(),
-                    source: "skill".to_string(),
-                    lifetime: "external".to_string(),
-                    content: text,
-                    role: None,
-                });
-            }
+            let mut chat_protocol_loaded = false;
             // 内置聊天工具协议技能正文常驻注入（L4 特例）：
             // 渐进式披露的例外——聊天协议是行为基线，模型若不自发 load_skill
             // 就看不到「必须用 emit_bubble 输出气泡」，导致工具调用积极度不足。
@@ -243,6 +228,7 @@ impl PromptOrchestrator {
                 ) {
                     let trimmed = content.trim();
                     if !trimmed.is_empty() {
+                        chat_protocol_loaded = true;
                         frags.push(PromptFragment {
                             layer: 4,
                             id: "skill.chat_protocol".to_string(),
@@ -269,8 +255,35 @@ impl PromptOrchestrator {
                     options.available_tools
                 );
             }
+            // 已注入正文的聊天协议不再要求 load_skill，避免每次普通聊天额外消耗一轮。
+            // 若本轮没有加载工具，也不能给模型注入无法遵守的「必须先加载」指令。
+            if options.available_tools.is_empty()
+                || options.available_tools.iter().any(|tool| tool == "load_skill")
+            {
+                let menu = skill.discover(
+                    companion_id,
+                    options.skill_limit.saturating_add(u32::from(chat_protocol_loaded)),
+                    options.available_tools.clone(),
+                ).into_iter()
+                    .filter(|entry| !chat_protocol_loaded || entry.skill_id != BUILTIN_CHAT_TOOL_SKILL_ID)
+                    .take(options.skill_limit.max(1) as usize)
+                    .collect();
+                let text = skill.build_menu_context(menu);
+                if !text.trim().is_empty() {
+                    frags.push(PromptFragment {
+                        layer: 4,
+                        id: "skill.injected".to_string(),
+                        source: "skill".to_string(),
+                        lifetime: "external".to_string(),
+                        content: text,
+                        role: None,
+                    });
+                }
+            }
         }
-        if options.include_memory_skill {
+        if options.include_memory_skill && (options.available_tools.is_empty()
+            || ["recall_memory", "save_memory", "consolidate_memory"].iter()
+                .all(|name| options.available_tools.iter().any(|tool| tool == name))) {
             let text = memory_skill_context();
             if !text.trim().is_empty() {
                 frags.push(PromptFragment {
@@ -282,6 +295,27 @@ impl PromptOrchestrator {
                     role: None,
                 });
             }
+        }
+
+        // 工具能力总览（A 方案 2026-09-28）：始终注入「本轮可用工具」清单。
+        // 背景：旧行为按关键词门控工具注入，未命中时模型完全不知道自己的工具，
+        // 真机表现为「问有什么工具 → 答不知道」「工具调用恒定失败」。
+        if !options.available_tools.is_empty() {
+            let mut names: Vec<String> = options.available_tools.clone();
+            names.sort();
+            names.dedup();
+            let overview = format!(
+                "[可用工具] 本轮你已挂载以下工具，需要执行操作时直接调用（不要只描述，也不要罗列工具清单或解释参数）：\n{}\n用户问「你会什么 / 有什么工具」时，用一两句话概括能力即可。",
+                names.join("、")
+            );
+            frags.push(PromptFragment {
+                layer: 4,
+                id: "tools.overview".to_string(),
+                source: "tools".to_string(),
+                lifetime: "external".to_string(),
+                content: overview,
+                role: None,
+            });
         }
 
         // L5 Memory 长期记忆层：召回相关记忆（外部信息；排除 WORKING 短期记忆）
@@ -836,6 +870,68 @@ mod tests {
             !frags.iter().any(|f| f.id == "skill.chat_protocol"),
             "非聊天场景不应注入聊天协议正文: {frags:?}"
         );
+    }
+
+    #[test]
+    fn injected_chat_protocol_does_not_require_reloading_or_consume_menu_limit() {
+        let (full, _) = orchestrator();
+        let frags = full.build_fragments(
+            None, Some(1), None, "你好".to_string(),
+            PromptOrchestratorOptions {
+                available_tools: vec!["emit_bubble".to_string(), "load_skill".to_string()],
+                skill_limit: 1,
+                ..Default::default()
+            },
+        );
+        assert!(frags.iter().any(|f| f.id == "skill.chat_protocol"));
+        let menu = frags.iter().find(|f| f.id == "skill.injected").unwrap();
+        assert!(menu.content.contains("s1"));
+        assert!(!menu.content.contains(BUILTIN_CHAT_TOOL_SKILL_ID));
+    }
+
+    #[test]
+    fn unavailable_tools_are_not_required_by_skill_instructions() {
+        let (full, _) = orchestrator();
+        let frags = full.build_fragments(
+            None, Some(1), None, "你好".to_string(),
+            PromptOrchestratorOptions {
+                available_tools: vec!["emit_bubble".to_string()],
+                ..Default::default()
+            },
+        );
+        assert!(frags.iter().any(|f| f.id == "skill.chat_protocol"));
+        assert!(!frags.iter().any(|f| f.id == "skill.injected"));
+        assert!(!frags.iter().any(|f| f.id == "skill.memory_procedural"));
+    }
+
+    /// A 方案：只要本轮挂载了工具，就必须注入「能力总览」，模型才知道自己有什么；
+    /// 没有工具时不注入（避免声称有工具却没有）。
+    #[test]
+    fn tool_overview_lists_available_tools() {
+        let (full, _) = orchestrator();
+        let frags = full.build_fragments(
+            None, Some(1), None, "你好".to_string(),
+            PromptOrchestratorOptions {
+                available_tools: vec!["search_web".to_string(), "device_get_time".to_string()],
+                ..Default::default()
+            },
+        );
+        let overview = frags
+            .iter()
+            .find(|f| f.id == "tools.overview")
+            .expect("挂载工具时应注入工具总览");
+        assert!(overview.content.contains("search_web"), "{}", overview.content);
+        assert!(overview.content.contains("device_get_time"), "{}", overview.content);
+        assert_eq!(overview.layer, 4);
+
+        let empty = full.build_fragments(
+            None, Some(1), None, "你好".to_string(),
+            PromptOrchestratorOptions {
+                available_tools: vec![],
+                ..Default::default()
+            },
+        );
+        assert!(!empty.iter().any(|f| f.id == "tools.overview"));
     }
 
     #[test]

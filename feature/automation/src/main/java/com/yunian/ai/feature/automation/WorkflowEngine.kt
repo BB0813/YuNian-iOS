@@ -66,7 +66,7 @@ class WorkflowEngine(
 
                             val generated = withTimeoutOrNull(TimeoutBudgets.AUTOMATION_AI_TIMEOUT_MS) {
                                 callAgentGeneration(automation.companionId, enrichedPrompt)
-                            } ?: ""
+                            } ?: throw IllegalStateException("工作流 AI 生成超时")
                             variables[current.outputVar.ifBlank { "result" }] = generated
                             outputMessage = generated
                         }
@@ -101,24 +101,37 @@ class WorkflowEngine(
      */
     private suspend fun callAgentGeneration(companionId: Long, prompt: String): String {
         val appContext = context.applicationContext
+        val database = com.yunian.ai.database.AppDatabase.getDatabase(appContext)
+        val activeApi = com.yunian.ai.database.repository.ApiConfigRepository(database.apiConfigDao())
+            .getActiveEnabledConfig() ?: throw IllegalStateException("工作流未找到可用 API 配置")
+        val isPartner = activeApi.provider == com.yunian.ai.database.model.ApiProvider.PARTNER
+        val session = if (isPartner) com.yunian.ai.common.RemoteKeyProvider.getPartnerSession(appContext) else null
+        val credentials = AgentFacade.buildCredentialsJson(
+            sessionToken = session?.token,
+            clientId = session?.clientId,
+            apiKey = activeApi.apiKey,
+            extraApiKeys = activeApi.extraApiKeys,
+        )
         val turnRequest = AgentTurnRequest(
             groupId = null,
             historyJson = serializeHistoryJson(prompt),
             tools = emptyList(),
             maxRounds = 1u,
-            toolChoice = "auto",
+            toolChoice = "none",
             stickerProbability = 0u,
             image = null,
             systemPrompt = null,
             companionNameMapJson = null,
         )
-        val result = runCatching {
-            AgentFacade.runTurn(turnRequest, appContext, companionId, AgentToolHost(appContext))
-        }.onFailure {
-            SecureLog.e("WorkflowEngine", "agent generation failed", it)
-        }.getOrNull() ?: return ""
+        val result = AgentFacade.runtime(appContext).runTurnWithCredentials(
+            turnRequest, companionId, AgentToolHost(appContext), credentials,
+        )
+        check(result.finishedReason != "error" && result.finishedReason != "confirm_pending") {
+            result.error ?: "工作流 AI 生成未完成：${result.finishedReason}"
+        }
         return result.finalText.trim()
             .ifBlank { result.events.filter { it.kind == "bubble" }.joinToString("\n") { it.text }.trim() }
+            .also { check(it.isNotBlank()) { "工作流 AI 未返回有效内容" } }
     }
 
     /** 单条 user 指令 → OpenAI messages JSON。 */

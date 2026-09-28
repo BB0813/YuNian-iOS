@@ -295,6 +295,67 @@
 -keep class androidx.work.Configuration$Builder { *; }
 -keep class androidx.work.impl.WorkManagerInitializer { *; }
 
+# ═══════════════════════════════════════════════════════════════
+# Agent Native 桥接（UniFFI + JNA）—— release 专有故障的根因所在
+#
+# UniFFI 生成的绑定完全依赖 JNA：native 函数按「接口方法名」解析符号，
+# RustBuffer.ByValue 等结构体的字段布局靠反射计算，回调（ToolHost /
+# StreamSink / SkillStore / MemoryStore / …）经 JNA CallbackProxy 反射调用。
+# 一旦 R8 改名或删除这些类/方法/字段，release 包会在运行期抛
+# UnsatisfiedLinkError / NoSuchMethodError，并因 SecureLog 在非 debug 静默
+# 而表现为「聊天界面 AI 不回复」——debug 包不复现。
+#
+# 事故证据（2026-09-28 release mapping.txt）：
+#   com.sun.jna.CallbackProxy            -> ug0
+#   com.sun.jna.CallbackReference        -> yg0
+#   com.sun.jna.Library                  -> cd4
+#   com.yunian.ai.agent.host.AgentToolHost -> d8
+#   com.yunian.ai.agent.uniffi.AgentTurnRequest -> f8
+#   com.yunian.ai.agent.uniffi.FfiConverterRustBuffer -> R8$$REMOVED$$CLASS$$
+# ═══════════════════════════════════════════════════════════════
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class com.sun.jna.** { *; }
+-dontwarn com.sun.jna.**
+-dontwarn java.awt.**
+-keep class * implements com.sun.jna.Library { *; }
+-keep class * implements com.sun.jna.Callback { *; }
+-keep class * extends com.sun.jna.Structure { *; }
+-keep class * extends com.sun.jna.PointerType { *; }
+-keepclassmembers class * extends com.sun.jna.Structure {
+    <fields>;
+    <init>();
+}
+-keepclassmembers class * implements com.sun.jna.Callback {
+    <methods>;
+}
+-keep,allowoptimization class * implements com.sun.jna.Callback {
+    <methods>;
+}
+
+# UniFFI 生成的 Kotlin 绑定（包名见 agent-native/uniffi.toml）
+-keep class com.yunian.ai.agent.uniffi.** { *; }
+-keepclassmembers class com.yunian.ai.agent.uniffi.** { *; }
+-keep interface com.yunian.ai.agent.uniffi.** { *; }
+-keep enum com.yunian.ai.agent.uniffi.** { *; }
+-keep,includedescriptorclasses class com.yunian.ai.agent.uniffi.** { *; }
+
+# 回调实现类（Kotlin 实现，经 JNA 被 Rust 反调）
+-keep class com.yunian.ai.agent.AgentFacade { *; }
+-keep class com.yunian.ai.agent.host.** { *; }
+-keep class com.yunian.ai.agent.skill.** { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.ToolHost { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.StreamSink { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.SkillStore { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.MemoryStore { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.RequestSignatureProvider { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.StickerPreferenceStore { *; }
+-keepclassmembers class * implements com.yunian.ai.agent.uniffi.TurnStateController { *; }
+
+# JNI 声明方法名必须与 .so 符号一致
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
 -dontwarn com.huawei.hms.**
 -dontwarn com.huawei.android.os.**
 -dontwarn com.huawei.hianalytics.**

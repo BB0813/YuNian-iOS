@@ -85,9 +85,6 @@ class ChatGenerationManager private constructor(
 
         private const val IDLE_DISPOSE_MS = 60_000L
 
-        /** 模型整条回复只有生图标签时的占位文案（不含方括号，避免被当成表情包标签） */
-        private const val IMAGE_GEN_ONLY_REPLY_TEXT = "（正在为你配图…）"
-
         fun get(application: Application, companionId: Long): ChatGenerationManager =
             instances.getOrPut(companionId) { ChatGenerationManager(application, companionId) }
 
@@ -968,8 +965,12 @@ class ChatGenerationManager private constructor(
             if (imagePath == null) {
                 val activeApi = syncAgentRuntimeConfig()
                 val conversationId = java.util.UUID.randomUUID().toString()
+                // A 方案（用户拍板 2026-09-28）：**始终注入全部工具**。
+                // 旧行为由 ChatToolIntent 关键词白名单门控：未命中时模型一个全局工具都拿不到，
+                // 真机实测「你有啥工具」只挂载 4 个 memory/skill 工具 → 模型答"你说的工具是指什么呀"，
+                // 表现为「工具调用恒定失败」。代价是每轮多约 3~5k prompt tokens（已确认接受）。
                 val (agentTools, availableTools, orchestrationOptions) = buildAgentTools(
-                    useGlobalTools = shouldEnableToolsFor(userContentForMemory, history),
+                    useGlobalTools = true,
                 )
                 val turnRequest = com.yunian.ai.agent.uniffi.AgentTurnRequest(
                     groupId = null,
@@ -987,19 +988,6 @@ class ChatGenerationManager private constructor(
                 val toolHost = com.yunian.ai.agent.host.AgentToolHost(application)
                 val agentResult = runTurnWithConfirmation(turnRequest, toolHost, companionId)
                     ?: throw java.util.concurrent.TimeoutException("AI response timeout")
-
-                // 主回合结束（非待确认）后驱动委派子回合：串行执行，失败不影响主链路
-                if (agentResult.finishedReason != "confirm_pending") {
-                    runCatching {
-                        val coordinator = ServiceRegistry.get(
-                            com.yunian.ai.domain.delegation.DelegationCoordinator::class.java
-                        )
-                        (coordinator as? com.yunian.ai.agent.delegation.DelegationCoordinatorImpl)
-                            ?.runPendingDelegations(application)
-                    }.onFailure {
-                        SecureLog.w("ChatGenerationManager", "runPendingDelegations failed: ${it.message}")
-                    }
-                }
 
                 recordAgentDispatchLog(
                     sessionId = conversationId,
@@ -1019,11 +1007,7 @@ class ChatGenerationManager private constructor(
                 for (event in agentResult.events) {
                     when (event.kind) {
                         "bubble" -> {
-                            val text = if (imageGenEnabled) {
-                                ImageGenTriggerLogic.stripTags(event.text)
-                            } else {
-                                event.text
-                            }
+                            val text = AgentReplyText.forDisplay(event.text, imageGenEnabled)
                             if (text.isBlank()) continue
                             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(text)
                             if (toastMsg != null) continue
@@ -1073,11 +1057,7 @@ class ChatGenerationManager private constructor(
                 // 仅当事件流完全无输出（异常路径）而 finalText 有内容时，才用 finalText 补救一条，
                 // 避免模型意图丢失。正常路径不会走到这里（防重复气泡）。
                 if (emitted.isEmpty() && stickerEmitted == 0) {
-                    val closing = if (imageGenEnabled) {
-                        ImageGenTriggerLogic.stripTags(agentResult.finalText.trim())
-                    } else {
-                        agentResult.finalText.trim()
-                    }
+                    val closing = AgentReplyText.forDisplay(agentResult.finalText.trim(), imageGenEnabled)
                     val closingToast = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(closing)
                     if (closing.isNotBlank() && closingToast == null) {
                         delay(800L + kotlin.random.Random.nextLong(1200L))
@@ -1105,7 +1085,9 @@ class ChatGenerationManager private constructor(
                 // 生图：Agent 路径输入仍为「用户输入 + 本轮全部气泡文本」
                 maybeTriggerImageGeneration(
                     userText = userContentForMemory,
-                    aiText = (listOf(agentResult.finalText) + emitted).joinToString("\n"),
+                    // 原始 bubble 可含生图标签；emitted 已清洗，不能用于恢复画面描述。
+                    aiText = (listOf(agentResult.finalText) +
+                        agentResult.events.filter { it.kind == "bubble" }.map { it.text }).joinToString("\n"),
                     enabled = imageGenEnabled,
                 )
 
@@ -1138,6 +1120,20 @@ class ChatGenerationManager private constructor(
                     "Agent turn completed in ${System.currentTimeMillis() - requestStartedAt}ms, " +
                         "reason=${agentResult.finishedReason}, bubbles=${emitted.size}, stickers=$stickerEmitted",
                 )
+                // 先落地主回复并结束 typing，再串行执行子回合；子任务耗时不能挡住已有回复。
+                if (agentResult.finishedReason != "confirm_pending") {
+                    try {
+                        val coordinator = ServiceRegistry.get(
+                            com.yunian.ai.domain.delegation.DelegationCoordinator::class.java
+                        )
+                        (coordinator as? com.yunian.ai.agent.delegation.DelegationCoordinatorImpl)
+                            ?.runPendingDelegations(application)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (exception: Exception) {
+                        SecureLog.w("ChatGenerationManager", "runPendingDelegations failed: ${exception.message}")
+                    }
+                }
                 return@launch
             }
 
@@ -1223,16 +1219,7 @@ class ChatGenerationManager private constructor(
 
             val aiContentRaw = streamResult.assistantText
             // vision 路径不接入气泡协议：整段原文交由 `deliverResponse` 走「空行分段」兜底。
-            val aiContent = if (imageGenEnabled) {
-                val stripped = ImageGenTriggerLogic.stripTags(aiContentRaw)
-                when {
-                    stripped.isNotBlank() -> stripped
-                    ImageGenTriggerLogic.isPromptOnly(aiContentRaw) -> IMAGE_GEN_ONLY_REPLY_TEXT
-                    else -> aiContentRaw
-                }
-            } else {
-                aiContentRaw
-            }
+            val aiContent = AgentReplyText.forDisplay(aiContentRaw, imageGenEnabled)
             val toastMsg = com.yunian.ai.domain.AiOperationalMessages.asToastMessage(aiContent)
             if (toastMsg != null) {
                 StreamingReasoningMessagePipeline.removeStreaming(companionId, pendingTurn.turnId)
@@ -1323,14 +1310,9 @@ class ChatGenerationManager private constructor(
         }
     }
 
-    private fun shouldEnableToolsFor(content: String, history: List<ChatMessage>): Boolean {
 
-        return ChatToolIntent.shouldEnableTools(
-            content = content,
-            latestUserText = history.lastOrNull { it.isFromUser }?.content
-        )
-    }
-
+    // 注：关键词门控（ChatToolIntent）已随 A 方案停用——工具改为每轮全量注入。
+    // 该类保留备用（未来若需做“软提示”而非硬门控可复用其词表）。
     /**
      * 聊天配图触发。
      *

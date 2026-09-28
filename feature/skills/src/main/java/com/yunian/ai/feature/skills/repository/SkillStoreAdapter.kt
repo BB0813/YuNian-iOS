@@ -39,8 +39,9 @@ import org.json.JSONObject
  *
  * 后者是 master 的「Room 索引 + 文件正文」实现，二者都实现同一个 UniFFI 回调接口。
  * 迁移期保留两者：`SkillStoreAdapter` 负责本地资产/市场技能，`SkillStoreImpl` 负责
- * 内置种（`builtin_chat_tool_protocol`）等 Agent 原生技能。由 [com.yunian.ai.agent.AgentFacade]
- * 决定注入哪一个。
+ * 内置种（`builtin_chat_tool_protocol`）等 Agent 原生技能。二者经
+ * `com.yunian.ai.agent.skill.CompositeSkillStore` 组合后交给 Rust `SkillSelector`——
+ * 只注入适配器会让 Room 里的内置技能从 L1 目录消失。
  */
 class SkillStoreAdapter(
     private val skillManager: SkillManager,

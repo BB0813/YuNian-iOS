@@ -4,6 +4,7 @@ import android.content.Context
 import com.yunian.ai.agent.audit.AgentDispatchRecorder
 import com.yunian.ai.agent.audit.PromptAuditRecorder
 import com.yunian.ai.agent.memory.MemoryStoreImpl
+import com.yunian.ai.agent.skill.CompositeSkillStore
 import com.yunian.ai.agent.skill.SkillStoreImpl
 import com.yunian.ai.agent.audit.ToolCallRecord
 import com.yunian.ai.agent.uniffi.AgentGlobalConfig
@@ -308,10 +309,18 @@ object AgentFacade {
      */
     fun skillSelector(context: Context): SkillSelector =
         skillSelector ?: synchronized(this) {
-            skillSelector ?: SkillSelector(
-                skillStoreOverride ?: SkillStoreImpl(context)
-            ).also { skillSelector = it }
+            skillSelector ?: SkillSelector(skillStore(context)).also { skillSelector = it }
         }
+
+    /**
+     * Rust `SkillSelector` 的数据源：注入本地资产适配器时**仍与** Agent 原生存储组合，
+     * 否则种进 Room 的内置技能（如 `builtin_chat_tool_protocol`）不会出现在 L1 目录，
+     * 模型将失去聊天工具协议与表情包/分段工具的调用依据。
+     */
+    private fun skillStore(context: Context): SkillStore {
+        val localOverride = skillStoreOverride ?: return SkillStoreImpl(context)
+        return CompositeSkillStore(localOverride, SkillStoreImpl(context))
+    }
 
     /** 技能选择（Rust 决策）：按 query 召回并读取正文。companionId=null 表示全局技能。 */
     fun selectSkills(context: Context, query: String, companionId: Long? = null, limit: UInt = 5u): List<SkillContext> =
@@ -428,7 +437,7 @@ object AgentFacade {
     /**
      * 幂等种子：把内置聊天工具协议 skill 写入混合存储（Room 索引 + content.md）。
      * 已存在（version ≥ [BUILTIN_CHAT_TOOL_SKILL_VERSION]）则跳过；应用启动时调用一次。
-     * 返回是否执行了写入（false = 已是最新，跳过）。
+     * 返回是否已就绪（已存在当前版本也视为成功；false 仅表示写入失败）。
      */
     fun seedBuiltinChatToolSkill(context: Context): Boolean {
         val store = SkillStoreImpl(context)
@@ -442,7 +451,7 @@ object AgentFacade {
                     o.optInt("version", 0) >= BUILTIN_CHAT_TOOL_SKILL_VERSION
             }
         }.getOrDefault(false)
-        if (exists) return false
+        if (exists) return true
         val meta = org.json.JSONObject().apply {
             put("skill_id", BUILTIN_CHAT_TOOL_SKILL_ID)
             put("name", "微信真人聊天规范")

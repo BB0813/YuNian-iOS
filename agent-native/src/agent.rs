@@ -564,7 +564,7 @@ impl AgentToolRegistry {
         }
         {
             let global = self.global_tools.lock().unwrap();
-            if global.contains_key(name) {
+            if global.get(name).is_some_and(|tool| tool.available) {
                 drop(global);
                 let ctx_json = serde_json::json!({
                     "companion_id": ctx.companion_id,
@@ -576,7 +576,7 @@ impl AgentToolRegistry {
             }
         }
         let session = self.session_tools.lock().unwrap();
-        if session.contains_key(name) {
+        if session.get(name).is_some_and(|tool| tool.available) {
             drop(session);
             let ctx_json = serde_json::json!({
                 "companion_id": ctx.companion_id,
@@ -714,6 +714,25 @@ impl AgentRuntime {
         )
     }
 
+    /// 使用本回合独立的凭证快照，避免不同会话覆盖全局凭证后串台。
+    pub fn run_turn_with_credentials(
+        &self,
+        request: AgentTurnRequest,
+        companion_id: Option<i64>,
+        tool_host: Arc<dyn ToolHost>,
+        credentials_json: String,
+    ) -> AgentTurnResult {
+        let gw = self.gateway_with_credentials(Some(credentials_json));
+        self.run_turn_inner(
+            &request,
+            companion_id,
+            &gw,
+            None,
+            tool_host.as_ref(),
+            &DefaultTurnStateMachine,
+        )
+    }
+
     /// 使用自定义状态控制器运行（编排方案 v3 决策 1：B 控制 + A 存储）
     ///
     /// 每轮 gateway.send 前调用 controller.on_round：
@@ -814,6 +833,26 @@ impl AgentRuntime {
         )
     }
 
+    /// 流式回合的独立凭证入口；凭证只属于本次网关，不写入全局运行时。
+    pub fn run_turn_stream_with_credentials(
+        &self,
+        request: AgentTurnRequest,
+        companion_id: Option<i64>,
+        tool_host: Arc<dyn ToolHost>,
+        sink: Arc<dyn StreamSink>,
+        credentials_json: String,
+    ) -> AgentTurnResult {
+        let gw = self.gateway_with_credentials(Some(credentials_json));
+        self.run_turn_inner(
+            &request,
+            companion_id,
+            &gw,
+            Some(sink),
+            tool_host.as_ref(),
+            &DefaultTurnStateMachine,
+        )
+    }
+
     // ── 全局工具注册表（下沉 rs，替代 KT ToolRegistry）──
 
     /// 全局注册工具（Kotlin 启动时调用）
@@ -835,13 +874,17 @@ impl AgentRuntime {
 impl AgentRuntime {
     /// 从当前全局配置快照构造 NativeGateway（默认 ureq 传输；Eval 注入 mock 时离线）
     fn gateway(&self) -> crate::native_gateway::NativeGateway {
+        self.gateway_with_credentials(None)
+    }
+
+    fn gateway_with_credentials(&self, credentials_json: Option<String>) -> crate::native_gateway::NativeGateway {
         let m = self.mutable.lock().unwrap();
         let cfg = crate::native_gateway::AgentGlobalConfig {
             db_path: self.db_path.clone(),
             device_id: self.device_id.clone(),
             settings_json: m.settings_json.clone(),
             stickers: m.stickers.clone(),
-            credentials_json: m.credentials_json.clone(),
+            credentials_json: credentials_json.unwrap_or_else(|| m.credentials_json.clone()),
             orchestrator: self.orchestrator.clone(),
         };
         let mock = self.mock_transport.lock().unwrap().clone();
@@ -885,13 +928,22 @@ impl AgentRuntime {
     /// 本轮实际注入模型的工具名集合（与 run_turn_inner 中 tool_defs 的过滤逻辑一致：
     /// available=true 的工具才会被模型看到，技能目录按此集合过滤显示；空 = 不过滤）
     fn available_tool_names(&self, request: &AgentTurnRequest) -> Vec<String> {
+        self.available_tool_definitions(request)
+            .into_iter()
+            .map(|t| t.name)
+            .collect()
+    }
+
+    /// 工具定义、确认类别与执行路由共用同一优先级，避免同名注册使声明和执行错位。
+    fn available_tool_definitions(&self, request: &AgentTurnRequest) -> Vec<ToolDefinition> {
+        let mut seen = std::collections::HashSet::new();
         self.registry
             .builtin_tool_definitions()
-            .iter()
-            .chain(self.registry.global_tool_definitions().iter())
-            .chain(request.tools.iter())
-            .filter(|t| t.available)
-            .map(|t| t.name.clone())
+            .into_iter()
+            .chain(self.registry.global_tool_definitions())
+            .chain(request.tools.iter().cloned())
+            .chain(self.core_plugin_tools())
+            .filter(|t| t.available && seen.insert(t.name.clone()))
             .collect()
     }
 
@@ -938,19 +990,10 @@ impl AgentRuntime {
             }
         }
 
-        let core_plugin_tools = self.core_plugin_tools();
-        // 按名去重（builtin/global/session/core 四级，先到先得）
-        let mut seen_tool_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let tool_defs: Vec<serde_json::Value> = self
-            .registry
-            .builtin_tool_definitions()
+        // 回合快照也是工具执行的白名单：模型不得调用本轮未公开或已禁用的工具。
+        let available_tools = self.available_tool_definitions(request);
+        let tool_defs: Vec<serde_json::Value> = available_tools
             .iter()
-            .chain(self.registry.global_tool_definitions().iter())
-            .chain(request.tools.iter())
-            .chain(core_plugin_tools.iter())
-            // 静态可用性过滤：available=false 的工具不注入本轮工具列表
-            // （动态 check_fn 由 Kotlin AiTool.isAvailable() 承担，注册前已过滤）
-            .filter(|t| t.available && seen_tool_names.insert(t.name.clone()))
             .map(|t| {
                 serde_json::json!({
                     "type": "function",
@@ -1010,7 +1053,8 @@ impl AgentRuntime {
         while rounds_used < max_rounds {
             rounds_used += 1;
             let is_first_round = rounds_used == 1;
-            let mut tool_choice = if !request.tool_choice.is_empty() {
+            let mut tool_choice = if !request.tool_choice.is_empty()
+                && (is_first_round || request.tool_choice != "required") {
                 request.tool_choice.clone()
             } else if is_first_round {
                 // 兜底用 auto 而非 required：DeepSeek 思考模式（deepseek-v4-pro /
@@ -1171,7 +1215,8 @@ impl AgentRuntime {
                     // Commerce 类工具默认 RequireConfirm：未批准/未拒绝时停止回合，产出 confirm_request 事件，
                     // finished_reason="confirm_pending"；Kotlin 确认后经 approve_tool/reject_tool 授权，
                     // 重跑回合时匹配的调用直接执行（一次性授权）或回灌「用户拒绝」。
-                    let needs_confirm = self.tool_category(&name, request) == ToolCategory::Commerce;
+                    let definition = available_tools.iter().find(|tool| tool.name == name);
+                    let needs_confirm = definition.is_some_and(|tool| tool.category == ToolCategory::Commerce);
                     let mut approved = false;
                     let mut rejected = false;
                     if needs_confirm {
@@ -1193,18 +1238,28 @@ impl AgentRuntime {
                             };
                         }
                     }
-                    let result_text = if needs_confirm && rejected {
-                        // 用户已拒绝：结果回灌模型，指导其调整（不执行、不再次触发确认）
+                    let result_text = if definition.is_none() {
+                        format!("错误：工具 {name} 在本回合不可用，请使用当前工具列表中的工具")
+                    } else if needs_confirm && rejected {
+                        // 用户已拒绝：结果回灌模型，指导其调整（不执行、不再次触发确认）。
+                        // 一次性拒绝：消费后即失效，否则同名同参数的调用会被永久拒绝。
+                        self.rejected_tools.lock().unwrap().remove(&(name.clone(), args.clone()));
                         format!("用户拒绝了该操作（工具 {name} 未授权执行）。请勿再次调用该工具，改用其他方式或询问用户。")
                     } else {
                         if approved {
                             // 一次性授权：使用后即失效
                             self.approved_tools.lock().unwrap().remove(&(name.clone(), args.clone()));
                         }
-                        // 核心插件工具（cordis 第 4 级）优先；未命中回退 builtin/global/session
-                        match self.core_tool_executor(&name) {
-                            Some(executor) => executor(&args),
-                            None => self.registry.execute_tool(&ctx, tool_host, &name, &args, &mut events),
+                        // 与公开定义的 builtin/global/session/core 优先级一致。
+                        let registered = self.registry.builtin.contains_key(&name)
+                            || self.registry.global_tools.lock().unwrap().get(&name).is_some_and(|t| t.available)
+                            || self.registry.session_tools.lock().unwrap().get(&name).is_some_and(|t| t.available);
+                        if registered {
+                            self.registry.execute_tool(&ctx, tool_host, &name, &args, &mut events)
+                        } else if let Some(executor) = self.core_tool_executor(&name) {
+                            executor(&args)
+                        } else {
+                            format!("错误：未注册的工具 {name}")
                         }
                     };
                     tool_calls_used += 1;
@@ -1232,6 +1287,7 @@ impl AgentRuntime {
                                 messages.push(serde_json::json!({
                                     "type": "system",
                                     "role": "system",
+                                    "_agent_preserve_system": true,
                                     "content": format!(
                                         "系统提示：你已连续 {STICKER_FAIL_CAP} 次发送表情包失败（标签无法匹配可用表情包）。请立即停止调用 send_sticker，改用文字气泡（emit_bubble）回复用户，或改用文字描述情绪。"
                                     ),
@@ -1274,12 +1330,17 @@ impl AgentRuntime {
                         })
                     })
                     .collect();
-                messages.push(serde_json::json!({
+                let mut assistant_message = serde_json::json!({
                     "type": "assistant",
                     "role": "assistant",
                     "content": content.clone(),
                     "tool_calls": normalized_calls,
-                }));
+                });
+                // 思考模型要求工具调用对应的推理内容原样回灌，不能在中间层丢弃。
+                if let Some(reasoning) = parsed.get("reasoning_content").and_then(|v| v.as_str()) {
+                    assistant_message["reasoning_content"] = serde_json::Value::String(reasoning.to_string());
+                }
+                messages.push(assistant_message);
                 messages.extend(tool_messages);
                 continue;
             }
@@ -1309,18 +1370,25 @@ impl AgentRuntime {
                     error: Some(msg),
                 };
             }
-            // 空响应（无内容、无工具调用、非 length 截断）→ error 而非 completed
-            // 修正：仅当本回合**从未产出任何事件**（无 bubble/sticker）时才判 error——
-            // 模型多轮工具调用后以空正文收尾是正常结束（事件流已承载输出），不得误判。
-            if content.is_empty() && finish_reason != "length" {
+            // 空响应 → error 而非 completed：仅当本回合**从未产出任何事件**（无 bubble/sticker）
+            // 时才判 error——模型多轮工具调用后以空正文收尾是正常结束（事件流已承载输出），不得误判。
+            // ⚠️ 同时覆盖 finish_reason="length"：思考型模型可能把 max_tokens 预算全耗在 reasoning 上，
+            // 正文为空且无任何输出。旧实现把它当成成功的 max_rounds 静默返回，上层只看到
+            // 「AI 未返回有效内容」而无法判断是截断，故此处显式上报可操作的错误。
+            if content.is_empty() {
                 let has_output = events.iter().any(|e| e.kind == "bubble" || e.kind == "sticker");
                 if !has_output {
+                    let msg = if finish_reason == "length" {
+                        "模型输出被 max_tokens 截断且未产生任何可见内容（finish_reason=length）——思考型模型可能把预算耗在推理上，请提高该 API 的最大输出（max_tokens）后重试".to_string()
+                    } else {
+                        format!("模型返回空响应（finish_reason={finish_reason:?}）")
+                    };
                     return AgentTurnResult {
                         events,
                         final_text: String::new(),
                         rounds_used,
                         finished_reason: "error".to_string(),
-                        error: Some(format!("模型返回空响应（finish_reason={finish_reason:?}）")),
+                        error: Some(msg),
                     };
                 }
             }
@@ -1373,23 +1441,6 @@ impl AgentRuntime {
             })
             .clone()
             .ok()
-    }
-
-    /// 工具类别解析（Approval 门用）：core → global → session → builtin 顺序。
-    fn tool_category(&self, name: &str, request: &AgentTurnRequest) -> ToolCategory {
-        if let Some(t) = self.core_plugin_tools().iter().find(|t| t.name == name) {
-            return t.category;
-        }
-        if let Some(t) = self.registry.global_tool_definitions().iter().find(|t| t.name == name) {
-            return t.category;
-        }
-        if let Some(t) = request.tools.iter().find(|t| t.name == name) {
-            return t.category;
-        }
-        if self.registry.builtin_tool_definitions().iter().any(|t| t.name == name) {
-            return ToolCategory::Chat;
-        }
-        ToolCategory::General
     }
 
     /// 回合事件 scope 标签（Scope ①）：companion:{id} / group:{gid} / global。
@@ -1468,7 +1519,7 @@ fn apply_worldbook_injections(
         let idx = find_safe_insert_index(&out, target);
         out.insert(
             idx,
-            serde_json::json!({ "role": inj.role, "content": inj.content }),
+            serde_json::json!({ "role": inj.role, "content": inj.content, "_agent_preserve_system": true }),
         );
     }
     out
@@ -2285,6 +2336,84 @@ mod tests {
         assert_eq!(result.finished_reason, "completed");
         assert_eq!(result.final_text, "好的，不买了");
         assert!(result.events.iter().all(|e| e.kind != "confirm_request"), "拒绝后不应再次触发确认");
+    }
+
+    /// Approval：拒绝必须是一次性的——消费后同名同参调用再次进入确认门，
+    /// 否则一次误点/一次通道自动拒绝会让该工具被永久拒绝。
+    #[test]
+    fn rejection_is_consumed_after_one_turn() {
+        struct NeverHost;
+        impl ToolHost for NeverHost {
+            fn execute(&self, name: String, _args: String, _ctx: String) -> String {
+                panic!("被拒绝的工具不应执行: {name}")
+            }
+        }
+        let (runner, gw, transport) = mock_gateway(vec![]);
+        runner.register_global_tools(vec![ToolDefinition {
+            name: "commerce_buy".to_string(),
+            description: "购买".to_string(),
+            parameters_json: r#"{"type":"object","properties":{"sku":{"type":"string"}}}"#.to_string(),
+            category: ToolCategory::Commerce,
+            toolsets: vec!["commerce".to_string()],
+            available: true,
+        }]);
+        let req = AgentTurnRequest {
+            group_id: None,
+            history_json: r#"[{"role":"user","content":"买一个"}]"#.to_string(),
+            tools: vec![],
+            max_rounds: 3,
+            tool_choice: String::new(),
+            sticker_probability: 0,
+            image: None,
+            system_prompt: None,
+            companion_name_map_json: None,
+        };
+        let call = r#"{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"commerce_buy","arguments":"{\"sku\":\"A1\"}"}}]},"finish_reason":"tool_calls"}]}"#;
+        // 第一次：拒绝生效并回灌 → 完成
+        runner.reject_tool("commerce_buy".to_string(), r#"{"sku":"A1"}"#.to_string());
+        transport.responses.lock().unwrap().push(call.to_string());
+        transport.responses.lock().unwrap().push(
+            r#"{"choices":[{"message":{"role":"assistant","content":"好的"},"finish_reason":"stop"}]}"#
+                .to_string(),
+        );
+        let first = runner.run_turn_inner(&req, Some(1), &gw, None, &NeverHost, &DefaultTurnStateMachine);
+        assert_eq!(first.finished_reason, "completed");
+        assert!(
+            runner.rejected_tools.lock().unwrap().is_empty(),
+            "拒绝应在回灌后被消费"
+        );
+        // 第二次：清掉 MockTransport 的粘性遗留响应，同一调用应再次进入确认门
+        transport.responses.lock().unwrap().clear();
+        transport.responses.lock().unwrap().push(call.to_string());
+        let second = runner.run_turn_inner(&req, Some(1), &gw, None, &NeverHost, &DefaultTurnStateMachine);
+        assert_eq!(second.finished_reason, "confirm_pending", "拒绝应只生效一次");
+    }
+
+    /// 思考模型把 max_tokens 全耗在 reasoning 上时：正文为空且无任何输出，
+    /// 必须显式上报截断错误，而不是伪装成成功的 max_rounds。
+    #[test]
+    fn truncated_empty_turn_reports_explicit_error() {
+        let (runner, gw, transport) = mock_gateway(vec![]);
+        transport.responses.lock().unwrap().push(
+            r#"{"choices":[{"message":{"role":"assistant","content":null},"finish_reason":"length"}]}"#
+                .to_string(),
+        );
+        let req = AgentTurnRequest {
+            group_id: None,
+            history_json: r#"[{"role":"user","content":"在吗"}]"#.to_string(),
+            tools: vec![],
+            max_rounds: 1,
+            tool_choice: String::new(),
+            sticker_probability: 0,
+            image: None,
+            system_prompt: None,
+            companion_name_map_json: None,
+        };
+        let result = runner.run_turn_inner(&req, Some(1), &gw, None, &NoopHost, &DefaultTurnStateMachine);
+        assert_eq!(result.finished_reason, "error");
+        let err = result.error.unwrap_or_default();
+        assert!(err.contains("max_tokens"), "错误应指明 max_tokens 截断: {err}");
+        assert!(result.events.is_empty());
     }
 
     /// Eval：脚本化传输（离线 mock）——不触网，按序弹出预置响应驱动完整回合
