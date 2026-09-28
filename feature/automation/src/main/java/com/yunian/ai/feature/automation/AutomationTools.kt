@@ -1,6 +1,8 @@
 package com.yunian.ai.feature.automation
 
 import android.app.Application
+import com.yunian.ai.common.ApplicationScopeProvider
+import com.yunian.ai.common.SecureLog
 import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ToolRegistry
 import com.yunian.ai.domain.plugin.LianYuPlugin
@@ -10,6 +12,8 @@ import com.yunian.ai.feature.automation.data.Automation
 import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
 import com.yunian.ai.feature.automation.data.AutomationStore
 import com.yunian.ai.feature.automation.data.AutomationType
+import com.yunian.ai.feature.automation.data.WorkflowNodeType
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -251,6 +255,7 @@ object AutomationTools {
         override val description =
             "立即触发某个已存在的自动化或工作流并同步返回执行结果。参数 id 为自动化ID；" +
                 "或给 title 按名称模糊匹配唯一命中后触发。" +
+                "含 AI 生成节点的工作流会转后台执行（避免与当前对话回合互相等待），返回 queued=true。" +
                 "注意：本工具只能立即执行，不能预约未来时间——需要定时请改用 " +
                 "automation_create 创建带触发时间的自动化。"
 
@@ -275,6 +280,15 @@ object AutomationTools {
                 AutomationToolLogic.matchByTitle(all, title.orEmpty()).singleOrNull()
             }
                 ?: return """{"error":"找不到要触发的自动化"}"""
+            // AI 工作流会在内部再入一次 Agent 回合：此刻工具回调正被 Rust 回合互斥锁保护
+            // （agent.rs turn_lock），同步执行必须等到本工具超时才对上层释放。因此改为后台派发。
+            if (target.isWorkflow && target.nodes.any { it.type == WorkflowNodeType.AI_GENERATE }) {
+                ApplicationScopeProvider.scope.launch {
+                    runCatching { AutomationExecutor(app).execute(target) }
+                        .onFailure { SecureLog.e("AutomationTools", "async automation fire failed", it) }
+                }
+                return """{"fired":true,"queued":true,"title":"${target.title}","note":"工作流含 AI 生成节点，已转后台执行"}"""
+            }
             val result = AutomationExecutor(app).execute(target)
             val ok = result is WorkflowEngine.Result.Success
             return """{"fired":true,"title":"${target.title}","success":$ok}"""

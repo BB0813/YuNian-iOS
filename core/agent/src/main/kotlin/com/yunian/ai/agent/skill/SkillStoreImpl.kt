@@ -52,7 +52,7 @@ class SkillStoreImpl(context: Context) : SkillStore {
         put("description", row.description)
         put("category", row.category.name)
         put("tags", row.tags)
-        put("tools", row.tools.split(',').map { it.trim() }.filter { it.isNotEmpty() })
+        put("tools", JSONArray(row.tools.split(',').map { it.trim() }.filter { it.isNotEmpty() }))
         put("enabled", row.enabled)
         put("companion_id", row.companionId ?: JSONObject.NULL)
         put("version", row.version)

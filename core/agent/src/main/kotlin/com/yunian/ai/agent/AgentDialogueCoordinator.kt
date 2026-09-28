@@ -239,8 +239,7 @@ class AgentDialogueCoordinator(
     // ── Agent 回合 ──
 
     /**
-     * 通道对话回合：单轮 run_turn（无气泡连发协议 / 无会话工具，与旧
-     * AiService.sendMessage 行为对齐），Rust 侧仍会注入全局工具（builtin + global）。
+     * 通道对话同样消费 Native 工具事件；技能/记忆调用后必须留出回复轮次。
      */
     private suspend fun runTurn(
         companionId: Long,
@@ -251,19 +250,38 @@ class AgentDialogueCoordinator(
         val request = AgentTurnRequest(
             groupId = null,
             historyJson = serializeHistoryJson(history.map { it.toAiChatMessage() }),
-            tools = emptyList(),
-            maxRounds = 1u,
+            tools = (AgentFacade.memoryToolDefinitions(context) +
+                AgentFacade.skillToolDefinitions() +
+                com.yunian.ai.domain.ToolRegistry.availableTools().map { AgentFacade.toolDefinition(it) })
+                .distinctBy { it.name },
+            maxRounds = 6u,
             toolChoice = "auto",
             stickerProbability = 0u,
             image = imagePath?.let { ImageInput(path = it, base64Data = null, mimeType = null) },
             systemPrompt = null,
             companionNameMapJson = null,
         )
-        return runCatching {
-            AgentFacade.runTurn(request, context, companionId, AgentToolHost(context))
+        val toolHost = AgentToolHost(context)
+        var result = runCatching {
+            AgentFacade.runTurn(request, context, companionId, toolHost)
         }.onFailure {
             SecureLog.e(TAG, "runTurn failed, companion=$companionId", it)
-        }.getOrNull()?.finalText
+        }.getOrNull() ?: return null
+        // Commerce 类工具的确认门在通道侧没有界面可确认：默认拒绝（一次性）后重跑回合，
+        // 让模型改用文字回应，而不是把用户晾在「需要确认」上。
+        var confirmGuard = 0
+        while (result.finishedReason == "confirm_pending" && confirmGuard < 3) {
+            val pending = result.events.firstOrNull { it.kind == "confirm_request" } ?: break
+            confirmGuard += 1
+            SecureLog.w(TAG, "confirm gate on non-interactive channel, auto-reject: ${pending.text}")
+            AgentFacade.rejectTool(context, pending.text, pending.extra)
+            result = runCatching {
+                AgentFacade.runTurn(request, context, companionId, toolHost)
+            }.onFailure {
+                SecureLog.e(TAG, "runTurn after auto-reject failed, companion=$companionId", it)
+            }.getOrNull() ?: break
+        }
+        return AgentTurnReplyText.resolve(result.events, result.finalText, result.finishedReason)
     }
 
     private suspend fun syncRuntimeConfig() {

@@ -5,6 +5,10 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
 import com.yunian.ai.feature.automation.data.AutomationStore
+import com.yunian.ai.domain.ServiceRegistry
+import com.yunian.ai.database.repository.MessageWriteCoordinator
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -24,6 +28,11 @@ class AutomationFireWorker(
             return@withContext Result.success()
         }
 
+        // 冷启动时先等服务装配；未就绪不可把工作流降级为普通提醒并消耗触发记录。
+        val ready = withTimeoutOrNull(30_000L) { ServiceRegistry.initialized.first { it } } == true
+        if (!ready || ServiceRegistry.get(MessageWriteCoordinator::class.java) == null) {
+            return@withContext Result.retry()
+        }
         AutomationScheduler.fireDue(context, automation)
         Result.success()
     }

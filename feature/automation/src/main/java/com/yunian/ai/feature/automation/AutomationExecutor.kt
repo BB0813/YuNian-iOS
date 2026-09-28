@@ -47,6 +47,9 @@ class AutomationExecutor(private val context: Context) {
         val messageWriter = ServiceRegistry.get(MessageWriteCoordinator::class.java)
         val chatRepository = ServiceRegistry.get(ChatRepository::class.java)
 
+        if (automation.isWorkflow && messageWriter == null) {
+            return@withContext WorkflowEngine.Result.Failure("工作流消息服务尚未就绪")
+        }
         val result = if (automation.isWorkflow && messageWriter != null) {
             val engine = WorkflowEngine(context, messageWriter, chatRepository)
             engine.execute(automation)

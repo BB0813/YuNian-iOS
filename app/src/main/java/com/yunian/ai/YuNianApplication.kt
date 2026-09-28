@@ -207,15 +207,20 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
 
             bgScope.launch {
                 // ── 放行屏障（T01′）──────────────────────────────────────────────────────
-                //   首页唯一的硬依赖是「provider 已注册 + DB 已打开」：
+                //   放行前完成 provider、技能适配器、Agent 签名器和工具蓝图接线：
                 //     · HomeViewModel 构造时 getOrThrow(CompanionRepository/ChatRepository)；
                 //     · AppDatabase.getDatabase(app) 打开 DB。
-                //   registerServiceProviders(app) 完成（或抛异常）后**立即**翻转 initialized 放行 UI，
+                //   AgentRuntime 首次构造会缓存 SkillSelector，必须晚于技能适配器注册。
+                //   否则冷启动首轮会永久使用默认技能存储，或漏掉签名器/自动化工具。
                 //   不再与后面那串重 IO（repairUserAvatar / verifyAndRecover / seed / warm / hydrateRecent）
                 //   绑成同一个门控——原先这里白等 ~800ms 才让首页出现。
                 //   异常处理与原有语义保持一致：无论注册是否成功都放行（finally），避免 UI 永久卡 loading。
                 try {
                     registerServiceProviders(app)
+                    initAgentRuntime(app)
+                    runCatching { loadDefaultBlueprint(app) }
+                        .onFailure { SecureLog.e("YuNianApplication", "loadDefaultBlueprint failed", it) }
+                    PerformanceTrace.markStartupStage("ib_blueprint")
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -225,15 +230,9 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                     ServiceRegistry.markInitialized()
                 }
 
-                // ── 蓝图装载（对应 cordis.yml：plugins + patches + inserts 组合语义） ──
-                // assets/blueprints/default.json 统一驱动 coffee.luckin /
-                // skill.builtin_chat_protocol / sticker.preference 三个内置插件。
-                // fail-soft：单个插件装载失败只记录日志，不影响其余插件与主流程。
-                runCatching { loadDefaultBlueprint(app) }
-                    .onFailure { SecureLog.e("YuNianApplication", "loadDefaultBlueprint failed", it) }
-                PerformanceTrace.markStartupStage("ib_blueprint")
-
                 // ── 以下全部在「放行」之后，不再阻挡首帧 ──────────────────────────────────
+                // 世界书同步也会创建 AgentRuntime，必须等待技能适配器完成注册。
+                bgScope.launch { initWorldbookAgent(app) }
 
                 // T01′：Automation 重排（原 registerServiceProviders 内的
                 //   runBlocking { AutomationStore.list() + AutomationScheduler.rescheduleAll }）
@@ -291,14 +290,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             bgScope.launch { initSecurityData(app) }
             bgScope.launch { autoBackupDatabase(app) }
             bgScope.launch { initVectorLibrary(app) }
-            // 阶段 5.9：世界书迁移 + 运行时注入（幂等；与其它 IO 任务并行，不阻挡首帧）
-            bgScope.launch { initWorldbookAgent(app) }
-            // 阶段 5.10：Agent 运行时接线（Rust 决策层）
-            //   · installRequestSigner 为 **同步必需**：PARTNER(suflow.cloud) 请求服务端校验
-            //     X-LianYu-Sig-Version，缺签名会被拒；且必须在首次 runTurn 之前完成。
-            //   · warmUp 延迟 5s 后台预热（提前 dlopen liblianyu_agent.so，消除首次对话卡顿）。
-            //   · registerGlobalTools 注册委派/汇聚工具（执行端在 AgentToolHost 特判分支）。
-            initAgentRuntime(app)
             // 安全基线（合并后事实）：L3 本地语义安全链已随 feature:localmodel 一并退役
             // （N0 / BayesianClassifier / ContentSafetyVerifier / SafetyClassifier 接口全部删除）。
             // 内容判定统一由 ContentFilter 的正则关键词 + 向量库（initVectorLibrary）承担。
@@ -436,18 +427,16 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         /**
          * 阶段 5.10 · Agent 运行时启动接线（Rust 决策层）。
          *
-         * 三件事，均幂等，且**全部在后台线程**执行（首次 `dlopen("liblianyu_agent.so")`
+         * 两件事，均幂等，由 provider 注册协程在放行前执行（首次 `dlopen("liblianyu_agent.so")`
          * 是数十毫秒级阻塞操作，禁止上主线程）：
          *
          * 1. `installRequestSigner` —— PARTNER(suflow.cloud) 请求的服务端验签回调。
          *    服务端校验 `X-LianYu-Sig-Version` 头，缺失会被拒；必须在首次 `runTurn` 前就位。
-         *    用户从冷启到进入聊天页有数百毫秒以上，本协程与首帧并行，时序充足。
+         *    同时必须晚于 SkillStoreAdapter 安装，避免提前缓存默认 SkillSelector。
          * 2. `registerGlobalTools` —— 多 Agent 编排的委派/汇聚工具定义注册进 Rust 全局注册表
          *    （决策在 Rust，执行端在 `AgentToolHost` 的特判分支）。
-         * 3. `warmUp` —— 延迟 5s 空闲期预热，避免与启动期 IO 争抢。
          */
         private fun initAgentRuntime(app: Application) {
-            bgScope.launch {
                 runCatching { com.yunian.ai.agent.AgentFacade.installRequestSigner(app) }
                     .onFailure { SecureLog.e("YuNianApplication", "installRequestSigner failed", it) }
 
@@ -480,13 +469,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                         ),
                     )
                 }.onFailure { SecureLog.e("YuNianApplication", "registerGlobalTools failed", it) }
-            }
-
-            bgScope.launch {
-                kotlinx.coroutines.delay(5_000)
-                runCatching { com.yunian.ai.agent.AgentFacade.warmUp(app) }
-                    .onFailure { SecureLog.e("YuNianApplication", "Agent warmUp failed", it) }
-            }
         }
 
         private fun registerServiceProviders(app: Application) {

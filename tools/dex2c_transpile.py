@@ -28,6 +28,47 @@ import zlib
 from typing import List, Dict, Optional, Tuple, Set
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 生成物必须是「纯 ASCII + LF」。
+#
+# 事故（docs/reports/打包交接说明.md 第四节）：真实转译的 dex2c_methods.cpp 含
+# 框线字符（═ ─ │ → 等）与 CRLF，ndk-build 编译该文件时在 .o.tmp → .o 的 rename
+# 阶段稳定报 Permission denied（同一文件手动 clang 编译却成功）。因此：
+#   1) 写入前把非 ASCII 字符映射/降级为 ASCII；
+#   2) 统一 LF 行尾并禁用 Windows 的 newline 转换。
+# ─────────────────────────────────────────────────────────────────────────
+_ASCII_TRANSLATION = str.maketrans({
+    '═': '=', '─': '-', '━': '-', '│': '|', '┃': '|',
+    '┌': '+', '┐': '+', '└': '+', '┘': '+', '├': '+', '┤': '+',
+    '→': '->', '←': '<-', '×': 'x', '✓': 'v', '✔': 'v',
+    '✅': 'OK', '❌': 'NG', '⚠': '!', '·': '.', '～': '~',
+})
+
+
+def cpp_ret_type(dex_return_type: str) -> str:
+    """DEX 返回类型 → C++ 返回类型（与 transpile_method 保持一致）。"""
+    if dex_return_type == 'Z':
+        return 'jboolean'
+    if dex_return_type == 'I':
+        return 'jint'
+    if dex_return_type == 'J':
+        return 'jlong'
+    if dex_return_type == 'F':
+        return 'jfloat'
+    if dex_return_type == 'D':
+        return 'jdouble'
+    if dex_return_type == 'V':
+        return 'void'
+    return 'jobject'
+
+
+def ascii_lf(text: str) -> str:
+    """把生成物规整为纯 ASCII + LF（见上）。"""
+    text = text.translate(_ASCII_TRANSLATION)
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    return ''.join(ch if ord(ch) < 128 else '?' for ch in text)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # DEX Format Constants
 # ═══════════════════════════════════════════════════════════════════
@@ -351,6 +392,28 @@ class DexParser:
             virtual_methods_size, consumed = self._read_uleb128(pos)
             if virtual_methods_size > 10000: continue
             pos += consumed
+
+            # ⚠️ encoded_field[] 必须先行消费。class_data_item 的真实布局是：
+            #   sizes → static_fields[] → instance_fields[] → direct_methods[] → virtual_methods[]
+            # 历史实现读完 4 个 size 后直接读方法条目，pos 实际停在第一个字段条目上，
+            # 于是除「恰好没有字段」的类以外，方法体全部取不到 —— 这正是
+            # README「白名单转译产出为空」与本次 58 个白名单方法只转译出 1 个的原因。
+            if static_fields_size + instance_fields_size > 10000:
+                continue
+            fields_ok = True
+            for _ in range(static_fields_size + instance_fields_size):
+                if pos >= max_off:
+                    fields_ok = False
+                    break
+                _, consumed = self._read_uleb128(pos)  # field_idx_diff
+                pos += consumed
+                if pos >= max_off:
+                    fields_ok = False
+                    break
+                _, consumed = self._read_uleb128(pos)  # access_flags
+                pos += consumed
+            if not fields_ok:
+                continue
 
             last_idx = 0
             total = direct_methods_size + virtual_methods_size
@@ -717,7 +780,10 @@ class Dex2CCodeGen:
             return None
 
         class_name = info['class'][1:-1].replace('/', '.')
-        jni_name = self.java_to_jni_name(class_name, info['name'])
+        # 与 generate_output 的注册表保持一致：符号名必须带声明类前缀，
+        # 否则同名方法（跨类）会生成重复定义 / 表项引用不到函数。
+        simple_class = class_name.split('.')[-1]
+        jni_name = self.java_to_jni_name(class_name, f"{simple_class}_{info['name']}")
         proto = info['proto']
 
         instructions = code.get('instructions', [])
@@ -767,6 +833,17 @@ class Dex2CCodeGen:
         final += f"{jni_name}({param_str}) {{\n"
         final += f"    // Dex2C transpiled from {class_name}.{info['name']}\n"
         final += f"    // DEX: {len(instructions)} instructions, {code['registers_size']} registers\n"
+
+        # 解码异常防御：R8 压缩后的指令流偶发产生越界寄存器号，旧实现直接 regs[a]
+        # 越界抛 IndexError，导致整个转译（乃至 release 构建）中断。
+        # 这里逐条校验 vA/vB/vC，越界即判定该方法无法安全转译并跳过。
+        reg_count = int(code.get('registers_size', 0))
+        for inst in instructions:
+            for operand in ('vA', 'vB', 'vC'):
+                value = inst.get(operand)
+                if value is not None and not (0 <= value < reg_count):
+                    print(f"  [skip] Method {info['index']}: {operand}={value} out of range (registers={reg_count})")
+                    return None
 
         # Insert translated instructions (pass return_type for return-void suppression)
         body_lines = self._translate_instructions(instructions, info, code, return_type)
@@ -840,15 +917,18 @@ class Dex2CCodeGen:
                     lines.append(f"{comment} → return-void suppressed (method returns {return_type})")
                     lines.append(f"// return-void suppressed: non-void method, fall through to default return")
 
-            elif op in (OP_RETURN,):
+            elif op in (OP_RETURN, OP_RETURN_OBJECT):
                 a = inst.get('vA', 0)
                 lines.append(f"{comment} → return {regs[a]};")
-                lines.append(f"return (jint){regs[a]};")
-
-            elif op in (OP_RETURN_OBJECT,):
-                a = inst.get('vA', 0)
-                lines.append(f"{comment} → return {regs[a]};")
-                lines.append(f"return (jobject){regs[a]};")
+                # 按「函数声明的返回类型」转换，而不是按寄存器类型：
+                # DEX 的 return / return-object 与声明返回类型可能不一致
+                # （R8 改写或解码异常），旧实现硬编码 (jint)/(jobject) 会让
+                # 生成代码编译失败：cannot initialize return object of type
+                # 'jobject' with an rvalue of type 'jint'。
+                if return_type == 'V':
+                    lines.append("return;")
+                else:
+                    lines.append(f"return ({cpp_ret_type(return_type)}){regs[a]};")
 
             elif op == OP_CONST_4:
                 a = inst.get('vA', 0)
@@ -1051,6 +1131,49 @@ class Dex2CCodeGen:
         methods_found = []
         methods_generated = []
 
+        # @class 白名单展开：@class Foo / @class Foo:m1,m2 → 该类（或指定名）的方法键。
+        # 原实现把 @class 行直接当方法键查找，必然 0 命中——release 白名单正是这种格式，
+        # 于是「转译成功但 0 个方法」，Dex2C 防护实际从未生效。
+        expanded: List[str] = []
+        seen_keys = set()
+        for raw in whitelist:
+            entry = raw.strip()
+            if not entry or entry.startswith('#'):
+                continue
+            if not entry.startswith('@class'):
+                if entry not in seen_keys:
+                    seen_keys.add(entry)
+                    expanded.append(entry)
+                continue
+            spec = entry[len('@class'):].strip()
+            if not spec:
+                continue
+            class_part, _, methods_part = spec.partition(':')
+            class_name = class_part.strip().replace('/', '.')
+            if class_name.startswith('L') and class_name.endswith(';'):
+                class_name = class_name[1:-1]
+            wanted = {m.strip() for m in methods_part.split(',') if m.strip()} if methods_part else None
+            matched = 0
+            for i in range(self.dex.method_ids_size):
+                m = self.dex.methods[i]
+                if m['class'][1:-1].replace('/', '.') != class_name:
+                    continue
+                if m['name'] in ('<init>', '<clinit>'):
+                    continue
+                if wanted is not None and m['name'] not in wanted:
+                    continue
+                key = self.dex.get_method_key(i)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                expanded.append(key)
+                matched += 1
+            if matched:
+                print(f"[dex2c] @class {class_name}: expanded to {matched} methods")
+            else:
+                print(f"[dex2c] WARNING: @class 在 DEX 中未命中任何方法: {class_name}")
+        whitelist = expanded
+
         for key in whitelist:
             key = key.strip()
             if not key or key.startswith('#'):
@@ -1066,14 +1189,24 @@ class Dex2CCodeGen:
         functions = []
         entries = []
         for key, midx in methods_found:
-            func = self.transpile_method(midx)
+            # 单个方法转译失败不得中断整条流水线（release 构建必须确定成功）。
+            try:
+                func = self.transpile_method(midx)
+            except Exception as exc:
+                print(f"[dex2c] WARNING: {key} 转译异常已跳过: {type(exc).__name__}: {exc}")
+                func = None
             if func:
                 functions.append(func)
                 # Generate JNI entry
                 info = self.dex.get_method_info(midx)
                 class_name = info['class'][1:-1].replace('/', '.')
                 java_name = f"native{info['name']}"
-                jni_name = self.java_to_jni_name(class_name, info['name'])
+                # 符号唯一化：不同类会有同名方法（encryptWithMetadata 同时存在于
+                # KmsProvider / Sm4Cipher），旧实现生成同名 JNI 函数 →
+                # "redefinition of Java_..._nativeencryptWithMetadata" 编译错误。
+                simple_class = class_name.split('.')[-1]
+                jni_name = self.java_to_jni_name(
+                    class_name, f"{simple_class}_{info['name']}")
                 jni_sig = self.jni_signature(info['return_type'], info['proto'])
                 entry = self.generate_method_entry(java_name, jni_sig, jni_name)
                 entries.append(entry)
@@ -1149,8 +1282,8 @@ class Dex2CCodeGen:
         cpp_lines.append("")
         cpp_lines.append(f"const size_t gDex2cMethodCount = sizeof(gDex2cMethods) / sizeof(gDex2cMethods[0]);")
 
-        with open(output_cpp, 'w') as f:
-            f.write('\n'.join(cpp_lines))
+        with open(output_cpp, 'w', encoding='ascii', newline='\n') as f:
+            f.write(ascii_lf('\n'.join(cpp_lines)))
         print(f"[dex2c] Wrote {output_cpp} ({len(cpp_lines)} lines)")
 
         # Write registry header
@@ -1179,8 +1312,8 @@ class Dex2CCodeGen:
         h_lines.append("")
         h_lines.append("#endif /* DEX2C_REGISTRY_H */")
 
-        with open(output_h, 'w') as f:
-            f.write('\n'.join(h_lines))
+        with open(output_h, 'w', encoding='ascii', newline='\n') as f:
+            f.write(ascii_lf('\n'.join(h_lines)))
         print(f"[dex2c] Wrote {output_h} ({len(h_lines)} lines)")
 
         # Summary

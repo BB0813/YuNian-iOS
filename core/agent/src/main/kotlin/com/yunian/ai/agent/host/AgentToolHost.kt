@@ -8,11 +8,17 @@ import com.yunian.ai.agent.sticker.StickerPreferenceFacade
 import com.yunian.ai.agent.uniffi.ToolHost
 import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.domain.ToolRegistry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 /**
  * Rust `ToolHost` 回调实现：Agent 回合中会话级工具的执行副作用桥。
@@ -31,6 +37,7 @@ import java.util.concurrent.TimeoutException
  * 注意：商业/支付类工具若需用户确认，应在 feature 层接入确认策略后再放行到 ToolRegistry，
  * 本类不做确认决策（决策在 Rust `ConfirmPolicy` / feature 层）。
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AgentToolHost(context: Context) : ToolHost {
 
     companion object {
@@ -50,6 +57,15 @@ class AgentToolHost(context: Context) : ToolHost {
         /** 工具执行线程池大小（有界，避免并发工具打爆 IO/主线程）。 */
         private const val TOOL_POOL_SIZE = 2
 
+        /**
+         * 应用级工具执行作用域（受限并行 [TOOL_POOL_SIZE]）：不随回合/宿主实例创建，避免线程池泄漏；
+         * 每次调用是独立子协程，超时可真正取消——挂起型工具在取消点立即中止，
+         * 不再出现「回灌超时错误、后台却继续写副作用」。
+         */
+        private val toolScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO.limitedParallelism(TOOL_POOL_SIZE)
+        )
+
         /** Rust `MemorySelector` 注册的记忆工具名集合。 */
         private val MEMORY_TOOLS = setOf("recall_memory", "save_memory", "consolidate_memory")
 
@@ -63,15 +79,6 @@ class AgentToolHost(context: Context) : ToolHost {
     private val appContext: Context = context.applicationContext
 
     /**
-     * 工具副作用执行池（P1-4）：Rust 回调线程只做提交 + 阻塞等待结果，
-     * 实际工具执行（DB / 网络 / runBlocking）落到专用有界线程池，
-     * 避免阻塞 Rust 工具循环线程之外的调度面，并支持超时控制。
-     */
-    private val toolExecutor = Executors.newFixedThreadPool(TOOL_POOL_SIZE) { r ->
-        Thread(r, "agent-tool-executor").apply { isDaemon = true }
-    }
-
-    /**
      * 本回合工具调用明细（线程安全，Rust 回调线程写入；回合结束后由调用方读取
      * 并传入 AgentFacade.recordDispatchLog 落调度日志）。
      */
@@ -83,44 +90,41 @@ class AgentToolHost(context: Context) : ToolHost {
     override fun execute(toolName: String, argumentsJson: String, contextJson: String): String {
         val startedAt = System.currentTimeMillis()
         Log.i(TAG, "tool call: name=$toolName args=$argumentsJson ctx=$contextJson")
-        try {
-            // 提交到专用池执行（P1-4/P1-5：有界并发 + 超时兜底）
-            val future = toolExecutor.submit<String> {
-                executeToolBlocking(toolName, argumentsJson, contextJson)
+        var ok = true
+        val result = try {
+            val task = toolScope.async { executeToolSuspending(toolName, argumentsJson, contextJson) }
+            try {
+                // Rust 回调线程同步等待；超时则取消子协程（挂起型工具在取消点真正中止）
+                runBlocking { withTimeout(TOOL_TIMEOUT_MS) { task.await() } }
+            } catch (timeout: TimeoutCancellationException) {
+                task.cancel(CancellationException("tool timeout: $toolName"))
+                ok = false
+                Log.w(TAG, "tool timeout: $toolName >${TOOL_TIMEOUT_MS / 1000}s (cancelled)")
+                "错误：工具 $toolName 执行超时（超过 ${TOOL_TIMEOUT_MS / 1000} 秒）已请求取消，结果未知——请先核实状态，不要重复执行有副作用的操作"
             }
-            val result = try {
-                future.get(TOOL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            } catch (e: TimeoutException) {
-                // 超时：任务仍可能在池中继续，但结果不再回灌模型
-                Log.w(TAG, "tool timeout: $toolName >${TOOL_TIMEOUT_MS / 1000}s")
-                "错误：工具 $toolName 执行超时（超过 ${TOOL_TIMEOUT_MS / 1000} 秒），请简化操作后重试"
-            } catch (e: Exception) {
-                Log.w(TAG, "tool execute failed: $toolName", e)
-                "错误：工具 $toolName 执行失败：${e.message ?: "未知错误"}"
-            }
-            val elapsed = System.currentTimeMillis() - startedAt
-            toolCalls.add(ToolCallRecord(name = toolName, args = argumentsJson, result = result, elapsedMs = elapsed, ok = true))
-            Log.i(
-                TAG,
-                "tool done: name=$toolName elapsed=${elapsed}ms result=${result.take(120)}",
-            )
-            return result
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
-            val elapsed = System.currentTimeMillis() - startedAt
-            toolCalls.add(ToolCallRecord(name = toolName, args = argumentsJson, result = t.message ?: t.javaClass.simpleName, elapsedMs = elapsed, ok = false))
+            ok = false
             Log.e(TAG, "execute $toolName failed", t)
-            return "工具执行失败：${t.message ?: t.javaClass.simpleName}"
+            "错误：工具 $toolName 执行失败：${t.message ?: t.javaClass.simpleName}"
         }
+        val elapsed = System.currentTimeMillis() - startedAt
+        toolCalls.add(ToolCallRecord(name = toolName, args = argumentsJson, result = result, elapsedMs = elapsed, ok = ok))
+        Log.i(TAG, "tool done: name=$toolName elapsed=${elapsed}ms ok=$ok result=${result.take(120)}")
+        return result
     }
 
     /**
-     * 实际工具执行（在 [toolExecutor] 池线程上运行）：记忆工具 / load_skill /
+     * 实际工具执行（在 [toolScope] 受限并行调度器上运行）：记忆工具 / load_skill /
      * sticker_pick / ToolRegistry 全局工具分派。
      */
-    private fun executeToolBlocking(toolName: String, argumentsJson: String, contextJson: String): String =
+    private suspend fun executeToolSuspending(toolName: String, argumentsJson: String, contextJson: String): String =
         when {
             toolName in MEMORY_TOOLS ->
-                AgentFacade.executeMemoryTool(appContext, toolName, argumentsJson, contextJson)
+                withContext(Dispatchers.IO) {
+                    AgentFacade.executeMemoryTool(appContext, toolName, argumentsJson, contextJson)
+                }
 
             toolName == LOAD_SKILL_TOOL -> executeLoadSkill(argumentsJson, contextJson)
 
@@ -132,11 +136,7 @@ class AgentToolHost(context: Context) : ToolHost {
 
             else -> {
                 val tool = ToolRegistry.get(toolName)
-                if (tool != null) {
-                    runBlocking { tool.execute(argumentsJson) }
-                } else {
-                    "错误：未注册的工具 $toolName"
-                }
+                if (tool != null) tool.execute(argumentsJson) else "错误：未注册的工具 $toolName"
             }
         }
 
@@ -145,7 +145,7 @@ class AgentToolHost(context: Context) : ToolHost {
      * argumentsJson 契约：`{"role": "analyst|helper", "prompt": "任务说明"}`；
      * contextJson 含 companionId（"companion_id"）。
      */
-    private fun executeDelegateTask(argumentsJson: String, contextJson: String): String {
+    private suspend fun executeDelegateTask(argumentsJson: String, contextJson: String): String {
         val args = try {
             org.json.JSONObject(argumentsJson)
         } catch (e: Exception) {
@@ -161,7 +161,7 @@ class AgentToolHost(context: Context) : ToolHost {
         }
         val coordinator = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.delegation.DelegationCoordinator::class.java)
         if (coordinator == null) return "错误：委派协调器未初始化"
-        val record = runBlocking { coordinator.create(role, prompt, companionId) }
+        val record = coordinator.create(role, prompt, companionId)
         return org.json.JSONObject().apply {
             put("delegation_id", record.id)
             put("role", role)
@@ -174,7 +174,7 @@ class AgentToolHost(context: Context) : ToolHost {
      * fetch_delegation_result：查询委派结果。
      * argumentsJson 契约：`{"delegation_id": 1}`。
      */
-    private fun executeFetchDelegation(argumentsJson: String): String {
+    private suspend fun executeFetchDelegation(argumentsJson: String): String {
         val args = try {
             org.json.JSONObject(argumentsJson)
         } catch (e: Exception) {
@@ -184,7 +184,7 @@ class AgentToolHost(context: Context) : ToolHost {
         if (id <= 0L) return "错误：缺少 delegation_id"
         val coordinator = com.yunian.ai.domain.ServiceRegistry.get(com.yunian.ai.domain.delegation.DelegationCoordinator::class.java)
         if (coordinator == null) return "错误：委派协调器未初始化"
-        val record = runBlocking { coordinator.get(id) } ?: return "错误：委派记录不存在（id=$id）"
+        val record = coordinator.get(id) ?: return "错误：委派记录不存在（id=$id）"
         return org.json.JSONObject().apply {
             put("delegation_id", record.id)
             put("role", record.role)
@@ -200,7 +200,7 @@ class AgentToolHost(context: Context) : ToolHost {
      * argumentsJson 契约：`{"skill_id": "..."}`，可选 `companion_id`。
      * 返回技能正文；技能不存在/已禁用返回明确错误文本（模型会收到工具结果并调整）。
      */
-    private fun executeLoadSkill(argumentsJson: String, contextJson: String): String {
+    private suspend fun executeLoadSkill(argumentsJson: String, contextJson: String): String {
         val args = try {
             org.json.JSONObject(argumentsJson)
         } catch (e: Exception) {
@@ -218,7 +218,9 @@ class AgentToolHost(context: Context) : ToolHost {
         } catch (e: Exception) {
             null
         }
-        val content = AgentFacade.loadSkillContent(appContext, skillId, companionId)
+        val content = withContext(Dispatchers.IO) {
+            AgentFacade.loadSkillContent(appContext, skillId, companionId)
+        }
         if (content == null) {
             return "错误：技能 $skillId 不存在或已禁用"
         }
@@ -236,7 +238,7 @@ class AgentToolHost(context: Context) : ToolHost {
      *
      * 注意：仅预选不记录使用（recordUsage 由落地成功时执行，避免重复计数）。
      */
-    private fun executeStickerPick(argumentsJson: String, contextJson: String): String {
+    private suspend fun executeStickerPick(argumentsJson: String, contextJson: String): String {
         val args = try {
             org.json.JSONObject(argumentsJson)
         } catch (e: Exception) {
@@ -251,11 +253,12 @@ class AgentToolHost(context: Context) : ToolHost {
             ?: emptyList()
         if (tags.isEmpty()) return "{\"ok\":false}"
         return try {
-            runBlocking {
-                val entryIds = StickerPreferenceFacade.sampleCandidates(appContext, 1, tags)
-                if (entryIds.isEmpty()) return@runBlocking "{\"ok\":false}"
-                val entry = AppDatabase.getDatabase(appContext).stickerEntryDao().getById(entryIds.first())
-                    ?: return@runBlocking "{\"ok\":false}"
+            val entry = StickerPreferenceFacade.sampleCandidates(appContext, 1, tags)
+                .firstOrNull()
+                ?.let { AppDatabase.getDatabase(appContext).stickerEntryDao().getById(it) }
+            if (entry == null) {
+                "{\"ok\":false}"
+            } else {
                 val out = org.json.JSONObject()
                 out.put("ok", true)
                 out.put("entryId", entry.id)
@@ -263,6 +266,8 @@ class AgentToolHost(context: Context) : ToolHost {
                 out.put("description", entry.description.orEmpty())
                 out.toString()
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             Log.e(TAG, "sticker_pick failed", t)
             "{\"ok\":false}"

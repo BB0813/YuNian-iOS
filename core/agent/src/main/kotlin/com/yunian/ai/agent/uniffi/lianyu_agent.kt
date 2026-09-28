@@ -1140,6 +1140,10 @@ internal open class UniffiVTableCallbackInterfaceTurnStateController(
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -1187,7 +1191,11 @@ fun uniffi_lianyu_agent_checksum_method_agentruntime_run_turn(
 ): Short
 fun uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_stream(
 ): Short
+fun uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_stream_with_credentials(
+): Short
 fun uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_with_controller(
+): Short
+fun uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_with_credentials(
 ): Short
 fun uniffi_lianyu_agent_checksum_method_agentruntime_set_mock_transport(
 ): Short
@@ -1395,7 +1403,11 @@ fun uniffi_lianyu_agent_fn_method_agentruntime_run_turn(`ptr`: Pointer,`request`
 ): RustBuffer.ByValue
 fun uniffi_lianyu_agent_fn_method_agentruntime_run_turn_stream(`ptr`: Pointer,`request`: RustBuffer.ByValue,`companionId`: RustBuffer.ByValue,`toolHost`: Pointer,`sink`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_lianyu_agent_fn_method_agentruntime_run_turn_stream_with_credentials(`ptr`: Pointer,`request`: RustBuffer.ByValue,`companionId`: RustBuffer.ByValue,`toolHost`: Pointer,`sink`: Pointer,`credentialsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_lianyu_agent_fn_method_agentruntime_run_turn_with_controller(`ptr`: Pointer,`request`: RustBuffer.ByValue,`companionId`: RustBuffer.ByValue,`toolHost`: Pointer,`controller`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_lianyu_agent_fn_method_agentruntime_run_turn_with_credentials(`ptr`: Pointer,`request`: RustBuffer.ByValue,`companionId`: RustBuffer.ByValue,`toolHost`: Pointer,`credentialsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_lianyu_agent_fn_method_agentruntime_set_mock_transport(`ptr`: Pointer,`responses`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1783,7 +1795,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_stream() != 56354.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_stream_with_credentials() != 3081.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_with_controller() != 13078.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_lianyu_agent_checksum_method_agentruntime_run_turn_with_credentials() != 63517.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_lianyu_agent_checksum_method_agentruntime_set_mock_transport() != 60563.toShort()) {
@@ -2576,6 +2594,11 @@ public interface AgentRuntimeInterface {
     fun `runTurnStream`(`request`: AgentTurnRequest, `companionId`: kotlin.Long?, `toolHost`: ToolHost, `sink`: StreamSink): AgentTurnResult
     
     /**
+     * 流式回合的独立凭证入口；凭证只属于本次网关，不写入全局运行时。
+     */
+    fun `runTurnStreamWithCredentials`(`request`: AgentTurnRequest, `companionId`: kotlin.Long?, `toolHost`: ToolHost, `sink`: StreamSink, `credentialsJson`: kotlin.String): AgentTurnResult
+    
+    /**
      * 使用自定义状态控制器运行（编排方案 v3 决策 1：B 控制 + A 存储）
      *
      * 每轮 gateway.send 前调用 controller.on_round：
@@ -2584,6 +2607,11 @@ public interface AgentRuntimeInterface {
      * - tool_choice_override 非空 → 覆盖本轮 tool_choice
      */
     fun `runTurnWithController`(`request`: AgentTurnRequest, `companionId`: kotlin.Long?, `toolHost`: ToolHost, `controller`: TurnStateController): AgentTurnResult
+    
+    /**
+     * 使用本回合独立的凭证快照，避免不同会话覆盖全局凭证后串台。
+     */
+    fun `runTurnWithCredentials`(`request`: AgentTurnRequest, `companionId`: kotlin.Long?, `toolHost`: ToolHost, `credentialsJson`: kotlin.String): AgentTurnResult
     
     /**
      * Eval：注入脚本化传输（离线 mock，按序弹出预置响应，不发真实网络）。
@@ -2845,6 +2873,21 @@ open class AgentRuntime: Disposable, AutoCloseable, AgentRuntimeInterface
 
     
     /**
+     * 流式回合的独立凭证入口；凭证只属于本次网关，不写入全局运行时。
+     */override fun `runTurnStreamWithCredentials`(`request`: AgentTurnRequest, `companionId`: kotlin.Long?, `toolHost`: ToolHost, `sink`: StreamSink, `credentialsJson`: kotlin.String): AgentTurnResult {
+            return FfiConverterTypeAgentTurnResult.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_lianyu_agent_fn_method_agentruntime_run_turn_stream_with_credentials(
+        it, FfiConverterTypeAgentTurnRequest.lower(`request`),FfiConverterOptionalLong.lower(`companionId`),FfiConverterTypeToolHost.lower(`toolHost`),FfiConverterTypeStreamSink.lower(`sink`),FfiConverterString.lower(`credentialsJson`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 使用自定义状态控制器运行（编排方案 v3 决策 1：B 控制 + A 存储）
      *
      * 每轮 gateway.send 前调用 controller.on_round：
@@ -2857,6 +2900,21 @@ open class AgentRuntime: Disposable, AutoCloseable, AgentRuntimeInterface
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_lianyu_agent_fn_method_agentruntime_run_turn_with_controller(
         it, FfiConverterTypeAgentTurnRequest.lower(`request`),FfiConverterOptionalLong.lower(`companionId`),FfiConverterTypeToolHost.lower(`toolHost`),FfiConverterTypeTurnStateController.lower(`controller`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 使用本回合独立的凭证快照，避免不同会话覆盖全局凭证后串台。
+     */override fun `runTurnWithCredentials`(`request`: AgentTurnRequest, `companionId`: kotlin.Long?, `toolHost`: ToolHost, `credentialsJson`: kotlin.String): AgentTurnResult {
+            return FfiConverterTypeAgentTurnResult.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_lianyu_agent_fn_method_agentruntime_run_turn_with_credentials(
+        it, FfiConverterTypeAgentTurnRequest.lower(`request`),FfiConverterOptionalLong.lower(`companionId`),FfiConverterTypeToolHost.lower(`toolHost`),FfiConverterString.lower(`credentialsJson`),_status)
 }
     }
     )
