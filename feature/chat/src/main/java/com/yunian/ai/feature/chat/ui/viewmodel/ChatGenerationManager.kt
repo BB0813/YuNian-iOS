@@ -744,7 +744,17 @@ class ChatGenerationManager private constructor(
         var activeApi: com.yunian.ai.database.model.ApiConfig? = null
         runCatching {
             val role = userRepository?.selectedRole?.value?.name ?: CompanionRole.GIRLFRIEND.name
-            val settingsJson = com.yunian.ai.agent.AgentFacade.buildSettingsJson(role = role)
+            // 生图协议：提示词由 Rust 组装，必须经 settings 下发，否则模型不知道能生图却仍被触发
+            val imageGenRules = runCatching {
+                ImageGenTriggerLogic.systemRules(
+                    enabled = appSettingsStore.getImageGenEnabled(),
+                    hasKeywordTrigger = appSettingsStore.getImageGenKeywords().isNotEmpty(),
+                )
+            }.getOrDefault("")
+            val settingsJson = com.yunian.ai.agent.AgentFacade.buildSettingsJson(
+                role = role,
+                imageGenRules = imageGenRules,
+            )
             val stickers = com.yunian.ai.agent.sticker.StickerPreferenceFacade
                 .availableTagsWithFallback(application)
             val partnerSession = com.yunian.ai.common.RemoteKeyProvider.getPartnerSession(application)

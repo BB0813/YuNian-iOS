@@ -181,10 +181,16 @@ object AgentFacade {
      */
     fun buildSettingsJson(
         role: String = "GIRLFRIEND",
+        imageGenRules: String? = null,
     ): String = org.json.JSONObject().apply {
         put("role", role)
         put("timezone", java.util.TimeZone.getDefault().id)
         put("working_memory_limit", 200)
+        // 生图协议文本（Kotlin ImageGenTriggerLogic.systemRules 产物）。
+        // 提示词组装已下沉 Rust：旧做法是把协议拼进 aiCompanion.systemPrompt 交给 Kotlin
+        // 请求链路，Agent 路径不经过那里，于是「模型说不会画画、但关键词仍触发生图」。
+        // 经 settings 下发（与 timezone 等同一热更新通道），由 Rust 拼进 system prompt。
+        if (!imageGenRules.isNullOrBlank()) put("image_gen_rules", imageGenRules)
     }.toString()
 
     /**
