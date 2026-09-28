@@ -33,6 +33,122 @@ object SearchTools {
         ToolRegistry.register(WebFetchTool())
     }
 
+    /** 搜索结果条目（对象级，便于单测） */
+    internal data class SearchResult(val title: String, val url: String, val snippet: String)
+
+    /**
+     * 解析必应结果页（纯函数，可单测）。
+     *
+     * 真机事故（2026-09-28）：搜索工具「调用成功但永远 no results」。
+     * 根因是**必应移动版把链接包在标题外面**：
+     *   移动版：<a href="真实URL"><h2>标题</h2></a>   ← 旧正则要求 <h2><a ...，恒 0 命中
+     *   桌面版：<h2><a href="真实URL">标题</a></h2>   ← 旧正则能命中
+     * App 用的是移动 UA，因此线上必然搜不到；本实现同时覆盖两种形态，
+     * 并把 /ck/a?...&u=a1<base64url> 形式的内链还原成真实地址。
+     */
+    internal fun parseBingResults(html: String, maxResults: Int): List<SearchResult> {
+        if (html.isBlank()) return emptyList()
+        val anchorTag = Regex(
+            "<a\\b([^>]*)>(.*?)</a>",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        val hrefAttr = Regex("href=\"([^\"]+)\"", RegexOption.IGNORE_CASE)
+        val h2Tag = Regex(
+            "<h2\\b[^>]*>(.*?)</h2>",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        val snippetTag = Regex(
+            "<p[^>]*class=\"[^\"]*b_lineclamp[^\"]*\"[^>]*>(.*?)</p>",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        val found = LinkedHashMap<String, SearchResult>()
+
+        fun snippetAfter(fromIndex: Int): String {
+            val tail = html.substring(fromIndex.coerceAtLeast(0)).take(2000)
+            return stripHtmlTags(snippetTag.find(tail)?.groupValues?.get(1).orEmpty()).trim()
+        }
+
+        fun add(title: String, url: String, snippet: String): Boolean {
+            if (title.isBlank() || url.isBlank() || isBingInternalUrl(url)) return false
+            if (!found.containsKey(url)) found[url] = SearchResult(title, url, snippet)
+            return found.size >= maxResults
+        }
+
+        // ① 移动版形态（App 实际请求的 UA）：<a href="真实URL"><h2>标题</h2></a>
+        for (m in anchorTag.findAll(html)) {
+            val inner = m.groupValues[2]
+            if (!inner.contains("<h2", ignoreCase = true)) continue
+            val url = normalizeBingUrl(hrefAttr.find(m.groupValues[1])?.groupValues?.get(1)) ?: continue
+            if (add(stripHtmlTags(inner).trim(), url, snippetAfter(m.range.last + 1))) {
+                return found.values.toList()
+            }
+        }
+
+        // ② 桌面版形态：<h2><a href="真实URL">标题</a></h2>（以及 App 未来若改 UA 的情况）
+        for (h in h2Tag.findAll(html)) {
+            val a = anchorTag.find(h.groupValues[1]) ?: continue
+            val url = normalizeBingUrl(hrefAttr.find(a.groupValues[1])?.groupValues?.get(1)) ?: continue
+            if (add(stripHtmlTags(a.groupValues[2]).trim(), url, snippetAfter(h.range.last + 1))) break
+        }
+        return found.values.toList()
+    }
+
+    /**
+     * 必应链接归一：绝对地址直接返回；/ck/a?...&u=a1<base64url> 形式还原真实地址；
+     * 其余相对内链（/rp/… 静态资源等）返回 null 由调用方丢弃。
+     */
+    internal fun normalizeBingUrl(raw: String?): String? {
+        val href = raw?.trim().orEmpty()
+        if (href.isEmpty()) return null
+        if (href.startsWith("http://") || href.startsWith("https://")) return href
+        val encoded = Regex("[?&]u=([^&]+)").find(href)?.groupValues?.get(1) ?: return null
+        return runCatching {
+            val body = if (encoded.startsWith("a1")) encoded.substring(2) else encoded
+            val padded = body.replace('-', '+').replace('_', '/')
+                .let { it + "=".repeat((4 - it.length % 4) % 4) }
+            String(java.util.Base64.getDecoder().decode(padded), Charsets.UTF_8)
+                .takeIf { it.startsWith("http") }
+        }.getOrNull()
+    }
+
+    /** 必应/微软站内链接过滤（导航、跳转、翻译等非目标结果） */
+    internal fun isBingInternalUrl(url: String): Boolean =
+        url.contains("bing.com") ||
+            url.contains("go.microsoft.com") ||
+            url.contains("microsofttranslator.com")
+
+    /** 解析 DuckDuckGo Lite 结果页（纯函数，可单测）。
+     *
+     * 注意：该页的 a 标签属性顺序不固定（实测 rel/href 在前、class="result-link" 在后），
+     * 因此不能写死「class 在 href 之前」的正则，必须按属性集合判断。
+     */
+    internal fun parseDdgLiteResults(html: String, maxResults: Int): List<SearchResult> {
+        if (html.isBlank()) return emptyList()
+        val anchorRegex = Regex(
+            "<a\\b([^>]*)>(.*?)</a>",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        val hrefAttr = Regex("href=\"(https?://[^\"]+)\"", RegexOption.IGNORE_CASE)
+        val snippetRegex = Regex(
+            "<td[^>]*class=\"result-snippet\"[^>]*>(.*?)</td>",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        val snippets = snippetRegex.findAll(html).map { stripHtmlTags(it.groupValues[1]).trim() }.toList()
+        val out = ArrayList<SearchResult>(maxResults)
+        var index = 0
+        for (m in anchorRegex.findAll(html)) {
+            val attrs = m.groupValues[1]
+            if (!attrs.contains("result-link", ignoreCase = true)) continue
+            val url = hrefAttr.find(attrs)?.groupValues?.get(1)?.trim().orEmpty()
+            val title = stripHtmlTags(m.groupValues[2]).trim()
+            if (url.isBlank() || title.isBlank()) continue
+            out.add(SearchResult(title, url, snippets.getOrElse(index) { "" }))
+            index++
+            if (out.size >= maxResults) break
+        }
+        return out
+    }
+
     /** UA 伪装头：必应/DDG 等对非浏览器 UA 返回精简页或拒绝 */
     private fun browserHeaders(request: Request.Builder) {
         request.header(
@@ -169,30 +285,60 @@ object SearchTools {
                 return buildJsonObject { put("ok", false); put("error", "query 不能为空") }.toString()
             }
 
-            // Brave（配置了 key 优先）→ 必应中国兜底（免 key 开箱即用）
+            // 兜底链：Brave（配了 key）→ 必应中国 → DuckDuckGo Lite。
+            // 每步失败都记录原因：旧实现把所有失败吞成「无结果」，
+            // 模型与用户都无从判断是「真没搜到」还是「被拦截 / 解析失败」。
             val apiKey = appSettings.getSearchApiKey()
-            val results = withTimeoutOrNull(20_000L) {
+            val attempts = mutableListOf<String>()
+            var usedSource = "none"
+            val results = withTimeoutOrNull(25_000L) {
                 if (apiKey.isNotBlank()) {
-                    runCatching { braveSearch(apiKey, query, maxResults) }.getOrElse { emptyList() }
-                        .ifEmpty { runCatching { bingSearch(query, maxResults) }.getOrElse { emptyList() } }
-                } else {
-                    runCatching { bingSearch(query, maxResults) }.getOrElse { emptyList() }
+                    val brave = runCatching { braveSearch(apiKey, query, maxResults) }
+                        .onFailure { attempts.add("brave: ${it.message}") }
+                        .getOrDefault(emptyList())
+                    if (brave.isNotEmpty()) {
+                        usedSource = "brave"
+                        return@withTimeoutOrNull brave
+                    }
+                    attempts.add("brave: 0 结果")
                 }
-            } ?: emptyList()
-
+                val bing = runCatching { bingSearch(query, maxResults) }
+                    .onFailure { attempts.add("bing: ${it.message}") }
+                    .getOrDefault(emptyList())
+                if (bing.isNotEmpty()) {
+                    usedSource = "bing"
+                    return@withTimeoutOrNull bing
+                }
+                attempts.add("bing: 0 结果")
+                val ddg = runCatching { ddgSearch(query, maxResults) }
+                    .onFailure { attempts.add("ddg: ${it.message}") }
+                    .getOrDefault(emptyList())
+                if (ddg.isNotEmpty()) {
+                    usedSource = "ddg"
+                    return@withTimeoutOrNull ddg
+                }
+                attempts.add("ddg: 0 结果")
+                emptyList()
+            }
+            if (results == null) {
+                return buildJsonObject {
+                    put("ok", false)
+                    put("query", query)
+                    put("error", "搜索超时（25s）：" + attempts.joinToString("；"))
+                }.toString()
+            }
             if (results.isEmpty()) {
                 return buildJsonObject {
-                    put("ok", true)
+                    put("ok", false)
                     put("query", query)
-                    put("empty", true)
-                    put("note", "未找到相关结果，请尝试更换关键词")
+                    put("error", "搜索未取到结果：" + attempts.joinToString("；"))
                 }.toString()
             }
 
             return buildJsonObject {
                 put("ok", true)
                 put("query", query)
-                put("source", if (apiKey.isNotBlank()) "brave_or_bing" else "bing")
+                put("source", usedSource)
                 put("results", buildJsonArray {
                     results.forEach { r ->
                         add(buildJsonObject {
@@ -205,36 +351,32 @@ object SearchTools {
             }.toString()
         }
 
-        private data class SearchResult(val title: String, val url: String, val snippet: String)
-
-        /** 免 key 兜底：必应中国网页版解析（国内直连可达） */
+        /** 免 key 兜底 1：必应中国网页版（国内直连可达）。失败即抛错，原因交上层汇总。 */
         private fun bingSearch(query: String, maxResults: Int): List<SearchResult> {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
             val request = Request.Builder()
                 .url("https://cn.bing.com/search?q=$encodedQuery&mkt=zh-CN&count=$maxResults")
                 .apply { browserHeaders(this) }
                 .build()
-
             val html = newHttpClient().newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return emptyList()
+                if (!resp.isSuccessful) throw IllegalStateException("bing HTTP ${resp.code}")
                 resp.body?.string().orEmpty()
             }
+            return parseBingResults(html, maxResults)
+        }
 
-            val blockRegex = Regex("<li class=\"b_algo\".*?</li>", RegexOption.DOT_MATCHES_ALL)
-            val linkRegex = Regex("<h2[^>]*>\\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
-            val snippetRegex = Regex("<p[^>]*>(.*?)</p>", RegexOption.DOT_MATCHES_ALL)
-
-            return blockRegex.findAll(html)
-                .take(maxResults)
-                .mapNotNull { match ->
-                    val block = match.value
-                    val link = linkRegex.find(block) ?: return@mapNotNull null
-                    val title = stripHtmlTags(link.groupValues[2])
-                    val url = link.groupValues[1]
-                    val snippet = stripHtmlTags(snippetRegex.find(block)?.groupValues?.get(1).orEmpty())
-                    if (title.isBlank() || url.isBlank()) null else SearchResult(title, url, snippet)
-                }
-                .toList()
+        /** 免 key 兜底 2：DuckDuckGo Lite（结构极简稳定；国内可能不可达，原因会回灌） */
+        private fun ddgSearch(query: String, maxResults: Int): List<SearchResult> {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val request = Request.Builder()
+                .url("https://lite.duckduckgo.com/lite/?q=$encodedQuery")
+                .apply { browserHeaders(this) }
+                .build()
+            val html = newHttpClient().newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) throw IllegalStateException("ddg HTTP ${resp.code}")
+                resp.body?.string().orEmpty()
+            }
+            return parseDdgLiteResults(html, maxResults)
         }
 
         private suspend fun braveSearch(apiKey: String, query: String, maxResults: Int): List<SearchResult> {

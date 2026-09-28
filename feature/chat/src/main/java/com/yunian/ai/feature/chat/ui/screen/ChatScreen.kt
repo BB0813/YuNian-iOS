@@ -348,6 +348,8 @@ fun ChatScreen(
     val isTyping by viewModel.isTyping.collectAsStateWithLifecycle()
     val typingText by viewModel.typingText.collectAsStateWithLifecycle()
     val imageGenGenerating by viewModel.imageGenGenerating.collectAsStateWithLifecycle()
+    // 生图计时基准（真实开始时间）：跨页面不重置，与后台任务保持一致
+    val imageGenStartedAtMs by viewModel.imageGenStartedAtMs.collectAsStateWithLifecycle()
     val isRegenerating by viewModel.isRegenerating.collectAsStateWithLifecycle()
     // 首屏历史是否已装载完成（空会话也算完成）—— 果冻入场动画的水位线由它来锁定。
     val initialHistoryLoaded by viewModel.initialHistoryLoaded.collectAsStateWithLifecycle()
@@ -871,6 +873,7 @@ fun ChatScreen(
                                 companionData = companionData,
                                 adaptiveSizing = adaptiveSizing,
                                 isDarkTheme = isDarkTheme,
+                                startedAtMs = imageGenStartedAtMs,
                                 modifier = Modifier.jellyEntrance(
                                     play = jellyAnimEnabled,
                                     transformOrigin = TransformOrigin(0f, 1f)

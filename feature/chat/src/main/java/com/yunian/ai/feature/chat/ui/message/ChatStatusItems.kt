@@ -99,6 +99,8 @@ fun ImageGenGeneratingItem(
     companionData: CompanionModel?,
     adaptiveSizing: AdaptiveSizing,
     isDarkTheme: Boolean,
+    /** 本轮生图的真实开始时间（进程级状态）；null 时退化为进入组装的时刻 */
+    startedAtMs: Long? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -127,10 +129,12 @@ fun ImageGenGeneratingItem(
     )
 
     var elapsedSeconds by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        val startedAt = System.currentTimeMillis()
+    // 计时基准 = 本轮生图的真实开始时间（进程级状态）：
+    // 此前用「进入组装的时刻」，导致退出会话再回来秒数归零，而后台任务仍在跑。
+    LaunchedEffect(startedAtMs) {
+        val beganAtMs = startedAtMs ?: System.currentTimeMillis()
         while (true) {
-            elapsedSeconds = ((System.currentTimeMillis() - startedAt) / 1000L).toInt()
+            elapsedSeconds = ((System.currentTimeMillis() - beganAtMs) / 1000L).toInt()
             delay(1000L)
         }
     }
