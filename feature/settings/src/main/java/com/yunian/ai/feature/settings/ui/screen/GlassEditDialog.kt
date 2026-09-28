@@ -24,8 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
 import com.yunian.ai.uicommon.component.glass.drawGlass
+import com.kyant.backdrop.Backdrop
 import com.yunian.ai.uicommon.theme.AppTheme
 
 /** 液态玻璃编辑弹窗统一圆角：与顶栏 GlassTopBar 保持一致。 */
@@ -40,8 +40,9 @@ private val GlassEditDialogMaxWidth = 420.dp
 /**
  * 液态玻璃材质的编辑弹窗容器。
  *
- * - 背景：复用 [LocalPageBackdrop] 采样当前页面背景，配合 [drawGlass] 做 vibrancy + blur + lens；
- *   backdrop 为 null 时 [drawGlass] 内部自动退化为纯色，不会崩溃。
+ * - 背景：**不**采样页面窗口的 LayerBackdrop。本组件是独立窗口，跨窗口采样在
+ *   「切后台→回前台」后会失效（表现为整个弹窗变透明、下层页面透出重影），
+ *   因此直接走 [drawGlass] 的纯色不透明兜底（backdrop = null 分支）。
  * - 形状：固定 28dp 圆角（[GlassEditDialogShape]），满足 lens 效果只支持 CornerBasedShape 的约束。
  * - 结构：标题 / 可滚动内容区 / 底部按钮行，按钮行由调用方通过 [actions] 自行编排。
  */
@@ -53,7 +54,14 @@ internal fun GlassEditDialog(
     actions: @Composable RowScope.() -> Unit,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val backdrop = LocalPageBackdrop.current
+    // ⚠️ 这里**不能**采样页面窗口的 LayerBackdrop。
+    //
+    // 本组件是独立窗口（[Dialog]），采样页面窗口的 RenderNode 属跨窗口采样：
+    // 切后台再回前台后该层已失效，采样结果为空 → drawGlass 只剩 50% 半透明底
+    // → 整个弹窗变透明、下层页面文字透出叠成重影（真机问题：API 配置页弹窗）。
+    // 传 null 让 drawGlass 走纯色不透明兜底（其实现本就为此设计），
+    // 既保证「不透明玻璃」观感，也不再受窗口生命周期影响。
+    val backdrop: Backdrop? = null
     val surfaceColor = AppTheme.colors.surfaceVariant
     val outlineColor = AppTheme.colors.outline
 
