@@ -1003,6 +1003,10 @@ class ChatGenerationManager private constructor(
                 var stickerEmitted = 0
                 val stickerContents = mutableListOf<String>()
                 var lastDelivered: AiResponseFinalizer.DeliveredResponse? = null
+                // 本轮用量与思考过程（Rust 事件流带出；Agent 路径 HTTP 已下沉，AiService 不再记录）
+                var usageInputTokens = 0L
+                var usageOutputTokens = 0L
+                val reasoningParts = mutableListOf<String>()
 
                 for (event in agentResult.events) {
                     when (event.kind) {
@@ -1014,7 +1018,7 @@ class ChatGenerationManager private constructor(
                             delay(800L + kotlin.random.Random.nextLong(1200L))
                             lastDelivered = responseFinalizer.deliverResponse(
                                 aiContent = text,
-                                reasoning = null,
+                                reasoning = reasoningParts.joinToString("\n\n").takeIf { it.isNotBlank() },
                                 userContentForMemory = null,
                                 pendingTurn = pendingTurn,
                                 reasoningStartedAtMs = requestStartedAt,
@@ -1035,7 +1039,35 @@ class ChatGenerationManager private constructor(
                                 stickerContents.add("[$desc]")
                             }
                         }
+                        "reasoning" -> {
+                            // 「启用思考过程」的数据来源：Rust 已解析 reasoning_content（含工具轮），
+                            // 这里汇总后交给 finalizer 落库，由消息列表按 showReasoning 决定展示/折叠。
+                            val part = event.text.trim()
+                            if (part.isNotEmpty()) reasoningParts.add(part)
+                        }
+                        "usage" -> {
+                            // token 用量：OpenAI 用 prompt_tokens/completion_tokens，
+                            // Anthropic 用 input_tokens/output_tokens —— 两种键都兼容。
+                            runCatching {
+                                val usage = JSONObject(event.text)
+                                usageInputTokens += usage.optLong("prompt_tokens", usage.optLong("input_tokens", 0L))
+                                usageOutputTokens += usage.optLong("completion_tokens", usage.optLong("output_tokens", 0L))
+                            }.onFailure {
+                                SecureLog.w("ChatGenerationManager", "parse usage event failed: ${it.message}")
+                            }
+                        }
                         else -> Unit // status / confirm_request 仅过程态，不落库
+                    }
+                }
+
+                // 落库 token 用量（迁移后 Agent 路径不再经过 AiService，必须在此记录，
+                // 否则「Token 使用统计」页恒为空）。
+                if (usageInputTokens > 0 || usageOutputTokens > 0) {
+                    runCatching {
+                        com.yunian.ai.database.repository.TokenUsageRepository(application)
+                            .recordTokenUsage(companionId, usageInputTokens, usageOutputTokens)
+                    }.onFailure {
+                        SecureLog.w("ChatGenerationManager", "recordTokenUsage failed: ${it.message}")
                     }
                 }
 
@@ -1063,7 +1095,7 @@ class ChatGenerationManager private constructor(
                         delay(800L + kotlin.random.Random.nextLong(1200L))
                         lastDelivered = responseFinalizer.deliverResponse(
                             aiContent = closing,
-                            reasoning = null,
+                            reasoning = reasoningParts.joinToString("\n\n").takeIf { it.isNotBlank() },
                             userContentForMemory = null,
                             pendingTurn = pendingTurn,
                             reasoningStartedAtMs = requestStartedAt,

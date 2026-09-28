@@ -1197,6 +1197,29 @@ impl AgentRuntime {
                 .unwrap_or_default();
             last_finish_reason = finish_reason.clone();
 
+            // ── 用量与思考过程上报（事件流）──
+            // Agent 路径的 HTTP 已下沉 Rust，Kotlin AiService 不再经过，因此
+            // ① token 统计（token_usage 表）②「显示思考过程」都必须由这里带出，
+            // 否则二者在迁移后恒为空 / 恒不生效（真机实测：token_usage 0 行）。
+            if let Some(usage) = parsed.get("usage") {
+                if !usage.is_null() {
+                    events.push(AgentEvent {
+                        kind: "usage".to_string(),
+                        text: usage.to_string(),
+                        extra: String::new(),
+                    });
+                }
+            }
+            if let Some(reasoning) = parsed.get("reasoning_content").and_then(|v| v.as_str()) {
+                if !reasoning.trim().is_empty() {
+                    events.push(AgentEvent {
+                        kind: "reasoning".to_string(),
+                        text: reasoning.to_string(),
+                        extra: String::new(),
+                    });
+                }
+            }
+
             // 模型调用了工具
             if !tool_calls.is_empty() {
                 let mut tool_messages: Vec<serde_json::Value> = Vec::new();
@@ -2387,6 +2410,33 @@ mod tests {
         transport.responses.lock().unwrap().push(call.to_string());
         let second = runner.run_turn_inner(&req, Some(1), &gw, None, &NeverHost, &DefaultTurnStateMachine);
         assert_eq!(second.finished_reason, "confirm_pending", "拒绝应只生效一次");
+    }
+
+    /// 用量与思考过程必须经事件流带出（否则 token 统计为空、思考过程设置不生效）。
+    #[test]
+    fn turn_emits_usage_and_reasoning_events() {
+        let (runner, gw, transport) = mock_gateway(vec![]);
+        transport.responses.lock().unwrap().push(
+            r#"{"choices":[{"message":{"role":"assistant","content":"你好","reasoning_content":"想了一下"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#
+                .to_string(),
+        );
+        let req = AgentTurnRequest {
+            group_id: None,
+            history_json: r#"[{"role":"user","content":"在吗"}]"#.to_string(),
+            tools: vec![],
+            max_rounds: 1,
+            tool_choice: String::new(),
+            sticker_probability: 0,
+            image: None,
+            system_prompt: None,
+            companion_name_map_json: None,
+        };
+        let result = runner.run_turn_inner(&req, Some(1), &gw, None, &NoopHost, &DefaultTurnStateMachine);
+        let usage = result.events.iter().find(|e| e.kind == "usage").expect("应产出 usage 事件");
+        assert!(usage.text.contains("prompt_tokens"), "{}", usage.text);
+        let reasoning = result.events.iter().find(|e| e.kind == "reasoning").expect("应产出 reasoning 事件");
+        assert_eq!(reasoning.text, "想了一下");
+        assert_eq!(result.final_text, "你好");
     }
 
     /// 思考模型把 max_tokens 全耗在 reasoning 上时：正文为空且无任何输出，

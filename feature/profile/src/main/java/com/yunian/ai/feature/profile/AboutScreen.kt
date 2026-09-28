@@ -55,7 +55,10 @@ private val ossCategories = listOf(
     OssCategory(
         title = "参考与移植",
         items = listOf(
+            OssItem("Cordis（cordis-rs / cordis-loader）", "Agent 插件底座与分层提示词编排的架构来源（Rust 侧核心底座）"),
             OssItem("RikkaHub", "世界书、提示词处理与工具循环等实现的重要参考"),
+            OssItem("SillyTavern World Info", "世界书（lorebook）触发语义与注入位置规范"),
+            OssItem("chara_card", "角色卡 V1/V2/V3 与 PNG tEXt 解析（Apache-2.0）"),
             OssItem("Shizuku", "提供 ADB 特权授权通道（技能与自动化能力）")
         )
     ),
@@ -75,6 +78,18 @@ private val ossCategories = listOf(
         title = "AI 与语音",
         items = listOf(
             OssItem("sherpa-onnx", "语音识别（ONNX Runtime）")
+        )
+    ),
+    OssCategory(
+        title = "Agent 运行时（Rust）",
+        items = listOf(
+            OssItem("UniFFI（Mozilla）", "Rust 与 Kotlin 之间的绑定与回调桥"),
+            OssItem("JNA", "UniFFI Kotlin 绑定依赖的原生调用层"),
+            OssItem("ureq / rustls", "原生 HTTP 与 TLS（对话请求、SSE 流式输出）"),
+            OssItem("rusqlite / SQLite", "直读本地数据库（API 配置、人设、记忆）"),
+            OssItem("serde / serde_json", "序列化与请求体组装"),
+            OssItem("chrono", "时间上下文（系统提示词的当前时间感知）"),
+            OssItem("regex", "世界书关键词的正则激活")
         )
     ),
     OssCategory(
