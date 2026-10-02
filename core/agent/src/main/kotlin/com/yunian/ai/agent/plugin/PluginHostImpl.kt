@@ -45,7 +45,7 @@ class PluginHostImpl(
     frameworkServices: Map<String, Any>,
     private val log: PluginLog = AndroidPluginLog(),
     private val eventBus: PluginEventBus = PluginEventBus(log),
-) : PluginHost {
+) : PluginHost, com.yunian.ai.domain.plugin.PluginEventPublisher {
 
     private val baseServices: Map<String, Any> = HashMap(frameworkServices)
     private val registry = ConcurrentHashMap<String, LianYuPlugin>()
@@ -59,6 +59,12 @@ class PluginHostImpl(
      * 因此 `configJson == null` 时不写入条目（缺条目读出来就是 null，比较语义不变）。
      */
     private val loadedConfig = ConcurrentHashMap<String, String>()
+
+    /** ToolHost 等宿主组件的标准发布端；仍进入本宿主持有的唯一 PluginEventBus。 */
+    override fun <T : Any> emit(
+        key: com.yunian.ai.domain.plugin.EventKey<T>,
+        payload: T,
+    ) = eventBus.emit(key.name, payload)
 
     override fun register(plugin: LianYuPlugin) {
         val manifestError = manifestMatchesSelfDescription(plugin)

@@ -13,8 +13,8 @@ android {
         applicationId = "com.yunian.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "2.0.2"
+        versionCode = 27
+        versionName = "2.1.0"
 
         manifestPlaceholders["developerName"] = "苏苏"
         manifestPlaceholders["developerOrg"] = "YuNian"
@@ -38,8 +38,16 @@ android {
             "androidx.test.runner.AndroidJUnitRunner"
         }
 
+        // 默认只打 arm64；数据库/崩溃恢复的 x86_64 instrumentation 夹具可显式覆盖。
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            val emulatorAbis = providers.gradleProperty("yunianEmulatorAbis").orNull
+            if (emulatorAbis.isNullOrBlank()) {
+                abiFilters += listOf("arm64-v8a")
+            } else {
+                abiFilters += emulatorAbis.split(',', ' ')
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+            }
         }
     }
 

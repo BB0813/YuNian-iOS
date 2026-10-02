@@ -10,6 +10,7 @@ import com.yunian.ai.database.AppDatabase
 import com.yunian.ai.domain.wechat.WeChatProactiveSync
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.common.MessageBodyState
+import com.yunian.ai.common.ScriptTurnStripper
 import com.yunian.ai.database.model.ChatGroup
 import com.yunian.ai.database.model.CompanionEntity
 import com.yunian.ai.database.model.GroupMessage
@@ -192,7 +193,13 @@ class GroupChatViewModel(
         // 并严格保持原顺序语义：校验输入 → 通过后再申请门控 → 再取消旧 job → 启动新一轮。
         val previousJob = sendMessageJob
         val job = applicationScope.launch {
-            val inputCheck = com.yunian.ai.common.ContentFilter.checkInput(content)
+            // 输入安全校验在 try 之外，且 applicationScope 无 CoroutineExceptionHandler：
+            // 一旦这里抛出就会沿线程默认未捕获处理器直接闪退，故显式兜底并中止本轮。
+            val inputCheck = runCatching { com.yunian.ai.common.ContentFilter.checkInput(content) }
+                .getOrElse { e ->
+                    Log.e("GroupChatViewModel", "checkInput failed", e)
+                    return@launch
+                }
             if (inputCheck.isViolating) {
                 android.util.Log.w("GroupChatViewModel", "Input blocked by safety filter: ${inputCheck.reason}")
                 com.yunian.ai.common.BanManager.recordViolation(getApplication(), inputCheck.level)
@@ -855,7 +862,17 @@ class GroupChatViewModel(
             }
         }
 
-        return baseSystemPrompt
+        // 回合纪律（硬性红线）：群聊自带 system_prompt，Rust 侧编排器会被跳过
+        // （agent.rs：system_prompt 非空即不注入 L3 常驻片段），故此处显式补上禁令，
+        // 防止模型续写对话脚本、替用户说话（与主聊天 TURN_DISCIPLINE_NOTE 等价）。
+        val turnDiscipline = """
+            【对话纪律（硬性红线）】
+            1. 禁止替用户说话：一条回复只说你自己（${companion.name}）这一方，绝不模拟用户语气或替用户作答。
+            2. 禁止自问自答：不自己提问又替用户回答。
+            3. 禁止输出「用户：」「你：」等回合标记，禁止以任何分隔符（如 ｜）续写对话脚本。
+            4. 只输出你自己这一方的回复；引用用户时用转述（如"你刚说想我了"），不要伪造用户回合。
+        """.trimIndent()
+        return baseSystemPrompt + "\n\n" + turnDiscipline
     }
 
     private suspend fun generateIsolatedAiReplyBubbles(
@@ -1189,6 +1206,11 @@ class GroupChatViewModel(
         text = rolePrefixRegex.replace(text, "")
         val encRegex = Regex("(?m)^enc:\\S+$")
         text = encRegex.replace(text, "")
+
+        // 角色串线防线：剥离模型续写的「用户回合」脚本。
+        // 群聊此前只剥行首名字前缀、不截断内容——模型编造的用户话剥掉前缀后仍以 AI 口吻落库。
+        // 必须在下面的名字前缀剥离之前执行，避免「用户：xxx」的标记先被剥掉而漏截。
+        text = ScriptTurnStripper.strip(text, aiName = companionName)
 
         val allNames = _allCompanions.value.map { it.name }.toSet() + listOfNotNull("用户", companionName)
         val namePattern = allNames.joinToString("|") { Regex.escape(it) }

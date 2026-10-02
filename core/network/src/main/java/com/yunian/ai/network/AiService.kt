@@ -481,7 +481,8 @@ class AiService(context: Context) : AiServiceProvider {
 
         fun markKeyFailed(key: String) {
             keyCooldownUntil[key] = System.currentTimeMillis() + KEY_FAILURE_COOLDOWN_MS
-            SecureLog.w("AiService", "Key失败冷却5s: ${key.take(8)}...")
+            // 不打印 key 任何片段：breadcrumbs 在 release 也会捕获本行并随崩溃报告外发。
+            SecureLog.w("AiService", "Key失败冷却5s")
         }
 
         fun resetKeyState() {
@@ -768,13 +769,18 @@ class AiService(context: Context) : AiServiceProvider {
 
         val conversationText = buildString {
             messages.forEach { msg ->
-                val role = if (msg.isFromUser) "用户" else (companionNameMap[msg.companionId] ?: "AI")
                 val content = msg.content
                     .replace(Regex("\\[.*?\\]"), "")
                     .replace(Regex("（.*?）"), "")
                     .trim()
                 if (content.isNotBlank()) {
-                    appendLine("$role: $content")
+                    if (msg.isFromUser) {
+                        // 用户消息用引号包裹形态，避免「用户：内容」回合标记格式被摘要模仿后
+                        // 注入聊天提示词，诱导模型续写「用户：」脚本（角色串线诱导源之一）
+                        appendLine("用户说：\"$content\"")
+                    } else {
+                        appendLine("${companionNameMap[msg.companionId] ?: "AI"}: $content")
+                    }
                 }
             }
         }
@@ -1870,8 +1876,9 @@ class AiService(context: Context) : AiServiceProvider {
                     ""
                 }
 
-                SecureLog.i("VISION", "Settings: modelSetting=$visionModelSetting, providerSetting=$visionProviderSetting, url=${visionApiUrlSetting.take(30)}..., key=${visionApiKeySetting.take(10)}...")
-                SecureLog.i("VISION", "Original config: provider=${config.provider}, baseUrl=${config.baseUrl}, model=${config.model}, key=${config.apiKey.take(10)}...")
+                // 不打印 key 片段（breadcrumbs 在 release 也会捕获并随报告外发），只记录是否已配置。
+                SecureLog.i("VISION", "Settings: modelSetting=$visionModelSetting, providerSetting=$visionProviderSetting, url=${visionApiUrlSetting.take(30)}..., keyConfigured=${visionApiKeySetting.isNotBlank()}")
+                SecureLog.i("VISION", "Original config: provider=${config.provider}, baseUrl=${config.baseUrl}, model=${config.model}, keyConfigured=${config.apiKey.isNotBlank()}")
 
                 if (visionProviderSetting != "auto" && (visionApiUrlSetting.isNotBlank() || visionApiKeySetting.isNotBlank())) {
                     val resolvedProvider = when (visionProviderSetting.uppercase()) {
@@ -1892,7 +1899,7 @@ class AiService(context: Context) : AiServiceProvider {
                     val finalApiKey = visionApiKeySetting.ifBlank { config.apiKey }
                     val finalBaseUrl = visionApiUrlSetting.ifBlank { config.baseUrl }
 
-                    SecureLog.i("VISION", "Final config: provider=$resolvedProvider, baseUrl=$finalBaseUrl, model=$resolvedModel, key=${finalApiKey.take(10)}...")
+                    SecureLog.i("VISION", "Final config: provider=$resolvedProvider, baseUrl=$finalBaseUrl, model=$resolvedModel, keyConfigured=${finalApiKey.isNotBlank()}")
 
                     if (finalApiKey.isBlank()) {
                         return@withContext AiResponse("[TOAST]API密钥为空，请检查视觉模型设置中的API Key")

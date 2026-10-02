@@ -87,6 +87,8 @@ object AgentFacade {
         runCatching { runtime(context) }.onFailure {
             android.util.Log.w(TAG, "warmUp failed: ${it.message}")
         }
+        // Forward any previous-session native diagnostics without blocking runtime creation.
+        RustAgentLogBridge.dump(context)
     }
 
     /**
@@ -245,6 +247,7 @@ object AgentFacade {
         companionId: Long?,
         toolHost: ToolHost,
     ): AgentTurnResult = runtime(context).runTurn(request, companionId, toolHost)
+        .also { RustAgentLogBridge.dump(context) }
 
     /**
      * 运行一轮流式 Agent 回合（SSE 流式输出完全下沉 rs）。
@@ -266,6 +269,7 @@ object AgentFacade {
         toolHost: ToolHost,
         sink: StreamSink,
     ): AgentTurnResult = runtime(context).runTurnStream(request, companionId, toolHost, sink)
+        .also { RustAgentLogBridge.dump(context) }
 
     // ── 全局工具注册表（决策在 Rust：builtin + global + session 三级组装） ──
 
