@@ -246,14 +246,8 @@
         </receiver>
         -->
 
-        <!-- 华为 HMS Push 服务 -->
-        <service
-            android:name=".push.service.HuaweiPushService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
+        <!-- 华为 HMS Push 暂停启用：当前构建缺少完整 AGConnect 配置，且 shell manifest
+             已显式移除 HMS 自动初始化组件，避免华为设备启动时实例化半成品链路。 -->
     </application>
 
 </manifest>

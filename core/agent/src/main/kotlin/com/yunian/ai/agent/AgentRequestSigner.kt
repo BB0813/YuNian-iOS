@@ -16,7 +16,29 @@ import java.security.SecureRandom
  */
 class AgentRequestSigner : RequestSignatureProvider {
 
+    private companion object {
+        const val TAG = "AgentRequestSigner"
+    }
+
     override fun signHeaders(
+        method: String,
+        path: String,
+        body: String,
+        clientId: String,
+    ): List<RequestHeader> {
+        // UniFFI foreign callback boundary: never let Keystore, crypto, or thread failures
+        // escape into Rust (where they become UnexpectedUniFFICallbackError -> panic/abort).
+        // Empty headers preserve the Rust-side fail-closed signature check.
+        return try {
+            signHeadersInternal(method, path, body, clientId)
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "signHeaders failed: ${t.javaClass.simpleName}")
+            emptyList()
+        }
+    }
+
+
+    private fun signHeadersInternal(
         method: String,
         path: String,
         body: String,

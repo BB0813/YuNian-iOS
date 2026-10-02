@@ -7,7 +7,11 @@ import com.yunian.ai.agent.audit.ToolCallRecord
 import com.yunian.ai.agent.sticker.StickerPreferenceFacade
 import com.yunian.ai.agent.uniffi.ToolHost
 import com.yunian.ai.database.AppDatabase
+import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.domain.ToolRegistry
+import com.yunian.ai.domain.plugin.PluginEventPublisher
+import com.yunian.ai.domain.plugin.PluginHost
+import com.yunian.ai.domain.plugin.ToolFinishStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +22,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -50,6 +55,11 @@ class AgentToolHost(
      * `"channel":"app"`）都不影响判定；不使用 ThreadLocal，也不使用可变全局开关。
      */
     private val allowAppLocalTools: Boolean = false,
+    /** 仅用于关联订阅者自己的会话；随机值不包含 companion/user 信息。 */
+    val lifecycleStreamId: String = UUID.randomUUID().toString(),
+    /** 默认取生产 Cordis 宿主；null（尚未装配/无订阅端）时工具执行照常。 */
+    private val eventPublisher: PluginEventPublisher? =
+        ServiceRegistry.get(PluginHost::class.java) as? PluginEventPublisher,
 ) : ToolHost {
 
     companion object {
@@ -89,6 +99,7 @@ class AgentToolHost(
     }
 
     private val appContext: Context = context.applicationContext
+    private val lifecycleReporter = ToolLifecycleReporter(eventPublisher, lifecycleStreamId)
 
     /**
      * 本回合工具调用明细（线程安全，Rust 回调线程写入；回合结束后由调用方读取
@@ -103,24 +114,34 @@ class AgentToolHost(
         val startedAt = System.currentTimeMillis()
         Log.i(TAG, "tool call: name=$toolName args=$argumentsJson ctx=$contextJson")
         var ok = true
-        val result = try {
-            val task = toolScope.async { executeToolSuspending(toolName, argumentsJson, contextJson) }
+        var result: String? = null
+        var cancellation: CancellationException? = null
+        withToolLifecycle(lifecycleReporter, toolName) { markFinished ->
             try {
-                // Rust 回调线程同步等待；超时则取消子协程（挂起型工具在取消点真正中止）
-                runBlocking { withTimeout(TOOL_TIMEOUT_MS) { task.await() } }
-            } catch (timeout: TimeoutCancellationException) {
-                task.cancel(CancellationException("tool timeout: $toolName"))
+                val task = toolScope.async { executeToolSuspending(toolName, argumentsJson, contextJson) }
+                result = try {
+                    // Rust 回调线程同步等待；超时则取消子协程（挂起型工具在取消点真正中止）
+                    runBlocking { withTimeout(TOOL_TIMEOUT_MS) { task.await() } }
+                } catch (timeout: TimeoutCancellationException) {
+                    task.cancel(CancellationException("tool timeout: $toolName"))
+                    ok = false
+                    markFinished(ToolFinishStatus.TIMED_OUT)
+                    Log.w(TAG, "tool timeout: $toolName >${TOOL_TIMEOUT_MS / 1000}s (cancelled)")
+                    "错误：工具 $toolName 执行超时（超过 ${TOOL_TIMEOUT_MS / 1000} 秒）已请求取消，结果未知——请先核实状态，不要重复执行有副作用的操作"
+                }
+            } catch (cancelled: CancellationException) {
                 ok = false
-                Log.w(TAG, "tool timeout: $toolName >${TOOL_TIMEOUT_MS / 1000}s (cancelled)")
-                "错误：工具 $toolName 执行超时（超过 ${TOOL_TIMEOUT_MS / 1000} 秒）已请求取消，结果未知——请先核实状态，不要重复执行有副作用的操作"
+                markFinished(ToolFinishStatus.CANCELLED)
+                cancellation = cancelled
+            } catch (t: Throwable) {
+                ok = false
+                markFinished(ToolFinishStatus.FAILED)
+                Log.e(TAG, "execute $toolName failed", t)
+                result = "错误：工具 $toolName 执行失败：${t.message ?: t.javaClass.simpleName}"
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (t: Throwable) {
-            ok = false
-            Log.e(TAG, "execute $toolName failed", t)
-            "错误：工具 $toolName 执行失败：${t.message ?: t.javaClass.simpleName}"
         }
+        cancellation?.let { throw it }
+        val finalResult = requireNotNull(result)
         val elapsed = System.currentTimeMillis() - startedAt
         // 本机敏感工具结果（本机用户资料）不进 ToolCallRecord / 日志明文，统一用固定占位替换；
         // 其他工具的日志行为保持不变（result 截断 120 字符）。
@@ -128,14 +149,15 @@ class AgentToolHost(
             ToolCallRecord(
                 name = toolName,
                 args = argumentsJson,
-                result = AppLocalToolGate.resultForRecord(toolName, result),
+                result = AppLocalToolGate.resultForRecord(toolName, finalResult),
                 elapsedMs = elapsed,
                 ok = ok,
             )
         )
-        Log.i(TAG, "tool done: name=$toolName elapsed=${elapsed}ms ok=$ok result=${AppLocalToolGate.resultForLog(toolName, result)}")
-        return result
+        Log.i(TAG, "tool done: name=$toolName elapsed=${elapsed}ms ok=$ok result=${AppLocalToolGate.resultForLog(toolName, finalResult)}")
+        return finalResult
     }
+
 
     /**
      * 实际工具执行（在 [toolScope] 受限并行调度器上运行）：记忆工具 / load_skill /

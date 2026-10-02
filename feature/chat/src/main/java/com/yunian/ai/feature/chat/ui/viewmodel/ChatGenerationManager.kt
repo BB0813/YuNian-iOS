@@ -38,6 +38,10 @@ import com.yunian.ai.domain.ToolRegistry
 import com.yunian.ai.feature.chat.R
 import com.yunian.ai.feature.chat.data.ChatContextResolver
 import com.yunian.ai.feature.chat.data.ChatDetailSettingsStore
+import com.yunian.ai.feature.chat.plugin.ChatToolLifecycleItem
+import com.yunian.ai.feature.chat.plugin.ChatToolLifecyclePlugin
+import com.yunian.ai.feature.chat.plugin.ChatToolLifecycleProjection
+import com.yunian.ai.feature.chat.plugin.ChatToolLifecycleStatus
 import com.yunian.ai.feature.chat.timeline.EventCommitRules
 import com.yunian.ai.feature.chat.timeline.PendingTurnStreamApplier
 import com.yunian.ai.feature.chat.timeline.StreamingReasoningMessagePipeline
@@ -1011,8 +1015,27 @@ class ChatGenerationManager private constructor(
                     application,
                     allowAppLocalTools = true,
                 )
-                val agentResult = runTurnWithConfirmation(turnRequest, toolHost, companionId)
-                    ?: throw java.util.concurrent.TimeoutException("AI response timeout")
+                // Chat 是 Cordis 的独立订阅插件：只订阅本轮随机 streamId，绝不由 ToolHost 直连 UI。
+                val projection = ChatToolLifecycleProjection(toolHost.lifecycleStreamId) { snapshots ->
+                    val projected = snapshots.mapIndexed { index, item -> item.toToolActivity(index.toLong()) }
+                    synchronized(turnActivityMap) {
+                        turnActivityMap.clear()
+                        projected.forEach { activity -> turnActivityMap[activity.id] = activity }
+                    }
+                    _toolActivity.value = projected
+                }
+                val lifecycleHost = ServiceRegistry.get(com.yunian.ai.domain.plugin.PluginHost::class.java)
+                val lifecyclePlugin = ChatToolLifecyclePlugin(toolHost.lifecycleStreamId, projection)
+                lifecycleHost?.register(lifecyclePlugin)
+                val lifecycleLoaded = lifecycleHost?.load(lifecyclePlugin.id, null) ==
+                    com.yunian.ai.domain.plugin.PluginLoadResult.Loaded
+                val agentResult = try {
+                    runTurnWithConfirmation(turnRequest, toolHost, companionId)
+                        ?: throw java.util.concurrent.TimeoutException("AI response timeout")
+                } finally {
+                    if (lifecycleLoaded) lifecycleHost?.unload(lifecyclePlugin.id)
+                    lifecycleHost?.unregister(lifecyclePlugin.id)
+                }
 
                 recordAgentDispatchLog(
                     sessionId = conversationId,
@@ -1351,6 +1374,22 @@ class ChatGenerationManager private constructor(
             }
         }
     }
+
+
+    /** 标准脱敏事件到既有实时/持久 ToolActivity 模型的唯一映射。 */
+    private fun ChatToolLifecycleItem.toToolActivity(localId: Long): ToolActivity = ToolActivity(
+        id = localId,
+        toolName = toolName,
+        // 生命周期事件故意不含 args/result；持久卡片也因此不可能泄漏它们。
+        argsSummary = "",
+        status = when (status) {
+            ChatToolLifecycleStatus.RUNNING -> ToolStatus.RUNNING
+            ChatToolLifecycleStatus.DONE -> ToolStatus.DONE
+            ChatToolLifecycleStatus.FAILED -> ToolStatus.FAILED
+        },
+        resultSummary = null,
+        startedAtMs = startedAtMs,
+    )
 
     private fun enterLoading() {
         if (activeRequests.incrementAndGet() == 1) {

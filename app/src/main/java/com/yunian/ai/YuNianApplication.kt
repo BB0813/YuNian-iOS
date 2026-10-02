@@ -112,6 +112,8 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         // 冷启动时基：进程内最早可达点（加固壳 preflight 之后、业务代码最早处）。
         PerformanceTrace.startLaunch()
         PerformanceTrace.markStartupStage("app_attach_begin")
+        // Thin-shell 路径下本类才是被壳反射创建的真实 Application；安装幂等。
+        runCatching { com.yunian.ai.common.crash.CrashReporter.install(base) }
         super.attachBaseContext(base)
     }
 
@@ -126,6 +128,9 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
         super.onCreate()
         PerformanceTrace.markStartupStage("oncreate_super_done")
         instance = this
+
+        // 周期性落盘 breadcrumbs，供 Java/native/ANR 异常退出后的下次启动诊断。
+        runCatching { com.yunian.ai.common.crash.CrashBreadcrumbPersister.install(this) }
 
         AppForegroundTracker.init()
         PerformanceTrace.markStartupStage("app_fgt_init_done")
