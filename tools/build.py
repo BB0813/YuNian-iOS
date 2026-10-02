@@ -335,7 +335,7 @@ def phase6b_patch_crc32(apk_path, config_dir):
 def shell_dex():
     """Compile shell DEX from source."""
     print("\n═══ Shell DEX ═══")
-    shell_source_names = ["StaticApkShell.java", "SActivity.java", "MethodRecoveryEngine.java"]
+    shell_source_names = ["StaticApkShell.java", "ShellCrashHandler.java", "SActivity.java", "MethodRecoveryEngine.java"]
     os.makedirs(SHELL_SRC, exist_ok=True)
     for name in shell_source_names:
         target = os.path.join(SHELL_SRC, name)

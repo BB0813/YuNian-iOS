@@ -60,6 +60,7 @@ _FALLBACK_KEY = bytes([
 
 SHELL_SOURCES = [
     "StaticApkShell.java",
+    "ShellCrashHandler.java",
     "SActivity.java",
     "MethodRecoveryEngine.java",
 ]
@@ -343,6 +344,10 @@ def sign_apk(apk_path: Path, keystore: Path, store_pass: str, key_pass: str, ali
 
 ALLOWED_ROOT_CLASSES = {
     "Lcom/yunian/ai/security/StaticApkShell;",
+    "Lcom/yunian/ai/security/ShellCrashHandler;",
+    # ShellCrashHandler 内的匿名 Thread.UncaughtExceptionHandler 会编译出 $1 内部类，
+    # 与被允许的外层类成对出现；不登记则根 DEX 白名单校验必然失败。
+    "Lcom/yunian/ai/security/ShellCrashHandler$1;",
     "Lcom/yunian/ai/security/SActivity;",
     "Lcom/yunian/ai/security/MethodRecoveryEngine;",
 }
