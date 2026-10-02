@@ -134,3 +134,5 @@ nul
 .build-lock
 .build-lock.owner
 build-lock.ps1
+# 真机验证产物（含数据库快照与 logcat 抓包，属私密数据，严禁入库）
+/.device-backup/
