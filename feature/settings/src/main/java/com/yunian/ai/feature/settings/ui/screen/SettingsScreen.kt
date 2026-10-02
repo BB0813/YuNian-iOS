@@ -525,7 +525,7 @@ fun SettingsScreen(
         }
     }
 
-    // 三个子页面为全屏覆盖层，用 AnimatedVisibility 做「从右侧滑入 / 退回右侧」的过渡动画，
+    // 四个子页面为全屏覆盖层，用 AnimatedVisibility 做「从右侧滑入 / 退回右侧」的过渡动画，
     // 符合「进入下一级 / 返回上一级」的心理模型；容器补 fillMaxSize 避免动画期间尺寸跳动或被裁剪。
     AnimatedVisibility(
         visible = showVisionModelSettings,

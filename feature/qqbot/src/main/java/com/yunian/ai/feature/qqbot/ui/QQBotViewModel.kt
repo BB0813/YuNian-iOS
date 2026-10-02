@@ -1,5 +1,7 @@
 package com.yunian.ai.feature.qqbot.ui
 
+import com.yunian.ai.feature.qqbot.data.network.ConnectionState
+
 import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
@@ -200,6 +202,10 @@ class QQBotViewModel(
                             val openid = pollBody.data.userOpenid
 
                             tokenStore.saveAccount(QQBotAccount(appId, secret))
+                            // 宿主（用户本人）openid 是主动发送的默认目标，此前被就地丢弃；
+                            // 这里落盘（DataStore 单键，无 Room 变更）。绑定接口未返回时不写，
+                            // 由入站 C2C 消息补齐（QQBotChatBridge）。
+                            tokenStore.setHostUserOpenId(openid)
 
                             _uiState.value = _uiState.value.copy(
                                 isLoggedIn = true,
@@ -353,7 +359,7 @@ data class QQBotUiState(
     val availableCompanions: List<CompanionEntity> = emptyList(),
     val userCompanionMappings: Map<String, Long> = emptyMap(),
     val customBotName: String? = null,
-    val connectionState: QQBotWebSocketClient.ConnectionState = QQBotWebSocketClient.ConnectionState.DISCONNECTED,
+    val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
 
     val qrBitmap: Bitmap? = null,
     val bindStatus: BindStatus = BindStatus.NONE,

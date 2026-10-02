@@ -8,6 +8,8 @@
     <string name="memory_management_desc">恋人が覚えていることを見る</string>
     <string name="api_settings">API設定</string>
     <string name="api_settings_desc">AI APIを設定</string>
+    <string name="plugin_settings">プラグイン設定</string>
+    <string name="plugin_settings_desc">プラグインの有効・無効を管理</string>
     <string name="theme_mode">テーマ</string>
     <string name="theme_mode_desc">ライト/ダーク切替</string>
     <string name="chat_background">チャット背景</string>

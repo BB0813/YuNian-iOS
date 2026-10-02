@@ -92,4 +92,25 @@
     <string name="yandere_upload_question">数据会离开设备吗？</string>
     <string name="yandere_upload_answer">不会。所有数据仅作为本地 AI 提示词的一部分使用，不会上传、同步或共享。</string>
     <string name="yandere_experimental_hint">实验性功能：开启后可能显著改变 AI 的对话风格，请根据个人偏好谨慎使用。</string>
+
+    <!-- Plugin Settings Screen -->
+    <string name="plugin_settings_title">插件设置</string>
+    <string name="plugin_settings_tab_channel">消息通道</string>
+    <string name="plugin_settings_tab_general">通用插件</string>
+    <string name="plugin_settings_search_hint">搜索插件名称或 id</string>
+    <string name="plugin_settings_search_clear">清空搜索</string>
+    <string name="plugin_settings_expand">展开配置</string>
+    <string name="plugin_settings_collapse">收起配置</string>
+    <string name="plugin_settings_no_config">此插件无可配置项</string>
+    <string name="plugin_settings_tool_grant_subtitle">管理需要确认的 Agent 工具能力</string>
+    <!-- FULL_PAGE 设置区行底「进入」箭头的无障碍文案（见 PluginSettingsPresentation） -->
+    <string name="plugin_settings_open_section">进入设置</string>
+    <string name="plugin_settings_open_tool_grants">进入工具授权</string>
+
+    <!-- 债务 D3：启停操作的 Snackbar 反馈。%1$s = 插件展示名，%2$s = 宿主给的原因（或 pluginId）。
+         这两个占位符的顺序必须与 PluginSettingsScreen 的 format(...) 调用一致。 -->
+    <string name="plugin_settings_load_succeeded">%1$s 已启用</string>
+    <string name="plugin_settings_toggle_failed">%1$s 操作失败：%2$s</string>
+    <string name="plugin_settings_not_saved">%1$s 当前生效但未保存，重启可能恢复</string>
+    <string name="plugin_settings_load_failed">%1$s 装载失败：%2$s</string>
 </resources>

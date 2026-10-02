@@ -20,6 +20,7 @@ sealed class MainRoute(val route: String) {
     data class EditCompanion(val companionId: Long) : MainRoute("edit/$companionId")
 
     object Settings : MainRoute("settings")
+    object PluginSettings : MainRoute("plugin_settings")
     object TtsSettings : MainRoute("tts_settings")
     object TokenUsage : MainRoute("token_usage")
     object Theme : MainRoute("theme")
@@ -49,11 +50,6 @@ sealed class MainRoute(val route: String) {
     object Thanks : MainRoute("thanks")
     object ThanksFullList : MainRoute("thanks_full_list")
     object OriginOSAdaption : MainRoute("originos_adaption")
-
-    object WeChatSettings : MainRoute("wechat_settings")
-    object WeChatBind : MainRoute("wechat_bind")
-
-    object QQBotSettings : MainRoute("qqbot_settings")
 
     object DataBackup : MainRoute("data_backup")
     object BackupExportSelect : MainRoute("backup_export_select")
@@ -90,6 +86,7 @@ sealed class MainRoute(val route: String) {
             route == "create" -> CreateCompanion
             route == "create_group" -> CreateGroup
             route == "settings" -> Settings
+            route == "plugin_settings" -> PluginSettings
             route == "tts_settings" -> TtsSettings
             route == "token_usage" -> TokenUsage
             route == "profile_settings" -> ProfileSettings
@@ -115,9 +112,6 @@ sealed class MainRoute(val route: String) {
             route == "thanks" -> Thanks
             route == "thanks_full_list" -> ThanksFullList
             route == "originos_adaption" -> OriginOSAdaption
-            route == "wechat_settings" -> WeChatSettings
-            route == "wechat_bind" -> WeChatBind
-            route == "qqbot_settings" -> QQBotSettings
             route == "data_backup" -> DataBackup
             route == "backup_export_select" -> BackupExportSelect
             route == "coffee" -> Coffee

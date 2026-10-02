@@ -35,4 +35,18 @@ class WeChatContentCleanerTest {
         val cleaned = WeChatContentCleaner.clean(raw)
         assertEquals("打算晚上吃什么呀。", cleaned)
     }
+
+    @Test
+    fun clean_canReturnEmptyString_forStickerOnlyReply() {
+        // 上游确实会把一段「非空」回复清洗成空串——这正是 G6 静默丢弃的输入源。
+        assertEquals("", WeChatContentCleaner.clean("[开心]"))
+        assertEquals("", WeChatContentCleaner.clean("[角色1] [开心][难过]"))
+    }
+
+    @Test
+    fun clean_pureRepetitionWithoutSentenceBoundarySurvivesCleaner() {
+        // 记录真实行为：clean 的去重按句号/问号/叹号切句，没有句读的叠词原样留下。
+        // 它随后会在桥接链路的 removeLocalRepetition 里被吃成空串——G6 的第二条输入源。
+        assertEquals("哈哈哈哈哈哈", WeChatContentCleaner.clean("哈哈哈哈哈哈"))
+    }
 }

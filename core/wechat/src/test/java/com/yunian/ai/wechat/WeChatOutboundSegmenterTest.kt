@@ -58,6 +58,87 @@ class WeChatOutboundSegmenterTest {
     }
 
     @Test
+    fun splitSimple_normalInputsRemainCompatible() {
+        val cases = mapOf(
+            "" to listOf(""),
+            "   \n " to listOf(""),
+            "  你好，世界  " to listOf("你好，世界"),
+            "你好。世界！还有吗？" to listOf("你好。", "世界！", "还有吗？"),
+            "Hello. Next; still here" to listOf("Hello. Next; still here"),
+            "甲。乙。丙。丁。" to listOf("甲。乙。", "丙。", "丁。"),
+            "第一行\n第二行" to listOf("第一行\n第二行"),
+        )
+        cases.forEach { (input, expected) ->
+            assertEquals(input, expected, WeChatOutboundSegmenter.splitTextSimple(input))
+        }
+    }
+
+    @Test
+    fun splitSimple_adjacentEndersPreserveOriginalTone() {
+        val cases = mapOf(
+            "你好！！" to listOf("你好！！"),
+            "真的？！好！！" to listOf("真的？！", "好！！"),
+            "What!? Yes!!" to listOf("What!?", "Yes!!"),
+            "等等……然后呢？" to listOf("等等……", "然后呢？"),
+            "好。！？!?……继续" to listOf("好。！？!?……", "继续"),
+            "你好！！世界？？再见……" to listOf("你好！！", "世界？？", "再见……"),
+        )
+        cases.forEach { (input, expected) ->
+            assertEquals(input, expected, WeChatOutboundSegmenter.splitTextSimple(input))
+        }
+    }
+
+    @Test
+    fun splitSimple_standaloneEllipsesRemainValid() {
+        for (input in listOf("…", "……", "………", "...")) {
+            assertEquals(listOf(input), WeChatOutboundSegmenter.splitTextSimple(input))
+        }
+        assertEquals(listOf("……", "好。"), WeChatOutboundSegmenter.splitTextSimple("……好。"))
+    }
+
+    @Test
+    fun splitSimple_punctuationRunsDoNotCrossLineBoundaries() {
+        for (separator in listOf("\n", "\r\n", "\n\n", "\n  \n")) {
+            assertEquals(
+                listOf("你好！", "！"),
+                WeChatOutboundSegmenter.splitTextSimple("你好！" + separator + "！"),
+            )
+            assertEquals(
+                listOf("…", "…"),
+                WeChatOutboundSegmenter.splitTextSimple("…" + separator + "…"),
+            )
+            assertEquals(
+                listOf("你好！！", "……", "再见。"),
+                WeChatOutboundSegmenter.splitTextSimple("你好！！" + separator + "……" + separator + "再见。"),
+            )
+        }
+    }
+
+    @Test
+    fun splitSimple_whitespaceIsNotAdjacentPunctuation() {
+        assertEquals(listOf("你好！", "！"), WeChatOutboundSegmenter.splitTextSimple("你好！ ！"))
+        assertEquals(listOf("…", "…"), WeChatOutboundSegmenter.splitTextSimple("…\t…"))
+    }
+
+    @Test
+    fun expand_repeatedEndersProduceWholeIndexedSegments() {
+        val request = WeChatOutboundRequest(companionId = 1L, text = "你好！！再见……")
+        val segments = WeChatOutboundSegmenter.expand(request, wechatUserId = "wx1", rootId = "r")
+        assertEquals(listOf("你好！！", "再见……"), segments.map { it.text })
+        assertEquals(listOf("r#0", "r#1"), segments.map { it.outboxId })
+        assertEquals(listOf(0, 1), segments.map { it.segmentIndex })
+        assertEquals(listOf(2, 2), segments.map { it.segmentCount })
+    }
+
+    @Test
+    fun expand_standaloneEllipsisIsNotDropped() {
+        val request = WeChatOutboundRequest(companionId = 1L, text = "……")
+        val segments = WeChatOutboundSegmenter.expand(request, wechatUserId = "wx1", rootId = "r")
+        assertEquals(listOf("……"), segments.map { it.text })
+        assertEquals(1, segments.single().segmentCount)
+    }
+
+    @Test
     fun expand_textProducesIndexedSegments() {
 
         val request = WeChatOutboundRequest(

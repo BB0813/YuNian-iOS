@@ -1069,6 +1069,10 @@ impl AgentRuntime {
         // send_sticker 同轮连续无匹配重试上限（2 次；达到后注入 system 消息阻止继续尝试）
         let mut sticker_fail_streak: u32 = 0;
         const STICKER_FAIL_CAP: u32 = 2;
+        // 通道发送的副作用事实：工具明确返回 send_succeeded=true/status=sent 后，
+        // 模型第二轮不得用相反文本把成功误报为失败。仅记录严格 JSON 成功契约；
+        // 失败/未知/旧格式均不触发，避免把真实失败改写成成功。
+        let mut channel_send_succeeded = false;
 
         while rounds_used < max_rounds {
             rounds_used += 1;
@@ -1314,6 +1318,9 @@ impl AgentRuntime {
                             format!("错误：未注册的工具 {name}")
                         }
                     };
+                    if name == "send_channel_message" && channel_send_result_is_success(&result_text) {
+                        channel_send_succeeded = true;
+                    }
                     tool_calls_used += 1;
                     text_chars_total += bubble_chars(&events).saturating_sub(chars_before);
 
@@ -1397,7 +1404,9 @@ impl AgentRuntime {
                 continue;
             }
 
-            // 正常文本 → 产出 bubble 事件，结束
+            // 正常文本 → 产出 bubble 事件，结束。通道发送已成功时，发布前做事实一致性校验：
+            // 模型可以自然表达，但不能把刚完成的副作用反说成失败。
+            let content = reconcile_channel_send_statement(content, channel_send_succeeded);
             if !content.is_empty() {
                 events.push(AgentEvent {
                     kind: "bubble".to_string(),
@@ -1643,6 +1652,35 @@ fn bubble_chars(events: &[AgentEvent]) -> u32 {
         .filter(|e| e.kind == "bubble")
         .map(|e| e.text.chars().count() as u32)
         .sum()
+}
+
+/// 只接受 `send_channel_message` 的新成功契约，避免旧格式或模糊文本被误判为成功。
+fn channel_send_result_is_success(result: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(result)
+        .ok()
+        .is_some_and(|value| {
+            value.get("ok").and_then(|v| v.as_bool()) == Some(true)
+                && value.get("send_succeeded").and_then(|v| v.as_bool()) == Some(true)
+                && value.get("status").and_then(|v| v.as_str()) == Some("sent")
+        })
+}
+
+/// 成功副作用与最终自然语言冲突时，使用保守且不声称对端已收到的确定性文本。
+fn reconcile_channel_send_statement(content: String, send_succeeded: bool) -> String {
+    if !send_succeeded {
+        return content;
+    }
+    let normalized = content.to_lowercase();
+    const CONTRADICTIONS: &[&str] = &[
+        "没发出去", "没有发出去", "发不出去", "发送失败", "发送不成功",
+        "送不出去", "未能发送", "直接报错", "通道报错", "还是不行",
+        "send failed", "failed to send", "sending failed",
+    ];
+    if CONTRADICTIONS.iter().any(|marker| normalized.contains(marker)) {
+        "消息已经通过通道发出去了；通道没有对端送达回执。".to_string()
+    } else {
+        content
+    }
 }
 
 #[cfg(test)]
@@ -2189,6 +2227,83 @@ mod tests {
         // 注销后不再出现
         runner.unregister_global_tool("order_coffee".to_string());
         assert!(runner.global_tool_definitions().is_empty());
+    }
+
+    struct ChannelSendHost {
+        result: String,
+    }
+    impl ToolHost for ChannelSendHost {
+        fn execute(&self, _name: String, _args: String, _ctx: String) -> String {
+            self.result.clone()
+        }
+    }
+
+    fn channel_send_request() -> AgentTurnRequest {
+        AgentTurnRequest {
+            group_id: None,
+            history_json: r#"[]"#.to_string(),
+            tools: vec![],
+            max_rounds: 3,
+            tool_choice: "auto".to_string(),
+            sticker_probability: 0,
+            image: None,
+            system_prompt: None,
+            companion_name_map_json: None,
+        }
+    }
+
+    fn register_channel_send_tool(runner: &AgentRuntime) {
+        runner.register_global_tools(vec![ToolDefinition {
+            name: "send_channel_message".to_string(),
+            description: "发送通道消息".to_string(),
+            parameters_json: r#"{"type":"object","properties":{}}"#.to_string(),
+            category: ToolCategory::General,
+            toolsets: vec!["channel".to_string()],
+            available: true,
+        }]);
+    }
+
+    #[test]
+    fn successful_channel_send_cannot_be_reported_as_failure() {
+        let (runner, gw, _transport) = mock_gateway(vec![
+            r#"{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"send-1","type":"function","function":{"name":"send_channel_message","arguments":"{\"channelKey\":\"qqbot\",\"target\":\"group\",\"text\":\"测试\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+            r#"{"choices":[{"message":{"role":"assistant","content":"还是不行呢，这回直接报错了，消息没发出去。"},"finish_reason":"stop"}]}"#,
+        ]);
+        register_channel_send_tool(&runner);
+        let host = ChannelSendHost {
+            result: r#"{"ok":true,"send_succeeded":true,"status":"sent","delivery_status":"unknown"}"#.to_string(),
+        };
+
+        let result = runner.run_turn_inner(
+            &channel_send_request(), Some(1), &gw, None, &host, &DefaultTurnStateMachine,
+        );
+
+        assert_eq!(result.finished_reason, "completed");
+        assert_eq!(result.final_text, "消息已经通过通道发出去了；通道没有对端送达回执。");
+        let visible: Vec<&str> = result.events.iter()
+            .filter(|e| e.kind == "bubble")
+            .map(|e| e.text.as_str())
+            .collect();
+        assert_eq!(visible, vec!["消息已经通过通道发出去了；通道没有对端送达回执。"]);
+    }
+
+    #[test]
+    fn failed_channel_send_keeps_model_failure_statement() {
+        let (runner, gw, _transport) = mock_gateway(vec![
+            r#"{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"send-2","type":"function","function":{"name":"send_channel_message","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+            r#"{"choices":[{"message":{"role":"assistant","content":"发送失败了，请稍后重试。"},"finish_reason":"stop"}]}"#,
+        ]);
+        register_channel_send_tool(&runner);
+        let host = ChannelSendHost {
+            result: r#"{"ok":false,"status":"failed","reason":"通道未连接"}"#.to_string(),
+        };
+
+        let result = runner.run_turn_inner(
+            &channel_send_request(), Some(1), &gw, None, &host, &DefaultTurnStateMachine,
+        );
+
+        assert_eq!(result.final_text, "发送失败了，请稍后重试。");
+        assert!(result.events.iter().any(|e| e.kind == "bubble" && e.text.contains("发送失败")));
     }
 
     /// image / system_prompt / companion_name_map 字段应影响请求组装

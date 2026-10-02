@@ -691,8 +691,13 @@ class ChatGenerationManager private constructor(
      * ⚠️ 去重：Rust `memoryToolDefinitions` 已含 recall/save/consolidate_memory，
      * feature:memory 的 `MemoryRecallTools` 也注册同名工具 → 同请求 tools 重名会被
      * DeepSeek 拒绝（HTTP 400: Tool names must be unique）→ Rust 记忆工具优先。
+     *
+     * 全局（domain）工具的装配**只经折叠点** `AgentFacade.toolDefinitionsFor`：
+     * 与 QQ / 微信共用同一条授权判定（按伴侣 × 工具，**不含通道维度**），
+     * 本方法不再自行决定工具类别。
+     * suspend 化的原因即在此（折叠点要读一次授权存储）。
      */
-    private fun buildAgentTools(
+    private suspend fun buildAgentTools(
         useGlobalTools: Boolean,
     ): Triple<
         List<com.yunian.ai.agent.uniffi.ToolDefinition>,
@@ -702,7 +707,7 @@ class ChatGenerationManager private constructor(
         val memoryTools = com.yunian.ai.agent.AgentFacade.memoryToolDefinitions(application)
         val memoryNames = memoryTools.map { it.name }.toSet()
         val skillTools = com.yunian.ai.agent.AgentFacade.skillToolDefinitions()
-        val availableTools = ToolRegistry.availableTools().map { it.name }
+        val availableTools = ToolRegistry.availableTools(includeAppLocal = true).map { it.name }
             .toMutableList()
             .apply {
                 addAll(memoryNames)
@@ -722,9 +727,15 @@ class ChatGenerationManager private constructor(
             companionNameMapJson = null,
             workingMemoryLimit = 200u,
         )
-        val globalTools = ToolRegistry.availableTools().map {
-            com.yunian.ai.agent.AgentFacade.toolDefinition(it)
-        }
+        // 工具装配的**唯一折叠点**（授权按伴侣 × 工具命中，**不含通道维度**）：
+        // 显式允许的工具不再被强制 COMMERCE、显式禁止的工具即使自身没声明也会被强制 COMMERCE；
+        // 无决定 / 存储未注册 / 读取失败一律 fail-closed 维持既有类别。
+        // includeAppLocal = true 是本机会话的渠道声明，
+        // 执行侧 AgentToolHost(allowAppLocalTools = true) 是第二道闸。
+        val globalTools = com.yunian.ai.agent.AgentFacade.toolDefinitionsFor(
+            companionId = companionId,
+            tools = ToolRegistry.availableTools(includeAppLocal = true),
+        )
         val tools = buildList {
             addAll(memoryTools)
             addAll(skillTools)
@@ -995,7 +1006,11 @@ class ChatGenerationManager private constructor(
                     systemPrompt = null,
                     companionNameMapJson = null,
                 )
-                val toolHost = com.yunian.ai.agent.host.AgentToolHost(application)
+                // App 内单聊是本机会话：显式开启本机敏感工具（个人资料）的执行权限。
+                val toolHost = com.yunian.ai.agent.host.AgentToolHost(
+                    application,
+                    allowAppLocalTools = true,
+                )
                 val agentResult = runTurnWithConfirmation(turnRequest, toolHost, companionId)
                     ?: throw java.util.concurrent.TimeoutException("AI response timeout")
 

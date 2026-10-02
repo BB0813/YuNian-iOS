@@ -35,8 +35,8 @@ object SecurityConstants {
         const val OPENAI_HOST          = "api.openai.com"
         const val DEEPSEEK_HOST        = "api.deepseek.com"
         const val WECHAT_ILINK         = "https://ilinkai.weixin.qq.com"
-        const val QQ_BOT_API           = "https://api.sgroup.qq.com"
-        const val QQ_BOT_APP           = "https://bots.qq.com"
+        const val QQ_BOT_API           = "https://api.bot.qq.com"
+        const val QQ_BOT_APP           = "https://api.bot.qq.com"
 
         const val CLOVE_PROVISION      = "/app/v1/provision"
 

@@ -8,14 +8,14 @@
     <string name="memory_management_desc">View what your companion remembers</string>
     <string name="api_settings">API Settings</string>
     <string name="api_settings_desc">Configure AI API</string>
+    <string name="plugin_settings">Plugins</string>
+    <string name="plugin_settings_desc">Manage plugins and toggles</string>
     <string name="theme_mode">Theme</string>
     <string name="theme_mode_desc">Switch light/dark theme</string>
     <string name="chat_background">Chat Background</string>
     <string name="chat_background_desc">Customize chat background</string>
     <string name="background_settings">Background</string>
     <string name="background_settings_desc">Customize main &amp; chat background</string>
-    <string name="qqbot_settings">QQ Bot</string>
-    <string name="qqbot_settings_desc">Bind official QQ bot</string>
     <string name="language">Language</string>
     <string name="language_desc">Current: English</string>
     <string name="framerate">Frame Rate</string>

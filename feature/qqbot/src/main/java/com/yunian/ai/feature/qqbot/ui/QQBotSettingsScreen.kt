@@ -1,4 +1,6 @@
 package com.yunian.ai.feature.qqbot.ui
+
+import com.yunian.ai.feature.qqbot.data.network.ConnectionState
 import com.yunian.ai.uicommon.component.glass.GlassTopBar
 import com.yunian.ai.uicommon.component.glass.drawGlass
 import com.yunian.ai.uicommon.component.glass.LocalPageBackdrop
@@ -670,17 +672,17 @@ private fun QQBotStatusCard(
     isLoggedIn: Boolean,
     accountId: String?,
     customName: String?,
-    connectionState: QQBotWebSocketClient.ConnectionState,
+    connectionState: ConnectionState,
     onBindClick: () -> Unit,
     onUnbindClick: () -> Unit,
     onRenameClick: () -> Unit
 ) {
     val (statusText, statusColor) = when {
         !isLoggedIn -> QQBotStrings.NOT_BOUND to AppTheme.colors.warning
-        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED -> QQBotStrings.ONLINE to AppTheme.colors.success
-        connectionState == QQBotWebSocketClient.ConnectionState.CONNECTING -> QQBotStrings.CONNECTING to AppTheme.colors.warning
-        connectionState == QQBotWebSocketClient.ConnectionState.RECONNECTING -> QQBotStrings.RECONNECTING to AppTheme.colors.warning
-        connectionState == QQBotWebSocketClient.ConnectionState.AUTH_FAILED -> QQBotStrings.AUTH_FAILED to AppTheme.colors.danger
+        connectionState == ConnectionState.CONNECTED -> QQBotStrings.ONLINE to AppTheme.colors.success
+        connectionState == ConnectionState.CONNECTING -> QQBotStrings.CONNECTING to AppTheme.colors.warning
+        connectionState == ConnectionState.RECONNECTING -> QQBotStrings.RECONNECTING to AppTheme.colors.warning
+        connectionState == ConnectionState.AUTH_FAILED -> QQBotStrings.AUTH_FAILED to AppTheme.colors.danger
         else -> QQBotStrings.OFFLINE to Color(0xFF9E9E9E)
     }
 
@@ -689,16 +691,16 @@ private fun QQBotStatusCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
+            .background(if (isLoggedIn && connectionState == ConnectionState.CONNECTED)
                 AppTheme.colors.success.copy(alpha = 0.1f) else AppTheme.colors.surfaceVariant)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            imageVector = if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
+            imageVector = if (isLoggedIn && connectionState == ConnectionState.CONNECTED)
                 AppIcons.CircleCheckBig else AppIcons.TriangleAlert,
             contentDescription = null,
-            tint = if (isLoggedIn && connectionState == QQBotWebSocketClient.ConnectionState.CONNECTED)
+            tint = if (isLoggedIn && connectionState == ConnectionState.CONNECTED)
                 AppTheme.colors.success else AppTheme.colors.warning,
             modifier = Modifier.size(40.dp)
         )

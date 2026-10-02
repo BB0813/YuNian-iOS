@@ -82,6 +82,10 @@ object WeChatServiceLocator {
                     transport = transport,
                     sessionStore = store,
                     managedMediaCacheDir = java.io.File(app.cacheDir, WeChatStickerMaterializer.CACHE_DIR),
+                    // 僵尸行恢复在正式包也必须留证据（core:wechat 里的 SecureLog.i/w 是空操作）
+                    staleSendingRecoveryObserver = { recovered, dead ->
+                        WeChatOutboundDropLog.recordStaleSendingRecovered(recovered, dead)
+                    },
                 ).also { outboxCoordinator = it }
             }
         }

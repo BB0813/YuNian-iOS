@@ -54,4 +54,7 @@ dependencies {
     // api：玻璃组件公开 API 签名引用了 kyant Backdrop 类型，需透传给所有依赖方
     api(libs.kyant.backdrop)
     api(libs.kyant.capsule)
+
+    // AGP 9.2.1 不再自动注入 junit，需手写（与全仓其余 16 个有测试的模块写法一致）
+    testImplementation(libs.junit)
 }

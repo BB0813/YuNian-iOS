@@ -178,6 +178,7 @@
             android:hardwareAccelerated="true"
             android:theme="@style/Theme.YuNian"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
         <!-- vivo Push 密钥配置（未配置时留空，SDK 会跳过注册） -->

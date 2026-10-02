@@ -3,7 +3,9 @@ package com.yunian.ai.feature.qqbot.data
 import android.content.Context
 import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.database.AppDatabase
+import com.yunian.ai.feature.qqbot.QQBotDebugLog
 import com.yunian.ai.database.repository.CompanionRepository
+import com.yunian.ai.domain.ChannelKeys
 import com.yunian.ai.domain.DialogueCoordinator
 import com.yunian.ai.domain.DialogueRequest
 import com.yunian.ai.domain.ServiceRegistry
@@ -47,15 +49,49 @@ class QQBotChatBridge(
     fun start() {
         if (eventCollectionJob?.isActive == true) {
             android.util.Log.d("QQBotBridge", "Already started")
+            QQBotDebugLog.log("[Bridge] start ignored: already running")
             return
         }
         android.util.Log.i("QQBotBridge", "Starting event collection")
+        // 生命周期留痕：没有这行就无法区分「桥接没启动」与「启动了但没收到事件」。
+        QQBotDebugLog.log("[Bridge] start: collecting inbound events")
         eventCollectionJob = bridgeScope.launch {
             qqBotRepository.incomingEvents.collect { event ->
+                // 宿主 openid 补齐（**不依赖 autoReply**）：改动前就已绑定的用户，
+                // 绑定流程那次 `user_openid` 已经丢了，只能从入站 C2C 消息里补回来。
+                // 这是主动发送「默认发给用户本人」能成立的前提。
+                // 幂等且不阻塞：值未变化时直接返回（见 rememberHostUserOpenId）。
+                when (event) {
+                    is QQInboundEvent.C2CMessage -> {
+                        runCatching { qqBotRepository.rememberHostUserOpenId(event.userOpenid) }
+                            .onFailure {
+                                QQBotDebugLog.log("[Route] capture host target failed: " + it.message)
+                            }
+                    }
+                    is QQInboundEvent.GroupAtMessage -> {
+                        // Gateway 已验证的入站事件是 group_openid 的可信来源。捕获动作不依赖
+                        // autoReply：即使关闭自动回复，App 内的主动工具仍能用 target=group
+                        // 找到最近群聊；模型不再需要知道平台内部的不透明路由 ID。
+                        runCatching { qqBotRepository.rememberRecentGroupOpenId(event.groupOpenid) }
+                            .onFailure {
+                                QQBotDebugLog.log("[Route] capture recent group failed: " + it.message)
+                            }
+                    }
+                    else -> Unit
+                }
                 val autoReply = tokenStore.getAutoReply()
                 val text = qqBotRepository.extractText(event)
                 android.util.Log.d("QQBotBridge", "Event received, autoReply=$autoReply, text=$text")
-                if (!autoReply) return@collect
+                // 每个入站事件都留痕：这是判断「群消息到底有没有进来」的唯一可靠依据。
+                QQBotDebugLog.log(
+                    "[Bridge] event received type=" + event.javaClass.simpleName +
+                        " autoReply=" + autoReply + " text_len=" + text.length +
+                        " key=" + qqBotRepository.getReplyKey(event)
+                )
+                if (!autoReply) {
+                    QQBotDebugLog.log("[Bridge] auto-reply disabled, event dropped")
+                    return@collect
+                }
                 val key = qqBotRepository.getReplyKey(event)
 
                 synchronized(pendingLock) {
@@ -127,6 +163,13 @@ class QQBotChatBridge(
         val text = qqBotRepository.extractText(event)
         if (text.isNotBlank()) {
             runReply(event, text)
+        } else {
+            // 群消息会剥离 @ 前缀（见 QQBotMessageRepository.extractText），
+            // 剥离后为空则整条事件被跳过。这是静默分支，必须留痕。
+            QQBotDebugLog.log(
+                "[Bridge] text blank after extract, event skipped key=" +
+                    qqBotRepository.getReplyKey(event)
+            )
         }
     }
 
@@ -162,23 +205,48 @@ class QQBotChatBridge(
                     companionId = companionId,
                     text = text,
                     imagePath = null,
+                    // 通道身份（**不参与授权判定**，已核实）：工具授权只按 (伴侣 × 工具) 折叠，
+                    // 唯一折叠点是 AgentFacade.toolDefinitionsFor —— 它调
+                    // CapabilityGrantStore.decisionsFor(companionId)，签名里根本没有通道参数。
+                    // 同一条授权在 App 内单聊 / 群聊 / QQ / 微信上得到完全相同的结果，
+                    // 通道之间的差异只剩「有没有确认界面」。
+                    // 这里显式声明 QQBOT 是为了通道身份 / 观测（P3 通道插件化）：
+                    // 拼错它不会改变任何工具的放行结果。
+                    channelKey = ChannelKeys.QQBOT,
                 )
             )
             android.util.Log.d(
                 "QQBotBridge",
                 "Dialogue done blocked=${result.blocked} reply_len=${result.replyText.length}",
             )
+            QQBotDebugLog.log(
+                "[Bridge] dialogue done blocked=" + result.blocked +
+                    " reply_len=" + result.replyText.length +
+                    " turn=" + (result.turn != null)
+            )
 
-            val safeText = result.replyText
+            // 消费判定（P3-3c，**防双发**）：turn != null → **只**消费 events；
+            // turn == null → 回退 replyText（与改动前逐字一致）。
+            // 两者在 QQBotOutboundProjection.resolveSendText 的 ?: 上严格互斥，
+            // 因此 replyText 在 turn 非空时不可能被发送（下面所有出站都只用 safeText）。
+            val safeText = QQBotOutboundProjection.resolveSendText(result)
+            android.util.Log.d(
+                "QQBotBridge",
+                "Outbound projection: fromTurn=${result.turn != null} send_len=${safeText.length}",
+            )
             if (safeText.isBlank()) {
                 // 中间层未产出可发送内容（被拦截或上游错误）：不回灌任何消息，
                 // 拦截文案已由中间层落库并随首次 user 消息进入会话。
                 return@withContext
             }
 
+            // 以下「怎么发、什么时候发」逐字未变：分句 + 500ms 节流 + sendTextMessage。
+            // 分句本身抽到 [QQBotSentenceSplitter]（纯函数，可被纯 JVM 单测驱动）；
+            // 本次只修「连续句末标点会切出纯标点片段」这一个 bug，节流与发送策略一行未动。
             var lastSendTime = 0L
+            var forwardSkipLogged = false
             val minGapMs = 500L
-            val sentences = splitIntoSentences(safeText)
+            val sentences = QQBotSentenceSplitter.split(safeText)
             for (sentence in sentences) {
                 if (sentence.isBlank()) continue
                 val elapsed = System.currentTimeMillis() - lastSendTime
@@ -187,6 +255,14 @@ class QQBotChatBridge(
                 }
                 if (tokenStore.getForwardEnabled()) {
                     sendReply(event, sentence)
+                } else if (!forwardSkipLogged) {
+                    // 转发关闭 → 整段出站被丢弃。发送判定逐字未动，只补可观测性；
+                    // 只记一次，避免逐句刷屏。
+                    forwardSkipLogged = true
+                    QQBotDebugLog.log(
+                        "[Bridge] forward disabled, outbound skipped key=" +
+                            qqBotRepository.getReplyKey(event)
+                    )
                 }
                 lastSendTime = System.currentTimeMillis()
             }
@@ -263,9 +339,18 @@ class QQBotChatBridge(
     }
 
     private suspend fun sendReply(event: QQInboundEvent, text: String) {
+        QQBotDebugLog.log(
+            "[Bridge] send reply type=" + event.javaClass.simpleName + " text_len=" + text.length
+        )
         val result = qqBotRepository.sendTextMessage(event, text)
-        result.onFailure { e ->
+        result.onSuccess {
+            QQBotDebugLog.log("[Bridge] send reply success type=" + event.javaClass.simpleName)
+        }.onFailure { e ->
             android.util.Log.e("QQBotBridge", "Failed to send QQ reply: ${e.message}", e)
+            QQBotDebugLog.log(
+                "[Bridge] send reply failed type=" + event.javaClass.simpleName +
+                    " reason=" + (e.message ?: e.javaClass.simpleName)
+            )
         }
     }
 
@@ -275,26 +360,6 @@ class QQBotChatBridge(
             .replace(Regex("^[\\[\\]\\s，。！？、]+"), "")
             .replace(Regex("[\\[\\]\\s，。！？、]+$"), "")
             .trim()
-    }
-
-    private fun splitIntoSentences(text: String): List<String> {
-        if (text.isBlank()) return emptyList()
-        val delimiters = charArrayOf('。', '！', '？', '!', '?', '\n')
-        val result = mutableListOf<String>()
-        var start = 0
-        while (start < text.length) {
-            val idx = text.indexOfAny(delimiters, startIndex = start)
-            if (idx < 0) {
-                val remaining = text.substring(start).trim()
-                if (remaining.isNotEmpty()) result.add(remaining)
-                break
-            }
-            val end = idx + 1
-            val sentence = text.substring(start, end).trim()
-            if (sentence.isNotEmpty()) result.add(sentence)
-            start = end
-        }
-        return result
     }
 
     fun close() {

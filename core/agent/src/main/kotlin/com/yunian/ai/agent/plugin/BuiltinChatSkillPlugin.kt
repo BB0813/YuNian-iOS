@@ -23,8 +23,18 @@ class BuiltinChatSkillPlugin : LianYuPlugin {
 
     override val id: String = ID
     override val name: String = "内置聊天工具协议技能"
+    override val kind: PluginKind = PluginKind.SKILL
     override val requires: Set<String> = setOf(PluginServices.APP_CONTEXT)
     override val configSchema: String? = null
+
+    override val manifest: PluginManifest = PluginManifest(
+        id = ID,
+        name = "内置聊天工具协议技能",
+        version = "1.0.0",
+        kind = PluginKind.SKILL,
+        requires = requires.sorted(),
+        configSchema = null,
+    )
 
     override fun setup(ctx: PluginContext) {
         val app = ctx.inject<Context>(PluginServices.APP_CONTEXT)

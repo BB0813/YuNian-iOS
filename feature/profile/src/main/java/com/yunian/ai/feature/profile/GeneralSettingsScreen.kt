@@ -59,8 +59,6 @@ fun GeneralSettingsScreen(
     onTtsSettingsClick: () -> Unit = {},
     onTokenUsageClick: () -> Unit = {},
     onCheckUpdateClick: () -> Unit = {},
-    onWeChatClick: () -> Unit = {},
-    onQQBotClick: () -> Unit = {},
     onDataBackupClick: () -> Unit = {},
     onOriginOSAdaptionClick: () -> Unit = {},
     onCoffeeClick: () -> Unit = {},
@@ -139,8 +137,6 @@ fun GeneralCategoryScreen(
     onFrameRateClick: () -> Unit,
     onTtsSettingsClick: () -> Unit,
     onTokenUsageClick: () -> Unit,
-    onWeChatClick: () -> Unit,
-    onQQBotClick: () -> Unit,
     onDataBackupClick: () -> Unit,
     onOriginOSAdaptionClick: () -> Unit
 ) {
@@ -192,18 +188,6 @@ fun GeneralCategoryScreen(
                         stringResource(R.string.data_backup),
                         stringResource(R.string.data_backup_desc),
                         onDataBackupClick
-                    ),
-                    MenuItemData(
-                        AppIcons.MessageCircle,
-                        stringResource(R.string.wechat_settings),
-                        stringResource(R.string.wechat_settings_desc),
-                        onWeChatClick
-                    ),
-                    MenuItemData(
-                        AppIcons.MessageCircle,
-                        stringResource(R.string.qqbot_settings),
-                        stringResource(R.string.qqbot_settings_desc),
-                        onQQBotClick
                     ),
                     MenuItemData(
                         AppIcons.KeyRound,

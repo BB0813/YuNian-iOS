@@ -1,5 +1,7 @@
 package com.yunian.ai.domain.wechat
 
+import com.yunian.ai.domain.dialogue.DialogueTurnSnapshot
+
 data class WeChatCdnMediaRef(
     val encryptQueryParam: String? = null,
     val aesKey: String? = null,
@@ -104,6 +106,15 @@ data class WeChatDialogueResult(
     val blocked: Boolean = false,
     val assistantMessageId: Long? = null,
     val assistantMessageIds: List<Long> = emptyList(),
+
+    /**
+     * 结构化回合快照（尾部新增，可选）——由 app 侧桥接原样转发
+     * `DialogueResult.turn`（契约见 [DialogueTurnSnapshot]）。
+     *
+     * `null` = 本轮没有结构化输出（回合失败 / 被安全拦截），调用方继续按旧行为使用
+     * [replyText] 与 [stickerLabels]；前五个字段的语义与取值逐字未变。
+     */
+    val turn: DialogueTurnSnapshot? = null,
 )
 
 data class WeChatConnectionSnapshot(

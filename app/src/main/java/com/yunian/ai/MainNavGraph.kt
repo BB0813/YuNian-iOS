@@ -68,12 +68,12 @@ import com.yunian.ai.feature.profile.SupportScreen
 import com.yunian.ai.feature.profile.TeamScreen
 import com.yunian.ai.feature.profile.ThanksFullListScreen
 import com.yunian.ai.feature.profile.ThanksScreen
-import com.yunian.ai.feature.qqbot.ui.QQBotSettingsScreen
 import com.yunian.ai.feature.settings.ui.screen.CheckUpdateScreen
 import com.yunian.ai.feature.settings.ui.screen.ExperimentalFeaturesScreen
 import com.yunian.ai.feature.settings.ui.screen.FrameRateScreen
 import com.yunian.ai.feature.settings.ui.screen.LanguageScreen
 import com.yunian.ai.feature.settings.ui.screen.McpSettingsScreen
+import com.yunian.ai.feature.settings.ui.screen.PluginSettingsScreen
 import com.yunian.ai.feature.settings.ui.screen.SettingsScreen
 import com.yunian.ai.feature.settings.ui.screen.ThemeScreen
 import com.yunian.ai.feature.settings.ui.screen.TokenUsageScreen
@@ -81,8 +81,6 @@ import com.yunian.ai.feature.settings.ui.screen.TtsSettingsScreen
 import com.yunian.ai.feature.settings.ui.screen.WorldbookScreen
 import com.yunian.ai.feature.settings.ui.screen.WorldbookDetailScreen
 import com.yunian.ai.feature.settings.ui.screen.YandereModeScreen
-import com.yunian.ai.feature.wechat.ui.WeChatBindScreen
-import com.yunian.ai.feature.wechat.ui.WeChatSettingsScreen
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -331,8 +329,6 @@ internal fun MainNavHost(
                 onFrameRateClick = { navController.navigate(MainRoute.FrameRate.route) },
                 onTtsSettingsClick = { navController.navigate(MainRoute.TtsSettings.route) },
                 onTokenUsageClick = { navController.navigate(MainRoute.TokenUsage.route) },
-                onWeChatClick = { navController.navigate(MainRoute.WeChatSettings.route) },
-                onQQBotClick = { navController.navigate(MainRoute.QQBotSettings.route) },
                 onDataBackupClick = { navController.navigate(MainRoute.DataBackup.route) },
                 onOriginOSAdaptionClick = { navController.navigate(MainRoute.OriginOSAdaption.route) }
             )
@@ -353,17 +349,8 @@ internal fun MainNavHost(
                 onCheckUpdateClick = { navController.navigate(MainRoute.CheckUpdate.route) }
             )
         }
-        composable(MainRoute.WeChatSettings.route) {
-            WeChatSettingsScreen(
-                onNavigateBack = { navController.popBackStack() },
-                onBindClick = { navController.navigate(MainRoute.WeChatBind.route) }
-            )
-        }
-        composable(MainRoute.WeChatBind.route) {
-            WeChatBindScreen(onNavigateBack = { navController.popBackStack() })
-        }
-        composable(MainRoute.QQBotSettings.route) {
-            QQBotSettingsScreen(onNavigateBack = { navController.popBackStack() })
+        composable(MainRoute.PluginSettings.route) {
+            PluginSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(MainRoute.DataBackup.route) {
             BackupScreen(
@@ -473,6 +460,7 @@ private fun MainTabPager(
             2 -> ProfileScreen(
                 onMemoryClick = { navController.navigate(MainRoute.Memory.route) },
                 onSettingsClick = { navController.navigate(MainRoute.Settings.route) },
+                onPluginSettingsClick = { navController.navigate(MainRoute.PluginSettings.route) },
                 onThemeClick = { navController.navigate(MainRoute.Theme.route) },
                 onBackgroundSettingsClick = { navController.navigate(MainRoute.BackgroundSettings.route) },
                 onGeneralSettingsClick = { navController.navigate(MainRoute.GeneralSettings.route) },

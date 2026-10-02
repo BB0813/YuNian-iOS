@@ -52,4 +52,23 @@
     <string name="download_complete">ダウンロード完了、インストール中...</string>
     <string name="download_failed">ダウンロード失敗、ネットワークを確認して再試行してください</string>
     <string name="update_now">今すぐアップデート</string>
+
+    <!-- Plugin Settings Screen -->
+    <string name="plugin_settings_title">プラグイン設定</string>
+    <string name="plugin_settings_tab_channel">メッセージチャンネル</string>
+    <string name="plugin_settings_tab_general">汎用プラグイン</string>
+    <string name="plugin_settings_search_hint">プラグイン名または id で検索</string>
+    <string name="plugin_settings_search_clear">検索をクリア</string>
+    <string name="plugin_settings_expand">設定を展開</string>
+    <string name="plugin_settings_collapse">設定を折りたたむ</string>
+    <string name="plugin_settings_no_config">このプラグインに設定項目はありません</string>
+    <string name="plugin_settings_tool_grant_subtitle">確認が必要な Agent ツールの権限を管理</string>
+    <!-- FULL_PAGE 设置区行底「进入」箭头的无障碍文案（见 PluginSettingsPresentation） -->
+    <string name="plugin_settings_open_section">設定を開く</string>
+    <string name="plugin_settings_open_tool_grants">ツール権限を開く</string>
+
+    <!-- 債務 D3：プラグイン有効化／無効化の Snackbar フィードバック。
+         %1$s = プラグイン表示名、%2$s = ホストが返した理由（または plugin id）。 -->
+    <string name="plugin_settings_load_succeeded">%1$s を有効にしました</string>
+    <string name="plugin_settings_load_failed">%1$s の読み込みに失敗しました：%2$s</string>
 </resources>

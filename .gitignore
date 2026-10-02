@@ -129,3 +129,8 @@ nul
 /shell/build/
 # master 参考工作树（git worktree add 产物，约 146M）
 /_ref_master/
+
+# agent build mutex (never commit)
+.build-lock
+.build-lock.owner
+build-lock.ps1

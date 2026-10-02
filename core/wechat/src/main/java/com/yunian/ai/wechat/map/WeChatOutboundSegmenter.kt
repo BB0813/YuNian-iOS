@@ -28,9 +28,11 @@ object WeChatOutboundSegmenter {
     private fun splitIntoSentences(paragraph: String): List<String> {
         val result = mutableListOf<String>()
         val buffer = StringBuilder()
-        for (ch in paragraph) {
+        for ((index, ch) in paragraph.withIndex()) {
             buffer.append(ch)
-            if (ch in SENTENCE_ENDERS) {
+            // Keep adjacent enders (including ellipses) together without crossing whitespace.
+            val next = paragraph.getOrNull(index + 1)
+            if (ch in SENTENCE_ENDERS && next !in SENTENCE_ENDERS) {
                 val part = buffer.toString().trim()
                 if (part.isNotEmpty()) result.add(part)
                 buffer.clear()

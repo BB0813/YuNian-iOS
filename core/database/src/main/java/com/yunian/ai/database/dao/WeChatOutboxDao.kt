@@ -36,6 +36,27 @@ interface WeChatOutboxDao {
         )
         suspend fun listOpenByRootId(rootId: String): List<WeChatOutboxEntity>
 
+    /**
+     * 进程被杀后残留的 SENDING 行（「僵尸」）。
+     *
+     * [listReady] 只返回 PENDING/FAILED、[listOpenByRootId] 同样排除 SENDING，
+     * 因此写进 SENDING 后进程被杀的行不会再被任何查询捡起，永久卡死。
+     * 本查询按 updatedAtMs（dispatchOne 写 SENDING 时落库的时间）找出超过租约时长的行，
+     * 交由 [com.yunian.ai.wechat.outbox.WeChatOutboxCoordinator] 重置回 PENDING。
+     *
+     * 纯读查询：不新增表/列/索引，Room schema 不变，无需迁移。
+     */
+    @Query(
+        """
+        SELECT * FROM wechat_outbox
+        WHERE status = 'SENDING'
+          AND updatedAtMs <= :staleBeforeMs
+        ORDER BY updatedAtMs ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun listStaleSending(staleBeforeMs: Long, limit: Int): List<WeChatOutboxEntity>
+
     @Query(
         """
         UPDATE wechat_outbox
