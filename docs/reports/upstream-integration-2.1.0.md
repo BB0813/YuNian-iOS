@@ -152,3 +152,66 @@ Rust 接口新增了 `cancel_current_turn`，而 UniFFI 的 `.so` 与生成的 `
 2. 杀掉进程重进会话 → 看工具卡片是否回显；
 3. 人为触发一次崩溃（或等自然崩溃）→ 看崩溃日志入口是否有内容；
 4. 群聊连续翻页 → 看是否还复现此前的崩溃。
+
+## 8. 真机运行时验证（实施于 v2.1.0 装机后）
+
+设备：vivo V2324A / Android 16 (SDK 36) / arm64-v8a，adb 就地覆盖安装（install -r -d → Success，无权限弹窗）。
+
+### 8.1 已通过（含证据）
+
+| 项 | 证据 |
+|----|------|
+| 版本与 ABI | badging `versionCode=27 versionName=2.1.0`、`native-code: arm64-v8a` |
+| 冷启动洁净 | 该 PID 无任何 E/W 行、无 FATAL、无 UnsatisfiedLinkError |
+| Cordis 插件装配 | `Blueprint default applied: loaded=[coffee.luckin, skill.builtin_chat_protocol, sticker.preference, automation.core, channel.qqbot, channel.wechat, message.send] skipped=[]` |
+| Rust Cordis 核心存活 | `Core plugins: entries=[turn-observer Active, core-tools Active, core-prompt-fragments Active, turn-consolidation Active, ...]` |
+| 通道插件注册 | `ChannelRegistryImpl` 注册 qqbot 与 wechat 适配器 |
+| 升级不丢数据 | `user_version=45`、`integrity_check=ok`、升级前后 messages 305→305、message_bodies 305→305、`room_master_table.identity_hash` 未变 |
+| 应用自建升级前备份 | `files/db_backup/backup_20261003_005432/yunian_database`（1,355,776 B） |
+| FGS | `SService` 与 `QQBotForegroundService` 均 `isForeground=true`、`types=0x40000000`（SPECIAL_USE） |
+| QQ 重连（覆盖安装后） | `[QQBotWS] WebSocket connected` → `Resume sent with sessionId=96413507-…, seq=40`（崩后重启继续 seq=41/42/43） |
+| **工具卡片 Cordis 链路** | 3 个真实回合中 2 个各产出**恰好一条** TOOL_ACTIVITY（`id=313 → turn e1c1d311`、`id=320 → turn fe3615a7`），且都排在该轮最后一条助手消息之后；每个回合都能看到 `PluginHostImpl: loaded: chat.tool-lifecycle-cards.<streamId>` 与 `unloaded:` 精确包住全部工具执行窗口 |
+| 工具名与状态配对 | 回合内 `AgentToolHost: tool call:` / `tool done: … ok=true` 与卡片一一对应（如 search_web 470ms ok=true） |
+| **崩溃上报（真实崩溃）** | 见 8.2：`files/crash/crash_business.txt`（12,078 B）含 source/时间/线程/PID/设备/版本/异常类/异常消息/**完整堆栈**/面包屑 |
+| 异常退出检测 | `files/crash/.business_alive`、`.last_exit_ts` 均被更新 |
+| Rust 日志桥 | `databases/rust_agent_log.txt`（1,748 B，持续增长）+ `shared_prefs/rust_agent_log_bridge.xml` 记录 `offset=644`，证明按偏移增量转储可重入 |
+| 崩溃后自愈 | 进程重启后蓝图全量重放 `skipped=[]`、QQ 以 seq=41→43 连续 RESUME、双 FGS 恢复前台 |
+
+### 8.2 真实崩溃与崩溃上报
+
+验证期间捕获到一次**未被捕获的真实崩溃**（非人工构造）：
+
+```
+FATAL EXCEPTION: DefaultDispatcher-worker-12   (PID 31760)
+android.database.sqlite.SQLiteDiskIOException: disk I/O error
+  (code 522 SQLITE_IOERR_SHORT_READ), while compiling: PRAGMA journal_mode
+  at SQLiteConnection.setJournalMode / SQLiteConnectionPool.tryAcquireNonPrimaryConnectionLocked
+  at androidx.room.RoomDatabase.useConnection
+  at com.yunian.ai.database.dao.ApiConfigDao_Impl.getAllConfiguredConfigs
+  Suppressed: DiagnosticCoroutineContextException: StandaloneCoroutine{Cancelling}, Dispatchers.IO
+→ Sending signal. PID: 31760 SIG: 9
+```
+
+崩溃上报链路**工作正常**：报告含设备/版本/线程/异常类与消息/完整堆栈/面包屑，且崩溃后数据完好
+（`integrity_check=ok`、messages 与 message_bodies 行数始终相等、伙伴与 API 配置均在，无丢失）。
+
+**该崩溃的触发源是验证手段本身，须如实记录**：验证过程中对**活库**直接执行了 sqlite3 CLI 查询；
+sqlite3 CLI 打开 WAL 库时会 checkpoint 并改动 -wal/-shm，App 已持有的连接池随后新建连接即
+SQLITE_IOERR_SHORT_READ（同一错误类别在崩溃堆栈中被独立证实）。**已改用导出副本查询，不再触碰活库。**
+
+### 8.3 未关闭的缺口（本轮新增，如实说明）
+
+1. **偶发整轮零产出（未复现、未定位）**：某回合（turn `282d81f3`）在日志中记录
+   `Agent turn completed in 8398ms, reason=completed, bubbles=1`，但界面**无回复气泡**（用户确认），
+   库中也只有一条 REASONING——既无 TEXT、也无 TOOL_ACTIVITY；`archived_messages` 为 0 行，
+   `Persist tool activities failed` / `AI response failed` 均未出现，即**没有任何错误路径被走到**。
+   紧随其后的回合完全正常（产出 id=320 卡片）。工具卡片缺失是该轮「零产出」的**结果**而非独立缺陷：
+   `persistToolActivities` 仅在活动列表为空时跳过，故该轮投影未被触发。
+   **结论：症状确认，根因未定位，需专项排查。**
+2. **运行期 DB I/O 错误会打死进程**：上述崩溃表明，Dispatchers.IO 协程中一次瞬时
+   SQLiteDiskIOException 即可终止整个进程。本批的 `DatabaseRecoveryPolicy` 只覆盖**启动期**
+   打开/迁移，运行期 I/O 错误不在其内，也没有为 DB 查询协程配置统一异常处理。
+   这是**真实健壮性缺口**（触发源虽是外部 sqlite3 访问，但缺口本身成立）。
+3. **仍未验证**：工具卡片的 **UI 渲染观感与重进会话回显**（仅验证了落库与消息流位置）；
+   角色串线剥离在真实模型输出上的效果；HMS 停用后推送链路的实际表现；群聊连续翻页稳定性；
+   真机上的 DB 真实 corruption 恢复（仍只有 JVM 单测）。
