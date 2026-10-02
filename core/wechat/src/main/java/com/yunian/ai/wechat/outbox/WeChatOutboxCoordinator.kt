@@ -26,8 +26,21 @@ class WeChatOutboxCoordinator(
     private val maxRetry: Int = DEFAULT_MAX_RETRY,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val managedMediaCacheDir: File? = null,
+    private val staleSendingRecoveryEnabled: Boolean = true,
+    private val staleSendingRecoveryLimit: Int = DEFAULT_STALE_RECOVERY_LIMIT,
+    /**
+     * 僵尸行恢复的外部观察者：(已重置回待发的行数, 已判死的行数)。
+     *
+     * core:wechat 是纯库模块、拿不到 BuildConfig，而 SecureLog.i/w 在正式包里是空操作；
+     * 由调用方（feature:wechat，有 BuildConfig）注入正式包可见的记录通道。
+     */
+    private val staleSendingRecoveryObserver: ((recovered: Int, dead: Int) -> Unit)? = null,
 ) {
     private val drainMutex = Mutex()
+
+    /** 每个进程只做一次 SENDING 僵尸恢复：drain 被轮询/Worker/回复链路高频调用，不能每次都扫。 */
+    @Volatile
+    private var staleSendingRecoveryDone = false
 
     suspend fun enqueue(
         request: WeChatOutboundRequest,
@@ -48,6 +61,11 @@ class WeChatOutboxCoordinator(
     }
 
     suspend fun drain(limit: Int = DEFAULT_DRAIN_LIMIT): Int = drainMutex.withLock {
+        // 先恢复上一次进程留下的 SENDING 僵尸行（详见 WeChatOutboxRecovery）：
+        // 恢复失败不能连累正常 drain，因此整体 runCatching。
+        runCatching { recoverStaleSendingOnce() }
+            .onFailure { SecureLog.w(TAG, "stale_sending recovery failed: ${it.message}") }
+
         val ready = dao.listReady(nowMs = nowMs(), limit = limit)
         var sent = 0
         val deliveries = ready.map { it.rootId }.distinct().map { rootId ->
@@ -85,6 +103,36 @@ class WeChatOutboxCoordinator(
             )
         }
         sent
+    }
+
+    /**
+     * 把上一次进程残留的 SENDING 行恢复成 PENDING。每个进程只跑一次，由 [drain] 串行调用。
+     *
+     * 触发时机即「启动时可恢复」：drain 由 WeChatPollingService 主循环、WeChatPollingWorker、
+     * WeChatAiReplyWorker 以及回复链路共同驱动，进程起来后第一条 drain 就会执行本恢复。
+     *
+     * @return 被重置回 PENDING 的行数（0 表示没有僵尸行，或本进程已经恢复过）
+     */
+    suspend fun recoverStaleSending(): Int {
+        if (!staleSendingRecoveryEnabled) return 0
+        val now = nowMs()
+        val candidates = WeChatOutboxRecovery.readStaleSending(
+            dao = dao,
+            nowMs = now,
+            limit = staleSendingRecoveryLimit,
+        )
+        if (candidates.isEmpty()) return 0
+        val plan = WeChatOutboxRecovery.plan(candidates, nowMs = now, maxRetry = maxRetry)
+        val recovered = WeChatOutboxRecovery.applyPlan(dao, plan, nowMs = now)
+        WeChatOutboxRecovery.log(plan, nowMs = now)
+        staleSendingRecoveryObserver?.invoke(plan.recovered, plan.dead)
+        return recovered
+    }
+
+    private suspend fun recoverStaleSendingOnce() {
+        if (!staleSendingRecoveryEnabled || staleSendingRecoveryDone) return
+        recoverStaleSending()
+        staleSendingRecoveryDone = true
     }
 
     private suspend fun dispatchTextSegments(items: List<WeChatOutboxEntity>): Int {
@@ -165,7 +213,13 @@ class WeChatOutboxCoordinator(
     }
 
     private suspend fun dispatchOne(item: WeChatOutboxEntity): Boolean {
-        dao.updateStatus(item.id, WeChatDeliveryStatus.SENDING.name)
+        // updatedAtMs 就是 SENDING 租约的起点，必须与恢复逻辑用同一个时钟（nowMs），
+        // 否则租约判断会依赖 Room 默认的 System.currentTimeMillis()，无法测试也不可推导。
+        dao.updateStatus(
+            id = item.id,
+            status = WeChatDeliveryStatus.SENDING.name,
+            updatedAtMs = nowMs(),
+        )
         val result = runCatching {
             val contextToken = resolveContextToken(item.wechatUserId)
             // iLink 协议只能回复：无 token 或 token 过期时发送会被服务端静默丢弃（ret=0 但不投递）。
@@ -196,7 +250,11 @@ class WeChatOutboxCoordinator(
             }
         }
         return if (result.isSuccess) {
-            dao.updateStatus(item.id, WeChatDeliveryStatus.SENT.name)
+            dao.updateStatus(
+                id = item.id,
+                status = WeChatDeliveryStatus.SENT.name,
+                updatedAtMs = nowMs(),
+            )
             true
         } else {
             updateFailure(item, result.exceptionOrNull())
@@ -235,8 +293,9 @@ class WeChatOutboxCoordinator(
                 id = item.id,
                 status = WeChatDeliveryStatus.FAILED.name,
                 retryCount = nextRetry,
-                nextAttemptAtMs = Long.MAX_VALUE / 4,
+                nextAttemptAtMs = WeChatOutboxRecovery.NEVER_RETRY_AT_MS,
                 lastError = err,
+                updatedAtMs = nowMs(),
             )
             SecureLog.w(
                 TAG,
@@ -250,6 +309,7 @@ class WeChatOutboxCoordinator(
                 retryCount = nextRetry,
                 nextAttemptAtMs = nowMs() + backoff.coerceAtMost(60_000L),
                 lastError = err,
+                updatedAtMs = nowMs(),
             )
             SecureLog.w(
                 TAG,
@@ -271,6 +331,21 @@ class WeChatOutboxCoordinator(
         const val DEFAULT_MAX_RETRY = 5
         const val DEFAULT_DRAIN_LIMIT = 20
         const val DEFAULT_RECENT_FAILURE_LIMIT = 5
+        const val DEFAULT_STALE_RECOVERY_LIMIT = 50
+
+        /**
+         * SENDING 行的租约时长：超过它仍未落库就认定「发送它的进程已经死了」，重置回 PENDING。
+         *
+         * 取值依据（必须远大于任何一次单条发送的最坏耗时，否则会误判仍在发送中的行）：
+         * - 文本：一次 sendmessage，IlinkHttpApi.API_TIMEOUT_MS = 15s（read 超时 40s）；
+         * - 图片：getuploadurl 15s + CDN POST（connect 10s / write 30s / read 30s）≈ 最坏 ~70s；
+         * - 进程被冻结（Doze/后台限制）时发送协程可能被整体挂起，给足余量避免把「还在发」当僵尸。
+         * 5 分钟 ≈ 文本发送预算的 20 倍、图片预算的 4 倍。
+         *
+         * 租约越长，重复投递窗口越小，但僵尸消息滞留越久；这里选 5 分钟偏向「不重复」，
+         * 因为僵尸行本来就已经丢了（迟到 5 分钟重发远好过永久丢失）。
+         */
+        const val SENDING_LEASE_MS = 5L * 60 * 1000
 
         /** iLink 官方协议：用户超过 24 小时未发消息，context_token 过期，无法回复 */
         const val CONTEXT_TOKEN_MAX_AGE_MS = 24L * 60 * 60 * 1000

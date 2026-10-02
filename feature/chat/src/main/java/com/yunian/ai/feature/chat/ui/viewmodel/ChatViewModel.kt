@@ -281,6 +281,9 @@ class ChatViewModel(
                     companionId = companionId,
                     text = text,
                     imagePath = null,
+                    // 通话是 App 内的单聊会话：显式声明通道，否则默认 UNSPECIFIED
+                    // 会让装配期读不到「App 内单聊」这一维度的预授权（fail-closed 到基线行为）。
+                    channelKey = com.yunian.ai.domain.ChannelKeys.APP_CHAT,
                 )
             )
             val content = result.replyText.takeIf { it.isNotBlank() } ?: return@runCatching null

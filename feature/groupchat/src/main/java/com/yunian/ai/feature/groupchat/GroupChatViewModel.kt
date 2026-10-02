@@ -37,7 +37,9 @@ import com.yunian.ai.database.model.ApiProvider
 import com.yunian.ai.common.DeviceIdProvider
 import com.yunian.ai.common.RemoteKeyProvider
 import com.yunian.ai.common.SecureLog
+import com.yunian.ai.agent.AgentConfirmGuard
 import com.yunian.ai.agent.AgentFacade
+import com.yunian.ai.agent.AgentTurnReplyText
 import com.yunian.ai.agent.host.AgentToolHost
 import com.yunian.ai.agent.uniffi.AgentTurnRequest
 import com.yunian.ai.agent.uniffi.PromptOrchestratorOptions
@@ -76,6 +78,9 @@ class GroupChatViewModel(
 
     /** 群聊单次 Agent 回合的并行气泡预算（Rust 多轮 emit_bubble 循环上界）。 */
     private val bubbleLoopMaxRounds: UInt = 16u
+
+    /** 确认门守卫（Commerce 工具在群聊回合上 fail-closed 自动拒绝 + 有限次重跑，与通道侧同一实现）。 */
+    private val agentConfirmGuard = AgentConfirmGuard()
 
     private val memoryProvider: MemoryProvider by lazy {
         ServiceRegistry.getOrThrow(MemoryProvider::class.java).also { it.initialize() }
@@ -876,7 +881,7 @@ class GroupChatViewModel(
         val memoryTools = AgentFacade.memoryToolDefinitions(getApplication())
         val memoryNames = memoryTools.map { it.name }.toSet()
         val skillTools = AgentFacade.skillToolDefinitions()
-        val availableTools = ToolRegistry.availableTools().map { it.name }
+        val availableTools = ToolRegistry.availableTools(includeAppLocal = true).map { it.name }
             .toMutableList()
             .apply {
                 addAll(memoryNames)
@@ -896,7 +901,15 @@ class GroupChatViewModel(
             companionNameMapJson = serializeNameMap(companionNameMap),
             workingMemoryLimit = 200u,
         )
-        val globalTools = ToolRegistry.availableTools().map { AgentFacade.toolDefinition(it) }
+        // 工具装配的**唯一折叠点**（授权按伴侣 × 工具命中，**不含通道维度**）：
+        // companionId 必须取**本回合实际回复的伴侣**（本函数的 companion 参数，= 上层的发言人，
+        // 也是下面 runTurn / recordDispatchLog 用的同一个 id）——授权是按伴侣命中的，
+        // 取群 id 或其它伴侣 id 都会静默读不到决定。
+        // 无决定 / 存储未注册 / 读取失败一律 fail-closed 维持既有类别（与单聊、通道侧同一实现）。
+        val globalTools = AgentFacade.toolDefinitionsFor(
+            companionId = companion.id,
+            tools = ToolRegistry.availableTools(includeAppLocal = true),
+        )
         val tools = buildList {
             addAll(memoryTools)
             addAll(skillTools)
@@ -929,7 +942,8 @@ class GroupChatViewModel(
             ),
         )
 
-        val toolHost = AgentToolHost(appContext)
+        // App 内群聊是本机会话：显式开启本机敏感工具（个人资料）的执行权限。
+        val toolHost = AgentToolHost(appContext, allowAppLocalTools = true)
         val dispatchStartedAt = System.currentTimeMillis()
         val agentResult = withContext(Dispatchers.IO) {
             // Q4（R18）：群聊同样按「本回合发言人」实时合并世界书 ——
@@ -940,7 +954,16 @@ class GroupChatViewModel(
             }.onFailure {
                 SecureLog.w("GroupChatViewModel", "worldbook sync failed: ${it.message}")
             }
-            AgentFacade.runTurn(turnRequest, appContext, companion.id, toolHost)
+            // Commerce 类工具的确认门在群聊里同样没有可确认的界面：与通道侧共用
+            // [AgentConfirmGuard] 的 fail-closed 自动拒绝 + 有限次重跑。此前这里直接把
+            // confirm_pending 的结果交给上层，回合静默结束、气泡为空 —— 用户被晾在死路上。
+            agentConfirmGuard.drive(
+                tag = "GroupChatViewModel",
+                initial = AgentFacade.runTurn(turnRequest, appContext, companion.id, toolHost),
+                rerunFailureMessage = "runTurn after auto-reject failed, companion=${companion.id}",
+                runTurn = { AgentFacade.runTurn(turnRequest, appContext, companion.id, toolHost) },
+                rejectTool = { name, args -> AgentFacade.rejectTool(appContext, name, args) },
+            )
         }
 
         AgentFacade.recordDispatchLog(
@@ -970,6 +993,19 @@ class GroupChatViewModel(
         val closing = agentResult.finalText.trim().replace(Regex("\\n{2,}"), "\n")
         if (closing.isNotBlank() && bubbles.none { it == closing }) {
             bubbles.add(closing)
+        }
+
+        // U1：确认门重跑到上限（3 次）后模型仍坚持调用被拒工具时，Rust 回合既没有 bubble 事件、
+        // 也没有 finalText —— 上面两段都补不出内容，群聊首条取空即直接 return（User 被晾在死路上，
+        // 表现为空白/无回复）。通道侧由 [AgentTurnReplyText.resolve] 兜出一条含「确认」的可见文案，
+        // 这里复用同一份实现，保证两侧文案逐字一致；**仅在** confirm_pending 终局且确实没有任何
+        // 可见内容时补一条，正常的 completed 路径完全不受影响。
+        if (bubbles.isEmpty() &&
+            agentResult.finishedReason == AgentConfirmGuard.FINISHED_CONFIRM_PENDING
+        ) {
+            AgentTurnReplyText.resolve(agentResult.events, agentResult.finalText, agentResult.finishedReason)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { bubbles.add(it.trim().replace(Regex("\\n{2,}"), "\n")) }
         }
         return bubbles
     }

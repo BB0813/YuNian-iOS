@@ -8,6 +8,8 @@
     <string name="memory_management_desc">查看虛擬戀人記住的關於你的事</string>
     <string name="api_settings">API設置</string>
     <string name="api_settings_desc">配置AI接口</string>
+    <string name="plugin_settings">外掛設定</string>
+    <string name="plugin_settings_desc">管理外掛與啟停開關</string>
     <string name="theme_mode">主題模式</string>
     <string name="theme_mode_desc">切換淺色/深色主題</string>
     <string name="chat_background">聊天背景</string>

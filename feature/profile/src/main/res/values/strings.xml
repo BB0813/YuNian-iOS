@@ -24,16 +24,14 @@
     <string name="memory_management_desc">查看虚拟恋人记住的关于你的事</string>
     <string name="api_settings">API设置</string>
     <string name="api_settings_desc">配置AI接口</string>
+    <string name="plugin_settings">插件设置</string>
+    <string name="plugin_settings_desc">管理插件与启停开关</string>
     <string name="theme_mode">主题模式</string>
     <string name="theme_mode_desc">切换浅色/深色主题</string>
     <string name="chat_background">聊天背景</string>
     <string name="chat_background_desc">自定义聊天页面背景</string>
     <string name="background_settings">背景设置</string>
     <string name="background_settings_desc">自定义主界面与聊天背景</string>
-    <string name="wechat_settings">微信设置</string>
-    <string name="wechat_settings_desc">绑定微信个人号</string>
-    <string name="qqbot_settings">QQ机器人</string>
-    <string name="qqbot_settings_desc">绑定QQ官方机器人</string>
     <string name="coffee_title">瑞幸咖啡</string>
     <string name="coffee_desc">AI点餐（MCP接入）</string>
     <!-- 设置 -->

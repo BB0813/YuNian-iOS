@@ -4,6 +4,8 @@ import android.content.Context
 import com.yunian.ai.agent.sticker.StickerPreferenceFacade
 import com.yunian.ai.domain.plugin.LianYuPlugin
 import com.yunian.ai.domain.plugin.PluginContext
+import com.yunian.ai.domain.plugin.PluginKind
+import com.yunian.ai.domain.plugin.PluginManifest
 import com.yunian.ai.domain.plugin.PluginServices
 
 /**
@@ -20,8 +22,18 @@ class StickerPreferencePlugin : LianYuPlugin {
 
     override val id: String = ID
     override val name: String = "表情包偏好引擎"
+    override val kind: PluginKind = PluginKind.STICKER
     override val requires: Set<String> = setOf(PluginServices.APP_CONTEXT)
     override val configSchema: String? = null
+
+    override val manifest: PluginManifest = PluginManifest(
+        id = ID,
+        name = "表情包偏好引擎",
+        version = "1.0.0",
+        kind = PluginKind.STICKER,
+        requires = requires.sorted(),
+        configSchema = null,
+    )
 
     override fun setup(ctx: PluginContext) {
         val app = ctx.inject<Context>(PluginServices.APP_CONTEXT)

@@ -23,6 +23,9 @@ android {
 dependencies {
     // 仅依赖契约层：工具/循环定义由 Rust 侧产出，Kotlin 侧只做绑定 + 回调适配
     implementation(project(":core:domain"))
+    // 出站文本安全门：发起方工具在把文本交给通道前必须过 ContentFilter.checkOutputSafety。
+    // 此前本模块只是**间接**通过 :core:database 拿到它；现在显式声明（隐式传递依赖不是契约）。
+    implementation(project(":core:common"))
     // SkillStore 实现需要 Room 索引（混合存储之"索引"侧）与协程
     implementation(project(":core:database"))
     implementation(libs.kotlinx.coroutines.core)

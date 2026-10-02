@@ -18,6 +18,20 @@ interface AiTool {
     val toolsets: Set<String> get() = emptySet()
 
     /**
+     * 本机敏感工具标记：`true` 表示该工具只允许在予念 App 内的本机会话中使用。
+     *
+     * 这类工具暴露的是**手机主人本人的本机数据**（如个人资料）。一旦它出现在 QQ / 微信
+     * 等外部桥接会话的工具列表中，远端联系人就能借模型之手读到本机主人的私人信息。
+     *
+     * 默认必须是 `false`（普通工具）；[ToolRegistry] 的所有枚举 / 序列化入口默认
+     * **排除**本机敏感工具，只有宿主显式声明 `includeAppLocal = true` 时才可见，
+     * 执行侧还有第二道闸（AgentToolHost）。
+     *
+     * 授权只能来自宿主代码的不可变上下文，禁止依据模型给出的参数或 context JSON 判定。
+     */
+    val appLocalOnly: Boolean get() = false
+
+    /**
      * 可用性检查（对齐 Hermes check_fn）：按当前环境实时判断工具是否可用。
      * 默认恒可用；实现类可覆盖（如检测网络 / API 配置 / 权限 / 开关）。
      * [ToolRegistry.availableTools] 会按 30s TTL 缓存结果，60s 内容忍抖动（flake）。
@@ -86,10 +100,20 @@ object ToolRegistry {
         availabilityCache.remove(name)
     }
 
+    /**
+     * 原始单点查询：**不做渠道校验**（执行侧必须由宿主授权门判定 `AiTool.appLocalOnly`，
+     * 见 `AgentToolHost`）。面向模型的列表装配请用 [availableTools] / [toolDefinitionsJson]。
+     */
     fun get(name: String): AiTool? = tools[name]
 
-    fun all(): List<AiTool> = tools.values.toList()
+    /**
+     * 注册池快照：默认**排除**本机敏感工具（未知渠道 = 不可见），
+     * 只有确定的本机 App 会话才可传 `includeAppLocal = true`。
+     */
+    fun all(includeAppLocal: Boolean = false): List<AiTool> =
+        tools.values.filter { includeAppLocal || !it.appLocalOnly }
 
+    /** 仅表示注册池非空（存活探针），不反映渠道可见性；列表装配请用 [availableTools]。 */
     fun isNotEmpty(): Boolean = tools.isNotEmpty()
 
     /**
@@ -100,10 +124,19 @@ object ToolRegistry {
      * 把工具从模型工具列表里抖掉，破坏 prompt 缓存稳定性）。
      *
      * 装配 Agent 工具列表时应使用本方法而非 [all]。
+     *
+     * 渠道隔离：`includeAppLocal = false`（默认 / 未知渠道）时本机敏感工具根本不参与枚举，
+     * 也不求值其 [AiTool.isAvailable]——**可用性 ≠ 授权**，本机工具的可见性不经过
+     * [availabilityCache]，因此不存在「授权被可用性缓存二次确认」的路径。
      */
-    fun availableTools(): List<AiTool> {
+    fun availableTools(includeAppLocal: Boolean = false): List<AiTool> {
         val now = System.currentTimeMillis()
         return tools.values.filter { tool ->
+            if (tool.appLocalOnly && !includeAppLocal) {
+                // 本机敏感工具：非本机会话直接不参与枚举（模型连名字都看不到）。
+                // 注意不写 availabilityCache —— 授权结果绝不能混进可用性缓存。
+                return@filter false
+            }
             val cached = availabilityCache[tool.name]
             when {
                 cached == null -> {
@@ -135,25 +168,34 @@ object ToolRegistry {
      * 查询归属指定工具集（TOOLSETS）的工具（对齐 Hermes toolsets 分组）。
      * 空工具集名 = 通用集：返回未声明任何工具集的工具。
      */
-    fun toolsInToolset(toolset: String): List<AiTool> =
-        if (toolset.isBlank()) {
-            tools.values.filter { it.toolsets.isEmpty() }
+    fun toolsInToolset(toolset: String, includeAppLocal: Boolean = false): List<AiTool> {
+        val visible = tools.values.filter { includeAppLocal || !it.appLocalOnly }
+        return if (toolset.isBlank()) {
+            visible.filter { it.toolsets.isEmpty() }
         } else {
-            tools.values.filter { toolset in it.toolsets }
+            visible.filter { toolset in it.toolsets }
         }
+    }
 
-    /** 当前注册的全部工具集名（不含空通用集） */
-    fun toolsetNames(): Set<String> = tools.values.flatMap { it.toolsets }.toSet()
+    /** 当前注册的全部工具集名（不含空通用集）；默认不含本机敏感工具的工具集 */
+    fun toolsetNames(includeAppLocal: Boolean = false): Set<String> =
+        tools.values.filter { includeAppLocal || !it.appLocalOnly }.flatMap { it.toolsets }.toSet()
 
-    fun toolDefinitionsJson(): String = tools.values.toList().toToolDefinitionsJson()
+    /**
+     * 全部工具的 OpenAI tools 定义 JSON。
+     * **默认排除**本机敏感工具；只有确定的本机 App 会话才可传 `includeAppLocal = true`。
+     */
+    fun toolDefinitionsJson(includeAppLocal: Boolean = false): String =
+        tools.values.filter { includeAppLocal || !it.appLocalOnly }.toToolDefinitionsJson()
 
     fun clear() {
         tools.clear()
         availabilityCache.clear()
     }
 
-    fun systemPromptSection(): String {
+    fun systemPromptSection(includeAppLocal: Boolean = false): String {
         val parts = tools.values
+            .filter { includeAppLocal || !it.appLocalOnly }
             .map { it.systemPrompt() }
             .filter { it.isNotBlank() }
         if (parts.isEmpty()) return ""
@@ -165,8 +207,9 @@ object ToolRegistry {
      * 明确告知模型"你具备执行能力，任务匹配工具时必须直接调用"，
      * 解决聊天型人设下模型不主动调用、口头询问甚至拒绝的问题。
      */
-    fun agentDirectiveSection(): String {
-        if (tools.isEmpty()) return ""
+    fun agentDirectiveSection(includeAppLocal: Boolean = false): String {
+        val visible = tools.values.filter { includeAppLocal || !it.appLocalOnly }
+        if (visible.isEmpty()) return ""
         return buildString {
             appendLine("═══ 执行能力（重要）═══")
             appendLine("你不只是聊天对象——你拥有下列可实际执行的工具，可以直接操作手机与完成任务：")

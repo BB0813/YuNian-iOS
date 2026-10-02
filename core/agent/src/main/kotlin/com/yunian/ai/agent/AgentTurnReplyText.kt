@@ -2,8 +2,14 @@ package com.yunian.ai.agent
 
 import com.yunian.ai.agent.uniffi.AgentEvent
 
-/** 通道不支持气泡/表情事件时的文本适配；不重复追加已作为 bubble 发出的 finalText。 */
-internal object AgentTurnReplyText {
+/**
+ * 通道不支持气泡/表情事件时的文本适配；不重复追加已作为 bubble 发出的 finalText。
+ *
+ * 可见性说明：本对象**必须 public**——群聊侧（`feature:groupchat` 的 `GroupChatViewModel`）
+ * 在 confirm_pending 终局也要用它兜出可见文案，以保证与通道侧逐字一致；Kotlin 的 `internal`
+ * 只在模块内可见，跨模块无法复用（与 [AgentConfirmGuardLog] 同一手法）。它不是对外契约的一部分。
+ */
+object AgentTurnReplyText {
     fun resolve(events: List<AgentEvent>, finalText: String, finishedReason: String): String? {
         val visible = events.mapNotNull { event ->
             when (event.kind) {

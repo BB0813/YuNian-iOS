@@ -43,8 +43,8 @@ object NetworkConstants {
 
     val SILICONFLOW_VOICE_LIST_URL = ApiProvider.SILICONFLOW.defaultBaseUrl.trimEnd('/') + "/audio/voice/list"
 
-    const val QQ_BOT_AUTH_BASE_URL = "https://bots.qq.com/"
-    const val QQ_BOT_API_BASE_URL = "https://api.sgroup.qq.com/"
+    const val QQ_BOT_AUTH_BASE_URL = "https://api.bot.qq.com/"
+    const val QQ_BOT_API_BASE_URL = "https://api.bot.qq.com/"
 
     const val QQ_BOT_LITE_CREATE_TASK_URL = "https://q.qq.com/lite/create_bind_task"
     const val QQ_BOT_LITE_POLL_RESULT_URL = "https://q.qq.com/lite/poll_bind_result"

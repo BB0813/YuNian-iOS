@@ -7,6 +7,7 @@ import com.yunian.ai.uicommon.icon.AppIcons
 import com.yunian.ai.uicommon.theme.AppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -603,6 +605,22 @@ private fun WeChatStatusCard(
     }
 }
 
+/**
+ * 通道健康卡。
+ *
+ * ## 失败信息（债务 D2 / G5）
+ *
+ * 卡片的「失败信息」部分由 [WeChatChannelHealthAlerts] 决定显示什么——那一层是纯函数、
+ * 有 JVM 单测；本 Composable 只负责把它画出来，**不做任何判断**。
+ *
+ * 渲染规则：
+ * - `alerts` 为空（通道健康）时**一行都不多**，卡片与改动前逐字一致；
+ * - 每条 alert 两行：headline（颜色按 severity）+ 可选 detail（`onSurfaceVariant`）；
+ * - `actionRequired` 的条目（会话过期 / token 缺失或过期）左侧带一条错误色竖条，
+ *   让「必须用户动手」与「只是症状」在同一张卡里一眼可分；
+ * - [WeChatChannelHealthAlerts.fromSnapshot] 已包含超出上限的 outbox 失败摘要，
+ *   直接渲染一次，不在 Composable 中重复计数或追加摘要。
+ */
 @Composable
 private fun ChannelHealthCard(
     health: WeChatChannelHealthSnapshot,
@@ -611,6 +629,13 @@ private fun ChannelHealthCard(
     val pollerLabel = if (health.primaryPollerActive) "主轮询运行中" else "主轮询未持有（Worker 兜底）"
     val pollerColor = if (health.primaryPollerActive) AppTheme.colors.success else AppTheme.colors.warning
     val lastPoll = formatEpochMs(health.lastPollAtMs)
+
+    // 只在快照变化时重算（快照由 ViewModel 每 5 秒刷新一次）。不要把 nowMs 放进
+    // remember 的 key：它每次重组都不同，会让缓存永远失效、等于白记。
+    // 代价是「多久之前」最多滞后一个刷新周期（5 秒），对分钟级的文案无影响。
+    val alertList = remember(health) {
+        WeChatChannelHealthAlerts.fromSnapshot(health, System.currentTimeMillis())
+    }
 
     Column(
         modifier = Modifier
@@ -668,6 +693,68 @@ private fun ChannelHealthCard(
                 fontSize = 12.sp,
                 color = AppTheme.colors.warning,
             )
+        }
+
+        if (alertList.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "通道异常",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppTheme.colors.error,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            alertList.forEach { alert ->
+                ChannelHealthAlertRow(alert)
+            }
+        }
+    }
+}
+
+/**
+ * 单条失败提示：可选左侧竖条 + 正文 + 可选细节。
+ *
+ * 竖条只画给 [WeChatChannelHealthAlerts.ChannelHealthAlert.actionRequired]——见
+ * [ChannelHealthCard] 的 KDoc。
+ */
+@Composable
+private fun ChannelHealthAlertRow(alert: WeChatChannelHealthAlerts.ChannelHealthAlert) {
+    val tint = when (alert.severity) {
+        WeChatChannelHealthAlerts.AlertSeverity.ERROR -> AppTheme.colors.error
+        WeChatChannelHealthAlerts.AlertSeverity.WARNING -> AppTheme.colors.warning
+        WeChatChannelHealthAlerts.AlertSeverity.INFO -> AppTheme.colors.onSurfaceVariant
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (alert.actionRequired) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(AppTheme.colors.error),
+            )
+        }
+        Column {
+            Text(
+                text = alert.headline,
+                fontSize = 13.sp,
+                color = tint,
+                lineHeight = 19.sp,
+            )
+            alert.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = detail,
+                    fontSize = 12.sp,
+                    color = AppTheme.colors.onSurfaceVariant,
+                    lineHeight = 17.sp,
+                )
+            }
         }
     }
 }

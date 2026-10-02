@@ -56,6 +56,7 @@ import com.yunian.ai.uicommon.component.glass.drawGlass
 fun ProfileScreen(
     onMemoryClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onPluginSettingsClick: () -> Unit = {},
     onThemeClick: () -> Unit,
     onBackgroundSettingsClick: () -> Unit = {},
     onGeneralSettingsClick: () -> Unit,
@@ -202,6 +203,7 @@ fun ProfileScreen(
         Spacer(modifier = Modifier.height(12.dp))
         SolidMenuGroup(listOf(
             MenuItemData(AppIcons.Settings, stringResource(R.string.api_settings), stringResource(R.string.api_settings_desc), onSettingsClick),
+            MenuItemData(AppIcons.Zap, stringResource(R.string.plugin_settings), stringResource(R.string.plugin_settings_desc), onPluginSettingsClick),
             MenuItemData(AppIcons.Brush, stringResource(R.string.theme_mode), stringResource(R.string.theme_mode_desc), onThemeClick),
             MenuItemData(AppIcons.Palette, stringResource(R.string.background_settings), stringResource(R.string.background_settings_desc), onBackgroundSettingsClick)
         ))

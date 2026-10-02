@@ -19,7 +19,7 @@ import kotlinx.serialization.json.Json
 
 private val Context.qqbotDataStore: DataStore<Preferences> by preferencesDataStore(name = "qqbot_prefs")
 
-class QQBotTokenStore(context: Context) {
+class QQBotTokenStore(context: Context) : QQProactiveTargetStore {
     private val dataStore = context.applicationContext.qqbotDataStore
     private val secureStore = QQBotSecureStore(context.applicationContext)
     private val json = Json { ignoreUnknownKeys = true }
@@ -37,6 +37,22 @@ class QQBotTokenStore(context: Context) {
         private val TOKEN_EXPIRE_AT_KEY = longPreferencesKey("qqbot_token_expire_at")
         private val SESSION_ID_KEY = stringPreferencesKey("qqbot_session_id")
         private val LAST_SEQUENCE_KEY = longPreferencesKey("qqbot_last_sequence")
+        private val BOT_OPENID_KEY = stringPreferencesKey("qqbot_bot_openid")
+
+        /**
+         * **宿主（用户本人）的 user_openid**——主动发送的默认目标。
+         *
+         * 与 [BOT_OPENID_KEY]（机器人自己的 openid，READY 事件下发）是**两个不同的标识**，
+         * 绝不能混用：拿机器人 openid 当目标发消息必然失败。
+         *
+         * 两个来源都会写入本键：
+         * 1. 扫码绑定完成时 `poll_bind_result` 返回的 `user_openid`（现成的）；
+         * 2. 入站 C2C 消息的 `author.user_openid`——保证「改动前就已绑定」的用户也能补上。
+         */
+        private val HOST_USER_OPENID_KEY = stringPreferencesKey("qqbot_host_user_openid")
+
+        /** 最近一次收到入站消息的 QQ 群 group_openid（主动发送 `target=group` 的可信路由）。 */
+        private val RECENT_GROUP_OPENID_KEY = stringPreferencesKey("qqbot_recent_group_openid")
     }
 
     val accountFlow: Flow<QQBotAccount?> = accountState.asStateFlow()
@@ -63,10 +79,22 @@ class QQBotTokenStore(context: Context) {
             prefs.remove(TOKEN_EXPIRE_AT_KEY)
             prefs.remove(SESSION_ID_KEY)
             prefs.remove(LAST_SEQUENCE_KEY)
+            // 换绑后宿主 openid 属于上一个宿主：必须一并清掉，
+            // 否则主动发送会把消息发到旧宿主（旧 openid 对新机器人无效）。
+            prefs.remove(HOST_USER_OPENID_KEY)
+            prefs.remove(RECENT_GROUP_OPENID_KEY)
         }
     }
 
     suspend fun isLoggedIn(): Boolean = getAccount() != null
+
+    /**
+     * 是否已有账号（**同步**，读内存态 [accountState]，不碰 DataStore）。
+     *
+     * 供 [com.yunian.ai.domain.AiTool.isAvailable] 这类非 suspend 的可用性判定使用；
+     * 语义与 [isLoggedIn] 一致（两者都看同一个 [accountState]）。
+     */
+    fun hasAccount(): Boolean = accountState.value != null
 
     val autoReplyFlow: Flow<Boolean> = dataStore.data.map { it[AUTO_REPLY_KEY] ?: true }
     suspend fun getAutoReply(): Boolean = autoReplyFlow.first()
@@ -107,6 +135,42 @@ class QQBotTokenStore(context: Context) {
 
     suspend fun getLastSequence(): Long = dataStore.data.first()[LAST_SEQUENCE_KEY] ?: 0L
     suspend fun setLastSequence(seq: Long) = dataStore.edit { it[LAST_SEQUENCE_KEY] = seq }
+
+    /** 机器人自身 OpenID（READY 事件下发）。全量群消息模式靠它判断是否被 @。 */
+    suspend fun getBotOpenId(): String? = dataStore.data.first()[BOT_OPENID_KEY]
+    suspend fun setBotOpenId(openId: String?) = dataStore.edit { prefs ->
+        if (!openId.isNullOrBlank()) prefs[BOT_OPENID_KEY] = openId else prefs.remove(BOT_OPENID_KEY)
+    }
+
+    /**
+     * **宿主（用户本人）的 user_openid**——主动发送的默认目标（键名 `qqbot_host_user_openid`）。
+     *
+     * 与 [getBotOpenId] 的机器人 openid 是**两个不同的标识**，不得混用。
+     * 写入来源见 [HOST_USER_OPENID_KEY] 的 KDoc；空值一律不写（保持「没有目标」的诚实状态，
+     * 上层据此明确失败，而不是发到一个空字符串目标上）。
+     */
+    override suspend fun getHostUserOpenId(): String? =
+        dataStore.data.first()[HOST_USER_OPENID_KEY]?.takeIf { it.isNotBlank() }
+
+    override suspend fun setHostUserOpenId(openId: String?) {
+        dataStore.edit { prefs ->
+            val trimmed = openId?.trim()
+            if (!trimmed.isNullOrEmpty()) prefs[HOST_USER_OPENID_KEY] = trimmed
+            else prefs.remove(HOST_USER_OPENID_KEY)
+        }
+    }
+
+    override suspend fun getRecentGroupOpenId(): String? =
+        dataStore.data.first()[RECENT_GROUP_OPENID_KEY]?.takeIf { it.isNotBlank() }
+
+    override suspend fun setRecentGroupOpenId(openId: String?) {
+        dataStore.edit { prefs ->
+            val trimmed = openId?.trim()
+            if (!trimmed.isNullOrEmpty()) prefs[RECENT_GROUP_OPENID_KEY] = trimmed
+            else prefs.remove(RECENT_GROUP_OPENID_KEY)
+        }
+    }
+
 
     private val userCompanionMapFlow: Flow<Map<String, Long>> = dataStore.data.map { prefs ->
         prefs[USER_COMPANION_MAP_KEY]?.let {

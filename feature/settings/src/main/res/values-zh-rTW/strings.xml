@@ -52,4 +52,23 @@
     <string name="download_complete">下載完成，正在安裝...</string>
     <string name="download_failed">下載失敗，請檢查網絡後重試</string>
     <string name="update_now">立即更新</string>
+
+    <!-- Plugin Settings Screen -->
+    <string name="plugin_settings_title">外掛設定</string>
+    <string name="plugin_settings_tab_channel">訊息通道</string>
+    <string name="plugin_settings_tab_general">通用外掛</string>
+    <string name="plugin_settings_search_hint">搜尋外掛名稱或 id</string>
+    <string name="plugin_settings_search_clear">清除搜尋</string>
+    <string name="plugin_settings_expand">展開設定</string>
+    <string name="plugin_settings_collapse">收合設定</string>
+    <string name="plugin_settings_no_config">此外掛沒有可設定的項目</string>
+    <string name="plugin_settings_tool_grant_subtitle">管理需要確認的 Agent 工具能力</string>
+    <!-- FULL_PAGE 设置区行底「进入」箭头的无障碍文案（见 PluginSettingsPresentation） -->
+    <string name="plugin_settings_open_section">進入設定</string>
+    <string name="plugin_settings_open_tool_grants">進入工具授權</string>
+
+    <!-- 債務 D3：外掛啟停操作的 Snackbar 回饋。
+         %1$s = 外掛顯示名稱，%2$s = 宿主給出的原因（或 plugin id）。 -->
+    <string name="plugin_settings_load_succeeded">%1$s 已啟用</string>
+    <string name="plugin_settings_load_failed">%1$s 載入失敗：%2$s</string>
 </resources>

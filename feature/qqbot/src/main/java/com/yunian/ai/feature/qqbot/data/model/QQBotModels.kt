@@ -79,6 +79,8 @@ data class QQMessageEvent(
     val timestamp: String? = null,
     @SerialName("message_type") val messageType: Int? = null,
     val attachments: List<QQMessageAttachment>? = null,
+    /** 消息中 @ 的用户列表。全量群消息模式下用它判断是否 @ 了机器人本身。 */
+    val mentions: List<QQUser>? = null,
     val member: kotlinx.serialization.json.JsonElement? = null
 )
 
@@ -88,7 +90,8 @@ data class SendTextRequest(
     val markdown: QQMarkdown? = null,
     @SerialName("msg_type") val msgType: Int = 0,
     @SerialName("msg_id") val msgId: String? = null,
-    @SerialName("msg_seq") val msgSeq: Int = 0,
+    /** 仅被动回复使用；主动消息必须缺席，不能发送 0 或任意全局序号。 */
+    @SerialName("msg_seq") val msgSeq: Int? = null,
     @SerialName("message_reference") val messageReference: QQMessageReference? = null
 )
 
@@ -100,6 +103,43 @@ data class QQMarkdown(
 @Serializable
 data class QQMessageReference(
     @SerialName("message_id") val messageId: String
+)
+
+/**
+ * 主动发送的目标类别（**本模块私有的协议细节**）。
+ *
+ * 刻意不复用任何 domain 类型：domain 契约（[com.yunian.ai.domain.channel.ChannelOutboundRequest]）
+ * 的 `target` 是一个**不透明字符串**，由本模块按自己的协议解释成 USER / GROUP，
+ * 契约层不解释它的内容。
+ */
+enum class QQProactiveTargetKind {
+    /** 单个用户：目标标识是 `user_openid`，走 `POST /v2/users/{openid}/messages`。 */
+    USER,
+    /** 群聊：目标标识是 `group_openid`，走 `POST /v2/groups/{group_openid}/messages`。 */
+    GROUP,
+}
+
+/**
+ * 主动发送目标（**省略 `msg_id`** 的那条通路）。
+ *
+ * [id] 非空是硬要求：主动发送没有被动锚点可兜底，空目标必然发错人或直接 404，
+ * 因此调用方必须先确认目标存在，再由仓库层做二次校验。
+ */
+data class QQProactiveTarget(
+    val kind: QQProactiveTargetKind,
+    val id: String,
+)
+
+
+/**
+ * 主动发送结果。
+ *
+ * [deliveryReceipt] 恒为 `false`——QQ 出站只校验 HTTP 2xx，**没有任何 ack**：
+ * 它让上层能区分「已交给通道发出」与「对方已收到」，禁止把 [messageRef] 当成送达凭证。
+ */
+data class QQProactiveSendResult(
+    val messageRef: String? = null,
+    val deliveryReceipt: Boolean = false,
 )
 
 @Serializable

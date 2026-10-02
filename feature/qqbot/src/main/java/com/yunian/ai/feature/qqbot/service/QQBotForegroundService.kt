@@ -17,6 +17,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.yunian.ai.common.concurrent.AppDispatchers
 import com.yunian.ai.feature.qqbot.data.network.QQBotWebSocketClient
+import com.yunian.ai.feature.qqbot.data.network.ConnectionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -80,10 +81,12 @@ class QQBotForegroundService : Service() {
                     val repository = QQBotServiceLocator.messageRepository(this@QQBotForegroundService)
                     if (repository.isLoggedIn()) {
                         val state = repository.connectionState.value
-                        if (state != QQBotWebSocketClient.ConnectionState.CONNECTED &&
-                            state != QQBotWebSocketClient.ConnectionState.CONNECTING
-                        ) {
-                            Log.w(TAG, "QQ Bot connection state=$state, restoring channel")
+                        // 旧实现无条件跳过 CONNECTING，而 onClosing 又会取消握手看门狗，
+                        // 两者叠加让「永久连接中」无人可救。改为：只要状态机判定卡死
+                        // （中间态超时且无在途重连）就恢复，CONNECTING 不再被豁免。
+                        val stuck = repository.isConnectionStuck()
+                        if (state != ConnectionState.CONNECTED && stuck) {
+                            Log.w(TAG, "QQ Bot connection stuck in state=$state, restoring channel")
                             repository.disconnect()
                             repository.connect()
                             QQBotServiceLocator.chatBridge(this@QQBotForegroundService).start()

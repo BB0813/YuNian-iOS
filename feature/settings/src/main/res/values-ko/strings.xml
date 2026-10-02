@@ -52,4 +52,23 @@
     <string name="download_complete">다운로드 완료, 설치 중...</string>
     <string name="download_failed">다운로드 실패, 네트워크를 확인하고 다시 시도해 주세요</string>
     <string name="update_now">지금 업데이트</string>
+
+    <!-- Plugin Settings Screen -->
+    <string name="plugin_settings_title">플러그인 설정</string>
+    <string name="plugin_settings_tab_channel">메시지 채널</string>
+    <string name="plugin_settings_tab_general">일반 플러그인</string>
+    <string name="plugin_settings_search_hint">플러그인 이름 또는 id 검색</string>
+    <string name="plugin_settings_search_clear">검색 지우기</string>
+    <string name="plugin_settings_expand">설정 펼치기</string>
+    <string name="plugin_settings_collapse">설정 접기</string>
+    <string name="plugin_settings_no_config">이 플러그인에는 설정할 항목이 없습니다</string>
+    <string name="plugin_settings_tool_grant_subtitle">확인이 필요한 Agent 도구 권한 관리</string>
+    <!-- FULL_PAGE 设置区行底「进入」箭头的无障碍文案（见 PluginSettingsPresentation） -->
+    <string name="plugin_settings_open_section">설정 열기</string>
+    <string name="plugin_settings_open_tool_grants">도구 권한 열기</string>
+
+    <!-- 부채 D3: 플러그인 활성화/비활성화 Snackbar 피드백.
+         %1$s = 플러그인 표시 이름, %2$s = 호스트가 반환한 사유(또는 plugin id). -->
+    <string name="plugin_settings_load_succeeded">%1$s 활성화됨</string>
+    <string name="plugin_settings_load_failed">%1$s 로드 실패: %2$s</string>
 </resources>

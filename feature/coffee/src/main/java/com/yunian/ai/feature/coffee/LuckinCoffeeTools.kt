@@ -5,6 +5,8 @@ import com.yunian.ai.domain.CoffeeOrderProvider
 import com.yunian.ai.domain.ToolRegistry
 import com.yunian.ai.domain.plugin.LianYuPlugin
 import com.yunian.ai.domain.plugin.PluginContext
+import com.yunian.ai.domain.plugin.PluginKind
+import com.yunian.ai.domain.plugin.PluginManifest
 import com.yunian.ai.domain.plugin.PluginServices
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -167,8 +169,18 @@ class CoffeePlugin(
 
     override val id: String = ID
     override val name: String = "瑞幸咖啡"
+    override val kind: PluginKind = PluginKind.TOOL
     override val requires: Set<String> = setOf(PluginServices.TOOLS)
     override val configSchema: String? = null
+
+    override val manifest: PluginManifest = PluginManifest(
+        id = ID,
+        name = "瑞幸咖啡",
+        version = "1.0.0",
+        kind = PluginKind.TOOL,
+        requires = requires.sorted(),
+        configSchema = null,
+    )
 
     override fun setup(ctx: PluginContext) {
         val registry = ctx.inject<ToolRegistry>(PluginServices.TOOLS)

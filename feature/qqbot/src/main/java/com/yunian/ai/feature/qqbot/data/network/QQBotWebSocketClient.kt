@@ -2,10 +2,12 @@ package com.yunian.ai.feature.qqbot.data.network
 
 import com.yunian.ai.common.SecureLog
 import com.yunian.ai.common.concurrent.AppDispatchers
+import com.yunian.ai.feature.qqbot.QQBotDebugLog
 import com.yunian.ai.feature.qqbot.data.QQBotTokenStore
 import com.yunian.ai.feature.qqbot.data.model.QQGatewayPayload
 import com.yunian.ai.feature.qqbot.data.model.QQHelloData
 import com.yunian.ai.feature.qqbot.data.model.QQReadyData
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -29,7 +31,6 @@ import okhttp3.WebSocketListener
 import com.yunian.ai.common.ChatConstants
 import com.yunian.ai.network.NetworkConstants
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -39,13 +40,8 @@ class QQBotWebSocketClient(
     private val onEvent: suspend (QQGatewayPayload) -> Unit,
     private val onConnectionStateChange: ((ConnectionState) -> Unit)? = null
 ) {
-    enum class ConnectionState {
-        DISCONNECTED,
-        CONNECTING,
-        CONNECTED,
-        RECONNECTING,
-        AUTH_FAILED
-    }
+    // 连接状态枚举 ConnectionState 已迁到 ConnectionStateMachine.kt（顶层、纯逻辑、可 JVM 单测）。
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val scope = CoroutineScope(SupervisorJob() + AppDispatchers.io)
     private val client = OkHttpClient.Builder()
@@ -61,8 +57,15 @@ class QQBotWebSocketClient(
     private var reconnectJob: Job? = null
     private var handshakeWatchdogJob: Job? = null
 
-    private val isConnected = AtomicBoolean(false)
-    private val isConnecting = AtomicBoolean(false)
+    /** 状态 + 进入时间戳的唯一事实来源。所有状态迁移都必须经由它。 */
+    private val stateMachine = ConnectionStateMachine { state ->
+        onConnectionStateChange?.invoke(state)
+    }
+
+    /** 是否已有重连在途。用于 [ConnectionStateMachine.shouldForceRecovery] 判定。 */
+    @Volatile
+    private var reconnectPending = false
+
     private val lastSequence = AtomicLong(0)
     private val reconnectAttempt = AtomicInteger(0)
 
@@ -96,9 +99,8 @@ class QQBotWebSocketClient(
     }
 
     private suspend fun connectLocked() {
-        if (isConnected.get() || isConnecting.get()) return
-        isConnecting.set(true)
-        onConnectionStateChange?.invoke(ConnectionState.CONNECTING)
+        if (stateMachine.isConnected() || stateMachine.isConnecting()) return
+        stateMachine.onConnectStarted(System.currentTimeMillis())
         try {
             val account = tokenStore.getAccount()
                 ?: throw IllegalStateException("未配置 QQ Bot 账号")
@@ -145,7 +147,10 @@ class QQBotWebSocketClient(
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     SecureLog.w(TAG, "WebSocket closing: $code $reason")
+                    // 三个回调必须一致排重连：旧实现唯独漏掉这里，服务端发起关闭后
+                    // 客户端再也不会重连，状态永久停在 CONNECTING。
                     cleanupConnectionState()
+                    scheduleReconnect()
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -162,30 +167,54 @@ class QQBotWebSocketClient(
             })
         } catch (e: Exception) {
             SecureLog.e(TAG, "connect failed: ${e.message}", e)
-            isConnecting.set(false)
 
             apiClient.clearApiCache()
 
-            if (reconnectAttempt.get() >= 5) {
-                onConnectionStateChange?.invoke(ConnectionState.AUTH_FAILED)
+            // 决策必须是纯逻辑且不依赖 scheduleReconnect() 发状态：后者在「重连 job
+            // 已活跃」时会早退，旧实现因此让 attempt 0..4 期间完全没有状态迁移，
+            // UI 停在 CONNECTING。这里先判定，再保证状态离开 CONNECTING。
+            when (
+                ConnectionRecoveryPolicy.onConnectFailed(
+                    state = stateMachine.current,
+                    attempt = reconnectAttempt.get() + 1,
+                    retryPending = reconnectPending,
+                    maxAttempts = MAX_RECONNECT_ATTEMPTS,
+                )
+            ) {
+                ConnectFailureOutcome.GiveUp ->
+                    stateMachine.onAuthFailed(System.currentTimeMillis())
+
+                ConnectFailureOutcome.WaitForScheduledRetry ->
+                    // 重连 job 已在跑：仍必须离开 CONNECTING，否则就是「永久连接中」。
+                    stateMachine.onReconnectScheduled(System.currentTimeMillis())
+
+                ConnectFailureOutcome.ScheduleRetry ->
+                    scheduleReconnect()
             }
-            scheduleReconnect()
         }
     }
 
     fun disconnect() {
         reconnectJob?.cancel()
         reconnectJob = null
+        reconnectPending = false
         heartbeatJob?.cancel()
         heartbeatJob = null
         cancelHandshakeWatchdog()
         heartbeatActive = false
         webSocket?.close(1000, "manual disconnect")
         webSocket = null
-        isConnected.set(false)
-        isConnecting.set(false)
-        onConnectionStateChange?.invoke(ConnectionState.DISCONNECTED)
+        stateMachine.onDisconnected(System.currentTimeMillis())
     }
+
+    /**
+     * 是否已经卡在中间态（CONNECTING / RECONNECTING）超过阈值。
+     *
+     * 供 FGS 看门狗使用：旧看门狗无条件跳过 CONNECTING，而 [onClosing] 又会取消
+     * 握手看门狗，两者叠加导致无人可救、UI 永久停在「连接中」。
+     */
+    fun isConnectionStuck(): Boolean =
+        stateMachine.shouldForceRecovery(System.currentTimeMillis(), reconnectPending)
 
     fun destroy() {
         disconnect()
@@ -201,20 +230,28 @@ class QQBotWebSocketClient(
             }
             when (payload.op) {
                 opDispatch -> {
-                    if (payload.t == "READY") {
-                        payload.d?.let {
-                            val ready = json.decodeFromJsonElement<QQReadyData>(it)
-                            sessionId = ready.sessionId
+                    if (payload.t == READY_EVENT || payload.t == RESUMED_EVENT) {
+                        // RESUMED（RESUME 成功）与 READY 都是「会话已建立」，必须走同一套收尾。
+                        //
+                        // 只认 READY 的后果（回归根因）：重启后走 RESUME 的分支永远不进入
+                        // CONNECTED → 握手看门狗在 HANDSHAKE_TIMEOUT_MS(30s) 后判定死链并强制
+                        // 断开重连 → 每个周期都收到 RESUMED 却仍停在中间态 → 每 30 秒无限重连；
+                        // 且 reconnectAttempt 永不归零，最终撞上 MAX_RECONNECT_ATTEMPTS 永久放弃。
+                        // 真机日志特征：[Repo] dispatch type=RESUMED 严格每 30 秒出现一次。
+                        if (payload.t == READY_EVENT) {
+                            payload.d?.let {
+                                val ready = json.decodeFromJsonElement<QQReadyData>(it)
+                                sessionId = ready.sessionId
 
-                            scope.launch { tokenStore.setSessionId(ready.sessionId) }
-                            SecureLog.i(TAG, "READY: sessionId=${ready.sessionId}, bot=${ready.user?.username}")
+                                scope.launch { tokenStore.setSessionId(ready.sessionId) }
+                                SecureLog.i(TAG, "READY: sessionId=${ready.sessionId}, bot=${ready.user?.username}")
+                            }
                         }
 
-                        isConnected.set(true)
-                        isConnecting.set(false)
+                        QQBotDebugLog.log("[WS] handshake settled by " + payload.t)
                         reconnectAttempt.set(0)
                         cancelHandshakeWatchdog()
-                        onConnectionStateChange?.invoke(ConnectionState.CONNECTED)
+                        stateMachine.onReady(System.currentTimeMillis())
                     }
                     scope.launch { onEvent(payload) }
                 }
@@ -238,8 +275,6 @@ class QQBotWebSocketClient(
                         return
                     }
                     startHeartbeat(heartbeatIntervalMs)
-
-                    isConnecting.set(false)
                 }
                 opReconnect -> {
                     SecureLog.w(TAG, "Server requested reconnect")
@@ -253,9 +288,9 @@ class QQBotWebSocketClient(
                         tokenStore.setLastSequence(0)
                     }
 
-                    if (reconnectAttempt.get() >= 5) {
-                        onConnectionStateChange?.invoke(ConnectionState.AUTH_FAILED)
-                    }
+                    // 这里原先在 attempt>=5 时直接 invoke(AUTH_FAILED)，但它紧接着就被
+                    // reconnect() → disconnect() → DISCONNECTED 覆盖，用户从未看到过。
+                    // 现在 AUTH_FAILED 只由状态机在重连预算真正耗尽时发出（终态）。
                     reconnect()
                 }
                 opHeartbeatAck -> {
@@ -299,7 +334,6 @@ class QQBotWebSocketClient(
                 return@launch
             }
             startHeartbeat(heartbeatIntervalMs)
-            isConnecting.set(false)
         }
     }
 
@@ -361,7 +395,7 @@ class QQBotWebSocketClient(
     }
 
     suspend fun connectWithFreshToken() = connectMutex.withLock {
-        if (isConnected.get()) return
+        if (stateMachine.isConnected()) return
 
         // 用户主动重试：重置重连计数，避免上一轮失败次数累计导致直接 AUTH_FAILED
         reconnectAttempt.set(0)
@@ -400,18 +434,16 @@ class QQBotWebSocketClient(
     }
 
     private fun cleanupConnectionState() {
-        val wasConnected = isConnected.get()
-        isConnected.set(false)
-        isConnecting.set(false)
         heartbeatActive = false
         lastHeartbeatAckMs = 0L
         heartbeatAckTracker.reset()
         heartbeatJob?.cancel()
         heartbeatJob = null
         cancelHandshakeWatchdog()
-        if (wasConnected) {
-            onConnectionStateChange?.invoke(ConnectionState.DISCONNECTED)
-        }
+        // 旧实现是 `if (wasConnected) { invoke(DISCONNECTED) }`：卡在 CONNECTING 时
+        // （wasConnected=false）连状态回调都不发。现在状态迁移交给状态机，
+        // 中间态不会被静默吞掉——随后的 scheduleReconnect() 必然把它推出去。
+        stateMachine.onTransportLost(System.currentTimeMillis())
     }
 
     /** 握手看门狗：onOpen 后 HANDSHAKE_TIMEOUT_MS 内未进入 CONNECTED（收到 READY）则强制断开重连 */
@@ -419,7 +451,7 @@ class QQBotWebSocketClient(
         cancelHandshakeWatchdog()
         handshakeWatchdogJob = scope.launch {
             delay(HANDSHAKE_TIMEOUT_MS)
-            if (isConnected.get()) return@launch
+            if (stateMachine.isConnected()) return@launch
             SecureLog.w(TAG, "Handshake timeout: no READY within ${HANDSHAKE_TIMEOUT_MS}ms, forcing reconnect")
             val stale = webSocket
             webSocket = null
@@ -435,21 +467,35 @@ class QQBotWebSocketClient(
     }
 
     private fun scheduleReconnect() {
-        if (reconnectJob?.isActive == true) return
+        if (reconnectPending) return
+        reconnectPending = true
         reconnectJob = scope.launch {
             val attempt = reconnectAttempt.incrementAndGet()
             if (attempt > MAX_RECONNECT_ATTEMPTS) {
                 SecureLog.e(TAG, "Reconnect gave up after $attempt attempts")
-                onConnectionStateChange?.invoke(ConnectionState.AUTH_FAILED)
+                stateMachine.onAuthFailed(System.currentTimeMillis())
+                reconnectPending = false
                 return@launch
             }
-            val delayMs = (attempt * ChatConstants.QQ_BOT_RECONNECT_BACKOFF_BASE_MS).coerceAtMost(ChatConstants.QQ_BOT_RECONNECT_MAX_DELAY_MS)
+            val delayMs = ConnectionRecoveryPolicy.backoffMs(
+                attempt = attempt,
+                baseMs = ChatConstants.QQ_BOT_RECONNECT_BACKOFF_BASE_MS,
+                maxDelayMs = ChatConstants.QQ_BOT_RECONNECT_MAX_DELAY_MS,
+            )
             SecureLog.i(TAG, "Scheduling reconnect in ${delayMs}ms (attempt $attempt)")
-            onConnectionStateChange?.invoke(ConnectionState.RECONNECTING)
-            delay(delayMs)
-            if (isActive) {
-                connect()
+            // 进入 RECONNECTING：终态之外的状态一律不得长期保持，故必然有后续事件。
+            stateMachine.onReconnectScheduled(System.currentTimeMillis())
+            try {
+                delay(delayMs)
+            } catch (cancelled: CancellationException) {
+                reconnectPending = false
+                throw cancelled
             }
+            // 必须在 connect() **之前**清除：connect() 失败时会再次调用
+            // scheduleReconnect()，若此时 reconnectPending 仍为 true 就会被判定为
+            // 「已有重连在途」而不再排程，导致退避循环只跑一轮就永久卡在 RECONNECTING。
+            reconnectPending = false
+            connect()
         }
     }
 
@@ -472,5 +518,9 @@ class QQBotWebSocketClient(
 
         /** 握手超时：超出后视为死链（服务端不回 HELLO/READY），强制重连 */
         private const val HANDSHAKE_TIMEOUT_MS = 30_000L
+
+        /** 握手成功事件：READY（全新会话）与 RESUMED（会话恢复）同等意义。 */
+        private const val READY_EVENT = "READY"
+        private const val RESUMED_EVENT = "RESUMED"
     }
 }

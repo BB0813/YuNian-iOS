@@ -4,6 +4,7 @@ import android.content.Context
 import com.yunian.ai.agent.host.AgentToolHost
 import com.yunian.ai.agent.sticker.StickerPreferenceFacade
 import com.yunian.ai.agent.uniffi.AgentTurnRequest
+import com.yunian.ai.agent.uniffi.AgentTurnResult
 import com.yunian.ai.agent.uniffi.ImageInput
 import com.yunian.ai.common.BanManager
 import com.yunian.ai.common.ContentFilter
@@ -26,6 +27,7 @@ import com.yunian.ai.domain.MemoryProvider
 import com.yunian.ai.domain.DialogueRequest
 import com.yunian.ai.domain.DialogueResult
 import com.yunian.ai.domain.ServiceRegistry
+import com.yunian.ai.domain.dialogue.DialogueTurnSnapshot
 import com.yunian.ai.domain.imagegen.ImageGenProtocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -67,6 +69,9 @@ class AgentDialogueCoordinator(
     private val apiConfigRepository: ApiConfigRepository
         get() = ServiceRegistry.getOrThrow(ApiConfigRepository::class.java)
 
+    /** 确认门守卫（Commerce 工具在无确认界面的通道回合上 fail-closed 自动拒绝 + 有限次重跑）。 */
+    private val agentConfirmGuard = AgentConfirmGuard()
+
     override suspend fun generateReply(request: DialogueRequest): DialogueResult =
         withContext(Dispatchers.IO) {
             val companionId = request.companionId
@@ -81,6 +86,12 @@ class AgentDialogueCoordinator(
             }
 
             val imagePath = request.imagePath
+            // 通道身份由调用方声明（DialogueRequest.channelKey）——本中间层无法从
+            // companionId / 文本推断消息是从 QQ 还是微信来的。该字段是**通道自身的身份**
+            // （通道侧日志 / 观测；通道插件化时每个插件显式声明自己是谁），
+            // 能力预授权白名单（core:domain CapabilityGrantStore）**只按 (伴侣 × 工具) 命中，
+            // 不含通道维度**，装配入口见 runTurn 里的 AgentFacade.toolDefinitionsFor。
+            // 因此本方法**不再把 channelKey 往下传**：本文件内没有任何一处读它（见 runTurn KDoc）。
             if (imagePath != null) {
                 return@withContext generateVisionReply(companionId, companion, imagePath)
             }
@@ -119,8 +130,11 @@ class AgentDialogueCoordinator(
         val history = chatRepository.getRecentMessagesSync(companionId, limit = 30)
             .filterDecrypted()
 
-        val aiTextRaw = runTurn(companionId, history, imagePath = null)
-            ?: return DialogueResult(replyText = "抱歉，我暂时无法处理这条消息。", blocked = true)
+        // runTurn 返回 null = Agent 回合根本没跑起来；outcome.replyText 为 null = 本轮无可见文本。
+        // 两条分支的文案 / blocked 与改动前逐字一致（原先由同一个 `?:` 兜住两者）。
+        val outcome = runTurn(companionId, history, imagePath = null)
+            ?: return textTurnFailedReply()
+        val aiTextRaw = outcome.replyText ?: return textTurnFailedReply()
 
         // 画面描述绝不能出现在消息或聊天记录里：统一走 ImageGenProtocol 清洗
         val aiText = sanitizeImageGen(aiTextRaw)
@@ -162,6 +176,9 @@ class AgentDialogueCoordinator(
             replyText = aiText,
             blocked = false,
             assistantMessageId = aiMessageId.takeIf { it > 0 },
+            // 结构化投影（P3-3b）：发生在确认门守卫之后、ImageGenProtocol 清洗与
+            // ContentFilter 输出过滤之后——快照里的每段文本都出自上面那条已过滤的 aiText。
+            turn = projectTurn(outcome, aiText),
         )
     }
 
@@ -187,11 +204,9 @@ class AgentDialogueCoordinator(
         val history = chatRepository.getRecentMessagesSync(companionId, limit = 30)
             .filterDecrypted()
 
-        val aiTextRaw = runTurn(companionId, history, imagePath = imagePath)
-            ?: return DialogueResult(
-                replyText = "图片识别过程中出现错误，请稍后重试或发送文字描述。",
-                blocked = false,
-            )
+        val outcome = runTurn(companionId, history, imagePath = imagePath)
+            ?: return visionTurnFailedReply()
+        val aiTextRaw = outcome.replyText ?: return visionTurnFailedReply()
 
         val aiText = sanitizeImageGen(aiTextRaw)
 
@@ -233,6 +248,8 @@ class AgentDialogueCoordinator(
             replyText = aiText,
             blocked = false,
             assistantMessageId = aiMessageId.takeIf { it > 0 },
+            // 视觉回合与文本回合共用同一套投影（同一份已清洗 + 已过滤的 aiText）。
+            turn = projectTurn(outcome, aiText),
         )
     }
 
@@ -240,19 +257,45 @@ class AgentDialogueCoordinator(
 
     /**
      * 通道对话同样消费 Native 工具事件；技能/记忆调用后必须留出回复轮次。
+     *
+     * 返回 [TurnOutcome]：文本兜底（[AgentTurnReplyText.resolve]，与改动前逐字一致）**加上**
+     * 守卫收束后的原始 [AgentTurnResult]，供调用方在清洗 + 过滤之后做结构化投影。
+     * 返回 null 的语义与改动前一致：Agent 回合根本没跑起来（`AgentFacade.runTurn` 抛错 / 返回 null）。
+     *
+     * ## 为什么这里**没有** channelKey 参数
+     * 本方法曾经接收 `channelKey`，但函数体**从未读取它**——它只被
+     * [generateTextReply] / [generateVisionReply] 原样转发进来。通道身份只在入口处
+     * （`DialogueRequest.channelKey`）有意义：那是**通道自身的身份**，用于通道侧日志 /
+     * 观测，以及通道插件化时「每个插件显式声明自己是谁」。
+     *
+     * 授权侧与它无关：工具装配的唯一入口是 `AgentFacade.toolDefinitionsFor`，它按
+     * (伴侣 × 工具) 折叠（`CapabilityGrantStore.decisionsFor(companionId)` 的签名里
+     * 根本没有通道参数），**不含通道维度**。
+     *
+     * 因此保留一个谁都读不到的参数只会制造「本中间层是通道感知的」这一**假信号**：
+     * 读代码的人会以为通道差异在此处生效。P3 若真需要它，加回来的成本是一行参数
+     * ——比留下一个恒被忽略的形参便宜得多。
      */
     private suspend fun runTurn(
         companionId: Long,
         history: List<com.yunian.ai.database.model.ChatMessage>,
         imagePath: String?,
-    ): String? {
+    ): TurnOutcome? {
         syncRuntimeConfig()
         val request = AgentTurnRequest(
             groupId = null,
             historyJson = serializeHistoryJson(history.map { it.toAiChatMessage() }),
+            // 工具装配的**唯一入口**：AgentFacade.toolDefinitionsFor 同时完成
+            // 「领域 AiTool → Rust ToolDefinition」与「工具授权折叠」。
+            // 授权只按 (伴侣 × 工具) 命中，**不含通道维度**。通道身份（`DialogueRequest.channelKey`）
+            // 在入口处即被消费，不进本方法（见本函数 KDoc「为什么这里没有 channelKey 参数」）。
+            // 无决定 / 存储读失败时其 category 与本改动前逐字一致（fail-closed）。
             tools = (AgentFacade.memoryToolDefinitions(context) +
                 AgentFacade.skillToolDefinitions() +
-                com.yunian.ai.domain.ToolRegistry.availableTools().map { AgentFacade.toolDefinition(it) })
+                AgentFacade.toolDefinitionsFor(
+                    companionId = companionId,
+                    tools = com.yunian.ai.domain.ToolRegistry.availableTools(),
+                ))
                 .distinctBy { it.name },
             maxRounds = 6u,
             toolChoice = "auto",
@@ -268,20 +311,19 @@ class AgentDialogueCoordinator(
             SecureLog.e(TAG, "runTurn failed, companion=$companionId", it)
         }.getOrNull() ?: return null
         // Commerce 类工具的确认门在通道侧没有界面可确认：默认拒绝（一次性）后重跑回合，
-        // 让模型改用文字回应，而不是把用户晾在「需要确认」上。
-        var confirmGuard = 0
-        while (result.finishedReason == "confirm_pending" && confirmGuard < 3) {
-            val pending = result.events.firstOrNull { it.kind == "confirm_request" } ?: break
-            confirmGuard += 1
-            SecureLog.w(TAG, "confirm gate on non-interactive channel, auto-reject: ${pending.text}")
-            AgentFacade.rejectTool(context, pending.text, pending.extra)
-            result = runCatching {
-                AgentFacade.runTurn(request, context, companionId, toolHost)
-            }.onFailure {
-                SecureLog.e(TAG, "runTurn after auto-reject failed, companion=$companionId", it)
-            }.getOrNull() ?: break
-        }
-        return AgentTurnReplyText.resolve(result.events, result.finalText, result.finishedReason)
+        // 让模型改用文字回应，而不是把用户晾在「需要确认」上。循环语义收在 [AgentConfirmGuard]
+        // （群聊共用同一份实现），此处只做接线，tag / 文案 / 上限均与抽取前逐字一致。
+        result = agentConfirmGuard.drive(
+            tag = TAG,
+            initial = result,
+            rerunFailureMessage = "runTurn after auto-reject failed, companion=$companionId",
+            runTurn = { AgentFacade.runTurn(request, context, companionId, toolHost) },
+            rejectTool = { name, args -> AgentFacade.rejectTool(context, name, args) },
+        )
+        return TurnOutcome(
+            replyText = AgentTurnReplyText.resolve(result.events, result.finalText, result.finishedReason),
+            agentResult = result,
+        )
     }
 
     private suspend fun syncRuntimeConfig() {
@@ -343,7 +385,12 @@ class AgentDialogueCoordinator(
         }
     }
 
-    /** 安全拦截回复：落库 + 返回 blocked 结果。 */
+    /**
+     * 安全拦截回复：落库 + 返回 blocked 结果。
+     *
+     * **不携带任何回合快照**（`turn` 保持默认 null）：拦截路径绝不允许把未过滤的原始事件文本
+     * 带出去，调用方只能发送这里写死的安全话术。
+     */
     private suspend fun blockedReply(companionId: Long, text: String): DialogueResult {
         val blockedId = messageWriter.enqueueChat(
             ChatMessage(
@@ -373,6 +420,43 @@ class AgentDialogueCoordinator(
 
     private fun List<com.yunian.ai.database.model.ChatMessage>.toAiChatMessages() =
         map { it.toAiChatMessage() }
+
+    /**
+     * 结构化投影的**安全出口**（P3-3b）。
+     *
+     * 快照是新增契约，投影失败不得影响既有回合（与记忆提取同一手法：runCatching + 记日志 + 降级）：
+     * 失败 → `turn = null`，调用方回退 [DialogueResult.replyText]，行为与改动前一致。
+     * 降级方向只会「少给快照」，不会「多给未过滤文本」。
+     */
+    private fun projectTurn(outcome: TurnOutcome, aiText: String): DialogueTurnSnapshot? =
+        runCatching {
+            DialogueTurnMapper.project(result = outcome.agentResult, cleanedReplyText = aiText)
+        }.onFailure {
+            SecureLog.w(TAG, "turn projection failed, fallback to replyText: ${it.message}")
+        }.getOrNull()
+
+    /** 文本回合失败的统一结果（Agent 抛错 / 本轮无可见文本）：blocked 且不带回合快照。 */
+    private fun textTurnFailedReply() = DialogueResult(
+        replyText = "抱歉，我暂时无法处理这条消息。",
+        blocked = true,
+    )
+
+    /** 视觉回合失败的统一结果：既有语义是 `blocked = false`，逐字保留。 */
+    private fun visionTurnFailedReply() = DialogueResult(
+        replyText = "图片识别过程中出现错误，请稍后重试或发送文字描述。",
+        blocked = false,
+    )
+
+    /**
+     * 一轮 Agent 回合的载体：文本兜底 + 守卫收束后的原始结果。
+     *
+     * [replyText] 为 null 表示 [AgentTurnReplyText.resolve] 判定本轮没有可见文本（调用方走失败兜底）；
+     * [agentResult] **只在投影时使用**（[DialogueTurnMapper.project]），不得直接外发。
+     */
+    private class TurnOutcome(
+        val replyText: String?,
+        val agentResult: AgentTurnResult,
+    )
 
     companion object {
         private const val TAG = "AgentDialogueCoordinator"

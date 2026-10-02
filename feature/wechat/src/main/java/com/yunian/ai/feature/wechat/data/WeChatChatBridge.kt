@@ -23,7 +23,9 @@ import com.yunian.ai.feature.wechat.data.model.M0
 import com.yunian.ai.feature.wechat.data.model.M1
 import com.yunian.ai.feature.wechat.data.model.M1Type
 import com.yunian.ai.feature.wechat.data.model.M2
+import com.yunian.ai.feature.wechat.service.WeChatOutboundDropLog
 import com.yunian.ai.feature.wechat.service.WeChatServiceLocator
+import com.yunian.ai.wechat.map.WeChatOutboundText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -258,19 +260,25 @@ class WeChatChatBridge(
         forceDeliver: Boolean,
         userText: String = "",
     ): String? {
+        // 消费判定（P3-3c，**防双发**）：turn != null → **只**消费 events；
+        // turn == null → 回退 replyText（与改动前逐字一致）。
+        // 两者在 WeChatTurnProjection.of 的 if 上严格互斥，投影结果是本次唯一的文本来源。
+        val projection = WeChatTurnProjection.of(result.replyText, result.turn)
         val outcome = deliverDialogueResultInternal(
             companionId = companionId,
             wechatUserId = wechatUserId,
             result = result,
             forceDeliver = forceDeliver,
+            projection = projection,
         )
-        // 生图：与 App 内聊天同一套判定逻辑（ImageGenService），失败绝不影响聊天主流程
+        // 生图：与 App 内聊天同一套判定逻辑（ImageGenService），失败绝不影响聊天主流程。
+        // 输入文本与文本出站同源（turn 非空时即 events），顺序与调用时机均未变。
         runCatching {
             generateAndForwardImages(
                 companionId = companionId,
                 wechatUserId = wechatUserId,
                 userText = userText,
-                aiText = result.replyText,
+                aiText = projection.sourceText,
                 shouldForward = outcome.shouldForward,
             )
         }.onFailure { e ->
@@ -289,12 +297,14 @@ class WeChatChatBridge(
         wechatUserId: String,
         result: WeChatDialogueResult,
         forceDeliver: Boolean,
+        projection: WeChatTurnProjection,
     ): DialogueDelivery {
-        val aiResponseText = result.replyText
+        // 唯一文本来源：turn 非空时 = events 连接，否则 = replyText（逐字未变的回退）。
+        val aiResponseText = projection.sourceText
         val aiMessageId = result.assistantMessageId ?: 0L
 
         if (aiMessageId > 0 && aiResponseText.isNotBlank()) {
-            val processed = runCatching { extractStickerTags(aiResponseText) }
+            val processed = runCatching { extractStickerTags(aiResponseText, projection.eventStickerLabels) }
                 .getOrDefault(Pair(aiResponseText, emptyList<StickerInfo>()))
             if (processed.first.isNotEmpty() && processed.first != aiResponseText) {
                 val messageIds = result.assistantMessageIds.ifEmpty { listOf(aiMessageId) }
@@ -327,8 +337,9 @@ class WeChatChatBridge(
             return DialogueDelivery(aiResponseText.ifBlank { null }, shouldForward = false)
         }
 
-        val (cleanText, stickers) = runCatching { extractStickerTags(aiResponseText) }
-            .getOrDefault(Pair(aiResponseText, emptyList<StickerInfo>()))
+        val (cleanText, stickers) = runCatching {
+            extractStickerTags(aiResponseText, projection.eventStickerLabels)
+        }.getOrDefault(Pair(aiResponseText, emptyList<StickerInfo>()))
 
         android.util.Log.d(
             "WeChatBridge",
@@ -342,25 +353,40 @@ class WeChatChatBridge(
         if (stickers.isNotEmpty() && !isTextMeaningful) {
             android.util.Log.d("WeChatBridge", "Only stickers, no meaningful text to send")
         } else if (isTextMeaningful) {
-            val finalText = normalizeOutboundText(cleanText)
-                .replace(Regex("^[\\[\\]\\s，。！？、]+"), "")
-                .replace(Regex("[\\[\\]\\s，。！？、]+$"), "")
-                .trim()
-            if (finalText.length >= 1) {
-                val contextToken = weChatRepository.getContextToken(wechatUserId)
-                val rootId = weChatRepository.enqueueTextOutbound(
-                    companionId = companionId,
-                    wechatUserId = wechatUserId,
-                    text = finalText,
-                    contextToken = contextToken,
-                    sourceMessageId = aiMessageId.takeIf { it > 0 },
-                )
-                val sent = weChatRepository.drainOutbox()
-                WeChatDebugLog.log("[Bridge] Text delivered rootId=$rootId drainSent=$sent")
-                android.util.Log.d(
-                    "WeChatBridge",
-                    "Text enqueued rootId=$rootId drainSent=$sent",
-                )
+            when (val prepared = WeChatOutboundText.prepare(cleanText)) {
+                is WeChatOutboundText.Prepared.Sendable -> {
+                    val contextToken = weChatRepository.getContextToken(wechatUserId)
+                    val rootId = weChatRepository.enqueueTextOutbound(
+                        companionId = companionId,
+                        wechatUserId = wechatUserId,
+                        text = prepared.text,
+                        contextToken = contextToken,
+                        sourceMessageId = aiMessageId.takeIf { it > 0 },
+                    )
+                    val sent = weChatRepository.drainOutbox()
+                    WeChatDebugLog.log("[Bridge] Text delivered rootId=$rootId drainSent=$sent")
+                    android.util.Log.d(
+                        "WeChatBridge",
+                        "Text enqueued rootId=$rootId drainSent=$sent",
+                    )
+                }
+
+                is WeChatOutboundText.Prepared.Dropped -> {
+                    // 这一轮确实没有可发送的文本：不伪造内容、不强行发送，但必须留证据。
+                    // 旧实现在这里没有任何分支 —— 回复被清洗成空串后完全静默。
+                    WeChatOutboundDropLog.record(
+                        reason = prepared.reason.wireName,
+                        cleanedLength = prepared.cleanedLength,
+                        strippedLength = prepared.strippedLength,
+                        stickerCount = stickers.size,
+                    )
+                    android.util.Log.w(
+                        "WeChatBridge",
+                        "No sendable text this round: reason=" + prepared.reason.wireName +
+                            " cleanedLen=" + prepared.cleanedLength +
+                            " stickers=" + stickers.size,
+                    )
+                }
             }
         }
 
@@ -560,7 +586,22 @@ class WeChatChatBridge(
         private const val TAG = "WeChatChatBridge"
     }
 
-    private fun extractStickerTags(text: String): Pair<String, List<StickerInfo>> {
+    /**
+     * 剥离表情标签并解析本轮要发的表情。
+     *
+     * @param pinnedStickerLabels **结构化快照给出的表情标签**（P3-3c）：
+     *  - `null`（turn == null，回退 replyText）→ 旧行为逐字不变：表情标签由文本正则发现，
+     *    且文本里找不到标签时还有「按 StickerManager 规则在文本里找描述」的随机兜底；
+     *  - 非 `null`（turn != null）→ **表情只认事件**：文本里的 `[标签]` 照旧被剥离
+     *    （纯文本清洗，与改动前一致），但发哪个表情由该列表决定，文本不再参与表情发现，
+     *    随机兜底也必须关闭——否则会发出模型从未要求过的表情。
+     *
+     * 返回 (清洗后的文本, 表情列表)；文本清洗 / outbox / 图片镜像路径均未改动。
+     */
+    private fun extractStickerTags(
+        text: String,
+        pinnedStickerLabels: List<String>? = null,
+    ): Pair<String, List<StickerInfo>> {
         val stickerManager = StickerManager.getInstance(context)
         val systemTags = setOf("语音", "图片", "视频", "文件", "位置", "红包", "转账")
         val stickerRegex = Regex("\\[([^\\[\\]]+?)\\]")
@@ -568,6 +609,16 @@ class WeChatChatBridge(
         val matches = stickerRegex.findAll(text).toList()
 
         val stickers = mutableListOf<StickerInfo>()
+        // turn != null：表情由 Sticker 事件定夺，**不再从文本正则抠**。
+        // 标签 → StickerInfo 仍走既有 StickerManager 匹配（精确优先，再模糊），
+        // 匹配不到就什么都不发（与旧行为里「标签匹配不到」的结局一致）。
+        pinnedStickerLabels?.forEach { label ->
+            val sticker = stickerManager.findStickerByDescriptionExact(label)
+                ?: stickerManager.findStickerByDescription(label)
+            if (sticker != null && stickers.none { it.name == sticker.name }) {
+                stickers.add(sticker)
+            }
+        }
         val sentStickerDescs = mutableSetOf<String>()
         var cleanText = text
 
@@ -587,13 +638,19 @@ class WeChatChatBridge(
             var found = false
             val sticker = stickerManager.findStickerByDescriptionExact(description)
                 ?: stickerManager.findStickerByDescription(description)
-            if (sticker != null) {
-                if (stickers.none { it.name == sticker.name }) {
-                    stickers.add(sticker)
-                    found = true
-                } else {
-                    android.util.Log.d("WeChatBridge", "Duplicate sticker skipped: ${sticker.name}")
+            if (pinnedStickerLabels == null) {
+                if (sticker != null) {
+                    if (stickers.none { it.name == sticker.name }) {
+                        stickers.add(sticker)
+                        found = true
+                    } else {
+                        android.util.Log.d("WeChatBridge", "Duplicate sticker skipped: ${sticker.name}")
+                    }
                 }
+            } else {
+                // 表情已由事件定夺：文本里的这个 [标签] 只做清洗，不参与表情发现；
+                // 但匹配成功就置 found，免得误报 unmatched。
+                found = sticker != null
             }
             sentStickerDescs.add(description)
             sticker?.description?.let { sentStickerDescs.add(it) }
@@ -635,7 +692,9 @@ class WeChatChatBridge(
             .trim()
             .trimStart('，', ',', '.', '。', ' ')
 
-        if (stickers.isEmpty()) {
+        if (stickers.isEmpty() && pinnedStickerLabels == null) {
+            // 旧兜底：文本里没有任何标签时，按 StickerManager 规则在文本里找描述随机配一个表情。
+            // 只在回退路径（turn == null）生效——有结构化快照时表情以事件为准，绝不凭空猜一个。
             val allRules = stickerManager.getAllRules()
             if (allRules.isNotEmpty()) {
                 val matchedStickers = mutableListOf<Pair<StickerInfo, String>>()

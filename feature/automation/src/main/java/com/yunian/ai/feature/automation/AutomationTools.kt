@@ -7,6 +7,8 @@ import com.yunian.ai.domain.AiTool
 import com.yunian.ai.domain.ToolRegistry
 import com.yunian.ai.domain.plugin.LianYuPlugin
 import com.yunian.ai.domain.plugin.PluginContext
+import com.yunian.ai.domain.plugin.PluginKind
+import com.yunian.ai.domain.plugin.PluginManifest
 import com.yunian.ai.domain.plugin.PluginServices
 import com.yunian.ai.feature.automation.data.Automation
 import com.yunian.ai.feature.automation.data.AutomationSchedulePolicy
@@ -317,8 +319,18 @@ class AutomationPlugin(
 
     override val id: String = ID
     override val name: String = "自动化工具"
+    override val kind: PluginKind = PluginKind.TOOL
     override val requires: Set<String> = setOf(PluginServices.TOOLS)
     override val configSchema: String? = null
+
+    override val manifest: PluginManifest = PluginManifest(
+        id = ID,
+        name = "自动化工具",
+        version = "1.0.0",
+        kind = PluginKind.TOOL,
+        requires = requires.sorted(),
+        configSchema = null,
+    )
 
     override fun setup(ctx: PluginContext) {
         val registry = ctx.inject<ToolRegistry>(PluginServices.TOOLS)

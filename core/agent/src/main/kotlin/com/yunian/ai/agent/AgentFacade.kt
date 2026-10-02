@@ -29,6 +29,8 @@ import com.yunian.ai.agent.uniffi.ToolCategory
 import com.yunian.ai.agent.uniffi.ToolDefinition
 import com.yunian.ai.agent.uniffi.ToolHost
 import com.yunian.ai.common.DeviceIdProvider
+import com.yunian.ai.domain.CapabilityGrantStore
+import com.yunian.ai.domain.ServiceRegistry
 
 /**
  * Agent 核心门面（纯增量模块，不触碰既有 Agent 调用链）
@@ -623,21 +625,16 @@ object AgentFacade {
     /**
      * 领域 [com.yunian.ai.domain.AiTool] → Rust [ToolDefinition]。
      * feature 层把全局工具（ToolRegistry）转成 Rust 会话工具定义传入 AgentTurnRequest。
-     */
-    /**
-     * 领域 [com.yunian.ai.domain.AiTool] → Rust [ToolDefinition]。
-     * feature 层把全局工具（ToolRegistry）转成 Rust 会话工具定义传入 AgentTurnRequest。
      *
      * 归档工具集（Hermes TOOLSETS）：AiTool.toolsets 为空时保持空（= 通用 General），
      * 不再硬塞「domain」；available 取 AiTool 静态标记（动态 check_fn 由 ToolRegistry.availableTools 提前过滤）。
      *
-     * category 推导：显式 [category] 参数优先；否则按工具集自动映射
-     * （空→GENERAL、commerce→COMMERCE、memory→MEMORY、chat→CHAT、其余→CUSTOM），
-     * 与 Rust ToolCategory 语义对齐（COMMERCE 类工具需要用户确认，如瑞幸下单）。
+     * category 推导：显式 [category] 参数优先；装配期请用 [toolDefinitionsFor]（它按伴侣的有效决定
+     * 逐工具调用 [deriveToolCategory]），只有在需要覆盖单个工具类别时才显式传 [category]。
      */
     fun toolDefinition(
         tool: com.yunian.ai.domain.AiTool,
-        category: ToolCategory = deriveToolCategory(tool.toolsets),
+        category: ToolCategory,
     ): ToolDefinition = ToolDefinition(
         name = tool.name,
         description = tool.description,
@@ -647,13 +644,119 @@ object AgentFacade {
         available = tool.isAvailable(),
     )
 
-    /** 按工具集推导 [ToolCategory]（Hermes TOOLSETS 分组 → 类别语义；空 = 通用）。 */
-    private fun deriveToolCategory(toolsets: Set<String>): ToolCategory = when {
-        toolsets.isEmpty() -> ToolCategory.GENERAL
-        "commerce" in toolsets -> ToolCategory.COMMERCE
-        "memory" in toolsets -> ToolCategory.MEMORY
-        "chat" in toolsets -> ToolCategory.CHAT
+    /**
+     * 按「工具自身声明 + 该伴侣的显式授权决定」推导 Rust [ToolCategory]
+     * （Hermes TOOLSETS 分组 + 确认语义 → 类别语义；空工具集 = 通用）。
+     *
+     * **这里是「工具是否需要用户确认」的接线点。** Rust 侧唯一的门控判定
+     * （`agent-native/src/agent.rs`：`definition.category == ToolCategory::Commerce`）
+     * 目前以 COMMERCE 作为「需要确认」的载体；而 [ToolDefinition] 的 JSON 投影只取
+     * name / description / parameters_json，既不带 category 也不带 requiresConfirmation，
+     * 所以「这个工具要不要确认」只能在**装配期**折进 category——否则该声明在 Agent 链路上
+     * 没有任何消费者（等于摆设）。
+     *
+     * 判定优先级（三档，实现收在 core:domain 的 `CapabilityDefaults.requiresConfirm`，
+     * 与设置页开关**共用同一实现**，避免两边漂移）：
+     * 1. [decisions] 里该工具显式为 `true` ⇒ 不需要确认 ⇒ 回落到 [deriveToolsetCategory]；
+     * 2. [decisions] 里该工具显式为 `false` ⇒ 需要确认 ⇒ **COMMERCE**
+     *    （连本来不需要确认的安全工具也能被用户显式改成「必须先确认」）；
+     * 3. [decisions] 里没有该工具 ⇒ 回到**工具自身声明** `requiresConfirmation`
+     *    （true ⇒ COMMERCE，false ⇒ [deriveToolsetCategory]）。
+     *
+     * 工具集只决定「归档 / 分组」，确认语义决定「治理等级」，后者必须在门控上生效
+     * （如 requiresConfirmation = true 的 memory 工具仍须确认）。
+     * 无显式决定时映射与历史行为逐字一致，不改动任何既有类别。
+     *
+     * 将来若给 [ToolDefinition] 加显式 `requires_confirm` 字段（Rust 门控直接读该字段），
+     * 本函数的确认分支应当一并删除：确认语义回归字段本身，本函数退化为纯工具集分组映射。
+     *
+     * @param decisions 该伴侣视角下的有效决定表（工具名 → 是否允许），来自
+     *   `CapabilityGrantStore.decisionsFor`；空表 = 无任何显式决定。
+     */
+    internal fun deriveToolCategory(
+        tool: com.yunian.ai.domain.AiTool,
+        decisions: Map<String, Boolean>,
+    ): ToolCategory = when {
+        com.yunian.ai.domain.CapabilityDefaults.requiresConfirm(
+            explicit = decisions[tool.name],
+            toolRequiresConfirmation = tool.requiresConfirmation,
+        ) -> ToolCategory.COMMERCE
+
+        else -> deriveToolsetCategory(tool)
+    }
+
+    /**
+     * 纯工具集映射（不含确认语义分支）。**行为与重构前的 `deriveToolCategory` 逐字一致**，
+     * 拆出来只是为了让「确认语义」这条唯一的差异可以被单独表达
+     * （显式允许 ⇒ 跳过确认；显式禁止 ⇒ 强制确认）。
+     */
+    private fun deriveToolsetCategory(tool: com.yunian.ai.domain.AiTool): ToolCategory = when {
+        tool.toolsets.isEmpty() -> ToolCategory.GENERAL
+        "commerce" in tool.toolsets -> ToolCategory.COMMERCE
+        "memory" in tool.toolsets -> ToolCategory.MEMORY
+        "chat" in tool.toolsets -> ToolCategory.CHAT
         else -> ToolCategory.CUSTOM
+    }
+
+    // ── 工具授权（CapabilityGrant）：唯一折叠点 ──
+
+    /**
+     * **工具授权的唯一折叠点**：按伴侣装配本回合的工具定义（**不含通道维度**）。
+     *
+     * 为什么需要它：Rust 侧唯一的确认门判定是
+     * `definition.category == ToolCategory::Commerce`（agent-native/src/agent.rs），而
+     * `category` 只在**装配期**由 [deriveToolCategory] 算出来。因此在装配期折叠是放行
+     * 「已授权工具」的**唯一**位置——本函数也是唯一的入口，所有工具装配点都必须走它，
+     * 否则同一次请求里会出现两套互相矛盾的类别（有的工具走授权表、有的不走）。
+     *
+     * 折叠语义（**只改变被显式决定的那一个工具，其余一律维持现状**）：
+     * - 该伴侣的有效决定表里 `toolName → true` ⇒ 不再强制 COMMERCE，
+     *   类别回落到它自身的工具集映射（生产确认类工具 toolsets 为空 ⇒ GENERAL）；
+     * - 该伴侣的有效决定表里 `toolName → false` ⇒ 强制 COMMERCE（**即使工具自己没声明要确认**）；
+     * - 表里没有该工具（无决定 / 无记录 / 存储读取失败 / 存储未注册）
+     *   ⇒ 调用**同一个** [deriveToolCategory]，类别与引入授权表前**逐字一致**。
+     *
+     * 注意：授权只解除 / 施加「确认」这一道；工具**自身工具集**本来就是 `commerce` 的工具
+     * （如历史遗留的 commerce 工具集）仍然得到 COMMERCE，仍会走确认门。
+     * 这是刻意的保守选择——授权表不是「关掉确认门」，而是「承认用户已经逐条同意过的那条组合」。
+     *
+     * fail-closed 保证：[resolveDecisions] 在「存储未注册 / 读取抛异常」时返回空表，
+     * 于是所有工具都走 [deriveToolCategory]，行为与没有授权表时完全一致。
+     *
+     * @param companionId 目标伴侣 ID（来自 `DialogueRequest.companionId`）。
+     * @param tools 本次要装配的领域工具（通常是 `ToolRegistry.availableTools()`）。
+     */
+    suspend fun toolDefinitionsFor(
+        companionId: Long,
+        tools: List<com.yunian.ai.domain.AiTool>,
+    ): List<ToolDefinition> {
+        val decisions = resolveDecisions(companionId)
+        return tools.map { tool -> toolDefinition(tool, deriveToolCategory(tool, decisions)) }
+    }
+
+    /**
+     * 解析「伴侣 [companionId] 视角下的有效决定表」。
+     *
+     * fail-closed 的两条路径：
+     * 1. 存储未注册（如 App 尚未 `ServiceRegistry` 绑定，或单元测试环境）⇒ 空表；
+     * 2. 读取抛异常 ⇒ 空表（吞掉，绝不让授权表读取失败影响对话回合）。
+     *
+     * 此处**刻意不记日志**：`SecureLog` 底层是 `android.util.Log`，在纯 JVM 单测里会抛
+     * `RuntimeException("Stub!")`，在这里兜一层日志反而会把 fail-closed 兜底路径变成崩溃点。
+     * 真实存储实现（`CapabilityGrantStoreImpl`）自身已记录读取失败原因，可观测性不减。
+     *
+     * `CancellationException` 单独重抛（对齐 [AgentConfirmGuard] 的 U2 结论）：
+     * 取消不是「读取失败」，吞掉它会让已取消的作用域继续往下装配工具。
+     */
+    internal suspend fun resolveDecisions(companionId: Long): Map<String, Boolean> {
+        val store = ServiceRegistry.get(CapabilityGrantStore::class.java) ?: return emptyMap()
+        return try {
+            store.decisionsFor(companionId)
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Throwable) {
+            emptyMap()
+        }
     }
 
     /**

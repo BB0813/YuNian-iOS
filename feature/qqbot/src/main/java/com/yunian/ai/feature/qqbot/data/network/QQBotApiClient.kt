@@ -13,7 +13,12 @@ import java.util.concurrent.TimeUnit
 
 class QQBotApiClient(private val tokenStore: QQBotTokenStore) {
 
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        // 主动消息的 msg_id/msg_seq/message_reference 必须真正缺席；null 字段不能进请求体。
+        explicitNulls = false
+    }
     private val tokenMutex = Mutex()
 
     private val baseOkHttpClient: OkHttpClient by lazy {
@@ -62,10 +67,22 @@ class QQBotApiClient(private val tokenStore: QQBotTokenStore) {
                 throw IllegalStateException("获取 QQ Bot AccessToken 失败: ${response.code()} ${response.errorBody()?.string()}")
             }
             val body = response.body()!!
+            val expireAtMs = System.currentTimeMillis() + body.expiresIn * 1000
             tokenStore.setAccessToken(body.accessToken)
-            tokenStore.setTokenExpireAt(System.currentTimeMillis() + body.expiresIn * 1000)
+            tokenStore.setTokenExpireAt(expireAtMs)
 
+            // clearApiCache() 会把 cachedToken 一并置空，因此回填必须在它之后。
+            //
+            // 不回填的后果（回归根因）：cachedToken 此前只由 createAuthenticatedRestApi() 赋值，
+            // 而它只在「发起一次 REST 调用」时才被调到。重启后尚无任何 REST 调用，
+            // cachedToken 恒为 null → QQBotWebSocketClient 的 sendIdentify()/sendResume()
+            // 走 getCachedToken() 全部拿到 null 并返回 false → refreshTokenAndRetryHandshake()
+            // 虽然刷新出了新 token，却只丢弃返回值（握手只认 getCachedToken()）
+            // → 刷新后依旧发不出握手 → reconnect() → 无限重连且永远连不上。
             clearApiCache()
+            cachedToken = body.accessToken
+            cachedTokenExpireAt = expireAtMs
+
             body.accessToken
         }
     }
@@ -131,9 +148,13 @@ class QQBotApiClient(private val tokenStore: QQBotTokenStore) {
             throw IllegalStateException("刷新 QQ Bot AccessToken 失败: ${response.code()}")
         }
         val body = response.body()!!
+        val expireAtMs = System.currentTimeMillis() + body.expiresIn * 1000
         tokenStore.setAccessToken(body.accessToken)
-        tokenStore.setTokenExpireAt(System.currentTimeMillis() + body.expiresIn * 1000)
+        tokenStore.setTokenExpireAt(expireAtMs)
         clearApiCache()
+        // 与 getOrRefreshToken 同一坑：clearApiCache() 之后必须回填，否则握手读不到 token。
+        cachedToken = body.accessToken
+        cachedTokenExpireAt = expireAtMs
         return body.accessToken
     }
 
@@ -149,8 +170,9 @@ class QQBotApiClient(private val tokenStore: QQBotTokenStore) {
         }
 
     companion object {
-        private const val AUTH_BASE_URL = "https://bots.qq.com/"
-        private const val API_BASE_URL = "https://api.sgroup.qq.com/"
+        // 官方 2026-08-10 起所有接口域名统一为 api.bot.qq.com（鉴权与 OpenAPI 同域）
+        private const val AUTH_BASE_URL = "https://api.bot.qq.com/"
+        private const val API_BASE_URL = "https://api.bot.qq.com/"
         private const val TOKEN_REFRESH_MARGIN_MS = 60_000L
     }
 }

@@ -38,7 +38,19 @@ import java.util.concurrent.CopyOnWriteArrayList
  * 本类不做确认决策（决策在 Rust `ConfirmPolicy` / feature 层）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class AgentToolHost(context: Context) : ToolHost {
+class AgentToolHost(
+    context: Context,
+    /**
+     * 本机敏感工具通道开关（**不可变**，只能由宿主在构造会话时传入）：
+     * - `false`（默认）= QQ / 微信等外部桥接、无人值守 Worker、委派 / 评测等一切未知渠道：
+     *   `AiTool.appLocalOnly` 工具**拒绝执行**（稳定 refusal 文本，不回显任何资料内容）；
+     * - `true` = 只由 **App 内单聊 / 群聊**的装配点显式打开。
+     *
+     * 授权来源仅此一个构造参数：模型侧伪造 `argumentsJson` / `contextJson`（哪怕写着
+     * `"channel":"app"`）都不影响判定；不使用 ThreadLocal，也不使用可变全局开关。
+     */
+    private val allowAppLocalTools: Boolean = false,
+) : ToolHost {
 
     companion object {
         private const val TAG = "AgentToolHost"
@@ -110,8 +122,18 @@ class AgentToolHost(context: Context) : ToolHost {
             "错误：工具 $toolName 执行失败：${t.message ?: t.javaClass.simpleName}"
         }
         val elapsed = System.currentTimeMillis() - startedAt
-        toolCalls.add(ToolCallRecord(name = toolName, args = argumentsJson, result = result, elapsedMs = elapsed, ok = ok))
-        Log.i(TAG, "tool done: name=$toolName elapsed=${elapsed}ms ok=$ok result=${result.take(120)}")
+        // 本机敏感工具结果（本机用户资料）不进 ToolCallRecord / 日志明文，统一用固定占位替换；
+        // 其他工具的日志行为保持不变（result 截断 120 字符）。
+        toolCalls.add(
+            ToolCallRecord(
+                name = toolName,
+                args = argumentsJson,
+                result = AppLocalToolGate.resultForRecord(toolName, result),
+                elapsedMs = elapsed,
+                ok = ok,
+            )
+        )
+        Log.i(TAG, "tool done: name=$toolName elapsed=${elapsed}ms ok=$ok result=${AppLocalToolGate.resultForLog(toolName, result)}")
         return result
     }
 
@@ -134,10 +156,9 @@ class AgentToolHost(context: Context) : ToolHost {
 
             toolName == FETCH_DELEGATION_TOOL -> executeFetchDelegation(argumentsJson)
 
-            else -> {
-                val tool = ToolRegistry.get(toolName)
-                if (tool != null) tool.execute(argumentsJson) else "错误：未注册的工具 $toolName"
-            }
+            // ToolRegistry 全局工具：唯一分派点，必须经过本机敏感工具授权门。
+            // 注意 contextJson **刻意不传**：它是模型可见的上下文，不能作为授权依据。
+            else -> dispatchRegistryTool(toolName, argumentsJson, allowAppLocalTools)
         }
 
     /**
@@ -273,4 +294,56 @@ class AgentToolHost(context: Context) : ToolHost {
             "{\"ok\":false}"
         }
     }
+}
+
+/**
+ * 本机敏感工具授权门（执行侧强制，渠道隔离的第二道闸）。
+ *
+ * 与 [ToolRegistry] 的可见性过滤彼此独立：注册表侧解决「模型看不到」，
+ * 本门解决「即使被叫到名字也执行不了」——伪造工具名、伪造参数、伪造上下文，
+ * 或某个装配点漏传 `includeAppLocal`，都拿不到 `AiTool.appLocalOnly` 工具的结果。
+ *
+ * 纯函数、无状态：判定输入只有「注册表里该工具自身的静态归属」与「宿主构造时传入的
+ * 不可变开关」，因此可在 JVM 单测中直接验证；刻意不接收 contextJson，模型的上下文
+ * 自述渠道一律不作为授权依据。
+ */
+internal object AppLocalToolGate {
+
+    /** 本机敏感工具结果在 ToolCallRecord / Log 中的固定占位（不含任何资料内容）。 */
+    const val REDACTED_RESULT = "[本机敏感工具结果已脱敏]"
+
+    /** 该工具名是否指向已注册的本机敏感工具（未注册 / 普通工具 = false）。 */
+    fun isAppLocalTool(toolName: String): Boolean =
+        ToolRegistry.get(toolName)?.appLocalOnly == true
+
+    /** 稳定拒绝文本：不回显参数、不回显资料内容、不泄漏工具内部信息。 */
+    fun rejectionText(toolName: String): String = "错误：工具 $toolName 在本会话不可用"
+
+    /** ToolCallRecord.result：本机敏感工具一律用 [REDACTED_RESULT] 占位。 */
+    fun resultForRecord(toolName: String, result: String): String =
+        if (isAppLocalTool(toolName)) REDACTED_RESULT else result
+
+    /** 日志 result 字段：本机敏感工具脱敏；其余保持既有截断行为（120 字符）。 */
+    fun resultForLog(toolName: String, result: String): String =
+        if (isAppLocalTool(toolName)) REDACTED_RESULT else result.take(120)
+}
+
+/**
+ * [ToolRegistry] 全局工具的**唯一**分派入口（含执行侧授权门）。
+ *
+ * - `allowAppLocalTools = false`（默认 / 未知渠道）：本机敏感工具直接返回
+ *   [AppLocalToolGate.rejectionText]，**不调用其 execute**，因此不可能回显资料内容；
+ * - `allowAppLocalTools = true`：App 内本机会话，正常执行；
+ * - 未注册工具：保持既有「错误：未注册的工具 X」文本。
+ *
+ * 刻意**不接受** `contextJson` 参数（授权只能来自宿主构造标志）。
+ */
+internal suspend fun dispatchRegistryTool(
+    toolName: String,
+    argumentsJson: String,
+    allowAppLocalTools: Boolean,
+): String {
+    val tool = ToolRegistry.get(toolName) ?: return "错误：未注册的工具 $toolName"
+    if (!allowAppLocalTools && tool.appLocalOnly) return AppLocalToolGate.rejectionText(toolName)
+    return tool.execute(argumentsJson)
 }

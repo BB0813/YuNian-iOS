@@ -38,7 +38,10 @@ import com.yunian.ai.domain.ToolRegistry
 import com.yunian.ai.domain.ImageGenerationProvider
 import com.yunian.ai.domain.CoffeeOrderProvider
 import com.yunian.ai.domain.BuiltinCloudAccessPolicy
+import com.yunian.ai.domain.CapabilityGrantStore
 import com.yunian.ai.domain.imagegen.ImageGenService
+import com.yunian.ai.domain.plugin.PluginEnablementStore
+import com.yunian.ai.agent.plugin.PluginBlueprintStatus
 import com.yunian.ai.domain.LorebookProvider
 import com.yunian.ai.domain.McpManager
 import com.yunian.ai.domain.MemoryProvider
@@ -218,8 +221,24 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 try {
                     registerServiceProviders(app)
                     initAgentRuntime(app)
+                    // 蓝图装载的失败**不再静默**：loadDefaultBlueprint 内部已经把结局写进
+                    // PluginBlueprintStatus（进程级可查询）；这里再兜一层，覆盖「连它自己都没接住」
+                    // 的意外异常——同样落进同一个可查询状态，而不是只剩一行日志。
                     runCatching { loadDefaultBlueprint(app) }
-                        .onFailure { SecureLog.e("YuNianApplication", "loadDefaultBlueprint failed", it) }
+                        .onFailure { failure ->
+                            if (failure is CancellationException) throw failure
+                            PluginBlueprintStatus.recordFailure(
+                                reason = "loadDefaultBlueprint 抛出未捕获异常",
+                                blueprintId = null,
+                                failure = failure,
+                            )
+                            SecureLog.e("YuNianApplication", "loadDefaultBlueprint failed", failure)
+                        }
+                    // 停用覆盖：必须在蓝图装载**之后**（蓝图决定装载什么，本机停用记录只做减法）。
+                    // 此处已在 bgScope（AppDispatchers.io）协程内，suspend 直接顺序调用即可：
+                    // 不阻塞主线程、不新建协程作用域 / 线程、不是常驻后台循环，
+                    // 且与 loadDefaultBlueprint 同协程顺序执行 ⇒ 不存在「覆盖与装载竞态」。
+                    applyDisabledPluginOverlay()
                     PerformanceTrace.markStartupStage("ib_blueprint")
                 } catch (e: CancellationException) {
                     throw e
@@ -606,12 +625,37 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
 
             // 统一 AI 对话中间层（core:agent 实现）：
             // 微信 / QQ 桥接层只做消息收发，AI 回合 / 安全 / 落库 / 记忆全部收敛到它。
-            ServiceRegistry.registerSingleton(DialogueCoordinator::class.java) {
-                com.yunian.ai.agent.AgentDialogueCoordinator(app)
-            }
+            // 先建实例、后两处复用：① ServiceRegistry 的懒加载单例工厂 ② 插件宿主预置的
+            // PluginServices.AGENT。两处**必须是同一个实例**（否则通道插件看到的 Agent 与
+            // 桥接层用的不是同一个），因此这里提前构造并用局部变量传递。
+            // 构造本身只存 appContext（其余依赖都是 get()/by lazy 惰性解析），提前构造无副作用。
+            val dialogueCoordinator = com.yunian.ai.agent.AgentDialogueCoordinator(app)
+            ServiceRegistry.registerSingleton(DialogueCoordinator::class.java) { dialogueCoordinator }
 
             ServiceRegistry.registerSingleton(AppMetaStore::class.java) {
                 AppMetaStore(AppDatabase.getDatabase(app).appMetaDao())
+            }
+
+            // 工具授权（伴侣 × 工具，**不含通道维度**）：显式允许的工具不再触发确认门，
+            // 显式禁止的工具即使自身没声明需要确认也会被强制走确认门。
+            // 装配期折叠在 AgentFacade.toolDefinitionsFor（core:agent），
+            // 未绑定 / 读取失败时 fail-closed —— 所有工具维持既有类别，行为与引入授权前一致。
+            // 持久化走 AppMetaStore(KV 单键)，不新增 Room 表 / 字段（schema 冻结红线）。
+            ServiceRegistry.registerSingleton(CapabilityGrantStore::class.java) {
+                com.yunian.ai.agent.CapabilityGrantStoreImpl(
+                    ServiceRegistry.getOrThrow(AppMetaStore::class.java)
+                )
+            }
+
+            // 插件启停状态（**跨重启保留**）：用户停用的插件必须在重启后仍然是停用的。
+            // 蓝图是只读资产（loadDefaultBlueprint 只读不写），所以停用状态另存一份 KV，
+            // 语义是**减法**——只记「被显式停用」的 id，不在集合里的一律视为启用。
+            // 持久化走 AppMetaStore(KV 单键)，不新增 Room 表 / 字段（schema 冻结红线）。
+            // 读失败由实现方 fail-safe 成空集（= 全部启用），见 PluginEnablementStoreImpl。
+            ServiceRegistry.registerSingleton(PluginEnablementStore::class.java) {
+                PluginEnablementStoreImpl(
+                    ServiceRegistry.getOrThrow(AppMetaStore::class.java)
+                )
             }
 
             ServiceRegistry.registerSingleton(CoffeeOrderProvider::class.java) {
@@ -619,14 +663,25 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             }
 
             // ── Cordis 双层插件模板：PluginHost（代码插件 builtin） ──
-            // 框架服务预置（对齐 Cordis 宿主 ctx.<service>）：appContext / tools
+            // 通道注册中心（「通道即插件」的查询面）：先构造注册中心，再把它作为框架服务
+            // 预置给宿主（插件才能 ctx.inject(CHANNELS)），最后 bindHost 完成双向接线。
+            // 注册中心的内容来源是宿主 pluginsOf(PluginKind.ADAPTER)，不是任何旁路全局表。
+            val channelRegistry = com.yunian.ai.agent.channel.ChannelRegistryImpl()
+            // 框架服务预置（对齐 Cordis 宿主 ctx.<service>）：appContext / tools / channels / agent
+            // agent：上面已注册的同一个 DialogueCoordinator 实例——声明 requires = [AGENT] 的
+            // 通道插件因此可以 ctx.inject<DialogueCoordinator>(AGENT) 拿到生产实例；
+            // 未预置时装载 fail-closed（依赖校验拒绝），与其余服务键语义一致。
             val pluginHost = com.yunian.ai.agent.plugin.PluginHostImpl(
                 mapOf(
                     com.yunian.ai.domain.plugin.PluginServices.APP_CONTEXT to app,
                     com.yunian.ai.domain.plugin.PluginServices.TOOLS to ToolRegistry,
+                    com.yunian.ai.domain.plugin.PluginServices.CHANNELS to channelRegistry,
+                    com.yunian.ai.domain.plugin.PluginServices.AGENT to dialogueCoordinator,
                 )
             )
-            // 注册首批代码插件：工具（瑞幸咖啡）、技能（内置聊天协议）、表情包偏好
+            channelRegistry.bindHost(pluginHost)
+            // 注册首批代码插件：工具（瑞幸咖啡）、技能（内置聊天协议）、表情包偏好、
+            // 通道（QQ 机器人，kind = ADAPTER）
             pluginHost.register(
                 com.yunian.ai.feature.coffee.CoffeePlugin(
                     ServiceRegistry.getOrThrow(CoffeeOrderProvider::class.java)
@@ -634,7 +689,61 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             )
             pluginHost.register(com.yunian.ai.agent.plugin.BuiltinChatSkillPlugin())
             pluginHost.register(com.yunian.ai.agent.plugin.StickerPreferencePlugin())
+            // 通道插件（ADAPTER）：只包装既有 QQBotMessageRepository，装配期不启动任何会话。
+            // ⚠️ 事实更正：adapterFactory 在 QQBotChannelPlugin.setup 里会被**立即**调用，
+            // 所以下面这个 lambda 在**装载期**就执行、当场构造仓库（连带 TokenStore / ApiClient）；
+            // 此前注释称「惰性求值、start() 才碰 QQBotServiceLocator」是错的。
+            // 仍成立的结论：构造仓库不发起连接、不启动心跳 / 重连、不收发消息
+            //（构造体无 init 块，connect() 才是建连入口），故 QQ 的连接 / 心跳 / 重连 / 收发时序不受影响。
+            // 主动发送（P4-1）：**不**扩展 ChannelOutbound、**不**走 ChannelSession.send()
+            // （§17.6 裁定：send(outbound) 是传输契约、把通道当被调用方，与投影模型形状不符）。
+            // 请求/应答语义走插件事件 ChannelOutboundEvents.REQUEST，本插件是**订阅方**；
+            // 发起方是 core:agent 的 message.send 插件（它不认识任何具体通道）。
+            pluginHost.register(
+                com.yunian.ai.feature.qqbot.channel.QQBotChannelPlugin(
+                    adapterFactory = {
+                        com.yunian.ai.feature.qqbot.channel.QQBotChannelAdapter.ofRepository(
+                            com.yunian.ai.feature.qqbot.service.QQBotServiceLocator
+                                .messageRepository(app)
+                        )
+                    },
+                    // 与适配器操作**同一个**仓库实例（同一个连接状态、同一个 msg_seq 计数器）：
+                    // 另起一个仓库会造出第二个连接状态来源。
+                    proactiveSenderSupplier = {
+                        com.yunian.ai.feature.qqbot.channel.QQBotProactiveSender.fromRepository(
+                            com.yunian.ai.feature.qqbot.service.QQBotServiceLocator
+                                .messageRepository(app)
+                        )
+                    },
+                )
+            )
+            // 通道插件（ADAPTER）：微信（P4-2，与 QQ 侧对称）。
+            // 只注册适配器 + 订阅出站事件：setup **不**启动轮询、**不**发心跳、**不**碰重连，
+            // 微信的 FGS / WakeLock / watchdog / 重启 Worker 保活时序一行未动。
+            // 主动发送（不扩展 ChannelOutbound、不走 ChannelSession.send，见 §17.6）：
+            // 请求/应答经插件事件 ChannelOutboundEvents.REQUEST，本插件是**订阅方**。
+            // W1（修正版，用户裁定）：ilink 协议**只允许**给绑定的那个微信账号发消息——
+            // 「发给别人」和「群发」在协议上根本不存在，所以 target 为空**没有歧义**，
+            // 就是发给绑定的微信用户（用户说「你给我微信发条消息」时模型会省略 target，这是主路径）。
+            // 旧实现把「target 为空」当成「需要显式收件人」直接失败，让主路径**必然失败**——已修正。
+            // target 非空但**不是**绑定用户 → 如实失败：绝不静默忽略用户的显式指定，也绝不改写后照发。
+            pluginHost.register(
+                com.yunian.ai.feature.wechat.channel.WeChatChannelPlugin(
+                    senderSupplier = {
+                        com.yunian.ai.feature.wechat.channel.weChatChannelSender(app)
+                    },
+                )
+            )
+            // 消息发送**发起方**插件（kind = TOOL）：注册 send_channel_message 工具，
+            // 派发 ChannelOutboundEvents.REQUEST 由通道插件认领。
+            // 它**不认识任何具体通道**，因此通道插件卸载后工具仍在（派发得到「该通道未启用」），
+            // 而不是随通道一起消失——这正是「可自由启用/停用通道」的正确语义。
+            pluginHost.register(com.yunian.ai.agent.plugin.MessageSendPlugin())
             ServiceRegistry.registerSingleton(com.yunian.ai.domain.plugin.PluginHost::class.java) { pluginHost }
+            // 通道注册中心同时作为跨模块可查询服务（feature 模块按 ChannelRegistry 契约取用）。
+            ServiceRegistry.registerSingleton(com.yunian.ai.domain.channel.ChannelRegistry::class.java) {
+                channelRegistry
+            }
             // 插件装载由默认蓝图统一驱动（assets/blueprints/default.json，initBusiness 内执行）；
             // 因此此处不再直接调用 LuckinCoffeeTools.registerAll（改由 coffee.luckin 插件装载）。
 
@@ -643,6 +752,8 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             )
 
             com.yunian.ai.feature.chat.tools.SearchTools.registerAll(appSettings)
+
+            ToolRegistry.register(com.yunian.ai.agent.tools.UserProfileTool())
 
             bgScope.launch {
                 com.yunian.ai.feature.mcp.McpToolRegistrar(
@@ -709,30 +820,164 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
          * 语义与 cordis.yml 一致：plugins 为基准列表（缺省启用），patches 覆盖配置，
          * inserts 追加新插件；装载顺序即列表顺序（sticker 引擎依赖此顺序）。
          * 幂等：PluginHost 内部对已装载插件做 config 比对，配置未变则跳过。
+         *
+         * ## 失败语义（D4 / B2：**不再静默**）
+         * 资产读取、解析及宿主缺失在此记录；意外异常交给调用处记录，取消必须向上传播。
+         * 正常返回不等于所有插件均成功，结局查询 [PluginBlueprintStatus]：
+         * - Applied 表示遍历完成，单插件失败仍在 skipped 的 failed: 项中，后续项继续加载；
+         * - 资产读不到 / JSON 非法 / 宿主未注册 / 宿主返回 Failed → recordFailure；
+         * - 宿主抛异常可能已产生部分装载副作用，但没有返回进度列表。
+         * Failed.loaded 默认空表示未提供已知装载项，不证明宿主为空；当前存活集合查询 loadedIds()。
+         * hasFailed() 只判断整次失败，partial failure 应检查 Applied.skipped。
          */
         private fun loadDefaultBlueprint(app: Application) {
-            val json = app.assets.open("blueprints/default.json")
-                .bufferedReader()
-                .use { it.readText() }
-            val blueprint = com.yunian.ai.agent.plugin.PluginBlueprintParser.parse(json)
+            // ── 失败可见性（D4 / B2）──────────────────────────────────────────────
+            // 常规失败就地记录；取消向上传播，其他意外交给调用处兜底记录。
+            // 该记录描述本次尝试，不替代宿主当前 loadedIds() 快照。
+            val json = try {
+                app.assets.open(com.yunian.ai.agent.plugin.PluginBlueprintStatus.DEFAULT_BLUEPRINT_ASSET)
+                    .bufferedReader()
+                    .use { it.readText() }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                PluginBlueprintStatus.recordFailure(
+                    reason = "蓝图资产读取失败（${com.yunian.ai.agent.plugin.PluginBlueprintStatus.DEFAULT_BLUEPRINT_ASSET}）",
+                    failure = failure,
+                )
+                SecureLog.e("YuNianApplication", "Blueprint asset read failed", failure)
+                return
+            }
+
+            val blueprint = try {
+                com.yunian.ai.agent.plugin.PluginBlueprintParser.parse(json)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                PluginBlueprintStatus.recordFailure(
+                    reason = "蓝图 JSON 解析失败",
+                    failure = failure,
+                )
+                SecureLog.e("YuNianApplication", "Blueprint JSON parse failed", failure)
+                return
+            }
+
             val host = ServiceRegistry.get(com.yunian.ai.domain.plugin.PluginHost::class.java)
             if (host == null) {
+                // 宿主未注册，本次未执行蓝图；不推断其他加载路径的状态。
+                PluginBlueprintStatus.recordFailure(
+                    reason = "PluginHost 未注册，蓝图未装载",
+                    blueprintId = blueprint.id,
+                )
                 SecureLog.w("YuNianApplication", "PluginHost not registered, skip blueprint")
                 return
             }
+
             when (val result = host.loadBlueprint(blueprint)) {
-                is com.yunian.ai.domain.plugin.BlueprintLoadResult.Applied ->
+                is com.yunian.ai.domain.plugin.BlueprintLoadResult.Applied -> {
+                    PluginBlueprintStatus.recordApplied(
+                        blueprintId = blueprint.id,
+                        loaded = result.loaded,
+                        skipped = result.skipped,
+                    )
                     SecureLog.i(
                         "YuNianApplication",
                         "Blueprint ${blueprint.id} applied: loaded=${result.loaded} skipped=${result.skipped}",
                     )
-                is com.yunian.ai.domain.plugin.BlueprintLoadResult.Failed ->
+                }
+                is com.yunian.ai.domain.plugin.BlueprintLoadResult.Failed -> {
+                    PluginBlueprintStatus.recordFailure(
+                        reason = "宿主拒绝装载蓝图: ${result.reason}",
+                        blueprintId = blueprint.id,
+                    )
                     SecureLog.e("YuNianApplication", "Blueprint ${blueprint.id} failed: ${result.reason}")
+                }
             }
             // 核心插件底座可见性：记录 cordis-rs 宿主快照（回合统计 / 插件健康）
             runCatching {
                 SecureLog.i("YuNianApplication", "Core plugins: ${com.yunian.ai.agent.AgentFacade.corePluginSnapshot(app)}")
-            }.onFailure { SecureLog.w("YuNianApplication", "corePluginSnapshot failed: ${it.message}") }
+            }.onFailure { failure ->
+                if (failure is CancellationException) throw failure
+                SecureLog.w("YuNianApplication", "corePluginSnapshot failed: ${failure.message}")
+            }
+        }
+
+        /**
+         * 插件停用覆盖：把「用户在本机设置页显式停用的插件」从已装载集合里减掉。
+         *
+         * ## 为什么是「装载之后追加一步」而不是改蓝图
+         * 蓝图（`assets/blueprints/default.json`）是**只读资产**——本方法不碰
+         * [loadDefaultBlueprint] 的读取路径，只做减法：对 `disabledIds()` 里的每个 id
+         * 调一次 `PluginHost.unload`。于是「蓝图 = 出厂默认装载集合」与
+         * 「KV = 用户本机的停用集合」两件事各自单一职责。
+         *
+         * ## 协程 / 线程（不阻塞主线程）
+         * 调用点是 `initBusiness` 里 `bgScope.launch { ... }` 的**放行屏障段**，运行在
+         * [AppDispatchers.io] 上，因此这里可以直接调 suspend 的 `disabledIds()`：
+         * - `initBusiness` 本身在主线程只做 `bgScope.launch` 就返回，**主线程不等它**；
+         * - **不新建协程作用域 / 线程**，也**不是常驻后台循环**——一次读 + N 次 unload，跑完即止；
+         * - 与 [loadDefaultBlueprint] 在**同一个协程里顺序执行**，所以不存在「覆盖与装载竞态」：
+         *   覆盖一定看得见蓝图装载完的结果（这是刻意选的，比另起协程更确定）；
+         * - 代价明确记录：屏障因此多一次 `app_meta` 主键查询 + N 次「未装载时直接返回 false」的
+         *   unload（`PluginHostImpl.unload` 对未装载 id 不做任何事）。
+         *
+         * ## 失败语义（fail-safe，与契约同向）
+         * 存储未注册 / 读失败 / 单个卸载抛异常，一律降级为「什么都不做」
+         * （= 保持蓝图原样 = 全部启用），**绝不反过来把插件全停掉**，
+         * 也不会让放行屏障失败。只有协程取消照常向上传播。
+         */
+        private suspend fun applyDisabledPluginOverlay() {
+            val store = runCatching {
+                ServiceRegistry.get(PluginEnablementStore::class.java)
+            }.getOrNull()
+            if (store == null) {
+                SecureLog.w(
+                    "YuNianApplication",
+                    "PluginEnablementStore not registered, skip disablement overlay",
+                )
+                return
+            }
+
+            val disabled = try {
+                store.disabledIds()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                // 契约要求实现方自己 fail-safe；这里再兜一层：任何实现抛异常都只当「没有停用」。
+                SecureLog.e(
+                    "YuNianApplication",
+                    "disabledIds failed, treating as nothing disabled",
+                    failure,
+                )
+                return
+            }
+            if (disabled.isEmpty()) return
+
+            val host = runCatching {
+                ServiceRegistry.get(com.yunian.ai.domain.plugin.PluginHost::class.java)
+            }.getOrNull()
+            if (host == null) {
+                SecureLog.w("YuNianApplication", "PluginHost not registered, skip disablement overlay")
+                return
+            }
+
+            var unloaded = 0
+            for (id in disabled) {
+                val ok = try {
+                    host.unload(id)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (failure: Throwable) {
+                    // 单个插件的卸载失败不得影响其余 id，更不得让放行屏障失败。
+                    SecureLog.e("YuNianApplication", "unload failed for disabled plugin: $id", failure)
+                    false
+                }
+                if (ok) unloaded++
+            }
+            SecureLog.i(
+                "YuNianApplication",
+                "Plugin disablement overlay applied: disabled=${disabled.size} unloaded=$unloaded",
+            )
         }
 
         private fun clearUpdateIgnore(app: Application) {
