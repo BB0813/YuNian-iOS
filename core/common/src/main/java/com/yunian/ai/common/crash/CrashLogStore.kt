@@ -30,6 +30,7 @@ object CrashLogStore {
     private const val ALIVE_FILE = ".business_alive"
     private const val BREADCRUMBS_FILE = "breadcrumbs.txt"
     private const val EXIT_ACK_FILE = ".last_exit_ts"
+    private const val USER_TASK_REMOVED_FILE = ".user_task_removed_ts"
 
     /** 单文件字符上限（约 256KB 的 UTF-16 近似；崩溃报告远小于此）。 */
     internal const val MAX_CHARS = 128 * 1024
@@ -138,4 +139,22 @@ object CrashLogStore {
 
     fun writeExitAck(context: Context, timestamp: Long) =
         runCatching { exitAckFile(context).writeText(timestamp.toString()) }
+
+    // ── 「用户移除任务」时间戳 ────────────────────────────────────────────────────
+
+    private fun userTaskRemovedFile(context: Context): File = File(dir(context), USER_TASK_REMOVED_FILE)
+
+    /**
+     * 记录用户把任务从最近任务移除的时刻（由 `Service.onTaskRemoved()` 调用）。
+     *
+     * 用途见 [ApplicationExitPolicy.isUserInitiatedExit]：vivo 等 OEM 的清理器用
+     * `REASON_LOW_MEMORY` 结束进程，与「真被 LMK」无法区分，只能用这个自有信号判断。
+     * 与其余崩溃文件一致：**不依赖 BuildConfig/SecureLog，release 同样生效**。
+     */
+    fun writeUserTaskRemoved(context: Context, timestamp: Long) =
+        runCatching { userTaskRemovedFile(context).writeText(timestamp.toString()) }
+
+    /** 上次「用户移除任务」的时间戳；无记录或读取失败返回 0。 */
+    fun readUserTaskRemoved(context: Context): Long =
+        runCatching { userTaskRemovedFile(context).readText().trim().toLong() }.getOrDefault(0L)
 }

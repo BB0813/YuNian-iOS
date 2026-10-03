@@ -17,8 +17,10 @@ import java.io.InputStream
  *
  * 关键点：
  *  - API 30 以下**安静降级**（返回 null，不抛异常、不报错）；
- *  - 只上报「异常退出」类 reason（白名单见 [ApplicationExitPolicy]）；用户主动划掉/正常退出
- *    以及权限变更等非崩溃原因**不上报**；`LOW_MEMORY` 仅在仍处于前台/前台服务时上报；
+ *  - 只上报「应用真的出错了」的 reason（白名单见 [ApplicationExitPolicy]）；用户主动划掉/
+ *    正常退出、权限变更、**以及被系统回收内存（`LOW_MEMORY`）**都**不上报**
+ *    —— 被回收不是异常，本 App 常驻前台服务使其 `importance` 恒为 125，任何收窄条件都无区分力；
+ *    **用户主动移除任务另由 [onUserTaskRemoved] 落盘的独立信号排除**（OEM 的 reason 不可信）；
  *  - 用落盘的 ack 时间戳保证**同一次退出只提示一次**；
  *  - 尽量读取 `getTraceInputStream()`（可能为空/受限），**能拿到就落盘**，
  *    等于在没有 root 的情况下拿到 native 崩溃栈；拿不到就如实标注。
@@ -60,10 +62,61 @@ object ApplicationExitMonitor {
         if (timestamp > ack) CrashLogStore.writeExitAck(context, timestamp)
 
         if (timestamp <= ack) return null
-        // 传入「死亡时刻的重要性」：LOW_MEMORY 仅在仍处于前台/前台服务时才提示（见策略类）。
-        if (!ApplicationExitPolicy.isNotable(latest.reason, latest.importance)) return null
+        // 「是否用户主动移除任务」：vivo 等 OEM 的清理器给出的 reason 与「真被 LMK」完全重合，
+        // 必须靠自有信号排除（见策略类）。
+        val userInitiated = ApplicationExitPolicy.isUserInitiatedExit(
+            latest.timestamp,
+            CrashLogStore.readUserTaskRemoved(context)
+        )
+        if (!ApplicationExitPolicy.isNotable(latest.reason, userInitiated)) return null
 
         return buildReport(context, latest)
+    }
+
+    /**
+     * **用户把任务从最近任务移除时调用**（`Service.onTaskRemoved()`）。
+     *
+     * 落盘「移除时刻」时间戳，供下次启动判定「上一次退出是不是用户主动的」。
+     * 这是**不依赖 OEM 语义**的唯一可靠信号：系统给出的 reason 在 vivo/OriginOS 上
+     * 是 `REASON_LOW_MEMORY`（而非 `REASON_USER_REQUESTED`），无法据此区分主动划掉与真被 LMK。
+     *
+     * 本方法只碰文件系统，**绝不阻塞、绝不抛异常**（它运行在服务回调里）。
+     */
+    fun onUserTaskRemoved(context: Context) {
+        runCatching { CrashLogStore.writeUserTaskRemoved(context, System.currentTimeMillis()) }
+    }
+
+    /**
+     * 最近一次退出是否由用户主动移除任务引起。
+     *
+     * @return 判定结果；API 30 以下或读不到历史退出信息时返回 false（退回原有行为）。
+     */
+    fun isUserInitiatedExit(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return runCatching {
+            val latest = latestExitInfo(context) ?: return false
+            ApplicationExitPolicy.isUserInitiatedExit(
+                latest.timestamp,
+                CrashLogStore.readUserTaskRemoved(context)
+            )
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 最近一次退出的原因是否属于「崩溃类」（见 [ApplicationExitPolicy.isCrashLike]）。
+     *
+     * 用于判定落盘的崩溃报告是否**属于本次退出**：不属于即为陈旧报告，不应再向用户展示
+     * （真实症状：一份旧报告被无限重放，用户每次主动划掉后台、下次启动都被提示「闪退」）。
+     *
+     * @return 判定结果；**API 30 以下或读不到历史退出信息时返回 true**
+     *         —— 宁可多弹一次，也绝不漏报真实崩溃。
+     */
+    fun isLastExitCrashLike(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
+        return runCatching {
+            val latest = latestExitInfo(context) ?: return true
+            ApplicationExitPolicy.isCrashLike(latest.reason)
+        }.getOrDefault(true)
     }
 
     /**
