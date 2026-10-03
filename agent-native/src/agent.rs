@@ -20,7 +20,7 @@ use crate::segmenter::{agent_segment, SplitMode};
 // ── 回合级安全预算（P1-5，兜底；正常对话远达不到，行为无感知） ──
 
 /// 单回合工具调用总数上限（超过即终止，防止工具失控循环）
-const MAX_TOOL_CALLS_PER_TURN: u32 = 16;
+const MAX_TOOL_CALLS_PER_TURN: u32 = 64;
 
 /// 单回合气泡文本总字符上限（超过即终止，防止无限产出）
 const MAX_BUBBLE_CHARS_PER_TURN: usize = 8000;
@@ -1890,6 +1890,40 @@ mod tests {
             !bubbles.iter().any(|b| b == "不应补发的气泡"),
             "emit_bubble 协议下不得重复补发 content: {bubbles:?}"
         );
+    }
+
+    /// 单回合工具调用预算：撞到上限必须**立即终止并显式上报** `max_tool_calls`，
+    /// 而不是一路跑到 max_rounds 静默收尾。同时钉死上限取值，防被误改。
+    #[test]
+    fn tool_call_budget_trips_at_configured_limit() {
+        // 只预置一个响应时 MockTransport 会一直返回它 → 每轮都产生一次工具调用
+        let (runner, gw, _t) = mock_gateway(vec![
+            r#"{"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"noop_probe","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        let req = AgentTurnRequest {
+            group_id: None,
+            history_json: r#"[]"#.to_string(),
+            tools: vec![],
+            // 轮数给得远大于工具预算，确保先撞的是工具上限而不是轮数上限
+            max_rounds: MAX_TOOL_CALLS_PER_TURN + 10,
+            tool_choice: String::new(),
+            sticker_probability: 0,
+            image: None,
+            system_prompt: None,
+            companion_name_map_json: None,
+        };
+        let result = runner.run_turn_inner(&req, Some(1), &gw, None, &NoopHost, &DefaultTurnStateMachine);
+        assert_eq!(
+            result.finished_reason, "max_tool_calls",
+            "应撞工具预算而非轮数预算: {result:?}"
+        );
+        assert_eq!(
+            result.rounds_used, MAX_TOOL_CALLS_PER_TURN,
+            "第 {MAX_TOOL_CALLS_PER_TURN} 次工具调用后应立即终止"
+        );
+        assert_eq!(MAX_TOOL_CALLS_PER_TURN, 64, "单回合工具调用上限应为 64");
+        let err = result.error.unwrap_or_default();
+        assert!(err.contains("64"), "错误文案应带上限数值: {err}");
     }
 
     /// 工具调用完整链路：模型首轮返回 emit_bubble tool_calls →
