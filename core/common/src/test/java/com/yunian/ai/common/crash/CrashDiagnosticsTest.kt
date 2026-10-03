@@ -1,6 +1,5 @@
 package com.yunian.ai.common.crash
 
-import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -145,48 +144,102 @@ class CrashDiagnosticsTest {
     }
 
     @Test
-    fun exitPolicy_flagsCrashLikeReasonsAtUserFacingImportance() {
+    fun exitPolicy_flagsOnlyAppErrors() {
         // 期望值**直接取框架常量**，杜绝「把错误数字写死进断言」——
         // 上一版正是把 isNotable(8) 写死为 true（8 实为 PERMISSION_CHANGE），21/21 全绿却语义错误。
-        val fg = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_SIGNALED, fg))               // 2
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, fg))             // 3
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH, fg))                  // 4
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH_NATIVE, fg))           // 5
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_ANR, fg))                    // 6
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_INITIALIZATION_FAILURE, fg)) // 7
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_SIGNALED))               // 2
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH))                  // 4
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH_NATIVE))           // 5
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_ANR))                    // 6
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_INITIALIZATION_FAILURE)) // 7
         // ★ 权限变更（8）不是崩溃 —— 必须排除（上一版误报的根因）。
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PERMISSION_CHANGE, fg))     // 8
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PERMISSION_CHANGE))     // 8
     }
 
     @Test
     fun exitPolicy_ignoresNormalExits() {
-        val fg = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_UNKNOWN, fg))                  // 0
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_EXIT_SELF, fg))                // 1
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PERMISSION_CHANGE, fg))        // 8
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE, fg)) // 9
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_USER_REQUESTED, fg))           // 10
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_USER_STOPPED, fg))             // 11
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_DEPENDENCY_DIED, fg))          // 12
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_OTHER, fg))                    // 13
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_FREEZER, fg))                  // 14
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE, fg))     // 15
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PACKAGE_UPDATED, fg))          // 16
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_UNKNOWN))                  // 0
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_EXIT_SELF))                // 1
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PERMISSION_CHANGE))        // 8
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE)) // 9
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_USER_REQUESTED))           // 10
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_USER_STOPPED))             // 11
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_DEPENDENCY_DIED))          // 12
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_OTHER))                    // 13
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_FREEZER))                  // 14
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE))     // 15
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_PACKAGE_UPDATED))          // 16
     }
 
     @Test
-    @Suppress("DEPRECATION") // IMPORTANCE_BACKGROUND / IMPORTANCE_EMPTY 是能力过滤用的稳定语义值
-    fun exitPolicy_lowMemoryNarrowedToForegroundOrForegroundService() {
-        // 用户确实在前台 / 前台服务 → 提示
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND))
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE))
-        // 纯后台被回收 → 不提示（避免噪声化骚扰）
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE))
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE))
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, ActivityManager.RunningAppProcessInfo.IMPORTANCE_BACKGROUND))
-        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, ActivityManager.RunningAppProcessInfo.IMPORTANCE_EMPTY))
-        // 非 LOW_MEMORY 不受重要性影响：后台发生 native 崩溃仍要提示
-        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH_NATIVE, ActivityManager.RunningAppProcessInfo.IMPORTANCE_BACKGROUND))
+    fun exitPolicy_systemReclamationIsNeverAnException() {
+        // 旧策略：REASON_LOW_MEMORY 在白名单内，仅当 importance ≤ 125 才提示。
+        // 但本 App **常驻保活前台服务**，importance 恒为 125(FOREGROUND_SERVICE)，
+        // 该收窄条件**恒为真** —— 等价于「每次被系统回收都弹窗」。
+        // 实测（vivo V2324A / OriginOS，`dumpsys activity exit-info`）：
+        //   reason=3 (LOW_MEMORY)  importance=125  description=single-cleaner
+        // 每隔约 1 分钟出现一次，用户每次启动都看到「上次运行异常退出」。
+        //
+        // 现策略：LMK 是内核在内存紧张时的**正常行为**，与应用出错无关，
+        // 因此整体移出白名单 —— 被回收**不是异常**，不提示。
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY))
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, userInitiated = false))
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_LOW_MEMORY, userInitiated = true))
+        // 反向保护：真正的应用错误仍必须提示（防止「一刀切」把白名单改坏）。
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH))
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH_NATIVE))
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_ANR))
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_SIGNALED))
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_INITIALIZATION_FAILURE))
+    }
+
+    // ── 回归：vivo 清理器伪装成 LOW_MEMORY@125，导致「每次划掉后台都提示闪退」────────────
+
+    @Test
+    fun exitPolicy_userInitiatedExitSuppressesAnyReason() {
+        // vivo/OriginOS 的清理器给出的 reason 与「真被 LMK」**完全重合**
+        // （实测 reason=3 LOW_MEMORY / importance=125 / description=single-cleaner），
+        // 靠 reason 永远分不开，只能靠 Service.onTaskRemoved() 落盘的自有信号。
+        // 带该信号后，**任何** reason 都不再提示为异常。
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH, userInitiated = true))
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_ANR, userInitiated = true))
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH_NATIVE, userInitiated = true))
+        assertFalse(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_SIGNALED, userInitiated = true))
+        // 反向保护：不带该信号时，真崩溃仍要提示。
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_CRASH))
+        assertTrue(ApplicationExitPolicy.isNotable(ApplicationExitInfo.REASON_ANR))
+    }
+
+    @Test
+    fun exitPolicy_crashLikeMatchesOnlyReportProducingReasons() {
+        // 崩溃报告由 Thread.setDefaultUncaughtExceptionHandler 落盘，本项目**无 native 信号处理器**，
+        // 故实际只会对应 REASON_CRASH；另两个是「宁可多提示、绝不漏报」的保守纳入。
+        assertTrue(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_CRASH))
+        assertTrue(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_CRASH_NATIVE))
+        assertTrue(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_SIGNALED))
+        // 下列原因**不可能**产生崩溃报告 → 磁盘上若仍有报告，那份报告必然是陈旧的（不该再展示）。
+        assertFalse(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_LOW_MEMORY))
+        assertFalse(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_ANR))
+        assertFalse(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_INITIALIZATION_FAILURE))
+        assertFalse(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_USER_REQUESTED))
+        assertFalse(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_EXIT_SELF))
+        assertFalse(ApplicationExitPolicy.isCrashLike(ApplicationExitInfo.REASON_PACKAGE_UPDATED))
+    }
+
+    @Test
+    fun exitPolicy_userInitiatedExitWindowIsBounded() {
+        val removed = 1_000_000L
+        // 实测「划掉 → 进程结束」约 2s；10s 必须仍判定为用户主动。
+        assertTrue(ApplicationExitPolicy.isUserInitiatedExit(removed + 10_000L, removed))
+        // 死亡与移除同一时刻也算。
+        assertTrue(ApplicationExitPolicy.isUserInitiatedExit(removed, removed))
+        // 远超窗口 → 与本次移除无关（划掉后进程仍长期存活、之后才因别的原因死亡）。
+        assertFalse(ApplicationExitPolicy.isUserInitiatedExit(removed + 60_000L, removed))
+        // 死亡早于移除 → 与本次移除无关。
+        assertFalse(ApplicationExitPolicy.isUserInitiatedExit(removed - 1L, removed))
+        // 无记录 / 非法值 → 不判定为用户主动（退回原有行为，绝不误抑制）。
+        assertFalse(ApplicationExitPolicy.isUserInitiatedExit(removed, 0L))
+        assertFalse(ApplicationExitPolicy.isUserInitiatedExit(0L, removed))
+        assertFalse(ApplicationExitPolicy.isUserInitiatedExit(0L, 0L))
     }
 }

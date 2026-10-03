@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.yunian.ai.common.concurrent.AppDispatchers
+import com.yunian.ai.common.crash.ApplicationExitMonitor
 import com.yunian.ai.domain.AutomationTickProvider
 import com.yunian.ai.domain.ServiceRegistry
 import com.yunian.ai.feature.notification.R
@@ -110,6 +111,12 @@ open class CompanionKeepAliveService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
+
+        // 用户主动从最近任务移除本应用：落盘移除时刻，供下次启动区分「主动退出」与「真被系统回收」。
+        // 必须放在最前 —— 随后的 start() 要与 OEM 清理器的回收竞争（实测约 2s 后进程即结束）；
+        // 而且 vivo/OriginOS 给的 reason 是 REASON_LOW_MEMORY，与「真被 LMK」无法区分，
+        // 这个时间戳是唯一不依赖 OEM 语义的判据。
+        ApplicationExitMonitor.onUserTaskRemoved(applicationContext)
 
         if (!stopRequested) {
             start(applicationContext)

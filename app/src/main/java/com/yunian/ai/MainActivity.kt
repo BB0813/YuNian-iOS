@@ -140,16 +140,29 @@ class MainActivity : ComponentActivity() {
                 val report = withContext(Dispatchers.IO) {
                     runCatching {
                         val ctx = activity.applicationContext
+                        // 用户主动划掉后台导致的退出：不是崩溃，一律不打扰。
+                        val userInitiated = ApplicationExitMonitor.isUserInitiatedExit(ctx)
                         val javaReport = CrashLogStore.readLastCrash(ctx)
-                        if (javaReport != null) {
-                            // 已展示 Java 报告；若最近一次退出正是同一起 Java 崩溃，推进游标避免重复提示。
+                        // 报告只有在「不是用户主动退出」且「系统确认最近一次退出是崩溃类」时，
+                        // 才真的属于本次退出。否则它是**陈旧报告**：上次启动已展示过、文件却没清掉，
+                        // 于是每次启动都被重放（真实症状：每次划掉后台，下次启动都看到「闪退」）。
+                        if (javaReport != null && !userInitiated && ApplicationExitMonitor.isLastExitCrashLike(ctx)) {
+                            // 同一起 Java 崩溃：推进游标，避免系统报告再单独弹一次。
                             ApplicationExitMonitor.acknowledgeIfJavaCrashExit(ctx)
                             javaReport
                         } else {
-                            // 没有 Java 报告：尝试消费系统级异常退出（native/ANR/LMK）。
-                            val exitReport = ApplicationExitMonitor.consumeNotableExit(ctx)
-                            if (exitReport != null) CrashLogStore.writeBusiness(ctx, exitReport)
-                            exitReport
+                            if (javaReport != null) {
+                                // 陈旧报告：清掉，终止无限重放。
+                                runCatching { CrashLogStore.clear(ctx) }
+                            }
+                            if (userInitiated) {
+                                null
+                            } else {
+                                // 没有（有效）Java 报告：尝试消费系统级异常退出（native/ANR/LMK）。
+                                val exitReport = ApplicationExitMonitor.consumeNotableExit(ctx)
+                                if (exitReport != null) CrashLogStore.writeBusiness(ctx, exitReport)
+                                exitReport
+                            }
                         }
                     }.getOrNull()
                 }
@@ -222,7 +235,16 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     "以下是上次闪退的日志。请点「复制日志」，把它发给开发者即可帮助定位问题。"
                                 },
-                                onDismiss = { crashDismissed = true },
+                                onDismiss = {
+                                    // 「关闭」也清记录：否则这份报告留在磁盘上，
+                                    // 会在下一次启动被再次读到并展示 → 无限重放。
+                                    crashDismissed = true
+                                    pendingCrash = null
+                                    val ctx = activity.applicationContext
+                                    appScope.launch(Dispatchers.IO) {
+                                        runCatching { CrashLogStore.clear(ctx) }
+                                    }
+                                },
                                 onClear = {
                                     crashDismissed = true
                                     pendingCrash = null
