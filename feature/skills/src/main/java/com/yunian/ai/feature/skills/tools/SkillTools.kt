@@ -21,9 +21,10 @@ import com.yunian.ai.domain.SkillManager
  *
  * 保留为**接线锚点**：`app/YuNianApplication` 的技能装配区有一段连续的
  * `registerSkillTools` → `registerSkillMarketTools` → `registerDeviceTools` →
- * `registerAccessibilityTools` → `registerShizukuTools` 调用序列，函数保留可以让
- * 这段装配代码的形态与语义保持稳定，也作为本决策的记录点。若未来需要恢复本地
- * 技能工具，在此处注册即可。
+ * `registerShizukuTools` 调用序列（原序列中的 `registerAccessibilityTools` 已于
+ * 2026-10-03 随无障碍一组迁入 Cordis 插件 `ui.assists`，该函数**已删除**），
+ * 函数保留可以让这段装配代码的形态与语义保持稳定，也作为本决策的记录点。
+ * 若未来需要恢复本地技能工具，在此处注册即可。
  *
  * @param skillManager 本地技能管理器；当前不注册任何工具，仅作占位。
  */

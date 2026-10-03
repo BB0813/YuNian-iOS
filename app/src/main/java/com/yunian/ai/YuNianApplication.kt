@@ -788,8 +788,6 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
             )
             // 设备接管工具（打开应用/网页、剪贴板、闹钟、通知、电量、时间）
             com.yunian.ai.feature.skills.tools.registerDeviceTools(app)
-            // AI 控制手机：无障碍读屏/点击/滑动（操作类需用户确认）
-            com.yunian.ai.feature.skills.tools.registerAccessibilityTools()
             // Shizuku 特权通道状态检测
             com.yunian.ai.feature.skills.tools.registerShizukuTools(app)
             com.yunian.ai.feature.chat.tools.ConversationTools.registerAll(
@@ -806,6 +804,17 @@ class YuNianApplication : Application(), ImageLoaderFactory, androidx.work.Confi
                 com.yunian.ai.feature.automation.AutomationPlugin(
                     ServiceRegistry.getOrThrow(AutomationStore::class.java),
                     app,
+                )
+            )
+            // AI 控制手机改由 ui.assists 插件装配（默认蓝图装载，与本区块其它插件同一范式）：
+            // 9 个无障碍工具随之进/出注册表，用户可在插件设置里关掉「无障碍自动化」。
+            // 这里注入的是**真机实现** AssistsAccessibilityBridge（纯 Kotlin 接缝，见
+            // feature/skills/.../accessibility/AccessibilityBridge.kt）；插件本身不认识 assists。
+            // 时序：本方法由 initBusiness 在 loadDefaultBlueprint **之前**调用（L227 → L232），
+            // 因此这里同步注册即可保证「蓝图装载时该插件已在宿主中」（与上下位置无关）。
+            pluginHost.register(
+                com.yunian.ai.feature.skills.plugin.AssistsUiPlugin(
+                    com.yunian.ai.feature.skills.accessibility.AssistsAccessibilityBridge,
                 )
             )
 

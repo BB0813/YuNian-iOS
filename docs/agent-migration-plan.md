@@ -54,7 +54,7 @@ master 的实际设计（`core/agent/.../host/AgentToolHost.kt` 文档注释原�
 
 | 模块 | 构成 | 处置 | 工作量 |
 |---|---|---|---|
-| `feature:skills` | 11 文件：无障碍 / Shizuku / 设备 / 技能市场 | **工具注册零改动**；但**技能本体需收敛**（§1.5 Q6） | 19 个工具照旧 + 新增 `SkillStoreAdapter` |
+| `feature:skills` | 11 文件：无障碍 / Shizuku / 设备 / 技能市场 | ~~工具注册零改动~~ →**（2026-10-03）无障碍一组已迁入 Cordis 插件 `ui.assists`**（既有 7 个 + 新增 2 个 = 9 个，默认蓝图装载）；设备/Shizuku/市场仍为启动期直接注册。**技能本体需收敛**（§1.5 Q6） | 21 个工具（无障碍 9 + 设备 8 + Shizuku 1 + 市场 3）+ 新增 `SkillStoreAdapter` |
 | `feature:mcp` | 5 文件：SSE + StreamableHTTP 双传输 | **零改动**直接可用 | 同上 |
 | `feature:automation` | 16 文件：定时器 + 工作流引擎 + UI | **工具层按 cordis 重写**（见 §4 阶段 4b） | 包成 `AutomationPlugin` + 2 处改接 |
 
@@ -456,11 +456,11 @@ master 侧无对应物，故不在 master 的 19 文件集成面内，需**单�
 
 **B. `feature:skills` —— 工具注册点保留，但**需新增 `SkillStore` 适配器** ⚠️
 
-纯工具注册部分（无障碍 / 设备 / Shizuku / 技能市场）**保持零改动**：
+纯工具注册部分中，**设备 / Shizuku / 技能市场保持零改动**；**无障碍一组已于 2026-10-03 迁入 Cordis 插件**：
 
 | 现有注册点 | 工具数 |
 |---|---|
-| `skills/tools/AccessibilityTools.kt:181-187` | 7（无障碍：状态/读屏/返回/主页/点击/滑动/按文本点击） |
+| ~~`skills/tools/AccessibilityTools.kt:181-187`~~ → `skills/plugin/AssistsUiPlugin.kt:87`（插件 `ui.assists`，默认蓝图装载） | 7 → **9**（无障碍：状态/读屏/返回/主页/点击/滑动/按文本点击 + **输入文本 / 导出节点树**）；对外契约逐字不变，装配方式由「启动期直接注册」改为「插件装载」 |
 | `skills/tools/DeviceTools.kt:287-294` | 8（开应用/开链接/读写剪贴板/闹钟/通知/电量/时间） |
 | `skills/tools/ShizukuTools.kt:75` | 1（Shizuku 状态） |
 | `skills/tools/SkillMarketTools.kt:284-286` | 3（技能市场搜索/安装/卸载） |
@@ -1061,7 +1061,7 @@ UI 数据载体（`name` / `args`），删除本地自研的确认判定逻辑�
       + `array container is still decodable for import compatibility`（旧数组格式导入）
       + `malformed json degrades gracefully`（容错）
 - ⏳ 工具确认：命中确认门 → 弹窗 → 批准/拒绝 → 各执行一次往返正确 —— 需真机
-- ⏳ **本地独有工具可用**（Q1）：无障碍 7 工具 / 设备 8 工具 / Shizuku 1 / 技能市场 3 经 Agent 回合调用成功 —— 需真机
+- ⏳ **本地独有工具可用**（Q1）：无障碍 **9** 工具（含 2 个 `appLocalOnly = true` 的新增工具，外部桥接会话不可见）/ 设备 8 工具 / Shizuku 1 / 技能市场 3 经 Agent 回合调用成功 —— 需真机
 - [x]（单测覆盖）**skills 收敛生效**（Q6）：`use_skill` **已不在**工具表中 ——
       全仓库 `*.kt` 检索 `use_skill` **零命中**（待办 L 已核）。
 - [x]（单测覆盖）**`SkillStoreAdapter` 的 Rust 回调 JSON 契约**（Q6 新增的跨语言边界）——
