@@ -33,6 +33,12 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <!-- assists-base(3.5.9) AAR 自带 manifest 带进 READ/WRITE_CONTACTS；本项目不使用 assists 的联系人能力
+         （ContactsUtil 在 jar 内零入边），按隐私面收敛原则在合并阶段摘除，不做任何替代授权。
+         xmlns:tools 已在 <manifest> 上声明。 -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" tools:node="remove" />
+
     <!-- IQOO/OriginOS JobScheduler 保活 -->
     <uses-permission android:name="android.permission.BIND_JOB_SERVICE"
         tools:ignore="ProtectedPermissions" />

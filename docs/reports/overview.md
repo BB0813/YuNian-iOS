@@ -90,6 +90,7 @@ OpenClaw / Hermes Agent 的 QQ 接入均为官方 QQ Bot API v2（AppID/Secret +
 1. **技能索引注入**：可用技能清单（名称+描述，上限 20）常驻系统提示词——AI 从"不知道有技能"变为"匹配即主动 use_skill"。
 2. **技能自主上网安装**：SkillManager 支持外部技能目录（filesDir/external_skills），新增 `skill_install`（URL 下载 SKILL.md）/`skill_uninstall` 工具，与 web_search 形成"搜索→安装→加载执行"闭环。
 3. **AI 控制手机**：YuNianAccessibilityService（读屏/手势/全局导航）+ 7 个工具（accessibility_status / screen_read / press_back / go_home 低风险直执行；screen_tap / screen_swipe / screen_click_text 需用户确认）；manifest 声明服务与描述文案。
+   - **（2026-10-03 变更）** 本组工具已改由 Cordis 插件 `ui.assists`（无障碍自动化，默认蓝图装载）提供，并由 7 个扩为 **9 个**（新增 `screen_input_text` / `screen_dump_ui`，均 `appLocalOnly = true`）；服务基类改为 `com.ven.assists.service.AssistsService`，**manifest 与 `accessibility_service_config.xml` 均未改**，无障碍服务仍恰好 1 个、用户既有授权不失效。详见 [accessibility-plugin.md](accessibility-plugin.md)。
 4. **Shizuku 通道**：shizuku_status 工具（安装/运行/授权三态检测 + 引导），provider 与依赖就位；特权动作（静默安装、force-stop）二期。
 5. **设备工具第一批**（8 个）：打开应用/网页、读/写剪贴板、预填闹钟、发通知、电量、日期时间。
 

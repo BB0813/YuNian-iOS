@@ -361,3 +361,60 @@
 -dontwarn com.huawei.hianalytics.**
 -dontwarn com.huawei.libcore.io.**
 -dontwarn org.apache.commons.codec.**
+# ================================================================
+# assists-base 3.5.9（:feature:skills 无障碍自动化）— R8 依赖排除后的补偿规则
+# ================================================================
+# 背景：在 feature/skills/build.gradle.kts 中对 io.github.ven-coder:assists-base
+# 排除了三个经字节码取证确认不可达的传递依赖分组：
+#   com.google.mlkit / com.tencent.mmkv / androidx.databinding
+# assists-base 内部仍有类的常量池/方法描述符指向这些包（虽然那些类在 jar 内零入边），
+# R8 在 release 全程序分析时会对其报 Missing class，因此必须补 -dontwarn。
+#
+# 证据（build/assists-probe/javap-c/，javap -p -c -constants 全 203 个 class 的指令级取证）：
+#   · com/google/mlkit/**     仅被 com.ven.assists.text.TextRecognitionChineseLocator
+#                             及其 2 个 lambda 类引用；这 4 个类在全 jar 内零入边。
+#   · com/tencent/mmkv/**     全 203 个 class 零引用。
+#   · androidx/databinding/** 全 203 个 class 零引用；AAR 自带 4 个 ViewBinding 生成类
+#                             实现的是 androidx.viewbinding.ViewBinding（AGP 自带，不受影响）。
+# -dontwarn 只抑制缺类警告，不生成/保留任何代码；被排除类的唯一后果是
+# 「运行时才可能 NoClassDefFoundError」——而它们本就不可达。
+-dontwarn com.google.mlkit.**
+-dontwarn com.tencent.mmkv.**
+-dontwarn androidx.databinding.**
+# 上述被排除依赖的传递闭包（被我们一并排除，故此处同样免警）：
+-dontwarn com.google.android.gms.internal.mlkit_vision_text_chinese.**
+-dontwarn com.google.android.gms.internal.mlkit_vision_common.**
+-dontwarn com.google.android.gms.internal.mlkit_vision_text_common.**
+-dontwarn com.google.android.odml.**
+-dontwarn com.google.android.datatransport.**
+-dontwarn com.google.firebase.encoders.**
+
+# keep 规则：本轮「默认不加」。
+# 明确不采用全量保留（-keep class com.ven.assists.** { *; }）：那会把 203 个类全部保留，
+# 与本次瘦身目标直接冲突，且无证据表明需要 —— assists 的对外接触面全部是我们自己的
+# Kotlin 源码直接引用（AssistsService / AssistsCore / AssistsServiceListener 等），
+# 由 R8 的正常可达性分析覆盖；AAR 自带 proguard.txt 为 0 字节，即上游未声明任何必须保留项；
+# AAR manifest 声明的 AssistsFileProvider / ClipboardActivity 由 manifest 引用，
+# R8 会通过 manifest keep 规则自动保留其类名。
+#
+# R8 已实测（2026-10-03 :app:assembleRelease 成功，逐类核对 mapping.txt/seeds.txt/usage.txt）——
+# 并因此抓到 1 个 release 专有缺陷，修复规则见下：
+#   其余结论均经 R8 实际运行验证：AssistsService / AssistsFileProvider / ClipboardActivity 因
+#   manifest 引用被自动保名（seeds.txt 可见）；gson 序列化路径存活（com.google.gson.Gson -> i83）；
+#   反序列化路径被正确裁掉（usage.txt 里的 readField 等）；被排除的 mlkit/mmkv/viewbinding 未进 dex。
+#
+# ── 修复：assists 节点树数据类的 gson 反射字段名（release 专有缺陷）──
+# AssistsCore.getRootNodeTreeJson 用 gson **反射**序列化 NodeTree / NodeBounds，JSON 键名取自字段名。
+# R8 默认会混淆这两个类的字段名。修复前 mapping.txt 实测：
+#   NodeTree -> d20（packageName->a、text->b、des->c、className->e、isClickable->g、boundsInScreen->i）
+#   NodeBounds -> b20（centerX->g、centerY->h、left->a、top->b …）
+# 后果：release 包里 screen_dump_ui 返回的节点树 JSON 键名全是 a/b/c…——不会崩（gson 在），
+# 但内容对模型无意义，等于该工具在 release 下不可用。
+# 修复：用 -keepclassmembers 保住**成员名**（类名仍可混淆，不破坏瘦身）。
+#   ⚠ 首版误写成 -keepclassmembers,allowobfuscation —— 该修饰符的含义恰是「允许改名」，
+#     实测复验：字段仍被改成 a/b/c（mapping.txt 16:27 版），故必须去掉 allowobfuscation。
+#   注意区分：allowobfuscation 适合 @SerializedName 那类「注解值才是 JSON 键、字段名无所谓」的场景；
+#   本例 JSON 键直接取自字段名，因此字段名必须原样保留。
+-keepclassmembers class com.ven.assists.AssistsCore$NodeTree { <fields>; }
+-keepclassmembers class com.ven.assists.AssistsCore$NodeBounds { <fields>; }
+

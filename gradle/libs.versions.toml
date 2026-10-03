@@ -43,6 +43,7 @@ kyantCapsule = "2.1.1"
 mcpSdk = "0.10.0"
 ktor = "3.0.3"
 jna = "5.13.0"
+assists = "3.5.9"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -111,6 +112,7 @@ ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.r
 ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 ktor-client-sse = { group = "io.ktor", name = "ktor-client-sse", version.ref = "ktor" }
+assists-base = { group = "io.github.ven-coder", name = "assists-base", version.ref = "assists" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

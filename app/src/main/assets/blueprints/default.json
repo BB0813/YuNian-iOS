@@ -23,6 +23,9 @@
         },
         {
             "id": "message.send"
+        },
+        {
+            "id": "ui.assists"
         }
     ],
     "patches": [],
