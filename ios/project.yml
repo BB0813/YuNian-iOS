@@ -1,0 +1,104 @@
+# XcodeGen 工程定义 —— iOS 侧应用工程
+#
+# 为什么用 XcodeGen 而不是提交 .xcodeproj：
+#   .xcodeproj 是二进制/多文件格式，MR 冲突极难处理，且无法在没有 Mac 的机器上修改。
+#   这里提交声明式的 project.yml，CI 与本地都执行 `xcodegen generate` 产出工程。
+#
+# 前置：先跑 scripts/build_agent_ios.sh（或下载 CI 产物），
+#       使 ios/Generated/ 与 ios/Frameworks/ 存在。二者都是生成物，不入库。
+#
+# 生成与构建：
+#   cd ios && xcodegen generate && open YuNian.xcodeproj
+#   xcodebuild build -project YuNian.xcodeproj -scheme YuNian \
+#     -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+#     CODE_SIGNING_ALLOWED=NO
+
+name: YuNian
+options:
+  bundleIdPrefix: com.yunian.ai
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    # 与 Android 侧 Kotlin 2.2.10 / JVM 17 无关，iOS 侧独立；这里只固定我们自己的编译选项
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # 与 Android 的 applicationId com.yunian.ai 保持品牌一致
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    # 6.x：DatabasePool / Row / StatementArguments API 与本仓库用法一致
+    from: 6.29.0
+
+targets:
+  YuNian:
+    type: application
+    platform: iOS
+    sources:
+      - path: YuNian
+      # UniFFI 生成的 Swift API（由 build_agent_ios.sh / CI 产出，不入库）
+      - path: Generated
+        optional: true
+
+    dependencies:
+      - package: GRDB
+        product: GRDB
+      # Rust Agent 的静态库切片（含 lianyu_agentFFI.h 与 module.modulemap）
+      - framework: Frameworks/lianyu_agent.xcframework
+        embed: false
+        optional: true
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yunian.ai
+        INFOPLIST_FILE: YuNian/Resources/Info.plist
+        # ⚠️ 免费 Apple ID 无法启用 Push Notifications capability。
+        #    需要 APNs 时必须使用付费开发者账号 —— 见 docs/ios-port-feasibility.md §3.2。
+        #    在账号就位前不要打开下面的 entitlements 引用，否则签名会失败。
+        # CODE_SIGN_ENTITLEMENTS: YuNian/Resources/YuNian.entitlements
+        OTHER_LDFLAGS:
+          - "-lc++"
+        # Rust 静态库需要显式保留这些（rustls/ring 用到）
+        DEAD_CODE_STRIPPING: NO
+
+    scheme:
+      testTargets:
+        - YuNianTests
+      gatherCoverageData: false
+
+  YuNianTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: YuNianTests
+      # 安全基线数据也要能在测试 bundle 里取到。
+      #
+      # ⚠️ 否则会踩一个只有真机才暴露的坑：单测运行时 `Bundle.main` 是
+      #    **测试 bundle** 而不是 app，`SecuritySeedLoader.load()` 默认读 .main，
+      #    取不到资源 → `ContentFilter.load()` 返回 false → 金标向量测试全失败。
+      #    显式把该 JSON 复制进测试 target，测试侧改用 `Bundle(for:)` 读取。
+      - path: YuNian/Resources/SecuritySeed.json
+    dependencies:
+      - target: YuNian
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yunian.ai.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+# ── 测试策略 ────────────────────────────────────────────────────
+# 当前只有一组测试，但它是跨端一致性里风险最高的那个组件：
+# MessageSearchTokenizerTests 用**金标向量**锁死 token 格式
+# （unigram u<hex>z / bigram b<hex>x<hex>z / 查询侧只用 bigram 并加引号）。
+# 两端共用同一张 FTS 表，格式一旦偏离不会报错、只会「搜不到」，因此必须有测试兜住。
+#
+# 后续（M2/M3）应补充：
+#   - YuNianSchema 与 Room v45 的表/索引数量一致性断言（生成器已内置，可在 Swift 侧再锁一次）
+#   - RequestSigner 的 payload 逐字节断言（需要服务端给出的权威样例，见 V9）
+#   - YuNianDatabase 的 user_version 引导分支（空库 / 41-45 / <41 / >45）
