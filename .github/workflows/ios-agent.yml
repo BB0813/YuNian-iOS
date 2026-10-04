@@ -74,9 +74,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-contract-
 
+      # ❌ 修掉一个真实的卡点：actions/cache 恢复出来的 target/ 会让
+      #    `cargo build --lib` 认为「无需重建」而不重新链接，于是
+      #    RUSTFLAGS 改了也不生效 —— 这正是上一轮 strip=none 无效的原因。
+      #    构建 host 库前先清掉增量产物。
       - name: 构建 host 库（供 bindgen 提取元数据）
         working-directory: agent-native
-        run: cargo build --lib
+        run: |
+          rm -f target/debug/liblianyu_agent.so target/debug/lianyu_agent.dll
+          cargo build --lib
+          ls -l target/debug/liblianyu_agent.* 2>/dev/null || true
 
       - name: 生成 Swift 绑定
         working-directory: agent-native
