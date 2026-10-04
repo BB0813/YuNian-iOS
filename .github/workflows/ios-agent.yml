@@ -72,24 +72,28 @@ jobs:
       - name: 生成 Swift 绑定
         working-directory: agent-native
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # 按平台找 dylib，避免硬编码扩展名
           LIB=$(ls target/debug/liblianyu_agent.so target/debug/liblianyu_agent.dylib 2>/dev/null | head -n 1)
-          test -n "$LIB" || { echo "找不到 host 库"; ls -l target/debug/; exit 1; }
+          if [ -z "$LIB" ]; then echo "找不到 host 库"; ls -l target/debug/; exit 1; fi
           mkdir -p ../ios/Generated
 
-          # 先确认元数据符号真的在库里。UNIFFI_META_* 是 uniffi-bindgen
-          # --library 模式唯一的元数据来源；缺失时 bindgen 只报一句
-          # "Unable to extract metadata"，很难定位到这里。
-          # 第 1 次 CI 失败就卡在此处（Linux .so 符号行为与 Windows .dll 不同）。
-          if ! nm -D "$LIB" 2>/dev/null | grep -q UNIFFI_META; then
-            echo "::error:: $LIB 里找不到 UNIFFI_META_* 符号"
-            echo "  Cargo.toml 的 strip 必须是 \"debuginfo\"（不能是 true / \"symbols\"）"
-            echo "  crate-type 必须含 cdylib"
-            nm "$LIB" 2>/dev/null | grep -c UNIFFI_META || true
-            exit 1
+          # 元数据符号探测。⚠️ 两个教训（第 58/59 轮两次栽在同一处）：
+          # 1. 不能用 `set -e` 配管道 —— ubuntu 镜像默认无 binutils，
+          #    `nm -D lib | grep -q` 在 pipefail 下会把 nm 的失败当成整体失败，
+          #    于是"诊断"自己变成了 exit 2。
+          # 2. 探测必须**非致命**：找不到符号只警告，仍继续跑 bindgen，
+          #    否则符号没找到时 bindgen 的真实报错反而被掩盖了。
+          if command -v nm >/dev/null 2>&1; then
+            if nm "$LIB" 2>/dev/null | grep -q UNIFFI_META; then
+              echo "元数据符号确认存在"
+            else
+              echo "::warning:: 未在 $LIB 里找到 UNIFFI_META_* 符号，bindgen 很可能失败"
+              echo "  常见原因：strip 被设成 true/symbols，或 crate-type 缺 cdylib"
+            fi
+          else
+            echo "（无 nm，跳过符号探测）"
           fi
-          echo "元数据符号确认存在"
 
           cargo run --features cli-bin --bin uniffi-bindgen -- generate \
             --library "$LIB" --language swift --out-dir ../ios/Generated
