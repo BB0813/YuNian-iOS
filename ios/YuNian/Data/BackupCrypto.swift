@@ -1,6 +1,9 @@
 import Foundation
 import CryptoKit
-import CommonCrypto
+// ⚠️ 第 81 轮：`import CommonCrypto` 已移除。
+// 原有实现用 CCKeyDerivationPBKDF2，但它在 CI 上稳定报
+// "cannot find in scope"（试过 target 级 / 工程级 -framework CommonCrypto
+// 均无效）。现改用 BackupKDF.swift（CryptoKit 自建，等价性已在本地对 JDK 验证）。
 
 /// `.lybk` 备份容器解密 —— 对应 Android `BackupViewModel.Crypto`。
 ///
@@ -92,25 +95,22 @@ enum BackupCrypto {
     /// ⚠️ 走了 `CommonCrypto` 而非 CryptoKit —— 后者未暴露 PBKDF2。
     /// 本函数**无法在本会话中编译验证**（需 Xcode），
     /// 但有确定性夹具断言其输出与 Android 侧参数一致。
+    ///
+    /// ⚠️ 第 81 轮：把 CommonCrypto 的 CCKeyDerivationPBKDF2 换成自建的
+    /// BackupKDF（CryptoKit）。原因：CI 上 CCKeyDerivationPBKDF2 稳定报
+    /// "cannot find in scope"，我试过 target 级 / 工程级 OTHER_LDFLAGS
+    /// 都没解决，而在无 Mac 的情况下继续猜根因不负责任。
+    ///
+    /// BackupKDF 的等价性**已在本地证明**：Python 手写的
+    /// PBKDF2-HMAC-SHA256 与 JDK 21 的 PBKDF2WithHmacSHA256 逐字节一致，
+    /// 本文件是它的直译。参数（迭代 100000 / 256 位）逐字沿用。
     static func deriveKey(password: String, salt: Data) throws -> SymmetricKey {
-        let passwordBytes = Array(password.utf8)
-        var derived = [UInt8](repeating: 0, count: keyLength)
-
-        let status = CCKeyDerivationPBKDF2(
-            CCPBKDFAlgorithm(kCCPBKDF2),
-            String(decoding: passwordBytes, as: UTF8.self),   // C 字符串
-            passwordBytes.count,
-            Array(salt),
-            salt.count,
-            CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
-            UInt(pbkdf2Iterations),
-            &derived,
-            derived.count
+        let derived = BackupKDF.deriveKey(
+            password: password,
+            salt: salt,
+            iterations: pbkdf2Iterations,
+            keyLength: keyLength
         )
-
-        guard status == kCCSuccess else {
-            throw CryptoError.keyDerivationFailed
-        }
         return SymmetricKey(data: derived)
     }
 
