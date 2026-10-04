@@ -82,15 +82,10 @@ enum AvatarResolver {
         return url
     }
 
-    /// 解析为 iOS 侧资产名（**渲染层调用这个**）。
-    ///
-    /// - Parameter url: `companions.avatarUrl` 原始值（可能是 Android 资源 URI）
-    /// - Returns: Asset Catalog 里的 imageset 名；无法解析时返回 nil（调用方应给占位图）
-    ///
-    /// 第 144 轮之前本枚举整体没有调用方 —— 默认伴侣的 `avatarUrl` 是
-    /// `android.resource://...`，不翻译就永远加载不出头像。
-    static func assetName(for url: String?) -> String? {
-        guard let url else { return nil }
-        return androidResourceName(from: url)
-    }
+    // ⚠️ 第 75 轮：这里原本有**两个** `assetName(for:)` ——
+    // 下面 L51 那个（带 bundledAssetNames 校验）是原有实现，
+    // 第 144 轮我为了让 ChatView 用上头像，又在文件末尾加了一个 naive 版本，
+    // 编译报 invalid redeclaration。
+    // 修法：删掉第 144 轮加的那个，保留有校验的原有实现
+    // （它能拦住"asset 目录里没有这张图"的情况，比我的版本更稳）。
 }
