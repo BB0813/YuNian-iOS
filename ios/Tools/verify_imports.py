@@ -21,6 +21,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "ios/YuNian"
+# ⚠️ 第 68 轮：**把测试目录也纳入扫描**。
+# 原来只扫 ios/YuNian，于是漏了一个真实的编译错误：
+# AgentStoresTests / BackupImporterTests / SecuritySeedLoaderTests
+# 用了 GRDB 的 Row / StatementArguments / fetchAll / fetchOne，
+# 却只 import XCTest 与 @testable import YuNian ——
+# 后者不会把 GRDB 的类型转出来，编译期 "cannot find 'Row' in scope"。
+#
+# 生产代码那边是对的（verify_imports 一直在扫），
+# 测试代码这边是整整一个目录的盲区。
+TESTS = REPO_ROOT / "ios/YuNianTests"
 
 # 类型/符号 → 必需模块
 MODULE_BY_SYMBOL = {
@@ -79,7 +89,9 @@ TYPE_POSITION_PATTERNS = [
 
 
 def main() -> int:
-    files = sorted(SRC.rglob("*.swift"))
+    # 生产代码 + 测试代码都要扫（第 68 轮：测试目录曾是盲区）
+    files = sorted(SRC.rglob("*.swift")) + (
+        sorted(TESTS.rglob("*.swift")) if TESTS.exists() else [])
     if not files:
         print("[FAIL] 没有找到 Swift 文件")
         return 1

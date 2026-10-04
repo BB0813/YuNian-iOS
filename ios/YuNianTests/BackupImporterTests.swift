@@ -1,4 +1,7 @@
 import XCTest
+// ⚠️ 第 68 轮：本文件用 Row.fetchAll / Int64.fetchAll / String.fetchAll，
+// 而 `@testable import YuNian` 不会转出 GRDB 的类型。
+import GRDB
 @testable import YuNian
 
 /// `BackupImporter` 测试。

@@ -1,4 +1,7 @@
 import XCTest
+// ⚠️ 第 68 轮：L80 用了 Foundation 的 CharacterSet。
+// XCTest 会传递 Foundation（大概率能编），但显式写出更稳，也免得依赖传递行为。
+import Foundation
 @testable import YuNian
 
 /// `MessageSearchTokenizer` 的金标向量测试。
