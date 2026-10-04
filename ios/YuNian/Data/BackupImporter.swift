@@ -94,7 +94,13 @@ final class BackupImporter {
                             s["rawPrompt"] as? String, s["systemPrompt"] as? String,
                             s["intimacy"] as? Int ?? 0,
                             "[]",
-                            # 与 Android 一致：api_configs 不随备份迁移，跨设备 ID 语义不可信 → nil
+                            // ⚠️ 第 79 轮：这里原来误写成了 `# 与 Android 一致...`
+                            // （一个 `#` 开头的中文注释），Swift 把 `#` 认成**宏调用**：
+                            //   extraneous whitespace between '#' and macro name
+                            //   no macro named '与'
+                            //   cannot find 'Android' in scope
+                            // 一条裸 `#` 引出一串看似无关的报错。
+                            // 与 Android 一致：api_configs 不随备份迁移，跨设备 ID 语义不可信 → nil
                             nil,
                             s["createdAt"] as? Int64 ?? 0, s["updatedAt"] as? Int64 ?? 0,
                         ])

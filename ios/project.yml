@@ -65,6 +65,12 @@ targets:
         # CODE_SIGN_ENTITLEMENTS: YuNian/Resources/YuNian.entitlements
         OTHER_LDFLAGS:
           - "-lc++"
+          # ⚠️ 第 79 轮：必须显式链接 CommonCrypto。
+          # BackupCrypto.swift 用了 CCKeyDerivationPBKDF2（PBKDF2 密钥派生，
+          # 参数与 Android 逐字一致），该文件 import CommonCrypto 了，
+          # 但 CI 报 "cannot find 'CCKeyDerivationPBKDF2' in scope"
+          # —— import 成功而符号解析不到，说明模块没被链接进 target。
+          - "-framework CommonCrypto"
         # Rust 静态库需要显式保留这些（rustls/ring 用到）
         DEAD_CODE_STRIPPING: NO
 
