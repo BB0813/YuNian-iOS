@@ -1,4 +1,7 @@
 import XCTest
+// ⚠️ 第 68 轮：L66 用了 CryptoKit 的 SymmetricKey。
+// XCTest 只会传递 Foundation，**不会**转出 CryptoKit —— 缺这条 import 编译期直接报错。
+import CryptoKit
 @testable import YuNian
 
 /// `.lybk` 容器解密测试。

@@ -1,4 +1,9 @@
 import XCTest
+// ⚠️ 第 68 轮：本文件用到了 GRDB 的 Row/StatementArguments/fetchAll，
+// 而 `@testable import YuNian` **不会**把 GRDB 的类型转出来 —— 必须自己 import。
+// 这是第 65 轮那一连串"先看实际代码再动手"的教训的又一次：
+// 我原先凭"测试只 import XCTest 就够了"的印象漏掉了它。
+import GRDB
 @testable import YuNian
 
 /// `AgentStores` 的 JSON 契约测试。

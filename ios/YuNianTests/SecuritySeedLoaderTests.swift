@@ -1,4 +1,7 @@
 import XCTest
+// ⚠️ 第 68 轮：本文件用 Int.fetchOne，`@testable import YuNian`
+// 不会转出 GRDB 的类型。
+import GRDB
 @testable import YuNian
 
 /// `SecuritySeedLoader` 的双重编码还原与数据装载测试。
