@@ -28,6 +28,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATED = REPO_ROOT / "ios/Generated/LianyuAgent.swift"
 BUSINESS_DIRS = [
     REPO_ROOT / "ios/YuNian",      # Agent / App / Data / Platform
+    # ⚠️ 第 69 轮：**把测试目录也纳入核对**。
+    # 原来只核生产代码的 104 处调用，但测试**同样**在调用生成绑定
+    # （构造 AgentGlobalConfig、调用 AgentRuntime 等）。
+    # 一旦测试侧用了不存在的成员/参数名，就是编译错误 —— 而这一侧从没被核过。
+    # 这与第 68 轮 verify_imports 漏掉整个测试目录是同一类盲区：
+    # 关卡的扫描范围停在生产代码，测试代码成了第二个"没人验"的世界。
+    REPO_ROOT / "ios/YuNianTests",
 ]
 
 # 要核对的**生成绑定**类型（`ios/Generated/LianyuAgent.swift` 里的 open class）。
