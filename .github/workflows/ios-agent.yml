@@ -88,36 +88,10 @@ jobs:
       - name: 生成 Swift 绑定
         working-directory: agent-native
         run: |
-          set -uo pipefail
-          # 按平台找 dylib，避免硬编码扩展名
-          LIB=$(ls target/debug/liblianyu_agent.so target/debug/liblianyu_agent.dylib 2>/dev/null | head -n 1)
-          if [ -z "$LIB" ]; then echo "找不到 host 库"; ls -l target/debug/; exit 1; fi
-          mkdir -p ../ios/Generated
-
           set -x
-          # ① 元数据符号探测（非致命）
-          if command -v nm >/dev/null 2>&1; then
-            if nm "$LIB" 2>/dev/null | grep -q UNIFFI_META; then
-              echo "元数据符号确认存在"
-            else
-              echo "::warning:: 未在 $LIB 里找到 UNIFFI_META_* 符号，bindgen 很可能失败"
-            fi
-          fi
-
-          # ② 显式关掉 strip。
-          #    ⚠️ 第 60 轮的关键疑点：`strip = "debuginfo"` 在 Linux 上会把
-          #    .symtab 一并去掉（uniffi-bindgen 的 --library 模式读的是 .symtab
-          #    而不是 .dynsym），于是 Windows 上成功的同一条命令在 Linux 退出 2。
-          #    RUSTFLAGS 里的 -C strip 只影响「rustc 自己产出的符号」，
-          #    不能反悔 profile 里的设置，所以这里直接重建一次不带 strip 的库。
-          RUSTFLAGS="-C strip=none" cargo build --lib
-          if command -v nm >/dev/null 2>&1; then
-            echo "--- 重建后符号数：$(nm "$LIB" 2>/dev/null | grep -c UNIFFI_META) ---"
-          fi
-          set +x
-
+          ls -l target/debug/
           cargo run --features cli-bin --bin uniffi-bindgen -- generate \
-            --library "$LIB" --language swift --out-dir ../ios/Generated
+            --library target/debug/liblianyu_agent.so --language swift --out-dir ../ios/Generated
           ls -l ../ios/Generated
 
       - name: 断言 Swift 实现与生成签名一致
