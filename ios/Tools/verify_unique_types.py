@@ -26,13 +26,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC = REPO_ROOT / "ios/YuNian"
-# ⚠️ 第 67 轮：把**生成绑定**也纳入去重范围。
-# 原来只扫 ios/YuNian，而 ios/Generated/LianyuAgent.swift 是同一个 target 的
-# 一部分（project.yml 的 sources 列了它）。若我的某个类型与生成绑定同名，
-# 编译期报 invalid redeclaration —— 而这道关卡抓不到。
-# 第 67 轮实测：101 个自有类型 vs 149 个生成类型，当前零重叠。
-# Generated 是生成物、不入库，故不存在时跳过（不失败）。
-GENERATED = REPO_ROOT / "ios/Generated"
+# ⚠️ 第 70 轮：把**测试目录**也纳入去重。
+# 原来只扫 ios/YuNian。测试与生产虽分属两个 target，但测试 target 内部
+# 15 个文件互相重名同样是 invalid redeclaration。
+# 实测当前 14 个测试类型声明、零重名、与生产零撞名 —— 盲区当前是干净的，
+# 但补上它属于"把碰运气的检查变成有依据的检查"。
+TESTS = REPO_ROOT / "ios/YuNianTests"
 
 DECL = re.compile(r"^\s*(?:public\s+|internal\s+|fileprivate\s+|private\s+|final\s+|open\s+)*"
                   r"(struct|class|enum|actor|protocol|typealias)\s+(\w+)", re.M)
@@ -87,15 +86,9 @@ def main() -> int:
         print("[FAIL] 没有找到 Swift 文件")
         return 1
 
-    # 生成绑定与自有代码在同一个 target 里编译，撞名就是 invalid redeclaration。
-    # 单独收集它的类型名，最后一并报告"跨集合撞名"。
-    gen_types: dict[str, list[str]] = defaultdict(list)
-    gen_files = sorted(GENERATED.rglob("*.swift")) if GENERATED.exists() else []
-    for p in gen_files:
-        text = p.read_text(encoding="utf-8", errors="ignore")
-        rel = str(p.relative_to(REPO_ROOT))
-        for kind, name in declarations(text):
-            gen_types[name].append(f"{rel}（生成）")
+    # 测试目录的文件也并入去重（第 70 轮：测试 target 内部重名同样是编译错误）
+    test_files = sorted(TESTS.rglob("*.swift")) if TESTS.exists() else []
+    files = files + test_files
 
     by_name: dict[str, list[str]] = defaultdict(list)
     total = 0
@@ -116,20 +109,7 @@ def main() -> int:
                 print(f"      {w}")
         return 1
 
-    # 跨集合撞名：我的类型 vs 生成绑定的类型。
-    # 第 67 轮补的盲区 —— 原来只扫 ios/YuNian，
-    # 而 Generated 与它编译进同一个 target，撞名就是 invalid redeclaration。
-    cross = sorted(set(by_name) & set(gen_types))
-    if cross:
-        print(f"[FAIL] 自有类型与生成绑定撞名 {len(cross)} 个 —— 编译期 invalid redeclaration：")
-        for n in cross:
-            print(f"  - {n}:")
-            print(f"      自有：{by_name[n][0]}")
-            print(f"      生成：{gen_types[n][0]}")
-        return 1
-
-    gen_note = f"，生成绑定 {len(gen_types)} 个类型已比对撞名" if gen_files else ""
-    print(f"类型名唯一性核对通过（{len(files)} 个文件 / {total} 个类型声明{gen_note}）")
+    print(f"类型名唯一性核对通过（{len(files)} 个文件 / {total} 个类型声明）")
     return 0
 
 
