@@ -17,12 +17,15 @@ on:
         description: 是否运行 Rust 单元测试（189 个用例）
         type: boolean
         default: true
+  # ⚠️ 第 62 轮：去掉 push.paths 过滤。
+  # 原过滤列了 4 个路径，结果"这次改动会不会触发 CI"要逐个路径去猜 ——
+  # 我最后一次提交只动了 .gitignore 和 _regex_probe/，全不匹配，
+  # 于是 CI 静默不跑，我这边还以为推上去了就会验。
+  # 本仓现在只装 iOS（+ agent-native + 契约源），任何改动都相关，
+  # 不值得为省几分钟 runner 时间去换"不确定会不会跑"。
+  # 公开仓库 macOS runner 免费，成本不是问题。
   push:
-    paths:
-      - 'agent-native/**'
-      - 'ios/**'
-      - 'scripts/build_agent_ios.sh'
-      - '.github/workflows/ios-agent.yml'
+    branches: [main]
 
 concurrency:
   group: ios-agent-${{ github.ref }}
