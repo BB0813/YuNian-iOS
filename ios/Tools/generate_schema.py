@@ -97,6 +97,13 @@ def render(version: int, db: dict, tables: list[str], indices: list[str],
     A("// 重新生成：python ios/Tools/generate_schema.py")
     A("")
     A("import Foundation")
+    # ⚠️ 第 74 轮：必须由生成器 emit `import GRDB`。
+    # `createFTSTable(_ db: Database)` 用了 GRDB 的 Database 协议。
+    # 我第 72 轮是**手工**给 YuNianSchema.swift 加的 import GRDB，
+    # 然后又跑了 generate_schema.py 重新生成 —— 手工修复被覆盖，
+    # CI 因此再次报同一个错。
+    # 修根因就得改生成器，否则每次重新生成都会丢失。
+    A("import GRDB")
     A("")
     A("/// 予念 iOS 侧的数据库基线（与 Android 侧 Room v45 同构）。")
     A("///")
