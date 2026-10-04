@@ -60,8 +60,18 @@ enum BackupKDF {
         var out = [UInt8]()
         var block: UInt32 = 1
         while out.count < keyLength {
-            // U_1 = HMAC(P, S || INT(block))
-            var u = hmacSHA256(p, s + withUnsafeBytes(of: block.bigEndian) { Array($0) })
+            // ⚠️ 第 82 轮：原来用 `withUnsafeBytes(of: block.bigEndian) { Array($0) }`，
+            // CI 报 "Cannot convert value of type 'UInt32' to expected argument type 'Int'"
+            // —— 那个闭包在复合表达式里让类型推断崩了。
+            // 改为显式的大端 4 字节，正是 RFC 8018 对 INT(i) 的编码要求，
+            // 同时不再有任何推断歧义。
+            let blockBytes = [
+                UInt8(truncatingIfNeeded: block >> 24),
+                UInt8(truncatingIfNeeded: block >> 16),
+                UInt8(truncatingIfNeeded: block >> 8),
+                UInt8(truncatingIfNeeded: block)
+            ]
+            var u = hmacSHA256(p, s + blockBytes)
             var t = u
             for _ in 1..<iterations {
                 u = hmacSHA256(p, u)
