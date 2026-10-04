@@ -277,7 +277,15 @@ jobs:
   app-simulator:
     name: 编译模拟器 App（无需签名）
     needs: rust-ios
-    runs-on: macos-14
+    # ⚠️ 第 71 轮：从 macos-14 换成 macos-15。
+    # macos-14 自带 Xcode 15.4，它与 xcodegen 生成的 project format 不匹配：
+    #   · xcodegen 2.46 → format 77（装最新版时撞到）
+    #   · xcodegen 2.44 → format 70（锁版本后仍撞到）
+    # 两次都在"猜哪个 xcodegen 版本配哪代 Xcode"，而这是猜不完的。
+    # 改为让**运行器的 Xcode 去匹配生成器**：macos-15 自带 Xcode 16.x，
+    # 读 format 70/77 都没有问题。
+    # 只改这个 job —— rust-ios 在 macos-14 上已验证通过，不动它。
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
