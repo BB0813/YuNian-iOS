@@ -340,6 +340,13 @@ jobs:
               | grep -Eo 'iPhone [^(]*' | head -n 1 | sed 's/ *$//')
           fi
           echo "使用模拟器：$DEVICE"
+          # ⚠️ 第 78 轮：两件事必须都做对，否则日志还是空的。
+          #   (1) 不能在 `set -e` 下直接跑 xcodebuild —— 它返回非零
+          #       （本次 65 / EX_DATAERR）时脚本立刻退出，下面的代码不执行。
+          #   (2) `code=$?` **不能**放在失败命令之后才"想通"——
+          #       我上一版就是这么写的，本地一测就发现那行根本没跑到。
+          #       必须先 `set +e` 关掉 errexit，跑完再 `set -e` 打开。
+          set +e
           xcodebuild test \
             -project YuNian.xcodeproj \
             -scheme YuNian \
@@ -349,14 +356,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             > "$RUNNER_TEMP/xcodebuild.log" 2>&1
-          # ⚠️ 第 77 轮：去掉 `| tail -n 80`。
-          # 那是我第 30 轮就加上的，为的是让日志短一点。
-          # 但它把**错误的上下文**（文件:行号、前后代码行）全截掉了，
-          # 于是我这十几轮一直在读残缺日志，只能看到
-          # "Cannot find 'Android' in scope" 这类没有位置的错误。
-          # 完整日志写文件，并把最后 300 行打到 stdout，
-          # 另由后面的「上传构建日志」步骤整体留档。
-          tail -n 300 "$RUNNER_TEMP/xcodebuild.log"
+          code=$?
+          set -e
+          echo "xcodebuild 退出码：$code"
+          tail -n 300 "$RUNNER_TEMP/xcodebuild.log" || true
+          exit $code
 
       - name: 上传构建日志
         if: always()
