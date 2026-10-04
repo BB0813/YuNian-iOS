@@ -1,3 +1,15 @@
 [bindings.kotlin]
 package_name = "com.yunian.ai.agent.uniffi"
 cdylib_name = "lianyu_agent"
+
+# iOS 绑定配置（M0）
+# uniffi 0.29.5 的 bindgen 原生支持 Swift，且没有 per-language feature 门控，
+# 因此无需改动 Cargo.toml 的 feature —— 同一次 `--features cli-bin` 构建即可产出 Swift。
+# 生成命令见 scripts/build_agent_ios.sh。
+[bindings.swift]
+# Swift 侧 import 的模块名（生成 LianyuAgent.swift）
+module_name = "LianyuAgent"
+# C FFI 层：生成 lianyu_agentFFI.h + lianyu_agentFFI.modulemap，由 xcframework 提供实现
+ffi_module_name = "lianyu_agentFFI"
+ffi_module_filename = "lianyu_agentFFI"
+cdylib_name = "lianyu_agent"

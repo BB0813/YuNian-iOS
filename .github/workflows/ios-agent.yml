@@ -1,0 +1,339 @@
+name: iOS Agent
+
+# M0 打样流水线：在 macOS 上把 Rust Agent 编到 iOS、生成 Swift 绑定、并编译模拟器 App。
+#
+# 为什么需要云端 macOS：
+#   rustls 的密码学后端 ring（0.17.14）与 rusqlite 的 bundled SQLite（libsqlite3-sys）
+#   都需要编译 C/汇编源码，交叉编译到 iOS 必须有 iOS SDK 提供 clang 与头文件。
+#   因此「必须有一台 Mac 或 macOS CI」是 Rust 侧就决定的，与 UI 用什么写无关。
+#
+# 成本：本仓库为公开仓库，GitHub Actions 的标准 runner（含 macOS）对公开仓库免费。
+#      私有仓库的 macOS 分钟按 10× 倍率计费，请注意。
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 是否运行 Rust 单元测试（189 个用例）
+        type: boolean
+        default: true
+  push:
+    paths:
+      - 'agent-native/**'
+      - 'ios/**'
+      - 'scripts/build_agent_ios.sh'
+      - '.github/workflows/ios-agent.yml'
+
+concurrency:
+  group: ios-agent-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # 减少增量编译体积，CI 上无意义
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # ── 0. 契约检查（Linux runner，便宜且快）─────────────────────────
+  # 关键洞察：**生成 Swift 绑定不需要 macOS**。
+  # uniffi-bindgen 的 --library 模式解析的是 dylib 里的 UNIFFI_META_* 符号，
+  # Linux 的 .so 与 Windows 的 .dll 同样可用；只有**编译** Swift 才需要 Xcode。
+  # 因此把「契约是否一致」这类检查放在 ubuntu 上跑，省下昂贵的 macOS 分钟。
+  contract-checks:
+    name: 契约检查（非 macOS）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: 缓存 cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            agent-native/target
+          key: ${{ runner.os }}-cargo-contract-${{ hashFiles('agent-native/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-contract-
+
+      - name: 构建 host 库（供 bindgen 提取元数据）
+        working-directory: agent-native
+        run: cargo build --lib
+
+      - name: 生成 Swift 绑定
+        working-directory: agent-native
+        run: |
+          set -euo pipefail
+          # 按平台找 dylib，避免硬编码扩展名
+          LIB=$(ls target/debug/liblianyu_agent.so target/debug/liblianyu_agent.dylib 2>/dev/null | head -n 1)
+          test -n "$LIB" || { echo "找不到 host 库"; ls -l target/debug/; exit 1; }
+          mkdir -p ../ios/Generated
+          cargo run --features cli-bin --bin uniffi-bindgen -- generate \
+            --library "$LIB" --language swift --out-dir ../ios/Generated
+          ls -l ../ios/Generated
+
+      - name: 断言 Swift 实现与生成签名一致
+        run: python3 ios/Tools/verify_swift_conformance.py
+
+      - name: Swift 结构冒烟检查（括号 / 三引号）
+        run: python3 ios/Tools/verify_swift_syntax_smoke.py
+
+      - name: 断言 schema 生成物与 Room 一致
+        run: python3 ios/Tools/generate_schema.py --check
+
+      - name: 断言初始数据种子与 Android 源码一致
+        run: python3 ios/Tools/generate_seeds.py --check
+
+      - name: 断言安全基线种子与 Android 源码一致
+        run: python3 ios/Tools/generate_security_seed.py --check
+
+      - name: 交叉核对字面量契约（枚举列 vs 业务字面量）
+        run: python3 ios/Tools/verify_literals.py
+
+      - name: 核对 iOS 对 UniFFI 生成绑定的调用与构造参数
+        run: python3 ios/Tools/verify_generated_api_usage.py
+
+      # 过滤金标向量此前由 Python re 算出；此处用 java.util.regex（Android 的权威引擎）
+      # 复跑同一批输入，确认两侧等级判定一致。无 JDK 时自动跳过。
+      - name: 用 Java 正则引擎复核内容过滤金标向量
+        run: python3 ios/Tools/gen_regex_probe.py
+
+      # 一键驱动全部关卡：把退出码判断收在 Python 里，
+      # 避免在 PowerShell 管道上读退出码（第 102–122 轮因此错过六次）。
+      # 跑**全量**而非 --quick：被跳过的四关（SQLite / golden / Java 正则复核）
+      # 在 runner 上合计仅几十秒，为省时间降覆盖不值得。
+      - name: 全部本地关卡
+        run: python3 ios/Tools/run_all_gates.py
+
+      # 关卡自身的变异测试：证明每个检查器真的能抓住它声称的问题。
+      # 没有这一步，就分不清「代码没问题」和「检查器没工作」——
+      # 第 101–108 轮我四次栽在这上面（编辑没生效 / 管道断 /
+      # 变异不构成错误 / PowerShell -ne 大小写不敏感）。
+      # 覆盖 9 个关卡；死代码检查器是 report-only，故其变异用
+      # 「制造死代码看是否被报出」作判据，而非退出码。
+      - name: 关卡变异测试
+        run: python3 ios/Tools/run_mutation_tests.py
+
+      # 死代码扫描（report-only）：从未编译过的代码库里，无人引用的声明
+      # 可能引用了错误的东西而没人发现。
+      - name: 扫描疑似死代码
+        run: python3 ios/Tools/find_dead_swift.py
+
+      # 枚举 rawValue 重复不是编译错误，而是让 init(rawValue:) 运行时返回 nil。
+      # iOS 侧多个枚举的 rawValue 是与 Android 跨端对齐的契约。
+      - name: 核对枚举 rawValue 唯一
+        run: python3 ios/Tools/verify_enum_raw_values.py
+
+      # 同模块内重复类型名 = invalid redeclaration，确定性编译错误。
+      # 嵌套类型按外层前缀限定（ChatInputGuard.Outcome 与 DatabaseMaintenance.Outcome
+      # 是同名但不同命名空间，合法）。
+      - name: 核对类型名唯一性
+        run: python3 ios/Tools/verify_unique_types.py
+
+      # 属性包装器与容器类型是否匹配：@Published 只能在 class、
+      # SwiftUI 包装器（@State 等）只能在 struct。确定性编译错误。
+      - name: 核对属性包装器使用
+        run: python3 ios/Tools/verify_property_wrappers.py
+
+      # README 顶部的交付物统计必须与实测一致 —— 第 112 轮发现它漂移了
+      # （手写的数字，十几轮没更新）。读它的人会拿这些数字判断规模。
+      - name: 核对 README 交付物统计
+        run: python3 ios/Tools/verify_readme_accounting.py
+
+      # workflow 自身结构自洽：job 依赖、步骤名、脚本路径。
+      # 否则本文件的其余关卡可能是"看起来在跑"
+      - name: 核对 workflow 结构自洽
+        run: python3 ios/Tools/verify_ci_workflow.py
+
+      # M0 是「交给有 Mac 的人」的入口文档；它引用的东西必须自洽，
+      # 否则实跑的人会在 xcodegen generate 拿到难归因的错误
+      - name: 核对 M0 前提条件自洽
+        run: python3 ios/Tools/verify_m0_prereqs.py
+
+      # 工具定义（description / JSON Schema）是模型侧契约，
+      # 差一点模型看到的能力边界就不同 —— 且不报错
+      - name: 交叉核对工具定义与 Android 一致
+        run: python3 ios/Tools/verify_tool_contracts.py
+
+      # 防文档漂移：M0-RUNBOOK 是 macOS 实跑的入口，漏列测试文件会误导执行者
+      - name: 核对 runbook 覆盖全部测试文件
+        run: python3 ios/Tools/verify_docs_coverage.py
+
+      # 引用不存在的自有类型：编译器才查得到，本地用声明集合比对兜底
+      # （第 50 轮真实事故：AgentToolCatalog 的参数类型写成不存在的 AgentHost）
+      - name: 核对自有类型引用
+        run: python3 ios/Tools/verify_own_types.py
+
+      # SQL 是字符串，编译器不检查；此处拿到真实 v45 schema 上执行，
+      # 抓列名/表名拼错与语法错（这类错误只在运行时才炸）
+      - name: 把 Swift 里的 SQL 拿到真实 schema 上执行
+        run: python3 ios/Tools/verify_swift_sql.py
+
+      - name: 用真实 SQLite 验证建库脚本与 FTS 维护时序
+        run: python3 ios/Tools/verify_schema_sql.py
+
+      - name: 上传生成的绑定（供排查与下游复用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: uniffi-swift-bindings
+          path: ios/Generated/
+          retention-days: 7
+
+  # ── 1. Rust → iOS：xcframework + Swift 绑定 ─────────────────────
+  rust-ios:
+    name: Rust Agent → iOS
+    needs: contract-checks
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示工具链版本
+        run: |
+          sw_vers
+          xcode-select -p
+          xcrun --sdk iphoneos --show-sdk-version
+          rustc --version
+          cargo --version
+
+      - name: 安装 iOS target
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          rustup target list --installed
+
+      - name: 缓存 cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            agent-native/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-ios-${{ hashFiles('agent-native/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-ios-
+
+      - name: 构建（测试 + 交叉编译 + 生成 Swift 绑定 + 打包 xcframework）
+        working-directory: .
+        run: |
+          chmod +x scripts/build_agent_ios.sh
+          if [ "${{ inputs.run_tests }}" = "false" ]; then
+            ./scripts/build_agent_ios.sh --skip-test
+          else
+            ./scripts/build_agent_ios.sh
+          fi
+
+      - name: 校验产物（V1 / V2 的通过标准）
+        run: |
+          set -euo pipefail
+          echo "── xcframework 切片 ──"
+          ls -1 ios/Frameworks/lianyu_agent.xcframework
+          echo "── Swift 绑定 ──"
+          wc -l ios/Generated/LianyuAgent.swift
+          # V2：至少导出 1 个函数 + 1 个 Object + 1 个 protocol
+          grep -c '^public func ' ios/Generated/LianyuAgent.swift || true
+          grep -c '^public protocol ' ios/Generated/LianyuAgent.swift || true
+          grep -q 'AgentRuntime' ios/Generated/LianyuAgent.swift
+          echo "── 静态库架构 ──"
+          lipo -info agent-native/target/aarch64-apple-ios/release/liblianyu_agent.a
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: lianyu-agent-ios
+          path: |
+            ios/Frameworks/lianyu_agent.xcframework
+            ios/Generated/
+          retention-days: 14
+          if-no-files-found: error
+
+  # ── 2. 模拟器 App 编译（验证 Swift 侧能跑通）─────────────────────
+  app-simulator:
+    name: 编译模拟器 App（无需签名）
+    needs: rust-ios
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载 Rust 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: lianyu-agent-ios
+          path: ios
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: 编译并运行单元测试（模拟器，关闭签名）
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          # 选一个可用的模拟器 destination（避免硬编码机型在 runner 上不存在）
+          DEVICE=$(xcrun simctl list devices available \
+            | grep -Eo 'iPhone 1[5-9][^(]*' | head -n 1 | sed 's/ *$//')
+          if [ -z "$DEVICE" ]; then
+            DEVICE=$(xcrun simctl list devices available \
+              | grep -Eo 'iPhone [^(]*' | head -n 1 | sed 's/ *$//')
+          fi
+          echo "使用模拟器：$DEVICE"
+          xcodebuild test \
+            -project YuNian.xcodeproj \
+            -scheme YuNian \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | tail -n 80
+
+      - name: 上传构建日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ios/build/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # 说明：契约检查（Swift 签名一致性 / schema 一致性 / SQL 时序）
+  # 已全部前置到 contract-checks（ubuntu，便宜），此处不再重复。
+
+  # ── 3. 真机签名构建（需要付费账号，手动触发）────────────────────
+  # 免费 Apple ID 无法启用 Push Notifications capability，因此该任务默认不执行。
+  # 启用前需要配置以下 secrets：APPLE_TEAM_ID / BUILD_CERTIFICATE_BASE64 /
+  # P12_PASSWORD / PROVISIONING_PROFILE_BASE64 / KEYCHAIN_PASSWORD
+  app-device:
+    name: 真机签名构建（需付费账号，手动）
+    needs: rust-ios
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_tests == true && vars.ENABLE_DEVICE_BUILD == 'true' }}
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载 Rust 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: lianyu-agent-ios
+          path: ios
+      - name: 说明
+        run: |
+          echo "真机签名构建尚未接线。"
+          echo "需要先在仓库 Variables 中设置 ENABLE_DEVICE_BUILD=true，并配置签名 secrets。"
+          echo "详见 docs/ios-port-feasibility.md §3.2（签名与推送的硬约束）。"
+          exit 1

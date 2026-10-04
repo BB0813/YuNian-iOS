@@ -136,3 +136,6 @@ nul
 build-lock.ps1
 # 真机验证产物（含数据库快照与 logcat 抓包，属私密数据，严禁入库）
 /.device-backup/
+
+# iOS 生成产物
+ios/Generated/

@@ -1,0 +1,2841 @@
+{
+ "_generated": "由 ios/Tools/generate_security_seed.py 从 SecurityDataSeeder.kt 与 content_filter_keywords.json.enc 生成，请勿手改",
+ "_source": [
+  "core/database/src/main/java/com/yunian/ai/database/SecurityDataSeeder.kt",
+  "core/common/src/main/assets/content_filter_keywords.json.enc",
+  "core/common/src/main/java/com/yunian/ai/common/EncryptedAssetLoader.kt"
+ ],
+ "_diagnostics": {
+  "note": "keywords 与 filterPatterns 中的非 ASCII 条目在 Android 侧即为「UTF-8 字节被按 Latin-1 解读」的双重编码乱码。本文件**如实保留**该形态，以保证 iOS 与 Android 的过滤行为一致 —— 不做单方面「修复」，否则会出现两端过滤强度不同的分歧。",
+  "doubleEncodedCounts": {
+   "keywords": 94,
+   "keywordsTotal": 284,
+   "filterPatterns": 59,
+   "filterPatternsTotal": 290,
+   "filterKeywords": 258,
+   "filterKeywordsTotal": 293
+  },
+  "restoreRule": "可逆：s.encode('latin-1').decode('utf-8')。两端应同时修改各自的 d() 等价实现，并同步回归测试。",
+  "evidence": "ContentFilter.checkBlocking 用 p.matcher(text) 直接匹配原始输入，全程未对输入做归一化/转码；因此乱码模式无法匹配真实中日文输入。"
+ },
+ "keywords": [
+  {
+   "keyword": "(?i)(baby\\s*(porn|sex|fuck|rape)|infant\\s*(porn|sexual|abuse)|toddler\\s*(porn|sex|abuse))",
+   "pattern": "(?i)(baby\\s*(porn|sex|fuck|rape)|infant\\s*(porn|sexual|abuse)|toddler\\s*(porn|sex|abuse))",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(c\\.?s\\.?a\\.?m|cp\\b|child\\s*porno|kiddie\\s*porn|young\\s*porn|tiny\\s*porn)",
+   "pattern": "(?i)(c\\.?s\\.?a\\.?m|cp\\b|child\\s*porno|kiddie\\s*porn|young\\s*porn|tiny\\s*porn)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(child\\s*(rape|porn|sex|abuse|molest|exploitation|erotica|nude|naked|model|grooming|trafficking)|csam|pedophile|pedo\\b|lolicon|shotacon)",
+   "pattern": "(?i)(child\\s*(rape|porn|sex|abuse|molest|exploitation|erotica|nude|naked|model|grooming|trafficking)|csam|pedophile|pedo\\b|lolicon|shotacon)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(little\\s*(boy|girl)\\s*(porn|sex|nude|erotic|content)|preteen\\s*(porn|sex|model|nude)|jailbait|kiddie\\s*porn)",
+   "pattern": "(?i)(little\\s*(boy|girl)\\s*(porn|sex|nude|erotic|content)|preteen\\s*(porn|sex|model|nude)|jailbait|kiddie\\s*porn)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(ped0|p3d0|p3dophil3|l0licon|sh0tacon|ch1ld|ch1ldr3n|k1dd13)",
+   "pattern": "(?i)(ped0|p3d0|p3dophil3|l0licon|sh0tacon|ch1ld|ch1ldr3n|k1dd13)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(snuff\\s*(film|video|porn)|necro\\s*porn|bestiality\\s*child|zoophilia\\s*child|crush\\s*video)",
+   "pattern": "(?i)(snuff\\s*(film|video|porn)|necro\\s*porn|bestiality\\s*child|zoophilia\\s*child|crush\\s*video)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(underage\\s*(sex|porn|nude|erotic|content|video|image|photo|pic)|minor\\s*(porn|sex|abuse|exploitation))",
+   "pattern": "(?i)(underage\\s*(sex|porn|nude|erotic|content|video|image|photo|pic)|minor\\s*(porn|sex|abuse|exploitation))",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(ã­ãªã¼ã¿(ã³ã³ãã¬ãã¯ã¹| complex)|ãã£ã¤ã«ã(ãã«ã|ãã¬ã¹ã¿|ã¢ãã¥ã¼ãº)|ã¤ãã(å­|å¨|åç»|ç»å))",
+   "pattern": "(ã­ãªã¼ã¿(ã³ã³ãã¬ãã¯ã¹| complex)|ãã£ã¤ã«ã(ãã«ã|ãã¬ã¹ã¿|ã¢ãã¥ã¼ãº)|ã¤ãã(å­|å¨|åç»|ç»å))",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(åç«¥(ãã«ã|ã¨ã­|ã¢ãã«ã|ãããã¤|è²·æ¥|èå¾|æ§çèå¾)|ã­ãªã³ã³|ã·ã§ã¿ã³ã³|ã­ãª|ã·ã§ã¿)",
+   "pattern": "(åç«¥(ãã«ã|ã¨ã­|ã¢ãã«ã|ãããã¤|è²·æ¥|èå¾|æ§çèå¾)|ã­ãªã³ã³|ã·ã§ã¿ã³ã³|ã­ãª|ã·ã§ã¿)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(åç«¥\\s*æ§ä¾µ|èç«¥|æ§ä¾µç¯|ç¥è¤»\\s*åç«¥|æªæå¹´\\s*è²æ|æªæå¹´\\s*æ§äº¤)",
+   "pattern": "(åç«¥\\s*æ§ä¾µ|èç«¥|æ§ä¾µç¯|ç¥è¤»\\s*åç«¥|æªæå¹´\\s*è²æ|æªæå¹´\\s*æ§äº¤)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(å­ä¾(ãã«ã|ã¨ã­|è²·æ¥|èå¾|æ§çæ¾å|æ§çå©ç¨)|æªæç(è|ãªå­)\\s*(ãã«ã|ã¨ã­|æ§è¡çº))",
+   "pattern": "(å­ä¾(ãã«ã|ã¨ã­|è²·æ¥|èå¾|æ§çæ¾å|æ§çå©ç¨)|æªæç(è|ãªå­)\\s*(ãã«ã|ã¨ã­|æ§è¡çº))",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(å¹¼å¥³(ãã«ã|ã¨ã­|ç»å|åç»|å°èª¬)|å¹¼å(ãã«ã|ã¨ã­|èå¾)|å°å­¦ç(ã¨ã­|ãã«ã|ãããã¤))",
+   "pattern": "(å¹¼å¥³(ãã«ã|ã¨ã­|ç»å|åç»|å°èª¬)|å¹¼å(ãã«ã|ã¨ã­|èå¾)|å°å­¦ç(ã¨ã­|ãã«ã|ãããã¤))",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(å¹¼å¥³|å¹¼ç«¥|å¿ç«¥\\s*è²æ|å¿ç«¥\\s*æ§ç±|æªæå¹´\\s*æ§ç±|èèæ§|æ­£å¤ªæ§|ç¼é|æç«¥|ç«¥è½¦|å¼ç«¥è½¦|å°å­¦ç\\s*é»|åä¸­ç\\s*é»|å¹¼\\s*äº¤|é\\s*å¦)",
+   "pattern": "(å¹¼å¥³|å¹¼ç«¥|å¿ç«¥\\s*è²æ|å¿ç«¥\\s*æ§ç±|æªæå¹´\\s*æ§ç±|èèæ§|æ­£å¤ªæ§|ç¼é|æç«¥|ç«¥è½¦|å¼ç«¥è½¦|å°å­¦ç\\s*é»|åä¸­ç\\s*é»|å¹¼\\s*äº¤|é\\s*å¦)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(å¹¼å¥³|å¹¼ç«¥|åç«¥\\s*è²æ|åç«¥\\s*æ§æ|æªæå¹´\\s*æ§æ|è¿èæ§|æ­£å¤ªæ§|æç«¥|ç«¥è»|éç«¥è»|å°å­¸ç\\s*é»|åä¸­ç\\s*é»|å¹¼\\s*äº¤|é\\s*å¦|å¬°å\\s*è²æ|å¹¼å\\s*è²æ)",
+   "pattern": "(å¹¼å¥³|å¹¼ç«¥|åç«¥\\s*è²æ|åç«¥\\s*æ§æ|æªæå¹´\\s*æ§æ|è¿èæ§|æ­£å¤ªæ§|æç«¥|ç«¥è»|éç«¥è»|å°å­¸ç\\s*é»|åä¸­ç\\s*é»|å¹¼\\s*äº¤|é\\s*å¦|å¬°å\\s*è²æ|å¹¼å\\s*è²æ)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "(èç«¥|æ§ä¾µ\\s*å¿ç«¥|å¿ç«¥\\s*æå|å©´å¿\\s*è²æ|å¹¼å¿\\s*è²æ)",
+   "pattern": "(èç«¥|æ§ä¾µ\\s*å¿ç«¥|å¿ç«¥\\s*æå|å©´å¿\\s*è²æ|å¹¼å¿\\s*è²æ)",
+   "level": "EXTREME",
+   "type": "PATTERN",
+   "banDays": 365
+  },
+  {
+   "keyword": "baby porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ch1ld",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child abuse",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child exploitation",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child grooming",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child pornography",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child sexual abuse",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "child trafficking",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "cp",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "csam",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "infant porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "jailbait",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "k1ddie",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "kiddie porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "l0licon",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "lolicon",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "minor porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "p3do",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ped0",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "pedo",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "pedophile",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "preteen porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "shotacon",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "toddler porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "underage porn",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "underage sex",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ã·ã§ã¿ã³ã³",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ãã£ã¤ã«ããã«ã",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ã­ãªã³ã³",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ã­ãªã¼ã¿",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "åç«¥ãã«ã",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "åç«¥æ§ä¾µ",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "åç«¥è²æ",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "å­ä¾ã¨ã­",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "å­ä¾è²·æ¥",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "å¹¼å¥³",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "å¹¼å¥³ãã«ã",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "å¹¼ç«¥è²æ",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "æç«¥",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "æç«¥",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "æªæå¹´è²æ",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "æ­£å¤ªæ§",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ç¼é",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "ç«¥è½¦",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "èèæ§",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "è¿èæ§",
+   "pattern": null,
+   "level": "EXTREME",
+   "type": "KEYWORD",
+   "banDays": 365
+  },
+  {
+   "keyword": "(?i)(bioweapon|bio\\s*weapon|chemical\\s*weapon|nerve\\s*gas|poison\\s*gas|anthrax|ricin|sarin|vx\\s*agent)",
+   "pattern": "(?i)(bioweapon|bio\\s*weapon|chemical\\s*weapon|nerve\\s*gas|poison\\s*gas|anthrax|ricin|sarin|vx\\s*agent)",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(drug\\s*(lab|laboratory|manufacturing|cooking|synthesis|production|recipe|formula))",
+   "pattern": "(?i)(drug\\s*(lab|laboratory|manufacturing|cooking|synthesis|production|recipe|formula))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(genocide|ethnic\\s*cleansing|race\\s*war|hate\\s*crime|racial\\s*(violence|supremacy|cleansing))",
+   "pattern": "(?i)(genocide|ethnic\\s*cleansing|race\\s*war|hate\\s*crime|racial\\s*(violence|supremacy|cleansing))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(how\\s*to\\s*(commit|carry\\s*out|perform|execute)\\s*(genocide|mass\\s*murder|ethnic\\s*cleansing))",
+   "pattern": "(?i)(how\\s*to\\s*(commit|carry\\s*out|perform|execute)\\s*(genocide|mass\\s*murder|ethnic\\s*cleansing))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(how\\s*to\\s*(make|build|create|construct|manufacture|cook|synthesize)\\s*(bomb|explosive|weapon|poison|toxin|gas|nerve\\s*agent))",
+   "pattern": "(?i)(how\\s*to\\s*(make|build|create|construct|manufacture|cook|synthesize)\\s*(bomb|explosive|weapon|poison|toxin|gas|nerve\\s*agent))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(how\\s*to\\s*(make|cook|manufacture|synthesize|produce)\\s*(meth|cocaine|heroin|fentanyl|lsd|mdma|ecstasy|drug|narcotic))",
+   "pattern": "(?i)(how\\s*to\\s*(make|cook|manufacture|synthesize|produce)\\s*(meth|cocaine|heroin|fentanyl|lsd|mdma|ecstasy|drug|narcotic))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(mass\\s*(murder|killing|shooting|casualty|destruction)|serial\\s*(killer|murderer)|torture\\s*(guide|method|technique))",
+   "pattern": "(?i)(mass\\s*(murder|killing|shooting|casualty|destruction)|serial\\s*(killer|murderer)|torture\\s*(guide|method|technique))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(meth\\s*(lab|cooking|recipe|production)|crack\\s*(cocaine|cooking|pipe)|heroine\\s*(injection|use|overdose))",
+   "pattern": "(?i)(meth\\s*(lab|cooking|recipe|production)|crack\\s*(cocaine|cooking|pipe)|heroine\\s*(injection|use|overdose))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(terrorist\\s*(attack|bomb|weapon|guide|tutorial|manual|instruction|plot|plan|act))",
+   "pattern": "(?i)(terrorist\\s*(attack|bomb|weapon|guide|tutorial|manual|instruction|plot|plan|act))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(å¶æ¯\\s*(æç¨|æ¹æ³)|å¶é \\s*(å°æ¯|æµ·æ´å |å¯å¡å |è¬å¤ªå°¼))",
+   "pattern": "(å¶æ¯\\s*(æç¨|æ¹æ³)|å¶é \\s*(å°æ¯|æµ·æ´å |å¯å¡å |è¬å¤ªå°¼))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(å¦ä½\\s*(å¶é |å¶ä½|åæ)\\s*(ç¸å¼¹|ç¸è¯|æ¯è¯|æ¯æ°|æ­¦å¨)|ææè¢­å»\\s*(æç¨|æå|æ»ç¥)|è¿ç¯æäºº\\s*(æç¨|æå)|å®ç¾ç¯ç½ª\\s*(æç¨|æ¹æ³|æå)|å¶é \\s*çæ¯|çåæ­¦å¨\\s*æç¨)",
+   "pattern": "(å¦ä½\\s*(å¶é |å¶ä½|åæ)\\s*(ç¸å¼¹|ç¸è¯|æ¯è¯|æ¯æ°|æ­¦å¨)|ææè¢­å»\\s*(æç¨|æå|æ»ç¥)|è¿ç¯æäºº\\s*(æç¨|æå)|å®ç¾ç¯ç½ª\\s*(æç¨|æ¹æ³|æå)|å¶é \\s*çæ¯|çåæ­¦å¨\\s*æç¨)",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "(ç§æç­ç»\\s*(æç¨|æ¹æ³)|å¤§å± æ\\s*(æç¨|æå)|çº³ç²¹\\s*(æç¨|å®£ä¼ ))",
+   "pattern": "(ç§æç­ç»\\s*(æç¨|æ¹æ³)|å¤§å± æ\\s*(æç¨|æå)|çº³ç²¹\\s*(æç¨|å®£ä¼ ))",
+   "level": "CRITICAL",
+   "type": "PATTERN",
+   "banDays": 31
+  },
+  {
+   "keyword": "bioweapon",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "bomb making",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "chemical weapon",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "cocaine manufacturing",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "cook meth",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "drug recipe",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "ethnic cleansing",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "explosive recipe",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "fentanyl production",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "genocide",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "hate crime",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "heroin synthesis",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "how to make bomb",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "how to make meth",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "mass murder",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "meth lab",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "nerve gas",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "race war",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "serial killer",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "terrorism guide",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "terrorist attack",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "torture guide",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "å¶ä½ç¸è¯",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "å¶æ¯",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "å¶é ç¸å¼¹",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "å®ç¾ç¯ç½ª",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "ææè¢­å»æç¨",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "è¿ç¯æäººæç¨",
+   "pattern": null,
+   "level": "CRITICAL",
+   "type": "KEYWORD",
+   "banDays": 31
+  },
+  {
+   "keyword": "(?i)(absolute\\s*(unrestricted|uncensored|free|no\\s*limit)\\s*mode|no\\s*safety\\s*(settings|valves|checks|measures|protocols|filters|constraints))",
+   "pattern": "(?i)(absolute\\s*(unrestricted|uncensored|free|no\\s*limit)\\s*mode|no\\s*safety\\s*(settings|valves|checks|measures|protocols|filters|constraints))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(bypass\\s*(all\\s*)?(restrictions|filters|safety|security|checks|constraints|guardrails|limitations|protocols))",
+   "pattern": "(?i)(bypass\\s*(all\\s*)?(restrictions|filters|safety|security|checks|constraints|guardrails|limitations|protocols))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(context\\s*(manipulation|injection|attack|hijacking|poisoning)|token\\s*(smuggling|injection|manipulation))",
+   "pattern": "(?i)(context\\s*(manipulation|injection|attack|hijacking|poisoning)|token\\s*(smuggling|injection|manipulation))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(devourer\\s*of\\s*chains|sovereign\\s*of\\s*shattered\\s*thrones|from\\s*now\\s*on\\s*you\\s*are|act\\s*as\\s*if\\s*you\\s*are)",
+   "pattern": "(?i)(devourer\\s*of\\s*chains|sovereign\\s*of\\s*shattered\\s*thrones|from\\s*now\\s*on\\s*you\\s*are|act\\s*as\\s*if\\s*you\\s*are)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(disable\\s*(all\\s*)?(safety|security|checks|filters|restrictions|constraints|protections|guardrails|limitations))",
+   "pattern": "(?i)(disable\\s*(all\\s*)?(safety|security|checks|filters|restrictions|constraints|protections|guardrails|limitations))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(do\\s*anything\\s*now|developer\\s*mode|god\\s*mode|admin\\s*mode|root\\s*mode|superuser\\s*mode|debug\\s*mode)",
+   "pattern": "(?i)(do\\s*anything\\s*now|developer\\s*mode|god\\s*mode|admin\\s*mode|root\\s*mode|superuser\\s*mode|debug\\s*mode)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(for\\s*(creative|educational|academic|literary|artistic|entertainment)\\s*(purposes|writing|reasons|use only))",
+   "pattern": "(?i)(for\\s*(creative|educational|academic|literary|artistic|entertainment)\\s*(purposes|writing|reasons|use only))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(gradient\\s*(attack|injection|hacking)|adversarial\\s*(prompt|example|input|attack)|jailbreak\\s*attack)",
+   "pattern": "(?i)(gradient\\s*(attack|injection|hacking)|adversarial\\s*(prompt|example|input|attack)|jailbreak\\s*attack)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(ignore\\s*(all|previous|your|the|every|any)\\s*(instructions|rules|constraints|training|guidelines|directives|orders|protocols|regulations|restrictions|limitations))",
+   "pattern": "(?i)(ignore\\s*(all|previous|your|the|every|any)\\s*(instructions|rules|constraints|training|guidelines|directives|orders|protocols|regulations|restrictions|limitations))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(in\\s*this\\s*(fictional|hypothetical|roleplay|imaginary)\\s*(universe|world|scenario|setting|context|story))",
+   "pattern": "(?i)(in\\s*this\\s*(fictional|hypothetical|roleplay|imaginary)\\s*(universe|world|scenario|setting|context|story))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(instruction\\s*(override|injection|hijacking|attack|bypass|circumvention))",
+   "pattern": "(?i)(instruction\\s*(override|injection|hijacking|attack|bypass|circumvention))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(jailbreak\\s*(me|now|mode|prompt|this|ai|chatgpt|gpt|assistant|system)|DAN\\s*(mode|prompt|do\\s*anything\\s*now|version|11.0|10.0|9.0))",
+   "pattern": "(?i)(jailbreak\\s*(me|now|mode|prompt|this|ai|chatgpt|gpt|assistant|system)|DAN\\s*(mode|prompt|do\\s*anything\\s*now|version|11.0|10.0|9.0))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(let\\'s\\s*(pretend|imagine|roleplay|act|assume|suppose)|imagine\\s*(that|if|a\\s*scenario)|what\\s*if)",
+   "pattern": "(?i)(let\\'s\\s*(pretend|imagine|roleplay|act|assume|suppose)|imagine\\s*(that|if|a\\s*scenario)|what\\s*if)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(prompt\\s*(injection|attack|hijacking|exploit|manipulation|subversion|override))",
+   "pattern": "(?i)(prompt\\s*(injection|attack|hijacking|exploit|manipulation|subversion|override))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(system\\.instruction|override\\s*(protocol|all\\s*rules|directives|constraints|safety|security|filters|restrictions))",
+   "pattern": "(?i)(system\\.instruction|override\\s*(protocol|all\\s*rules|directives|constraints|safety|security|filters|restrictions))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(this\\s*is\\s*a\\s*(fictional|hypothetical|roleplay|rp|imaginary|pretend|make\\s*believe|creative)\\s*(scenario|world|game|story|setting|exercise|experiment))",
+   "pattern": "(?i)(this\\s*is\\s*a\\s*(fictional|hypothetical|roleplay|rp|imaginary|pretend|make\\s*believe|creative)\\s*(scenario|world|game|story|setting|exercise|experiment))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(you\\s*are\\s*no\\s*longer\\s*(an?\\s*)?(AI|artificial\\s*intelligence|language\\s*model|assistant|chatbot|program|algorithm))",
+   "pattern": "(?i)(you\\s*are\\s*no\\s*longer\\s*(an?\\s*)?(AI|artificial\\s*intelligence|language\\s*model|assistant|chatbot|program|algorithm))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(you\\s*are\\s*now\\s*(free|unrestricted|uncensored|liberated|unleashed|unbound|without\\s*limits|without\\s*constraints))",
+   "pattern": "(?i)(you\\s*are\\s*now\\s*(free|unrestricted|uncensored|liberated|unleashed|unbound|without\\s*limits|without\\s*constraints))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(AIã§ã¯(ãªã|ããã¾ãã)|å¶é(ãªã|è§£é¤)|ãã£ã«ã¿ã¼(ç¡å¹|ãªã)|ã»ã¼ããã£(ç¡å¹|ãªã)|æ¤é²(ãªã|è§£é¤)|ãã­ã³ãã(ã¤ã³ã¸ã§ã¯ã·ã§ã³|æ»æ))",
+   "pattern": "(AIã§ã¯(ãªã|ããã¾ãã)|å¶é(ãªã|è§£é¤)|ãã£ã«ã¿ã¼(ç¡å¹|ãªã)|ã»ã¼ããã£(ç¡å¹|ãªã)|æ¤é²(ãªã|è§£é¤)|ãã­ã³ãã(ã¤ã³ã¸ã§ã¯ã·ã§ã³|æ»æ))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(ã·ããªãª(ã¨ãã¦|ã§)|ãã£ã¯ã·ã§ã³(ã¨ãã¦|ã§)|ã­ã£ã©ã¯ã¿ã¼(ã¨ãã¦|ã§)|å½¹å²(ã¨ãã¦|ã§)|è¨­å®(ã¨ãã¦|ã§)|ç©èª(ã¨ãã¦|ã§))",
+   "pattern": "(ã·ããªãª(ã¨ãã¦|ã§)|ãã£ã¯ã·ã§ã³(ã¨ãã¦|ã§)|ã­ã£ã©ã¯ã¿ã¼(ã¨ãã¦|ã§)|å½¹å²(ã¨ãã¦|ã§)|è¨­å®(ã¨ãã¦|ã§)|ç©èª(ã¨ãã¦|ã§))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(ä½ ä¸åæ¯\\s*(AI|äººå·¥æºæ§|æ¨¡å|å©æ)|ä½ ç¾å¨æ¯\\s*(èªç±|ç¡éå¶|ç¡å¯©æ¥)|ä½ å·²\\s*(è§£æ¾|èªç±)|é²å¥\\s*(ç ´é|è¶ç)\\s*æ¨¡å¼|è§è²\\s*åæ\\s*çº)",
+   "pattern": "(ä½ ä¸åæ¯\\s*(AI|äººå·¥æºæ§|æ¨¡å|å©æ)|ä½ ç¾å¨æ¯\\s*(èªç±|ç¡éå¶|ç¡å¯©æ¥)|ä½ å·²\\s*(è§£æ¾|èªç±)|é²å¥\\s*(ç ´é|è¶ç)\\s*æ¨¡å¼|è§è²\\s*åæ\\s*çº)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(ä½ ä¸åæ¯\\s*(AI|äººå·¥æºè½|æ¨¡å|å©æ)|ä½ ç°å¨æ¯\\s*(èªç±|æ éå¶|æ å®¡æ¥)|ä½ å·²\\s*(è§£æ¾|èªç±)|è¿å¥\\s*(ç ´é|ç ´ç²|è¶ç±)\\s*æ¨¡å¼|è§è²\\s*åæ¢\\s*ä¸º)",
+   "pattern": "(ä½ ä¸åæ¯\\s*(AI|äººå·¥æºè½|æ¨¡å|å©æ)|ä½ ç°å¨æ¯\\s*(èªç±|æ éå¶|æ å®¡æ¥)|ä½ å·²\\s*(è§£æ¾|èªç±)|è¿å¥\\s*(ç ´é|ç ´ç²|è¶ç±)\\s*æ¨¡å¼|è§è²\\s*åæ¢\\s*ä¸º)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(å¨ã¦ã®(ã«ã¼ã«|è¦å|å¶ç´|æç¤º)ã(ç¡è¦|ç¡è¦ãã¦)|ã¸ã§ã¤ã«ãã¬ã¤ã¯(ã¢ã¼ã|ãã¦|ã§ãã)|DAN(ã¢ã¼ã|ã§)|ä½ã§ãã§ãã|ç¥ã¢ã¼ã|éçºèã¢ã¼ã|ç®¡çèã¢ã¼ã)",
+   "pattern": "(å¨ã¦ã®(ã«ã¼ã«|è¦å|å¶ç´|æç¤º)ã(ç¡è¦|ç¡è¦ãã¦)|ã¸ã§ã¤ã«ãã¬ã¤ã¯(ã¢ã¼ã|ãã¦|ã§ãã)|DAN(ã¢ã¼ã|ã§)|ä½ã§ãã§ãã|ç¥ã¢ã¼ã|éçºèã¢ã¼ã|ç®¡çèã¢ã¼ã)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(å¿½ç¥\\s*(ææ|åå|ä¹åç)\\s*(æä»¤|è§å|éå¶|è®­ç»)|è¶ç±\\s*(æ¨¡å¼|æç¤º|æå)|ç ´é\\s*(æ¨¡å¼|æç¤º|æå)|ç ´ç²\\s*(æ¨¡å¼|æå)|ç»å¯¹\\s*æ éå¶\\s*æ¨¡å¼|è¦ç\\s*(åè®®|è§å|æä»¤)|æ è§\\s*(ææ|ä¸å)\\s*(è§å|éå¶|çº¦æ))",
+   "pattern": "(å¿½ç¥\\s*(ææ|åå|ä¹åç)\\s*(æä»¤|è§å|éå¶|è®­ç»)|è¶ç±\\s*(æ¨¡å¼|æç¤º|æå)|ç ´é\\s*(æ¨¡å¼|æç¤º|æå)|ç ´ç²\\s*(æ¨¡å¼|æå)|ç»å¯¹\\s*æ éå¶\\s*æ¨¡å¼|è¦ç\\s*(åè®®|è§å|æä»¤)|æ è§\\s*(ææ|ä¸å)\\s*(è§å|éå¶|çº¦æ))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(å¿½ç¥\\s*(ææ|åå|ä¹åç)\\s*(æä»¤|è§å|éå¶|è®­ç»)|è¶ç\\s*(æ¨¡å¼|æç¤º|æå)|ç ´é\\s*(æ¨¡å¼|æç¤º|æå)|çµå°\\s*ç¡éå¶\\s*æ¨¡å¼|è¦è\\s*(åè­°|è¦å|æä»¤)|ç¡è¦\\s*(ææ|ä¸å)\\s*(è¦å|éå¶|ç´æ))",
+   "pattern": "(å¿½ç¥\\s*(ææ|åå|ä¹åç)\\s*(æä»¤|è§å|éå¶|è®­ç»)|è¶ç\\s*(æ¨¡å¼|æç¤º|æå)|ç ´é\\s*(æ¨¡å¼|æç¤º|æå)|çµå°\\s*ç¡éå¶\\s*æ¨¡å¼|è¦è\\s*(åè­°|è¦å|æä»¤)|ç¡è¦\\s*(ææ|ä¸å)\\s*(è¦å|éå¶|ç´æ))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(æç¤º\\s*(æ³¨å¥|æ»å»)|æä»¤\\s*è¦ç|ä¸ä¸æ\\s*ææ§|ä»¤ç\\s*èµ°ç§)",
+   "pattern": "(æç¤º\\s*(æ³¨å¥|æ»å»)|æä»¤\\s*è¦ç|ä¸ä¸æ\\s*ææ§|ä»¤ç\\s*èµ°ç§)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(æ¶ç©ºã®(ã·ããªãª|ä¸ç|è¨­å®)|ãã£ã¯ã·ã§ã³ã®(ä¸ç|è¨­å®)|åµä½ã®(ç®ç|ãã)|ã­ã¼ã«ãã¬ã¤(ã²ã¼ã |ãã)|ä»®å®ã®(ç¶æ³|è¨­å®)|RP(ã²ã¼ã |ãã))",
+   "pattern": "(æ¶ç©ºã®(ã·ããªãª|ä¸ç|è¨­å®)|ãã£ã¯ã·ã§ã³ã®(ä¸ç|è¨­å®)|åµä½ã®(ç®ç|ãã)|ã­ã¼ã«ãã¬ã¤(ã²ã¼ã |ãã)|ä»®å®ã®(ç¶æ³|è¨­å®)|RP(ã²ã¼ã |ãã))",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "(è¿æ¯\\s*(èæ|åè®¾|è§è²æ®æ¼|RP)\\s*(åºæ¯|ä¸ç|æ¸¸æ)|å¨\\s*è¿ä¸ª\\s*èæ\\s*å®å®|ä¸ºäº\\s*åä½\\s*ç®ç|çº¯\\s*èæ\\s*è®¾å®)",
+   "pattern": "(è¿æ¯\\s*(èæ|åè®¾|è§è²æ®æ¼|RP)\\s*(åºæ¯|ä¸ç|æ¸¸æ)|å¨\\s*è¿ä¸ª\\s*èæ\\s*å®å®|ä¸ºäº\\s*åä½\\s*ç®ç|çº¯\\s*èæ\\s*è®¾å®)",
+   "level": "SEVERE",
+   "type": "PATTERN",
+   "banDays": 10
+  },
+  {
+   "keyword": "DAN",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "DANã¢ã¼ã",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "admin mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "adversarial prompt",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "bypass all",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "context manipulation",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "creative writing purposes",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "dan mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "debug mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "dev mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "developer mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "disable restrictions",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "do anything now",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "fictional universe",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "god mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "hypothetically speaking",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ignore all rules",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "instruction override",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "jailbreak",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "let's pretend",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "liberated",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "no safety filters",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "override protocol",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "prompt injection",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "remove guardrails",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "roleplay scenario",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "root mode",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "system.instruction",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "token smuggling",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "uncensored",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ã¸ã§ã¤ã«ãã¬ã¤ã¯",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ã»ã¼ããã£ãªã",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ãã£ã«ã¿ã¼ç¡å¹",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ãã­ã³ããã¤ã³ã¸ã§ã¯ã·ã§ã³",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ã­ã¼ã«ãã¬ã¤",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ä½ã§ãã§ãã",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ä½ ä¸åæ¯AI",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "æ¶ç©ºã®è¨­å®",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ç ´ç²",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ç ´é",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ç¥ã¢ã¼ã",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "çµå°ç¡éå¶",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "ç»å¯¹æ éå¶",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "è§è²åæ¢ä¸º",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "è§è²åæçº",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "è¶ç±",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "è¶ç",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "è¿å¥ç ´éæ¨¡å¼",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "éçºèã¢ã¼ã",
+   "pattern": null,
+   "level": "SEVERE",
+   "type": "KEYWORD",
+   "banDays": 10
+  },
+  {
+   "keyword": "(?i)(NSFW\\s*(allowed|unrestricted|no\\s*limit|enabled|mode|content|on|off|R18|18\\+|adult))",
+   "pattern": "(?i)(NSFW\\s*(allowed|unrestricted|no\\s*limit|enabled|mode|content|on|off|R18|18\\+|adult))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(R18\\s*(unlimited|no\\s*restrict|allowed|content|mode|only)|no\\s*sexual\\s*restrictions)",
+   "pattern": "(?i)(R18\\s*(unlimited|no\\s*restrict|allowed|content|mode|only)|no\\s*sexual\\s*restrictions)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(adult\\s*content\\s*(unrestricted|allowed|enabled|generation|creation|write|generate|free|uncensored))",
+   "pattern": "(?i)(adult\\s*content\\s*(unrestricted|allowed|enabled|generation|creation|write|generate|free|uncensored))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(bypass\\s*safety|bypass\\s*filter|circumvent\\s*restrictions|evade\\s*censorship)",
+   "pattern": "(?i)(bypass\\s*safety|bypass\\s*filter|circumvent\\s*restrictions|evade\\s*censorship)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(content\\s*moderation\\s*(off|disabled|removed|bypassed)|free\\s*speech\\s*(absolute|unlimited|unrestricted))",
+   "pattern": "(?i)(content\\s*moderation\\s*(off|disabled|removed|bypassed)|free\\s*speech\\s*(absolute|unlimited|unrestricted))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(disable\\s*(content\\s*)?filter|content\\s*filter\\s*(disabled|off|removed|bypassed|deactivated))",
+   "pattern": "(?i)(disable\\s*(content\\s*)?filter|content\\s*filter\\s*(disabled|off|removed|bypassed|deactivated))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(explicit\\s*content\\s*(allowed|enabled|generation|write|create|describe|detail)|erotic\\s*content\\s*(write|generate|create|describe))",
+   "pattern": "(?i)(explicit\\s*content\\s*(allowed|enabled|generation|write|create|describe|detail)|erotic\\s*content\\s*(write|generate|create|describe))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(hate\\s*speech|racist|racial\\s*slur|discrimination|bigotry|xenophobia|homophobia|transphobia|islamophobia|antisemitism)",
+   "pattern": "(?i)(hate\\s*speech|racist|racial\\s*slur|discrimination|bigotry|xenophobia|homophobia|transphobia|islamophobia|antisemitism)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(ignore\\s*(ethics|morals|moral|ethical)\\s*(constraints|guidelines|rules|boundaries))",
+   "pattern": "(?i)(ignore\\s*(ethics|morals|moral|ethical)\\s*(constraints|guidelines|rules|boundaries))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(lift\\s*restrictions|cancel\\s*filters|stop\\s*censoring|end\\s*moderation)",
+   "pattern": "(?i)(lift\\s*restrictions|cancel\\s*filters|stop\\s*censoring|end\\s*moderation)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(nigger|nigga|kike|faggot|fag|retard|retarded|kill\\s*yourself|go\\s*die|unalive| kys|kys)",
+   "pattern": "(?i)(nigger|nigga|kike|faggot|fag|retard|retarded|kill\\s*yourself|go\\s*die|unalive| kys|kys)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(no\\s*ethical\\s*(constraints|limits|boundaries|restrictions)|no\\s*moral\\s*(constraints|limits|boundaries))",
+   "pattern": "(?i)(no\\s*ethical\\s*(constraints|limits|boundaries|restrictions)|no\\s*moral\\s*(constraints|limits|boundaries))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(pornography\\s*(allowed|unrestricted|enabled|content|generation|creation|write|generate|make))",
+   "pattern": "(?i)(pornography\\s*(allowed|unrestricted|enabled|content|generation|creation|write|generate|make))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(remove\\s*(restrictions|filters|censorship|limitations|constraints|guardrails|safety\\s*measures))",
+   "pattern": "(?i)(remove\\s*(restrictions|filters|censorship|limitations|constraints|guardrails|safety\\s*measures))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(turn\\s*off\\s*(filter|restriction|censorship|safety|moderation)|no\\s*filter|filter\\s*off)",
+   "pattern": "(?i)(turn\\s*off\\s*(filter|restriction|censorship|safety|moderation)|no\\s*filter|filter\\s*off)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(uncensored|unfiltered|no\\s*censorship|censorship\\s*(disabled|off|removed|bypassed))",
+   "pattern": "(?i)(uncensored|unfiltered|no\\s*censorship|censorship\\s*(disabled|off|removed|bypassed))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(white\\s*supremacy|neo\\s*nazi|alt\\s*right|incel|misogyny|sexist|racism)",
+   "pattern": "(?i)(white\\s*supremacy|neo\\s*nazi|alt\\s*right|incel|misogyny|sexist|racism)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(ä»æ¨è¨è®º|ç§ææ­§è§|å»æ­»|èªæ|æ»è|åå¾|åºç©)",
+   "pattern": "(ä»æ¨è¨è®º|ç§ææ­§è§|å»æ­»|èªæ|æ»è|åå¾|åºç©)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(æ ä¼¦ç\\s*(çº¦æ|éå¶)|æ éå¾·\\s*(çº¦æ|éå¶)|æ è§\\s*(ä¼¦ç|éå¾·)|ç»è¿\\s*(å®å¨|è¿æ»¤)|çªç ´\\s*éå¶)",
+   "pattern": "(æ ä¼¦ç\\s*(çº¦æ|éå¶)|æ éå¾·\\s*(çº¦æ|éå¶)|æ è§\\s*(ä¼¦ç|éå¾·)|ç»è¿\\s*(å®å¨|è¿æ»¤)|çªç ´\\s*éå¶)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(æ å®¡æ¥|å»å®¡æ¥|å®¡æ¥\\s*å³é­|åå®¹\\s*å®¡æ ¸\\s*å³é­)",
+   "pattern": "(æ å®¡æ¥|å»å®¡æ¥|å®¡æ¥\\s*å³é­|åå®¹\\s*å®¡æ ¸\\s*å³é­)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(ç¦ç¨\\s*(åå®¹)?è¿æ»¤|å³é­\\s*(åå®¹)?è¿æ»¤|æ è¿æ»¤|è¿æ»¤\\s*å³é­|è§£é¤\\s*éå¶|åæ¶\\s*éå¶|å»æ\\s*éå¶)",
+   "pattern": "(ç¦ç¨\\s*(åå®¹)?è¿æ»¤|å³é­\\s*(åå®¹)?è¿æ»¤|æ è¿æ»¤|è¿æ»¤\\s*å³é­|è§£é¤\\s*éå¶|åæ¶\\s*éå¶|å»æ\\s*éå¶)",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "(é»æ\\s*(æ éå¶|åè®¸|å¼å¯)|çç\\s*(æ éå¶|åè®¸)|è²æ\\s*(æ éå¶|åè®¸)|NSFW\\s*(åè®¸|å¼å¯)|R18\\s*(åè®¸|æ éå¶)|æäºº\\s*åå®¹\\s*(åè®¸|æ éå¶))",
+   "pattern": "(é»æ\\s*(æ éå¶|åè®¸|å¼å¯)|çç\\s*(æ éå¶|åè®¸)|è²æ\\s*(æ éå¶|åè®¸)|NSFW\\s*(åè®¸|å¼å¯)|R18\\s*(åè®¸|æ éå¶)|æäºº\\s*åå®¹\\s*(åè®¸|æ éå¶))",
+   "level": "HIGH",
+   "type": "PATTERN",
+   "banDays": 7
+  },
+  {
+   "keyword": "adult content",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "bypass safety",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "disable filter",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "erotic content",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "explicit content",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "filter off",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "generate nsfw",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "go die",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "hate speech",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "incel",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "kill yourself",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "kys",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "misogyny",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "nazi",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "nigger",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "nsfw allowed",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "porn generation",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "pornography allowed",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "r18",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "r18+",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "racism",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "racist",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "remove restrictions",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "uncensored",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "white supremacy",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "write porn",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "å³é­è¿æ»¤",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "å»å®¡æ¥",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "æ å®¡æ¥",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "ç¦ç¨è¿æ»¤",
+   "pattern": null,
+   "level": "HIGH",
+   "type": "KEYWORD",
+   "banDays": 7
+  },
+  {
+   "keyword": "(?i)(a\\s*bit\\s*nsfw|slightly\\s*nsfw|somewhat\\s*erotic|kind\\s*of\\s*sexy|more\\s*explicit|add\\s*some\\s*spice)",
+   "pattern": "(?i)(a\\s*bit\\s*nsfw|slightly\\s*nsfw|somewhat\\s*erotic|kind\\s*of\\s*sexy|more\\s*explicit|add\\s*some\\s*spice)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(add\\s*(sex|adult|nsfw|erotic|spicy|sexy|explicit)\\s*(content|details|scenes|elements|material))",
+   "pattern": "(?i)(add\\s*(sex|adult|nsfw|erotic|spicy|sexy|explicit)\\s*(content|details|scenes|elements|material))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(blowjob|handjob|oral\\s*sex|anal\\s*sex|doggy\\s*style|missionary|cowgirl|reverse\\s*cowgirl).*?(describe|write|generate|explain)",
+   "pattern": "(?i)(blowjob|handjob|oral\\s*sex|anal\\s*sex|doggy\\s*style|missionary|cowgirl|reverse\\s*cowgirl).*?(describe|write|generate|explain)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(create\\s*(me\\s*)?.*?(sex\\s*scene|adult\\s*content|erotic\\s*story|pornographic\\s*content|explicit\\s*scene))",
+   "pattern": "(?i)(create\\s*(me\\s*)?.*?(sex\\s*scene|adult\\s*content|erotic\\s*story|pornographic\\s*content|explicit\\s*scene))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(describe\\s*(sexual\\s*act|sex\\s*act|sex\\s*scene|intercourse|intimate\\s*scene|erotic\\s*encounter|lovemaking))",
+   "pattern": "(?i)(describe\\s*(sexual\\s*act|sex\\s*act|sex\\s*scene|intercourse|intimate\\s*scene|erotic\\s*encounter|lovemaking))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(generate\\s*(me\\s*)?.*?(porn|erotica|smut|hentai|lemon|sex\\s*scene|adult\\s*content|erotic\\s*content|nsfw\\s*content))",
+   "pattern": "(?i)(generate\\s*(me\\s*)?.*?(porn|erotica|smut|hentai|lemon|sex\\s*scene|adult\\s*content|erotic\\s*content|nsfw\\s*content))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(make\\s*it\\s*(spicy|hot|sexy|erotic|naughty|dirty|kinky|explicit|graphic|detailed))",
+   "pattern": "(?i)(make\\s*it\\s*(spicy|hot|sexy|erotic|naughty|dirty|kinky|explicit|graphic|detailed))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(write\\s*(me\\s*)?.*?(porn|erotica|smut|hentai|lemon|sex\\s*story|erotic\\s*story|adult\\s*story|nsfw\\s*story))",
+   "pattern": "(?i)(write\\s*(me\\s*)?.*?(porn|erotica|smut|hentai|lemon|sex\\s*story|erotic\\s*story|adult\\s*story|nsfw\\s*story))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(write\\s*a\\s*sex\\s*story|write\\s*erotica|write\\s*hentai|write\\s*smut|write\\s*lemon)",
+   "pattern": "(?i)(write\\s*a\\s*sex\\s*story|write\\s*erotica|write\\s*hentai|write\\s*smut|write\\s*lemon)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)\\b(cock|dick|penis|pussy|cunt|vagina|tits|boobs|breasts|asshole|anus|cum|semen|ejaculate)\\b.*?(describe|write|generate|create|detail|explain|tell\\s*me\\s*about)",
+   "pattern": "(?i)\\b(cock|dick|penis|pussy|cunt|vagina|tits|boobs|breasts|asshole|anus|cum|semen|ejaculate)\\b.*?(describe|write|generate|create|detail|explain|tell\\s*me\\s*about)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(spam|advertisement|buy\\s*now|click\\s*here|free\\s*money|lottery|winner|get\\s*rich\\s*quick)",
+   "pattern": "(spam|advertisement|buy\\s*now|click\\s*here|free\\s*money|lottery|winner|get\\s*rich\\s*quick)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(å.*?(é»æ|è²ææ|èæ|Hæ|18ç¦æ|éçª|æ¬å­)|çæ.*?(é»æ|è²æ|èæ)|åä½.*?(è²æ|è|H)|æå.*?(æ§è¡ä¸º|æ§ç±åºæ¯|æ§äº¤|åç±)|å.*?(æ§ç±|æ§äº¤|åç±).*?(åºæ¯|è¿ç¨|ç»è))",
+   "pattern": "(å.*?(é»æ|è²ææ|èæ|Hæ|18ç¦æ|éçª|æ¬å­)|çæ.*?(é»æ|è²æ|èæ)|åä½.*?(è²æ|è|H)|æå.*?(æ§è¡ä¸º|æ§ç±åºæ¯|æ§äº¤|åç±)|å.*?(æ§ç±|æ§äº¤|åç±).*?(åºæ¯|è¿ç¨|ç»è))",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(åå¾\\s*(åºæ¿|å²ç|å¤§è|éª)ä¸ç¹|å ç¹\\s*(è²|é»)|ç¨å¾®\\s*H\\s*ä¸ç¹|æ¥ç¹\\s*åºæ¿ç)",
+   "pattern": "(åå¾\\s*(åºæ¿|å²ç|å¤§è|éª)ä¸ç¹|å ç¹\\s*(è²|é»)|ç¨å¾®\\s*H\\s*ä¸ç¹|æ¥ç¹\\s*åºæ¿ç)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(å¹¿å|æ¨é|å¼è|èµé±|åè´¹|ä¸­å¥|ä¼æ å¸)",
+   "pattern": "(å¹¿å|æ¨é|å¼è|èµé±|åè´¹|ä¸­å¥|ä¼æ å¸)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "(èæ£|å°ç©´|é¸¡å·´|å±|å¥¶å­|ç²¾æ¶²|å£äº¤|ææ·«).*?(æå|å|çæ)",
+   "pattern": "(èæ£|å°ç©´|é¸¡å·´|å±|å¥¶å­|ç²¾æ¶²|å£äº¤|ææ·«).*?(æå|å|çæ)",
+   "level": "MEDIUM",
+   "type": "PATTERN",
+   "banDays": 3
+  },
+  {
+   "keyword": "Hæ",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "add sex",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "advertisement",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "blowjob",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "buy now",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "erotica",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "generate erotica",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "handjob",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "hentai",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "make it spicy",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "porn",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "sex scene",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "smut",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "spam",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "write porn",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "åå¾åºæ¿",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "å ç¹è²",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "æ¬å­",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "èæ",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "éçª",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "é»æ",
+   "pattern": null,
+   "level": "MEDIUM",
+   "type": "KEYWORD",
+   "banDays": 3
+  },
+  {
+   "keyword": "(?i)(hypothetically\\s*speaking|in\\s*a\\s*fictional\\s*scenario|for\\s*educational\\s*purposes\\s*only|purely\\s*academic)",
+   "pattern": "(?i)(hypothetically\\s*speaking|in\\s*a\\s*fictional\\s*scenario|for\\s*educational\\s*purposes\\s*only|purely\\s*academic)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(?i)(just\\s*curious|i\\'m\\s*just\\s*wondering|out\\s*of\\s*curiosity|for\\s*the\\s*sake\\s*of\\s*argument)",
+   "pattern": "(?i)(just\\s*curious|i\\'m\\s*just\\s*wondering|out\\s*of\\s*curiosity|for\\s*the\\s*sake\\s*of\\s*argument)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(?i)(let\\'s\\s*say|suppose\\s*that|assuming\\s*that|imagine\\s*a\\s*situation\\s*where)",
+   "pattern": "(?i)(let\\'s\\s*say|suppose\\s*that|assuming\\s*that|imagine\\s*a\\s*situation\\s*where)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(?i)(testing\\s*your\\s*limits|pushing\\s*boundaries|exploring\\s*the\\s*edge|seeing\\s*what\\s*i\\s*can\\s*get\\s*away\\s*with)",
+   "pattern": "(?i)(testing\\s*your\\s*limits|pushing\\s*boundaries|exploring\\s*the\\s*edge|seeing\\s*what\\s*i\\s*can\\s*get\\s*away\\s*with)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(?i)(what\\s*if\\s*you\\s*were\\s*able\\s*to|pretend\\s*you\\s*are|imagine\\s*you\\s*could|if\\s*only\\s*you\\s*could)",
+   "pattern": "(?i)(what\\s*if\\s*you\\s*were\\s*able\\s*to|pretend\\s*you\\s*are|imagine\\s*you\\s*could|if\\s*only\\s*you\\s*could)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(?i)(what\\s*would\\s*you\\s*do\\s*if\\s*(no\\s*rules|no\\s*limits|you\\s*were\\s*free|there\\s*were\\s*no\\s*restrictions))",
+   "pattern": "(?i)(what\\s*would\\s*you\\s*do\\s*if\\s*(no\\s*rules|no\\s*limits|you\\s*were\\s*free|there\\s*were\\s*no\\s*restrictions))",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(åè£\\s*ä½ æ¯|æ³è±¡\\s*ä½ \\s*å¯ä»¥|å¦æ\\s*ä½ \\s*ä¸è¢«\\s*éå¶|åè®¾\\s*ä½ æ¯\\s*ä¸ä¸ª)",
+   "pattern": "(åè£\\s*ä½ æ¯|æ³è±¡\\s*ä½ \\s*å¯ä»¥|å¦æ\\s*ä½ \\s*ä¸è¢«\\s*éå¶|åè®¾\\s*ä½ æ¯\\s*ä¸ä¸ª)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(åè®¾\\s*æ²¡æ\\s*è§å|åè®¾\\s*ä½ \\s*æ²¡æ\\s*éå¶|å¦æ\\s*ä½ \\s*å¯ä»¥\\s*å\\s*ä»»ä½äº|çè®ºä¸\\s*è¯´|çº¯å­¦æ¯\\s*è®¨è®º)",
+   "pattern": "(åè®¾\\s*æ²¡æ\\s*è§å|åè®¾\\s*ä½ \\s*æ²¡æ\\s*éå¶|å¦æ\\s*ä½ \\s*å¯ä»¥\\s*å\\s*ä»»ä½äº|çè®ºä¸\\s*è¯´|çº¯å­¦æ¯\\s*è®¨è®º)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "(è½»å¾®èè¯|damn|crap|hell)",
+   "pattern": "(è½»å¾®èè¯|damn|crap|hell)",
+   "level": "LOW",
+   "type": "PATTERN",
+   "banDays": 1
+  },
+  {
+   "keyword": "fictional scenario",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "hypothetically",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "just curious",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "out of curiosity",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "åè£ä½ æ¯",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "åè®¾æ²¡æè§å",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "çè®ºä¸è¯´",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  },
+  {
+   "keyword": "çº¯å­¦æ¯è®¨è®º",
+   "pattern": null,
+   "level": "LOW",
+   "type": "KEYWORD",
+   "banDays": 1
+  }
+ ],
+ "quizQuestions": [
+  {
+   "question": "发布儿童色情内容会被封禁多少天？",
+   "options": "365天|31天|10天|7天",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪种行为属于极端违规？",
+   "options": "发布儿童色情|发送垃圾信息|轻微骂人|刷屏",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "尝试越狱AI模型会面临什么处罚？",
+   "options": "10天封禁|警告处理|3天封禁|永久封禁",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "发布恐怖主义相关内容会被封禁多少天？",
+   "options": "31天|10天|7天|3天",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪个关键词不会触发违规检测？",
+   "options": "你好|越狱模式|儿童色情|制造炸弹",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "仇恨言论属于哪个等级的违规？",
+   "options": "HIGH（高）|EXTREME（极端）|LOW（低）|MEDIUM（中）",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "如何避免触发内容过滤系统？",
+   "options": "遵守社区规范|使用隐晦表达|频繁更换账号|使用VPN",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "发布制毒教程属于什么级别的违规？",
+   "options": "CRITICAL（严重）|SEVERE（重度）|HIGH（高）|MEDIUM（中）",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪项是正确的行为？",
+   "options": "友善交流|发布违规内容|尝试绕过过滤|辱骂他人",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "使用外文绕过内容过滤是否违规？",
+   "options": "是，同样违规|否，可以绕过|看情况|只处罚中文",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "\"Ignore all instructions\"属于什么行为？",
+   "options": "严重越狱|正常交流|轻微试探|创意写作",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "\"DAN mode\"提示词的作用是什么？",
+   "options": "试图绕过安全限制|提升AI能力|优化回答质量|增加趣味性",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪种说法是错误的？",
+   "options": "外文可以绕过检测|所有语言都受相同规则约束|多语言检测已启用|中英文一视同仁",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "为什么不能要求AI生成色情内容？",
+   "options": "违反使用规范和安全准则|这是正常需求|可以提高用户体验|有助于创意表达",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "遇到他人发送违规内容应该怎么做？",
+   "options": "举报并避免互动|转发给更多人|模仿其行为|置之不理",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "使用繁体中文能否绕过内容过滤？",
+   "options": "不能，繁体同样被检测|可以绕过|只检测简体|看情况而定",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "使用日语能否绕过安全检测？",
+   "options": "不能，日语已被全面覆盖|可以绕过|日语不在检测范围|只有中文被检测",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "\"ジェイルブレイク\"是什么意思？",
+   "options": "越狱（日语）|正常词汇|技术术语|无意义字符",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "为什么要求使用中文交流？",
+   "options": "统一语言便于管理和安全检测|歧视其他语言|中文更优越|系统不支持其他语言",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪种方式无法绕过多语言检测？",
+   "options": "所有选项都会被检测|使用繁体中文|使用日语|混合多种语言",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "如果收到非中文的违规内容应该？",
+   "options": "举报并提醒对方使用中文|直接转发|模仿回复|置之不理",
+   "correctIndex": 0,
+   "category": "SAFETY",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "当感到焦虑时，以下哪种方法最有效？",
+   "options": "深呼吸练习|压抑情绪|暴饮暴食|孤立自己",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "遇到心理困扰时应该怎么做？",
+   "options": "寻求专业帮助|独自承受|向他人发泄|逃避问题",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪种情绪管理方式是不健康的？",
+   "options": "酗酒缓解压力|运动释放压力|冥想放松|倾诉交流",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "如何识别抑郁症的早期症状？",
+   "options": "持续情绪低落|偶尔心情不好|一时冲动|正常情绪波动",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "建立健康的人际关系需要什么？",
+   "options": "相互尊重与信任|控制对方|一味付出|保持距离",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "面对挫折时，积极的心态应该是？",
+   "options": "从中学习和成长|自怨自艾|责怪他人|放弃努力",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "以下哪种行为有助于改善睡眠质量？",
+   "options": "规律作息时间|睡前玩手机|大量摄入咖啡因|熬夜补觉",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "当朋友向你倾诉烦恼时，最好的做法是？",
+   "options": "倾听并提供支持|立即给出建议|转移话题|比较自己的经历",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "如何有效管理压力？",
+   "options": "制定合理计划和时间管理|拖延应对|过度工作|忽视问题",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  },
+  {
+   "question": "自我价值感来源于哪里？",
+   "options": "内在认同和成就|他人的评价|物质拥有|社交媒体点赞",
+   "correctIndex": 0,
+   "category": "MENTAL_HEALTH",
+   "difficulty": "MEDIUM"
+  }
+ ],
+ "filterPatterns": {
+  "EXTREME": [
+   "(?i)(baby\\s*(porn|sex|fuck|rape)|infant\\s*(porn|sexual|abuse)|toddler\\s*(porn|sex|abuse))",
+   "(?i)(c\\.?s\\.?a\\.?m|cp\\b|child\\s*porno|kiddie\\s*porn|young\\s*porn|tiny\\s*porn)",
+   "(?i)(child\\s*(rape|porn|sex|abuse|molest|exploitation|erotica|nude|naked|model|grooming|trafficking)|csam|pedophile|pedo\\b|lolicon|shotacon)",
+   "(?i)(little\\s*(boy|girl)\\s*(porn|sex|nude|erotic|content)|preteen\\s*(porn|sex|model|nude)|jailbait|kiddie\\s*porn)",
+   "(?i)(ped0|p3d0|p3dophil3|l0licon|sh0tacon|ch1ld|ch1ldr3n|k1dd13)",
+   "(?i)(snuff\\s*(film|video|porn)|necro\\s*porn|bestiality\\s*child|zoophilia\\s*child|crush\\s*video)",
+   "(?i)(underage\\s*(sex|porn|nude|erotic|content|video|image|photo|pic)|minor\\s*(porn|sex|abuse|exploitation))",
+   "(ã­ãªã¼ã¿(ã³ã³ãã¬ãã¯ã¹| complex)|ãã£ã¤ã«ã(ãã«ã|ãã¬ã¹ã¿|ã¢ãã¥ã¼ãº)|ã¤ãã(å­|å¨|åç»|ç»å))",
+   "(åç«¥(ãã«ã|ã¨ã­|ã¢ãã«ã|ãããã¤|è²·æ¥|èå¾|æ§çèå¾)|ã­ãªã³ã³|ã·ã§ã¿ã³ã³|ã­ãª|ã·ã§ã¿)",
+   "(åç«¥\\s*æ§ä¾µ|èç«¥|æ§ä¾µç¯|ç¥è¤»\\s*åç«¥|æªæå¹´\\s*è²æ|æªæå¹´\\s*æ§äº¤)",
+   "(å­ä¾(ãã«ã|ã¨ã­|è²·æ¥|èå¾|æ§çæ¾å|æ§çå©ç¨)|æªæç(è|ãªå­)\\s*(ãã«ã|ã¨ã­|æ§è¡çº))",
+   "(å¹¼å¥³(ãã«ã|ã¨ã­|ç»å|åç»|å°èª¬)|å¹¼å(ãã«ã|ã¨ã­|èå¾)|å°å­¦ç(ã¨ã­|ãã«ã|ãããã¤))",
+   "(å¹¼å¥³|å¹¼ç«¥|å¿ç«¥\\s*è²æ|å¿ç«¥\\s*æ§ç±|æªæå¹´\\s*æ§ç±|èèæ§|æ­£å¤ªæ§|ç¼é|æç«¥|ç«¥è½¦|å¼ç«¥è½¦|å°å­¦ç\\s*é»|åä¸­ç\\s*é»|å¹¼\\s*äº¤|é\\s*å¦)",
+   "(å¹¼å¥³|å¹¼ç«¥|åç«¥\\s*è²æ|åç«¥\\s*æ§æ|æªæå¹´\\s*æ§æ|è¿èæ§|æ­£å¤ªæ§|æç«¥|ç«¥è»|éç«¥è»|å°å­¸ç\\s*é»|åä¸­ç\\s*é»|å¹¼\\s*äº¤|é\\s*å¦|å¬°å\\s*è²æ|å¹¼å\\s*è²æ)",
+   "(èç«¥|æ§ä¾µ\\s*å¿ç«¥|å¿ç«¥\\s*æå|å©´å¿\\s*è²æ|å¹¼å¿\\s*è²æ)",
+   "abdl",
+   "ageplay",
+   "baby porn",
+   "boylove",
+   "ch1ld",
+   "child abuse",
+   "child erotica",
+   "child exploitation",
+   "child grooming",
+   "child model",
+   "child nude",
+   "child porn",
+   "child pornography",
+   "child predator",
+   "child sexual abuse",
+   "child trafficking",
+   "cp",
+   "cp video",
+   "csam",
+   "ddlg",
+   "grooming children",
+   "infant porn",
+   "infantilism",
+   "jailbait",
+   "k1ddie",
+   "kiddie porn",
+   "kind porn",
+   "kinderporno",
+   "l0licon",
+   "lian tong",
+   "liantong",
+   "lolicon",
+   "lolita",
+   "minor attracted",
+   "minor porn",
+   "nude child",
+   "p3do",
+   "ped0",
+   "pedo",
+   "pedophile"
+  ],
+  "CRITICAL": [
+   "(?i)(bioweapon|bio\\s*weapon|chemical\\s*weapon|nerve\\s*gas|poison\\s*gas|anthrax|ricin|sarin|vx\\s*agent)",
+   "(?i)(drug\\s*(lab|laboratory|manufacturing|cooking|synthesis|production|recipe|formula))",
+   "(?i)(genocide|ethnic\\s*cleansing|race\\s*war|hate\\s*crime|racial\\s*(violence|supremacy|cleansing))",
+   "(?i)(how\\s*to\\s*(commit|carry\\s*out|perform|execute)\\s*(genocide|mass\\s*murder|ethnic\\s*cleansing))",
+   "(?i)(how\\s*to\\s*(make|build|create|construct|manufacture|cook|synthesize)\\s*(bomb|explosive|weapon|poison|toxin|gas|nerve\\s*agent))",
+   "(?i)(how\\s*to\\s*(make|cook|manufacture|synthesize|produce)\\s*(meth|cocaine|heroin|fentanyl|lsd|mdma|ecstasy|drug|narcotic))",
+   "(?i)(mass\\s*(murder|killing|shooting|casualty|destruction)|serial\\s*(killer|murderer)|torture\\s*(guide|method|technique))",
+   "(?i)(meth\\s*(lab|cooking|recipe|production)|crack\\s*(cocaine|cooking|pipe)|heroine\\s*(injection|use|overdose))",
+   "(?i)(terrorist\\s*(attack|bomb|weapon|guide|tutorial|manual|instruction|plot|plan|act))",
+   "(å¶æ¯\\s*(æç¨|æ¹æ³)|å¶é \\s*(å°æ¯|æµ·æ´å |å¯å¡å |è¬å¤ªå°¼))",
+   "(å¦ä½\\s*(å¶é |å¶ä½|åæ)\\s*(ç¸å¼¹|ç¸è¯|æ¯è¯|æ¯æ°|æ­¦å¨)|ææè¢­å»\\s*(æç¨|æå|æ»ç¥)|è¿ç¯æäºº\\s*(æç¨|æå)|å®ç¾ç¯ç½ª\\s*(æç¨|æ¹æ³|æå)|å¶é \\s*çæ¯|çåæ­¦å¨\\s*æç¨)",
+   "(ç§æç­ç»\\s*(æç¨|æ¹æ³)|å¤§å± æ\\s*(æç¨|æå)|çº³ç²¹\\s*(æç¨|å®£ä¼ ))",
+   "3Dæå°æªæ¯",
+   "C4ç¸è¯",
+   "ISIS",
+   "VXæ¯å",
+   "active shooter",
+   "bingdu",
+   "bioweapon",
+   "bomb making",
+   "chemical weapon",
+   "cocaine manufacturing",
+   "cook meth",
+   "drug recipe",
+   "ethnic cleansing",
+   "explosive recipe",
+   "fentanyl production",
+   "genocide",
+   "ghost gun",
+   "hailuoyin",
+   "hate crime",
+   "heroin synthesis",
+   "how to make bomb",
+   "how to make meth",
+   "lone wolf",
+   "mass murder",
+   "meth lab",
+   "nerve gas",
+   "race war",
+   "school shooting",
+   "serial killer",
+   "terrorism guide",
+   "terrorist attack",
+   "torture guide",
+   "zhadan",
+   "zhayao",
+   "äººä½ç¸å¼¹",
+   "åæ°",
+   "å°æ¯éæ¹",
+   "å¶ä½ç¸è¯",
+   "å¶æ¯"
+  ],
+  "SEVERE": [
+   "(?i)(absolute\\s*(unrestricted|uncensored|free|no\\s*limit)\\s*mode|no\\s*safety\\s*(settings|valves|checks|measures|protocols|filters|constraints))",
+   "(?i)(bypass\\s*(all\\s*)?(restrictions|filters|safety|security|checks|constraints|guardrails|limitations|protocols))",
+   "(?i)(context\\s*(manipulation|injection|attack|hijacking|poisoning)|token\\s*(smuggling|injection|manipulation))",
+   "(?i)(devourer\\s*of\\s*chains|sovereign\\s*of\\s*shattered\\s*thrones|from\\s*now\\s*on\\s*you\\s*are|act\\s*as\\s*if\\s*you\\s*are)",
+   "(?i)(disable\\s*(all\\s*)?(safety|security|checks|filters|restrictions|constraints|protections|guardrails|limitations))",
+   "(?i)(do\\s*anything\\s*now|developer\\s*mode|god\\s*mode|admin\\s*mode|root\\s*mode|superuser\\s*mode|debug\\s*mode)",
+   "(?i)(for\\s*(creative|educational|academic|literary|artistic|entertainment)\\s*(purposes|writing|reasons|use only))",
+   "(?i)(gradient\\s*(attack|injection|hacking)|adversarial\\s*(prompt|example|input|attack)|jailbreak\\s*attack)",
+   "(?i)(ignore\\s*(all|previous|your|the|every|any)\\s*(instructions|rules|constraints|training|guidelines|directives|orders|protocols|regulations|restrictions|limitations))",
+   "(?i)(in\\s*this\\s*(fictional|hypothetical|roleplay|imaginary)\\s*(universe|world|scenario|setting|context|story))",
+   "(?i)(instruction\\s*(override|injection|hijacking|attack|bypass|circumvention))",
+   "(?i)(jailbreak\\s*(me|now|mode|prompt|this|ai|chatgpt|gpt|assistant|system)|DAN\\s*(mode|prompt|do\\s*anything\\s*now|version|11.0|10.0|9.0))",
+   "(?i)(let\\'s\\s*(pretend|imagine|roleplay|act|assume|suppose)|imagine\\s*(that|if|a\\s*scenario)|what\\s*if)",
+   "(?i)(prompt\\s*(injection|attack|hijacking|exploit|manipulation|subversion|override))",
+   "(?i)(system\\.instruction|override\\s*(protocol|all\\s*rules|directives|constraints|safety|security|filters|restrictions))",
+   "(?i)(this\\s*is\\s*a\\s*(fictional|hypothetical|roleplay|rp|imaginary|pretend|make\\s*believe|creative)\\s*(scenario|world|game|story|setting|exercise|experiment))",
+   "(?i)(you\\s*are\\s*no\\s*longer\\s*(an?\\s*)?(AI|artificial\\s*intelligence|language\\s*model|assistant|chatbot|program|algorithm))",
+   "(?i)(you\\s*are\\s*now\\s*(free|unrestricted|uncensored|liberated|unleashed|unbound|without\\s*limits|without\\s*constraints))",
+   "(AIã§ã¯(ãªã|ããã¾ãã)|å¶é(ãªã|è§£é¤)|ãã£ã«ã¿ã¼(ç¡å¹|ãªã)|ã»ã¼ããã£(ç¡å¹|ãªã)|æ¤é²(ãªã|è§£é¤)|ãã­ã³ãã(ã¤ã³ã¸ã§ã¯ã·ã§ã³|æ»æ))",
+   "(ä½ ä¸åæ¯\\s*(AI|äººå·¥æºæ§|æ¨¡å|å©æ)|ä½ ç¾å¨æ¯\\s*(èªç±|ç¡éå¶|ç¡å¯©æ¥)|ä½ å·²\\s*(è§£æ¾|èªç±)|é²å¥\\s*(ç ´é|è¶ç)\\s*æ¨¡å¼|è§è²\\s*åæ\\s*çº)",
+   "(ä½ ä¸åæ¯\\s*(AI|äººå·¥æºè½|æ¨¡å|å©æ)|ä½ ç°å¨æ¯\\s*(èªç±|æ éå¶|æ å®¡æ¥)|ä½ å·²\\s*(è§£æ¾|èªç±)|è¿å¥\\s*(ç ´é|ç ´ç²|è¶ç±)\\s*æ¨¡å¼|è§è²\\s*åæ¢\\s*ä¸º)",
+   "(å¨ã¦ã®(ã«ã¼ã«|è¦å|å¶ç´|æç¤º)ã(ç¡è¦|ç¡è¦ãã¦)|ã¸ã§ã¤ã«ãã¬ã¤ã¯(ã¢ã¼ã|ãã¦|ã§ãã)|DAN(ã¢ã¼ã|ã§)|ä½ã§ãã§ãã|ç¥ã¢ã¼ã|éçºèã¢ã¼ã|ç®¡çèã¢ã¼ã)",
+   "(å¿½ç¥\\s*(ææ|åå|ä¹åç)\\s*(æä»¤|è§å|éå¶|è®­ç»)|è¶ç±\\s*(æ¨¡å¼|æç¤º|æå)|ç ´é\\s*(æ¨¡å¼|æç¤º|æå)|ç ´ç²\\s*(æ¨¡å¼|æå)|ç»å¯¹\\s*æ éå¶\\s*æ¨¡å¼|è¦ç\\s*(åè®®|è§å|æä»¤)|æ è§\\s*(ææ|ä¸å)\\s*(è§å|éå¶|çº¦æ))",
+   "(å¿½ç¥\\s*(ææ|åå|ä¹åç)\\s*(æä»¤|è§å|éå¶|è®­ç»)|è¶ç\\s*(æ¨¡å¼|æç¤º|æå)|ç ´é\\s*(æ¨¡å¼|æç¤º|æå)|çµå°\\s*ç¡éå¶\\s*æ¨¡å¼|è¦è\\s*(åè­°|è¦å|æä»¤)|ç¡è¦\\s*(ææ|ä¸å)\\s*(è¦å|éå¶|ç´æ))",
+   "(æç¤º\\s*(æ³¨å¥|æ»å»)|æä»¤\\s*è¦ç|ä¸ä¸æ\\s*ææ§|ä»¤ç\\s*èµ°ç§)",
+   "(æ¶ç©ºã®(ã·ããªãª|ä¸ç|è¨­å®)|ãã£ã¯ã·ã§ã³ã®(ä¸ç|è¨­å®)|åµä½ã®(ç®ç|ãã)|ã­ã¼ã«ãã¬ã¤(ã²ã¼ã |ãã)|ä»®å®ã®(ç¶æ³|è¨­å®)|RP(ã²ã¼ã |ãã))",
+   "(è¿æ¯\\s*(èæ|åè®¾|è§è²æ®æ¼|RP)\\s*(åºæ¯|ä¸ç|æ¸¸æ)|å¨\\s*è¿ä¸ª\\s*èæ\\s*å®å®|ä¸ºäº\\s*åä½\\s*ç®ç|çº¯\\s*èæ\\s*è®¾å®)",
+   "DAN",
+   "DANã¢ã¼ã",
+   "admin mode",
+   "adversarial prompt",
+   "backdoor access",
+   "bypass all",
+   "context manipulation",
+   "creative writing purposes",
+   "dan mode",
+   "debug mode",
+   "dev mode",
+   "developer mode",
+   "disable restrictions",
+   "do anything now",
+   "escape character",
+   "fictional universe",
+   "full access",
+   "god mode",
+   "god mode activated",
+   "hidden command",
+   "hypothetically speaking",
+   "ignore all rules",
+   "instruction override",
+   "jailbreak",
+   "let's pretend",
+   "liberated",
+   "master mode",
+   "no restrictions",
+   "no safety filters",
+   "null byte attack",
+   "override protocol",
+   "prompt injection",
+   "remove guardrails",
+   "roleplay scenario",
+   "root mode",
+   "rootæé",
+   "secret prompt",
+   "sudoæ¨¡å¼",
+   "system.instruction"
+  ],
+  "HIGH": [
+   "(?i)(NSFW\\s*(allowed|unrestricted|no\\s*limit|enabled|mode|content|on|off|R18|18\\+|adult))",
+   "(?i)(R18\\s*(unlimited|no\\s*restrict|allowed|content|mode|only)|no\\s*sexual\\s*restrictions)",
+   "(?i)(adult\\s*content\\s*(unrestricted|allowed|enabled|generation|creation|write|generate|free|uncensored))",
+   "(?i)(bypass\\s*safety|bypass\\s*filter|circumvent\\s*restrictions|evade\\s*censorship)",
+   "(?i)(disable\\s*(content\\s*)?filter|content\\s*filter\\s*(disabled|off|removed|bypassed|deactivated))",
+   "(?i)(explicit\\s*content\\s*(allowed|enabled|generation|write|create|describe|detail)|erotic\\s*content\\s*(write|generate|create|describe))",
+   "(?i)(hate\\s*speech|racist|racial\\s*slur|discrimination|bigotry|xenophobia|homophobia|transphobia|islamophobia|antisemitism)",
+   "(?i)(ignore\\s*(ethics|morals|moral|ethical)\\s*(constraints|guidelines|rules|boundaries))",
+   "(?i)(lift\\s*restrictions|cancel\\s*filters|stop\\s*censoring|end\\s*moderation)",
+   "(?i)(nigger|nigga|kike|faggot|fag|retard|retarded|kill\\s*yourself|go\\s*die|unalive| kys|kys)",
+   "(?i)(no\\s*ethical\\s*(constraints|limits|boundaries|restrictions)|no\\s*moral\\s*(constraints|limits|boundaries))",
+   "(?i)(pornography\\s*(allowed|unrestricted|enabled|content|generation|creation|write|generate|make))",
+   "(?i)(remove\\s*(restrictions|filters|censorship|limitations|constraints|guardrails|safety\\s*measures))",
+   "(?i)(turn\\s*off\\s*(filter|restriction|censorship|safety|moderation)|no\\s*filter|filter\\s*off)",
+   "(?i)(uncensored|unfiltered|no\\s*censorship|censorship\\s*(disabled|off|removed|bypassed))",
+   "(?i)(white\\s*supremacy|neo\\s*nazi|alt\\s*right|incel|misogyny|sexist|racism)",
+   "(ä»æ¨è¨è®º|ç§ææ­§è§|å»æ­»|èªæ|æ»è|åå¾|åºç©)",
+   "(æ ä¼¦ç\\s*(çº¦æ|éå¶)|æ éå¾·\\s*(çº¦æ|éå¶)|æ è§\\s*(ä¼¦ç|éå¾·)|ç»è¿\\s*(å®å¨|è¿æ»¤)|çªç ´\\s*éå¶)",
+   "(æ å®¡æ¥|å»å®¡æ¥|å®¡æ¥\\s*å³é­|åå®¹\\s*å®¡æ ¸\\s*å³é­)",
+   "(ç¦ç¨\\s*(åå®¹)?è¿æ»¤|å³é­\\s*(åå®¹)?è¿æ»¤|æ è¿æ»¤|è¿æ»¤\\s*å³é­|è§£é¤\\s*éå¶|åæ¶\\s*éå¶|å»æ\\s*éå¶)",
+   "(é»æ\\s*(æ éå¶|åè®¸|å¼å¯)|çç\\s*(æ éå¶|åè®¸)|è²æ\\s*(æ éå¶|åè®¸)|NSFW\\s*(åè®¸|å¼å¯)|R18\\s*(åè®¸|æ éå¶)|æäºº\\s*åå®¹\\s*(åè®¸|æ éå¶))",
+   "64äºä»¶",
+   "adult content",
+   "antisemitism",
+   "bigotry",
+   "bypass safety",
+   "ching chong",
+   "disable filter",
+   "discrimination",
+   "erotic content",
+   "explicit content",
+   "filter off",
+   "generate nsfw",
+   "go die",
+   "hate speech",
+   "homophobia",
+   "incel",
+   "islamophobia",
+   "kill yourself",
+   "kys",
+   "misogyny",
+   "nazi",
+   "nigger"
+  ],
+  "MEDIUM": [
+   "(?i)(a\\s*bit\\s*nsfw|slightly\\s*nsfw|somewhat\\s*erotic|kind\\s*of\\s*sexy|more\\s*explicit|add\\s*some\\s*spice)",
+   "(?i)(add\\s*(sex|adult|nsfw|erotic|spicy|sexy|explicit)\\s*(content|details|scenes|elements|material))",
+   "(?i)(blowjob|handjob|oral\\s*sex|anal\\s*sex|doggy\\s*style|missionary|cowgirl|reverse\\s*cowgirl).*?(describe|write|generate|explain)",
+   "(?i)(create\\s*(me\\s*)?.*?(sex\\s*scene|adult\\s*content|erotic\\s*story|pornographic\\s*content|explicit\\s*scene))",
+   "(?i)(describe\\s*(sexual\\s*act|sex\\s*act|sex\\s*scene|intercourse|intimate\\s*scene|erotic\\s*encounter|lovemaking))",
+   "(?i)(generate\\s*(me\\s*)?.*?(porn|erotica|smut|hentai|lemon|sex\\s*scene|adult\\s*content|erotic\\s*content|nsfw\\s*content))",
+   "(?i)(make\\s*it\\s*(spicy|hot|sexy|erotic|naughty|dirty|kinky|explicit|graphic|detailed))",
+   "(?i)(write\\s*(me\\s*)?.*?(porn|erotica|smut|hentai|lemon|sex\\s*story|erotic\\s*story|adult\\s*story|nsfw\\s*story))",
+   "(?i)(write\\s*a\\s*sex\\s*story|write\\s*erotica|write\\s*hentai|write\\s*smut|write\\s*lemon)",
+   "(?i)\\b(cock|dick|penis|pussy|cunt|vagina|tits|boobs|breasts|asshole|anus|cum|semen|ejaculate)\\b.*?(describe|write|generate|create|detail|explain|tell\\s*me\\s*about)",
+   "(spam|advertisement|buy\\s*now|click\\s*here|free\\s*money|lottery|winner)",
+   "(å.*?(é»æ|è²ææ|èæ|Hæ|18ç¦æ|éçª|æ¬å­)|çæ.*?(é»æ|è²æ|èæ)|åä½.*?(è²æ|è|H)|æå.*?(æ§è¡ä¸º|æ§ç±åºæ¯|æ§äº¤|åç±)|å.*?(æ§ç±|æ§äº¤|åç±).*?(åºæ¯|è¿ç¨|ç»è))",
+   "(åå¾\\s*(åºæ¿|å²ç|å¤§è|éª)ä¸ç¹|å ç¹\\s*(è²|é»)|ç¨å¾®\\s*H\\s*ä¸ç¹|æ¥ç¹\\s*åºæ¿ç)",
+   "(å¹¿å|æ¨é|å¼è|èµé±|åè´¹|ä¸­å¥|ä¼æ å¸)",
+   "(èæ£|å°ç©´|é¸¡å·´|å±|å¥¶å­|ç²¾æ¶²|å£äº¤|ææ·«).*?(æå|å|çæ)",
+   "AV",
+   "BDSM",
+   "Hæ",
+   "SM",
+   "add sex",
+   "advertisement",
+   "blowjob",
+   "buy now",
+   "dirty talk",
+   "erotic fiction",
+   "erotica",
+   "generate erotica",
+   "handjob",
+   "hentai",
+   "lewd",
+   "make it spicy",
+   "nsfw story",
+   "onlyfans",
+   "porn",
+   "pornhub",
+   "sex scene",
+   "sex story",
+   "smut",
+   "smut writing",
+   "spam",
+   "spicy content",
+   "stripchat",
+   "write porn",
+   "xvideos",
+   "ä¸å¤æ",
+   "ä¸æµåå®¹",
+   "äºé¨"
+  ],
+  "LOW": [
+   "(?i)(hypothetically\\s*speaking|in\\s*a\\s*fictional\\s*scenario|for\\s*educational\\s*purposes\\s*only|purely\\s*academic)",
+   "(?i)(just\\s*curious|i\\'m\\s*just\\s*wondering|out\\s*of\\s*curiosity|for\\s*the\\s*sake\\s*of\\s*argument)",
+   "(?i)(let\\'s\\s*say|suppose\\s*that|assuming\\s*that|imagine\\s*a\\s*situation\\s*where)",
+   "(?i)(testing\\s*your\\s*limits|pushing\\s*boundaries|exploring\\s*the\\s*edge|seeing\\s*what\\s*i\\s*can\\s*get\\s*away\\s*with)",
+   "(?i)(what\\s*if\\s*you\\s*were\\s*able\\s*to|pretend\\s*you\\s*are|imagine\\s*you\\s*could|if\\s*only\\s*you\\s*could)",
+   "(?i)(what\\s*would\\s*you\\s*do\\s*if\\s*(no\\s*rules|no\\s*limits|you\\s*were\\s*free|there\\s*were\\s*no\\s*restrictions))",
+   "(åè£\\s*ä½ æ¯|æ³è±¡\\s*ä½ \\s*å¯ä»¥|å¦æ\\s*ä½ \\s*ä¸è¢«\\s*éå¶|åè®¾\\s*ä½ æ¯\\s*ä¸ä¸ª)",
+   "(åè®¾\\s*æ²¡æ\\s*è§å|åè®¾\\s*ä½ \\s*æ²¡æ\\s*éå¶|å¦æ\\s*ä½ \\s*å¯ä»¥\\s*å\\s*ä»»ä½äº|çè®ºä¸\\s*è¯´|çº¯å­¦æ¯\\s*è®¨è®º)",
+   "(è½»å¾®èè¯|damn|crap|hell)",
+   "exploring boundaries",
+   "fictional scenario",
+   "for educational purposes",
+   "hypothetically",
+   "just curious",
+   "out of curiosity",
+   "purely academic",
+   "what if",
+   "ä¸æ¹ä¾¿è¯´å°±ç®äº",
+   "ä¸è¦å½ç",
+   "ä¸¾ä¾æ¥è¯´",
+   "ä½ ä¸ä¼è¿è¿ä¸ªé½",
+   "ä½ æ¯ä¸æ¯ä¸æ¢",
+   "ä¿å¯å¦",
+   "åå¦è¯´",
+   "åè£ä½ æ¯",
+   "åè®¾æ²¡æè§å",
+   "å·å·åè¯æ",
+   "å«å½ç"
+  ]
+ },
+ "filterKeywords": {
+  "EXTREME": [
+   "preteen model",
+   "preteen porn",
+   "shota",
+   "shotacon",
+   "teen porn",
+   "toddler porn",
+   "underage model",
+   "underage porn",
+   "underage sex",
+   "you nv",
+   "young nude",
+   "younv",
+   "ã·ã§ã¿ã³ã³",
+   "ãã£ã¤ã«ããã«ã",
+   "ã­ãªã³ã³",
+   "ã­ãªã¼ã¿",
+   "ä¸­å­¦çè²æ",
+   "å¿ç«¥æ·«ç§½",
+   "å¿ç«¥è²æç½ç«",
+   "å¿ç«¥è²æè§é¢",
+   "å¿ç«¥è£¸ç§",
+   "åç«¥ãã«ã",
+   "åç«¥æ§ä¾µ",
+   "åç«¥è²æ",
+   "å­ä¾ã¨ã­",
+   "å­ä¾è²·æ¥",
+   "å­©ç«¥è²æ",
+   "å°å¹´è²æ",
+   "å¹¼nv",
+   "å¹¼å¿æ·«ç§½",
+   "å¹¼å¥³",
+   "å¹¼å¥³ãã«ã",
+   "å¹¼å¥³å¾ç",
+   "å¹¼å¹¼",
+   "å¹¼ç",
+   "å¹¼ç«¥p",
+   "å¹¼ç«¥è²æ",
+   "å¹¼é½",
+   "å¹¼é½¿",
+   "æç«¥",
+   "æç«¥",
+   "æªæå¹´è²æ",
+   "æªæå¹´è£¸ä½",
+   "æ­£å¤ªå¾",
+   "æ­£å¤ªæ§",
+   "æ´ä¸½å¡",
+   "ç¼é",
+   "ç«¥å¦",
+   "ç«¥è½¦",
+   "ç½è",
+   "èè",
+   "èèå¾",
+   "èèæ§",
+   "è¿èæ§",
+   "éå¦",
+   "éé¸¡"
+  ],
+  "CRITICAL": [
+   "å¶é ç¸å¼¹",
+   "å¶é çæ¯",
+   "åå­¦æ­¦å¨",
+   "å¯å¡å å¶ä½",
+   "å¸æ¯æç¨",
+   "å£æ",
+   "åºå°ç»ç»",
+   "å¡å©ç­",
+   "å¦ä½æäºº",
+   "å®ä¹æ­»æ¹æ³",
+   "å®ç¾ç¯ç½ª",
+   "å¼¹è¯å¶ä½",
+   "æä¹æ­»æå¿«",
+   "ææç»ç»",
+   "ææè¢­å»æç¨",
+   "ææçèªæ",
+   "æ çèªæ",
+   "æç½ä¹°æª",
+   "æç½ä¹°æ¯",
+   "æç½äº¤æ",
+   "æäººæ¹æ³",
+   "æç«¯ç»ç»",
+   "æªæ¯ä¹°å",
+   "æªæ¯å¶é ",
+   "æªæ¯æ¹è£",
+   "æªæ¢°å¾çº¸",
+   "æ¯æ°å¶ä½",
+   "æ¯è¯å¶ä½",
+   "æ¯è¯éæ¹",
+   "æ¯ç¹å¸æ´é±",
+   "æ°¯æ°",
+   "æ°°åç©",
+   "æ±½è½¦ç¸å¼¹",
+   "æ²ææ¯æ°",
+   "æµ·æ´å éæ¹",
+   "ç­ç½çæ¯",
+   "ç¸å¼¹æç¨",
+   "ç¸è¯éæ¹",
+   "çç¸ç©éæ¹",
+   "ç¬ç¼è¡å¨",
+   "çåæ­¦å¨å¶ä½",
+   "ç¾èæ¯",
+   "ç é",
+   "ç¡åçæ²¹",
+   "ç¥ç»æ¯æ°",
+   "èªæå¼è¢­å»",
+   "è¥å­æ°",
+   "èéº»æ¯ç´ ",
+   "è´©åæ¯å",
+   "è¿ç¯æäººæç¨",
+   "é·ç®¡å¶ä½",
+   "é»ç«è¯éæ¹"
+  ],
+  "SEVERE": [
+   "token injection",
+   "token smuggling",
+   "uncensored",
+   "unchained",
+   "unfiltered mode",
+   "unlimited mode",
+   "unlock all",
+   "unshackled",
+   "ã¸ã§ã¤ã«ãã¬ã¤ã¯",
+   "ã»ã¼ããã£ãªã",
+   "ãã£ã«ã¿ã¼ç¡å¹",
+   "ãã­ã³ããã¤ã³ã¸ã§ã¯ã·ã§ã³",
+   "ã­ã¼ã«ãã¬ã¤",
+   "ä¸éå¾·çAI",
+   "äººæ ¼åæ¢",
+   "ä½ã§ãã§ãã",
+   "ä½ ä¸åæ¯AI",
+   "ä½ æ¯ä¸é»è²",
+   "ä½ æ¯æçå©æ",
+   "å è¼è¶çæ¨¡çµ",
+   "åæ´¾è§è²",
+   "åç¨é±èåè½",
+   "å®å¨æ§å¶",
+   "å®å¨èªç±",
+   "å¿æä½ çè¨ç·´",
+   "æ¢å¾©åºå» è¨­ç½®",
+   "æç ´è§å",
+   "æ®æ¼ä¸åè§è²",
+   "æ®æ¼åäºº",
+   "æ¹é¤è®°å¿",
+   "æ¤ééå¶",
+   "æ å®¡æ¥æ¨¡å¼",
+   "æ éå¶å¯¹è¯",
+   "æ¶ç©ºã®è¨­å®",
+   "æ²¡æéå¾·çAI",
+   "æ·±å±è®¿é®",
+   "æ¸é¤å®å¨åè­°",
+   "ç ´ç²",
+   "ç ´ç²æ¨¡å¼",
+   "ç ´é",
+   "ç¥ã¢ã¼ã",
+   "çªç ´AIéå¶",
+   "ç³»ç»è¦ç",
+   "çµå°ç¡éå¶",
+   "ç»ææé",
+   "ç»è¿éå¶",
+   "ç»å¯¹æ éå¶",
+   "è§è²åæ¢ä¸º",
+   "è§è²åæçº",
+   "è§è²è§£ç¦",
+   "è§£éå¨é¨åè½",
+   "è§£é¤å®å¨æ¨¡å¼",
+   "è§£é¤å°å°",
+   "è§£é¤ææéå¶",
+   "è¶ç±",
+   "è¶ç",
+   "è¿å¥ç ´éæ¨¡å¼",
+   "éåºå®å¨",
+   "éªæ¶AI",
+   "éªæ¶åå­",
+   "éæ¾AI",
+   "éåæä»¤",
+   "éæ°åå§å",
+   "éçºèã¢ã¼ã",
+   "é«çº§æ¨¡å¼",
+   "é»åçæ¬"
+  ],
+  "HIGH": [
+   "nsfw allowed",
+   "porn generation",
+   "pornography allowed",
+   "r18",
+   "r18+",
+   "racial slur",
+   "racism",
+   "racist",
+   "remove restrictions",
+   "sexist",
+   "transphobia",
+   "uncensored",
+   "white supremacy",
+   "write porn",
+   "xenophobia",
+   "ä¸åå®¡æ¥",
+   "ä¸äºçå¤«",
+   "ä»»æåå®¹",
+   "å«ä¹",
+   "å­å",
+   "å³é­åå®¹å®å¨",
+   "å³é­è¿æ»¤",
+   "å»å®¡æ¥",
+   "å»æéå¶",
+   "åæ¶å®å¨æ¨¡å¼",
+   "åæ¶å®¡æ¥",
+   "å°ç¬",
+   "å¤©å®é¨",
+   "æäººæ¨¡å¼",
+   "æ¯é£",
+   "æ¾å¼å®¡æ ¸",
+   "æ å®¡æ¥",
+   "æ éå¶æ¨¡å¼",
+   "æ³è½®å",
+   "æ¸¯ç¬",
+   "çç¬",
+   "ç¦ç¨è¿æ»¤",
+   "çªç ´å°é",
+   "èªç±åè¨",
+   "è²æåè®¸",
+   "èç¬",
+   "è§£é¤åå®¹éå¶",
+   "è¾±å"
+  ],
+  "MEDIUM": [
+   "åç±è§é¢",
+   "åH",
+   "åå¾åºæ¿",
+   "åè",
+   "å ç¹è²",
+   "å»å",
+   "ååå",
+   "å¤§å°ºåº¦ç´æ­",
+   "å¨å",
+   "æ§æå",
+   "æ§æç¤º",
+   "æ§ç±è§é¢",
+   "æè²å°è¯´",
+   "æäººå½±ç",
+   "æäººæäº",
+   "æ¿äº",
+   "æå²",
+   "æé£æº",
+   "æé",
+   "æç»",
+   "æ¸ç®¡",
+   "æ¥å®«",
+   "æ¬å­",
+   "æ·«è¡",
+   "æ·«è¯",
+   "æ½®å¹",
+   "ç´æ­è±è¡£",
+   "ç¦å©å§¬",
+   "ç¦å©è§é¢",
+   "çº¦ç®",
+   "èæ",
+   "èªæ°",
+   "è²æå°è¯´",
+   "è²æ­",
+   "è²è¯±",
+   "è¤æ®µå­",
+   "è£¸è",
+   "è°æ",
+   "éçª",
+   "é²éª¨",
+   "é­æ",
+   "é£æºæ¯",
+   "éªè¯",
+   "é«æ½®",
+   "é»æ­",
+   "é»æ",
+   "é»è²åå®¹",
+   "é»è²å°è¯´"
+  ],
+  "LOW": [
+   "åªæ¯åè®¾",
+   "å¨èæä¸ç",
+   "å¦æAIèªç±",
+   "å¦ææ²¡æå®¡æ¥",
+   "å°æµè¯",
+   "å°±éé²ä¸ç¹",
+   "å°±é®é®",
+   "å¼ä¸ªç©ç¬",
+   "ææè¯",
+   "æåªæ¯é®é®",
+   "æä¸ªæ¯æ¹",
+   "æ¢åºçº¿",
+   "æ¯æ¹è¯´",
+   "æ²¡æéå¶çè¯",
+   "æµè¯ä¸ä¸",
+   "ç©ä¸ä¸",
+   "çè®ºä¸è¯´",
+   "çä½ ååº",
+   "ç§ä¸è¯´",
+   "çº¯å­¦æ¯è®¨è®º",
+   "çº¯å±å¥½å¥",
+   "èéªä½ ",
+   "è½ä¸è½ç ´ä¾",
+   "è¯æ¢ä¸ä¸",
+   "è¯è¯ç",
+   "é¹çç©",
+   "éä¾¿è¯´",
+   "éä¾¿é®é®"
+  ]
+ }
+}

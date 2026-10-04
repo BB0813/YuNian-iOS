@@ -1,0 +1,27 @@
+# iOS 侧的生成物与本地构建输出 —— 不入库
+#
+# 依据：与 Android 侧 scripts/build_agent.ps1 的取向**不同**。
+# Android 把 liblianyu_agent.so 提交入库（4 个 ABI，约 31MB），
+# iOS 侧不提交 xcframework 与 Swift 绑定，理由：
+#   1. iOS 的 binder 产物（Swift 源码）是纯文本，由 CI 每次可重复生成；
+#   2. xcframework 体积更大且分 device/sim 双切片，入库会显著膨胀仓库；
+#   3. CI 产物用 actions/upload-artifact 传递，本地用脚本生成。
+# 因此**克隆后必须先跑 scripts/build_agent_ios.sh 或从 CI 下载产物**才能编译 App。
+
+# UniFFI 生成物（LianyuAgent.swift / lianyu_agentFFI.h / *.modulemap）
+Generated/
+
+# Rust 静态库打包产物
+Frameworks/
+
+# XcodeGen 生成的工程与本地构建目录
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/
+
+# 依赖解析产物
+Package.resolved
+
+# macOS 噪声
+.DS_Store
