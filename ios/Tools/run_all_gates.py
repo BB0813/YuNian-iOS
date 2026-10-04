@@ -19,6 +19,7 @@ run_all_gates.py — 一键跑完全部本地关卡，输出汇总。
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import time
@@ -27,7 +28,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOLS = REPO_ROOT / "ios/Tools"
 PY = sys.executable
-BASH = "C:/Program Files/Git/bin/bash.exe"
+# ⚠️ 第 61 轮：原本写死 "C:/Program Files/Git/bin/bash.exe"（我本机的路径）。
+# 本机跑得通，CI（Linux）上直接 FileNotFoundError ——
+# 「我这儿能跑」不等于「它对」，这是硬编码环境路径的通病。
+# 改为按平台解析：POSIX 用 which，Windows 才回落到 Git 自带 bash。
+if sys.platform == "win32":
+    BASH = "C:/Program Files/Git/bin/bash.exe"
+else:
+    BASH = shutil.which("bash") or "/bin/bash"
 
 # (名字, 参数, 是否 --check 生成器)
 GATES: list[tuple[str, list[str], bool]] = [
