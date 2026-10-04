@@ -219,7 +219,10 @@ extension AgentStores: MemoryStore {
                 let sourceId = (meta["source_id"] as? NSNumber)?.int64Value
                     ?? (existing["sourceId"] as Int64? ?? 0)
                 let observedAt = (meta["observed_at"] as? NSNumber)?.int64Value
-                    ?? (existing["observedAt"] as? Int64? ?? now)
+                    // ⚠️ 第 80 轮：同型修掉 —— `as? Int64? ?? now` 也是双层可选。
+                    // CI 只在 240 行报了一个（编译在一个错误后就停），
+                    // 但这个模式在第 79/80 轮连出三次，一起拍平。
+                    ?? (existing["observedAt"] as? Int64) ?? now
                 let lastAccessedAt = (meta["last_accessed_at"] as? NSNumber)?.int64Value ?? now
                 // expires_at 显式为 null 时清空；否则取入参或保持原值
                 let expiresAt: Int64?
@@ -236,8 +239,13 @@ extension AgentStores: MemoryStore {
                 }
                 let tags = (meta["tags"] as? String) ?? (existing["tags"] as String? ?? "")
                 let accessCount = max(
+                    // ⚠️ 第 80 轮：CI 报 AgentStores.swift:240
+                    // "value of optional type 'Int?' must be unwrapped to a value of type 'Int'"。
+                    // 与第 79 轮 expiresAt 那条同型：`existing` 是 [String: Any]，
+                    // `accessCount` 原本是 `Int`，但字典取值 + `as? Int` 叠成 `Int??`。
+                    // 用 `?? 1` 拍平成 `Int` 即可（与原意图一致：缺失时默认 1）。
                     (meta["access_count"] as? NSNumber)?.intValue
-                        ?? (existing["accessCount"] as? Int? ?? 1),
+                        ?? (existing["accessCount"] as? Int) ?? 1,
                     1
                 )
 

@@ -30,6 +30,15 @@ settings:
     # 与 Android 的 applicationId com.yunian.ai 保持品牌一致
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # ⚠️ 第 80 轮：CommonCrypto 从 target 级**提升到工程级**。
+    # 第 79 轮我只加在 YuNian target 的 OTHER_LDFLAGS 上，
+    # 结果 CI 仍报 "cannot find 'CCKeyDerivationPBKDF2' in scope" ——
+    # 因为 @testable import 会为 YuNianTests target 再编译一遍生产源码，
+    # 而 YuNianTests **不继承** YuNian 的 OTHER_LDFLAGS。
+    # 放这里两个 target 都能拿到。
+    OTHER_LDFLAGS:
+      - "-lc++"
+      - "-framework CommonCrypto"
 
 packages:
   GRDB:
@@ -63,14 +72,9 @@ targets:
         #    需要 APNs 时必须使用付费开发者账号 —— 见 docs/ios-port-feasibility.md §3.2。
         #    在账号就位前不要打开下面的 entitlements 引用，否则签名会失败。
         # CODE_SIGN_ENTITLEMENTS: YuNian/Resources/YuNian.entitlements
-        OTHER_LDFLAGS:
-          - "-lc++"
-          # ⚠️ 第 79 轮：必须显式链接 CommonCrypto。
-          # BackupCrypto.swift 用了 CCKeyDerivationPBKDF2（PBKDF2 密钥派生，
-          # 参数与 Android 逐字一致），该文件 import CommonCrypto 了，
-          # 但 CI 报 "cannot find 'CCKeyDerivationPBKDF2' in scope"
-          # —— import 成功而符号解析不到，说明模块没被链接进 target。
-          - "-framework CommonCrypto"
+        # ⚠️ 第 80 轮：OTHER_LDFLAGS 已提升到工程级 settings.base
+        # （CommonCrypto 要让 YuNianTests 也拿到 —— @testable import
+        #  会为测试 target 再编译一遍生产源码）。这里只留 Rust 相关项。
         # Rust 静态库需要显式保留这些（rustls/ring 用到）
         DEAD_CODE_STRIPPING: NO
 
