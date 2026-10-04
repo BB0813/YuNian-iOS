@@ -77,6 +77,20 @@ jobs:
           LIB=$(ls target/debug/liblianyu_agent.so target/debug/liblianyu_agent.dylib 2>/dev/null | head -n 1)
           test -n "$LIB" || { echo "找不到 host 库"; ls -l target/debug/; exit 1; }
           mkdir -p ../ios/Generated
+
+          # 先确认元数据符号真的在库里。UNIFFI_META_* 是 uniffi-bindgen
+          # --library 模式唯一的元数据来源；缺失时 bindgen 只报一句
+          # "Unable to extract metadata"，很难定位到这里。
+          # 第 1 次 CI 失败就卡在此处（Linux .so 符号行为与 Windows .dll 不同）。
+          if ! nm -D "$LIB" 2>/dev/null | grep -q UNIFFI_META; then
+            echo "::error:: $LIB 里找不到 UNIFFI_META_* 符号"
+            echo "  Cargo.toml 的 strip 必须是 \"debuginfo\"（不能是 true / \"symbols\"）"
+            echo "  crate-type 必须含 cdylib"
+            nm "$LIB" 2>/dev/null | grep -c UNIFFI_META || true
+            exit 1
+          fi
+          echo "元数据符号确认存在"
+
           cargo run --features cli-bin --bin uniffi-bindgen -- generate \
             --library "$LIB" --language swift --out-dir ../ios/Generated
           ls -l ../ios/Generated
