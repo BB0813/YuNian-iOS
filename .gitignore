@@ -139,3 +139,6 @@ build-lock.ps1
 
 # iOS 生成产物
 ios/Generated/
+
+# gen_regex_probe.py 的本机产物（有 JDK 时会生成）
+_regex_probe/
