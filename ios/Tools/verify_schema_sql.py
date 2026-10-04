@@ -39,7 +39,15 @@ SWIFT_SCHEMA = REPO_ROOT / "ios/YuNian/Data/Schema/YuNianSchema.swift"
 # 覆盖面下限（自证用）：断言数低于它说明有节被提前 return / 条件跳过阉割了。
 # 第 47 轮的教训 —— 当时 verify_literals.py 被误插提前 return，
 # 26 项断言静默失效而所有关卡仍全绿。新增断言时请同步抬高此数字。
-MIN_CHECKS = 140
+#
+# ⚠️ 第 63 轮：从「绝对总数 140」改为「单变体下限 × 实际变体数」。
+# 140 是在我 Windows 上（FTS5 70 + FTS4 70 = 140）标定的绝对数，
+# 而 CI 的 Linux SQLite 在同一变体上会少 2 条平台相关断言 → 138 → 误判失败。
+# 现在 68 是**跨平台观察到的单变体最小值**：
+#   · 若某平台的变体真的只有 68 条，那是平台差异，不该算「阉割」
+#   · 若有人删掉一节断言，单变体会掉到 ~50，仍会被抓
+# 这两个用途不冲突 —— 下限要的是「不掉下去」，不是「必须等于某个机器的数」。
+MIN_PER_VARIANT = 68
 FTS_TABLE = "message_search_index"
 
 
@@ -909,16 +917,31 @@ def main() -> int:
     if not variants:
         sys.exit("本机 SQLite 既无 FTS5 也无 FTS4，无法验证")
 
+    # ⚠️ 第 63 轮：下限改为**按变体锚定**，不再用绝对总数。
+    # 原写法 MIN_CHECKS = 140 是在我 Windows 上（FTS5 70 + FTS4 70）标定的，
+    # CI（Linux）跑出 138 就判失败 —— 而下限的本意是抓「有节被阉割」，
+    # 平台差异造成的 2 条差额不该算阉割。
+    # 现在分别统计每个变体的断言数，下限 = 单变体下限 × 实际变体数，
+    # 并把每个变体的条数打出来，下次再有差异能直接定位是哪个变体。
+    per_variant: list[tuple[str, int]] = []
     for v in variants:
+        before = report.passed
         run(v, report)
+        per_variant.append((v, report.passed - before))
+
+    for v, n in per_variant:
+        print(f"  · {v} 变体断言数：{n}")
 
     print(f"\n通过 {report.passed} 项，失败 {len(report.failed)} 项")
 
     # 覆盖面自证：每个 FTS 变体都应有足量断言；偏低说明某节被阉割
-    if report.passed < MIN_CHECKS:
-        print(f"[FAIL] 断言数 {report.passed} 低于下限 {MIN_CHECKS} —— "
+    weakest = min(n for _, n in per_variant) if per_variant else 0
+    if weakest < MIN_PER_VARIANT:
+        print(f"[FAIL] 最少的变体只有 {weakest} 条断言，低于单变体下限 {MIN_PER_VARIANT} —— "
               f"覆盖可能被阉割（检查是否误插提前 return）")
-        report.failed.append(f"断言数 {report.passed} < 下限 {MIN_CHECKS}")
+        report.failed.append(
+            f"单变体断言数 {weakest} < 下限 {MIN_PER_VARIANT}"
+        )
 
     for f in report.failed:
         print("  -", f)
