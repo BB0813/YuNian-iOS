@@ -290,7 +290,22 @@ jobs:
           path: ios
 
       - name: 安装 XcodeGen
-        run: brew install xcodegen
+        # ⚠️ 第 65 轮：必须**锁定版本**，不能 `brew install xcodegen` 装最新。
+        # 最新 xcodegen 2.46 生成 Xcode project format 77，而 macos-14 自带
+        # Xcode 15.4 只认更低格式，于是：
+        #   xcodebuild: error: Unable to read project 'YuNian.xcodeproj'.
+        #   Reason: ...it is in a future Xcode project file format (77).
+        # 这与我的代码无关，纯粹是"生成器版本 > 阅读器版本"。
+        # 2.44 生成的 format ≤ 76，Xcode 15.4 可读。
+        run: |
+          brew list xcodegen >/dev/null 2>&1 && brew uninstall --force xcodegen
+          # 从 GitHub release 取固定版本，比 brew 的 versioned formula 更可控
+          VER=2.44.0
+          curl -fsSL -o /tmp/xcodegen.tar.gz \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${VER}/xcodegen.zip"
+          mkdir -p /tmp/xcodegen-bin && unzip -qo /tmp/xcodegen.tar.gz -d /tmp/xcodegen-bin
+          sudo install -m 755 /tmp/xcodegen-bin/xcodegen /usr/local/bin/xcodegen
+          xcodegen --version
 
       - name: 生成 Xcode 工程
         working-directory: ios
