@@ -73,7 +73,12 @@ final class BackupImporter {
         try database.pool.write { db in
             // ① 伴侣：按 name 匹配 → 复用；否则新建（id=0 → 自增）
             var companionIdMap: [Int64: Int64] = [:]
-            let existingCompanionIds = try Self.existingCompanionIds(db)
+            // ⚠️ 第 80 轮：`let` → `var`。
+            // 下面第 109 行 `existingCompanionIds[name] = newId` 要写入它，
+            // 而这里原先是 `let` 常量 —— CI 报
+            // "Cannot assign through subscript: 'existingCompanionIds' is a 'let' constant"。
+            // （App target 编译过了但测试 target 暴露：@testable import 会再编译一遍生产源码）
+            var existingCompanionIds = try Self.existingCompanionIds(db)
             for s in companions {
                 let oldId = s["id"] as? Int64 ?? 0
                 let name = s["name"] as? String ?? ""
