@@ -20,7 +20,7 @@ final class StickerTagProvider {
     private let log = Logger(subsystem: "com.yunian.ai", category: "sticker.tags")
 
     /// Rust 侧偏好引擎（惰性创建；参数与 Android `defaultParams()` 逐字一致）。
-    private var selector: StickerPreferenceSelector?
+    private var selector: StickerPreferenceEngine?
 
     init(database: YuNianDatabase, stores: AgentStores) {
         self.database = database
@@ -45,9 +45,9 @@ final class StickerTagProvider {
     }
 
     /// 取（惰性创建）偏好引擎。对应 Android 的 `engine(context)`。
-    private func engine() -> StickerPreferenceSelector {
+    private func engine() -> StickerPreferenceEngine {
         if let selector { return selector }
-        let created = StickerPreferenceSelector(store: stores, params: Self.defaultParams())
+        let created = StickerPreferenceEngine(store: stores, params: Self.defaultParams())
         selector = created
         return created
     }

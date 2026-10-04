@@ -51,7 +51,11 @@ enum BackupCrypto {
             case let .tooShort(n):
                 return "备份文件过短（\(n) 字节，至少需要 \(4 + 16 + 12 + 16)）"
             case let .badMagic(m):
-                return "文件格式不正确（magic 为 \([UInt8](m)，非 LYBK）"
+                // ⚠️ 第 72 轮：这里原来写的是 `\([UInt8](m)`，收尾用了**全角** `）`
+                // （U+FF09）而不是 ASCII `)`，于是插值永远找不到闭合括号，
+                // 编译报 "Cannot find ')' to match opening '(' in string interpolation"。
+                // 另外 `[UInt8](m)` 也不是合法的转换写法，改为 `Array(m)`。
+                return "文件格式不正确（magic 为 \(Array(m))，非 LYBK）"
             case .keyDerivationFailed:
                 return "PBKDF2 密钥派生失败"
             case .decryptionFailed:
