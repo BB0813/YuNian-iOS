@@ -290,22 +290,31 @@ jobs:
           path: ios
 
       - name: 安装 XcodeGen
-        # ⚠️ 第 65 轮：必须**锁定版本**，不能 `brew install xcodegen` 装最新。
-        # 最新 xcodegen 2.46 生成 Xcode project format 77，而 macos-14 自带
-        # Xcode 15.4 只认更低格式，于是：
-        #   xcodebuild: error: Unable to read project 'YuNian.xcodeproj'.
-        #   Reason: ...it is in a future Xcode project file format (77).
-        # 这与我的代码无关，纯粹是"生成器版本 > 阅读器版本"。
-        # 2.44 生成的 format ≤ 76，Xcode 15.4 可读。
+        # ⚠️ 第 66 轮：两件事必须同时满足。
+        #
+        # (1) 必须**锁定版本**，不能 `brew install xcodegen` 装最新。
+        #     最新 2.46 生成 Xcode project format 77，而 macos-14 自带
+        #     Xcode 15.4 只认更低格式，于是 xcodebuild 读不了工程。
+        #
+        # (2) release zip 的内部结构是
+        #        xcodegen/bin/xcodegen      ← 二进制
+        #        xcodegen/share/...         ← SettingPresets（xcodegen 运行时需要）
+        #     而**不是**把二进制放在 zip 根下。
+        #     我第一版直接 install /tmp/xcodegen-bin/xcodegen，
+        #     那其实是个**目录**，于是报 "Inappropriate file type or format"。
+        #     正确做法照官方 install.sh：bin 与 share 都拷到 /usr/local。
         run: |
-          brew list xcodegen >/dev/null 2>&1 && brew uninstall --force xcodegen
-          # 从 GitHub release 取固定版本，比 brew 的 versioned formula 更可控
+          set -euo pipefail
           VER=2.44.0
-          curl -fsSL -o /tmp/xcodegen.tar.gz \
+          curl -fsSL -o /tmp/xcodegen.zip \
             "https://github.com/yonaskolb/XcodeGen/releases/download/${VER}/xcodegen.zip"
-          mkdir -p /tmp/xcodegen-bin && unzip -qo /tmp/xcodegen.tar.gz -d /tmp/xcodegen-bin
-          sudo install -m 755 /tmp/xcodegen-bin/xcodegen /usr/local/bin/xcodegen
-          xcodegen --version
+          rm -rf /tmp/xg && mkdir -p /tmp/xg
+          unzip -qo /tmp/xcodegen.zip -d /tmp/xg
+          # 官方安装逻辑（install.sh）：bin 与 share 都装进 PREFIX
+          sudo cp -r /tmp/xg/xcodegen/share /usr/local/
+          sudo cp -r /tmp/xg/xcodegen/bin /usr/local/
+          test -x /usr/local/bin/xcodegen || { echo "xcodegen 二进制不在 /usr/local/bin"; exit 1; }
+          /usr/local/bin/xcodegen --version
 
       - name: 生成 Xcode 工程
         working-directory: ios
