@@ -348,14 +348,24 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            | tail -n 80
+            > "$RUNNER_TEMP/xcodebuild.log" 2>&1
+          # ⚠️ 第 77 轮：去掉 `| tail -n 80`。
+          # 那是我第 30 轮就加上的，为的是让日志短一点。
+          # 但它把**错误的上下文**（文件:行号、前后代码行）全截掉了，
+          # 于是我这十几轮一直在读残缺日志，只能看到
+          # "Cannot find 'Android' in scope" 这类没有位置的错误。
+          # 完整日志写文件，并把最后 300 行打到 stdout，
+          # 另由后面的「上传构建日志」步骤整体留档。
+          tail -n 300 "$RUNNER_TEMP/xcodebuild.log"
 
       - name: 上传构建日志
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xcodebuild-log
-          path: ios/build/
+          path: |
+            ios/build/
+            "${{ runner.temp }}/xcodebuild.log"
           retention-days: 7
           if-no-files-found: ignore
 

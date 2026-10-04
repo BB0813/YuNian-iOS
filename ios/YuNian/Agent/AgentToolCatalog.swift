@@ -46,7 +46,13 @@ enum AgentToolCatalog {
         if let memory {
             definitions.append(contentsOf: memory.memoryToolDefinitions())
             for tool in memory.memoryToolDefinitions() {
-                host.register(tool.name) { _, argsJson, contextJson in
+                // ⚠️ 第 77 轮：闭包原本写成 `{ _, argsJson, contextJson in`（3 参），
+                // 但 `AgentToolHostImpl.Handler` 是 **2 参**（argumentsJSON, contextJSON）
+                // —— toolName 已由 `execute` 按 register 时的 key 查表得到，
+                // 不需要再传给 handler。
+                // CI 报：Contextual closure type '@Sendable (String, String) -> String'
+                // expects 2 arguments, but 3 were used in closure body。
+                host.register(tool.name) { argsJson, contextJson in
                     memory.executeMemoryTool(name: tool.name, argsJson: argsJson, contextJson: contextJson)
                 }
             }
@@ -68,7 +74,9 @@ enum AgentToolCatalog {
             )
             definitions.append(loadSkill)
 
-            host.register("load_skill") { _, argsJson, contextJson in
+            // ⚠️ 第 77 轮：handler 是 2 参（argumentsJSON, contextJSON），
+            // toolName 由 execute 按 register key 查表得到，不传进来。
+            host.register("load_skill") { argsJson, contextJson in
                 // ⚠️ companionId 必须从 contextJson 现取，**不能**用装配时冻结的值。
                 // 曾按装配时传入写，导致：
                 //   1. install 发生在 boot()，那会儿还没有绑定伴侣 → 恒为 nil
