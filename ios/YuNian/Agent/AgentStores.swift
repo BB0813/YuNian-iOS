@@ -226,8 +226,13 @@ extension AgentStores: MemoryStore {
                 if meta.keys.contains("expires_at"), meta["expires_at"] is NSNull {
                     expiresAt = nil
                 } else {
+                    // ⚠️ 第 79 轮：CI 报 "cannot convert value of type 'Int64??' to
+                    // expected argument type 'Int64'"（AgentStores.swift:230）。
+                    // 原因是 `existing` 是 `[String: Any]`，`existing["expiresAt"] as? Int64`
+                    // 得到的是 `Int64?`（字典取值本身已是一层可选，再 as? 又是一层）。
+                    // 用 `?? nil` 拍平一层即可 —— 不是逻辑改动。
                     expiresAt = (meta["expires_at"] as? NSNumber)?.int64Value
-                        ?? (existing["expiresAt"] as? Int64?)
+                        ?? (existing["expiresAt"] as? Int64?) ?? nil
                 }
                 let tags = (meta["tags"] as? String) ?? (existing["tags"] as String? ?? "")
                 let accessCount = max(
