@@ -78,22 +78,27 @@ jobs:
           if [ -z "$LIB" ]; then echo "找不到 host 库"; ls -l target/debug/; exit 1; fi
           mkdir -p ../ios/Generated
 
-          # 元数据符号探测。⚠️ 两个教训（第 58/59 轮两次栽在同一处）：
-          # 1. 不能用 `set -e` 配管道 —— ubuntu 镜像默认无 binutils，
-          #    `nm -D lib | grep -q` 在 pipefail 下会把 nm 的失败当成整体失败，
-          #    于是"诊断"自己变成了 exit 2。
-          # 2. 探测必须**非致命**：找不到符号只警告，仍继续跑 bindgen，
-          #    否则符号没找到时 bindgen 的真实报错反而被掩盖了。
+          set -x
+          # ① 元数据符号探测（非致命）
           if command -v nm >/dev/null 2>&1; then
             if nm "$LIB" 2>/dev/null | grep -q UNIFFI_META; then
               echo "元数据符号确认存在"
             else
               echo "::warning:: 未在 $LIB 里找到 UNIFFI_META_* 符号，bindgen 很可能失败"
-              echo "  常见原因：strip 被设成 true/symbols，或 crate-type 缺 cdylib"
             fi
-          else
-            echo "（无 nm，跳过符号探测）"
           fi
+
+          # ② 显式关掉 strip。
+          #    ⚠️ 第 60 轮的关键疑点：`strip = "debuginfo"` 在 Linux 上会把
+          #    .symtab 一并去掉（uniffi-bindgen 的 --library 模式读的是 .symtab
+          #    而不是 .dynsym），于是 Windows 上成功的同一条命令在 Linux 退出 2。
+          #    RUSTFLAGS 里的 -C strip 只影响「rustc 自己产出的符号」，
+          #    不能反悔 profile 里的设置，所以这里直接重建一次不带 strip 的库。
+          RUSTFLAGS="-C strip=none" cargo build --lib
+          if command -v nm >/dev/null 2>&1; then
+            echo "--- 重建后符号数：$(nm "$LIB" 2>/dev/null | grep -c UNIFFI_META) ---"
+          fi
+          set +x
 
           cargo run --features cli-bin --bin uniffi-bindgen -- generate \
             --library "$LIB" --language swift --out-dir ../ios/Generated
