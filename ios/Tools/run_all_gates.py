@@ -19,6 +19,7 @@ run_all_gates.py — 一键跑完全部本地关卡，输出汇总。
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import time
@@ -27,7 +28,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOLS = REPO_ROOT / "ios/Tools"
 PY = sys.executable
-BASH = "C:/Program Files/Git/bin/bash.exe"
+# ⚠️ 第 73 轮：bash 路径**不能写死**。
+# 第 61 轮我在 iOS 仓副本里修过这条（硬编码 Windows 路径导致 CI 上
+# FileNotFoundError），但本轮我改原仓副本后又反向覆盖过去，
+# 把修复覆盖没了 —— CI 因此再次报同一个错。
+#
+# 这是第 8 轮就记录过的教训：「同一个契约两处各自维护、互相掩盖」。
+# 根因是我现在有**两份副本**（原仓 D:\Project\予念 与 iOS 仓克隆），
+# 手工同步必有一次漏。
+if sys.platform == "win32":
+    BASH = "C:/Program Files/Git/bin/bash.exe"
+else:
+    BASH = shutil.which("bash") or "/bin/bash"
 
 # (名字, 参数, 是否 --check 生成器)
 GATES: list[tuple[str, list[str], bool]] = [
