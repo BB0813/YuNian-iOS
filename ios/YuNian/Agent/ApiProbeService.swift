@@ -41,8 +41,12 @@ enum ApiProbeService {
     /// 用生成绑定里的 `apiUsesAnthropicProtocol(provider:formatHint:)`
     /// 而不是自己 if provider == "ANTHROPIC" —— 前者是权威判断
     /// （`formatHint` 也可能覆盖 provider 的默认行为）。
+    // ⚠️ 第 72 轮：`ApiConfig` 是 `ApiConfigRepository` 的**嵌套** struct
+    /// （ApiConfigRepository.swift:29），未限定名在这里解析不到 ——
+    /// CI 实测三处 "cannot find type 'ApiConfig' in scope"。
+    /// 我的关卡只查「类型在项目里存在」，没查「在使用点可见」，这是它的盲区。
     static func testConnection(
-        config: ApiConfig,
+        config: ApiConfigRepository.ApiConfig,
         extraHeaders: [HttpHeader]
     ) -> Result<String, ProbeError> {
         let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
@@ -91,7 +95,7 @@ enum ApiProbeService {
 
     /// 查询余额。多数服务端**不返回**结构化余额，Rust 侧失败时会带原因。
     static func queryBalance(
-        config: ApiConfig,
+        config: ApiConfigRepository.ApiConfig,
         extraHeaders: [HttpHeader]
     ) -> Result<BalanceInfo, ProbeError> {
         let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
@@ -156,7 +160,7 @@ enum ApiProbeService {
     ///     由调用方按 `AgentSettings.buildExtraHeaders()` 的结论传入，
     ///     避免这里重复实现一套认证规则。
     static func fetchModels(
-        config: ApiConfig,
+        config: ApiConfigRepository.ApiConfig,
         extraHeaders: [HttpHeader]
     ) -> Result<[String], ProbeError> {
         // PARTNER 模式下 key 可为空（凭 session/clientId），其余必须有 key。

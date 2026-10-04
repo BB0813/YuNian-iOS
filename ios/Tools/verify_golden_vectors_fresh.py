@@ -59,8 +59,12 @@ def normalize(line: str) -> str:
 
 def main() -> int:
     # ① 生成期望片段
+    # ⚠️ 第 72 轮：必须显式 encoding="utf-8"。
+    # `text=True` 在 Windows 上按 GBK 解码子进程的 UTF-8 输出，
+    # 子进程一打印中文就 UnicodeDecodeError → r.stdout 为 None →
+    # 上游报一个毫不相干的 AttributeError。
     r = subprocess.run([PY, str(GENERATOR), "--swift"], cwd=REPO_ROOT,
-                       capture_output=True, text=True)
+                       capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         print("[FAIL] 金标生成器失败")
         print((r.stderr or r.stdout)[:400])

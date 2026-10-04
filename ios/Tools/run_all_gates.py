@@ -19,7 +19,6 @@ run_all_gates.py — 一键跑完全部本地关卡，输出汇总。
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import time
@@ -28,14 +27,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOLS = REPO_ROOT / "ios/Tools"
 PY = sys.executable
-# ⚠️ 第 61 轮：原本写死 "C:/Program Files/Git/bin/bash.exe"（我本机的路径）。
-# 本机跑得通，CI（Linux）上直接 FileNotFoundError ——
-# 「我这儿能跑」不等于「它对」，这是硬编码环境路径的通病。
-# 改为按平台解析：POSIX 用 which，Windows 才回落到 Git 自带 bash。
-if sys.platform == "win32":
-    BASH = "C:/Program Files/Git/bin/bash.exe"
-else:
-    BASH = shutil.which("bash") or "/bin/bash"
+BASH = "C:/Program Files/Git/bin/bash.exe"
 
 # (名字, 参数, 是否 --check 生成器)
 GATES: list[tuple[str, list[str], bool]] = [
@@ -60,6 +52,7 @@ GATES: list[tuple[str, list[str], bool]] = [
     ("属性包装器", [], False),
     ("枚举 rawValue", [], False),
     ("类型名唯一性", [], False),
+    ("字符串插值括号", [], False),
     ("CI workflow 结构", [], False),
     ("M0 前提条件", [], False),
     ("README 统计", [], False),
@@ -83,6 +76,10 @@ SCRIPT_BY_INDEX = [
     "verify_swift_conformance.py", "verify_swift_syntax_smoke.py",
     "verify_api_coverage.py", "verify_imports.py", "verify_property_wrappers.py",
     "verify_enum_raw_values.py", "verify_unique_types.py", "verify_ci_workflow.py",
+    # 第 72 轮：CI 第一次真正编译时报 "Cannot find ')' to match opening '('
+    # in string interpolation"，根因是插值收尾用了全角 ）。整体括号配平抓不到它
+    # （全角不计入），只有插值内部不对称才暴露。
+    "verify_interpolation_parens.py",
     "verify_m0_prereqs.py", "verify_readme_accounting.py", "find_dead_swift.py",
     "verify_golden_vectors_fresh.py", "verify_tokenizer_vectors_fresh.py",
     "verify_signing_payload_contract.py", "verify_client_id_extraction.py",
