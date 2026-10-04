@@ -53,6 +53,15 @@ jobs:
           rustup default stable
           rustc --version
 
+      # ubuntu 镜像默认无 binutils。前两次 bindgen 失败时我想用 nm 探测符号，
+      # 但 nm 不存在 —— 于是连「符号到底在不在」都答不了。
+      # 先装上，让后续诊断有据可查。
+      - name: 安装 binutils（nm）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils
+          nm --version | head -1
+
       - name: 缓存 cargo
         uses: actions/cache@v4
         with:
