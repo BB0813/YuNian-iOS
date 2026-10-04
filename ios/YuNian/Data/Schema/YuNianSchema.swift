@@ -5,6 +5,7 @@
 // 重新生成：python ios/Tools/generate_schema.py
 
 import Foundation
+import GRDB
 
 /// 予念 iOS 侧的数据库基线（与 Android 侧 Room v45 同构）。
 ///
