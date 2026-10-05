@@ -43,6 +43,12 @@ EXTERNAL_ALLOWLIST = {
     "String", "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16",
     "UInt32", "UInt64", "Double", "Float", "Bool", "Character", "Array", "Dictionary",
     "Set", "Optional", "Result", "Error", "Never", "Void", "Any", "AnyObject",
+    # SwiftUI 基础视图/图形
+    # ⚠️ 第 123 轮：LinearGradient / EmptyView / Gradient.Stop 加入白名单。
+    # 玻璃组件的竖直高光渐变要用（GlassSurface.kt:52-58 的
+    # 0f→White@0.14、0.35f→White@0.04、1f→White@0）；
+    # EmptyView 是 YuNianTopBar 的默认 actions 占位。
+    "LinearGradient", "Gradient", "EmptyView",
     # PhotosUI（相册多选）
     # ⚠️ 第 115 轮：PHPicker* 加入白名单。
     # 表情导入需要相册选择器，对应 Android 的 SAF/相册入口
