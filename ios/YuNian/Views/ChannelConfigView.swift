@@ -52,7 +52,7 @@ struct ChannelConfigView: View {
     /// 这与 Rust 侧"OpenAI 兼容可从 baseUrl 推断默认模型"的行为对应。
     private var isCustomAnthropic: Bool { isCustom && formatHint == "anthropic" }
 
-    private var preset: ApiProviderPreset? {
+    private var preset: YuNianSeed.ApiProviderPreset? {
         YuNianSeed.apiProviderPresets.first { $0.provider == provider }
     }
 
