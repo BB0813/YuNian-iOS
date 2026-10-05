@@ -49,18 +49,35 @@ final class ApiConfigRepository {
     /// **运算符优先级**：SQL 里 `AND` 比 `OR` 结合更紧，所以第一行实际是
     /// `((apiKey IS NOT NULL AND apiKey != '') OR provider = 'PARTNER')`，
     /// 再 `AND isEnabled = 1`。写成
-    /// `(apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER') AND isEnabled = 1`
-    /// 与原文等价，但**不能**按字面理解成三段并列。
+    /// ⚠️ 第 121 轮：谓词从 Android 的
+    ///   `(apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER') AND isEnabled = 1`
+    ///   改成 `isEnabled = 1`。**这是修一个真 bug，不是简化。**
     ///
-    /// 语义：**取最近一条「已启用 且（有非空 apiKey 或是 PARTNER）」的配置**。
-    /// PARTNER 的内置云通道没有本地 Key，因此单列豁免。
+    /// ## 为什么原来的写法在 iOS 上恒不成立
+    /// Android 的 `api_configs.apiKey` 存的是 Tink 密文 `enc:v4:...`（非空），
+    /// 所以那个条件成立。而 iOS **刻意把行里的 apiKey 写成空串**
+    /// （见本文下方 `upsertActiveConfig` 的安全决策：iOS 没有 Android 的
+    ///   列加密，明文落库等于把密钥写进未加密 SQLite）。
+    /// 于是保存成功后 `isEnabled=1` 但 `apiKey=''`，除 PARTNER 外**全部**
+    /// 被谓词过滤掉 → `activeConfig()` 恒返回 nil。
+    ///
+    /// 用户可见症状：**渠道保存后仍显示「未配置 API Key」**，
+    /// 看起来像"添加渠道失败"，反复保存反复失败。（用户三次反馈同一现象。）
+    ///
+    /// ## 为什么改成 isEnabled = 1 是安全的
+    /// 1. 这正是 Rust `load_api_config` 的读法（native_gateway.rs，
+    ///    本文件上方注释已记录：`... WHERE isEnabled = 1 ORDER BY id DESC LIMIT 1`）。
+    ///    宿主观测与引擎读法必须一致，否则会出现"UI 说没配、回合却照样跑"。
+    /// 2. iOS 上"有没有 key"由 **Keychain** 判定，不由行判定 ——
+    ///    用行里的空串去推断是本末倒置。
+    /// 3. PARTNER 豁免不再需要：PARTNER 也没有行内 key，旧写法对它是特例，
+    ///    现在统一按 isEnabled 走，行为反而更一致。
     func activeConfig() throws -> ApiConfig? {
         try database.pool.read { db in
             guard let row = try Row.fetchOne(db, sql: """
             SELECT id, provider, name, baseUrl, model, formatHint, isEnabled
             FROM api_configs
-            WHERE (apiKey IS NOT NULL AND apiKey != '' OR provider = 'PARTNER')
-              AND isEnabled = 1
+            WHERE isEnabled = 1
             ORDER BY id DESC LIMIT 1
             """) else { return nil }
 
