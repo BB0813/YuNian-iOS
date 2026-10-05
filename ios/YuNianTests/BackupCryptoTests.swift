@@ -1,4 +1,9 @@
 import XCTest
+// ⚠️ 第 95 轮：`SymmetricKey` 属 CryptoKit，本文件第 66 行用了它。
+// 我第 72 轮加过这条 import，后来某次同步把它覆盖丢了 ——
+// 与第 94 轮 BackupImporterTests 丢 import GRDB 完全同源（两份副本互相覆盖）。
+// CI 报 "cannot find type 'SymmetricKey' in scope"。
+import CryptoKit
 @testable import YuNian
 
 /// `.lybk` 容器解密测试。

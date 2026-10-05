@@ -43,7 +43,7 @@ final class AgentStoresTests: XCTestCase {
     func testListMemoriesProducesRustContractKeys() throws {
         try insertMemory(deviceId: DeviceIdentity.deviceId, content: "一条记忆")
 
-        let json = try object(stores.listMemories(scopeJson: #"{"scope":null}"#))
+        let json = try objectList(stores.listMemories(scopeJson: #"{"scope":null}"#))
         XCTAssertEqual(json.count, 1, "应返回 1 条（scope 为 null = 全部）")
 
         let item = try XCTUnwrap(json.first)
@@ -70,7 +70,7 @@ final class AgentStoresTests: XCTestCase {
                          expiresAt: Int64(Date().timeIntervalSince1970 * 1000) - 1000)
         try insertMemory(deviceId: DeviceIdentity.deviceId, content: "有效")
 
-        let json = try object(stores.listMemories(scopeJson: #"{"scope":null}"#))
+        let json = try objectList(stores.listMemories(scopeJson: #"{"scope":null}"#))
         let contents = json.compactMap { $0["content"] as? String }
         XCTAssertEqual(contents, ["有效"], "只应剩下有效记忆，实际：\(contents)")
     }
@@ -78,7 +78,7 @@ final class AgentStoresTests: XCTestCase {
     /// `expires_at` 无值时为 null（Android 的 `JSONObject.NULL`），不是 0 也不是缺键。
     func testListMemoriesExpiresAtIsNullWhenAbsent() throws {
         try insertMemory(deviceId: DeviceIdentity.deviceId, content: "无过期")
-        let json = try object(stores.listMemories(scopeJson: #"{"scope":null}"#))
+        let json = try objectList(stores.listMemories(scopeJson: #"{"scope":null}"#))
         let item = try XCTUnwrap(json.first)
         XCTAssertTrue(item.keys.contains("expires_at"), "键必须存在")
         XCTAssertTrue(item["expires_at"] is NSNull, "无值时应为 null，实际 \(String(describing: item["expires_at"]))")
@@ -166,5 +166,21 @@ private func object(_ json: String) throws -> [String: Any] {
                       userInfo: [NSLocalizedDescriptionKey: "不是 JSON 对象"])
     }
     return dict
+}
+
+/// 把 JSON **数组**字符串解析成 [[String: Any]]。
+///
+/// ⚠️ 第 95 轮：我第 93 轮只加了 object(_:)（返回单个字典），
+/// 但 `listMemories` 返回的是 JSON **数组**。CI 报一片
+///   "value of tuple type 'Dictionary<String, Any>.Element' has no member 'keys'"
+///   "cannot access element using subscript for tuple type ... use '.' notation"
+/// 根因就是 json.first 拿到的是字典的 (key, value) 元组而不是元素。
+private func objectList(_ json: String) throws -> [[String: Any]] {
+    guard let data = json.data(using: .utf8),
+          let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        throw NSError(domain: "AgentStoresTests", code: 2,
+                      userInfo: [NSLocalizedDescriptionKey: "不是 JSON 数组: \(json.prefix(80))"])
+    }
+    return arr
 }
 }
