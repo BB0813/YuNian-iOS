@@ -1,4 +1,8 @@
 import XCTest
+// ⚠️ 第 94 轮：`rows(sql:arguments:)` 用了 GRDB 的 StatementArguments，
+// 而本文件只 import XCTest —— CI 报 "cannot find type 'StatementArguments' in scope"。
+// `@testable import YuNian` 不会把 GRDB 的类型转出来。
+import GRDB
 @testable import YuNian
 
 /// `AgentStores` 的 JSON 契约测试。
