@@ -121,7 +121,12 @@ struct ChatView: View {
     private func bubble(_ message: ChatSession.Message) -> some View {
         HStack {
             if message.role == .user { Spacer(minLength: 40) }
-            Text(message.text)
+            // ⚠️ 第 112 轮：模型回复先过 ImageGenProtocol.sanitizeForDisplay 再显示。
+            // 不这样做，模型按协议输出的 [[生图: 画面描述]] 会被当成普通文字原样展示
+            // —— 用户看到一串标记，画也没出来。
+            // Android 侧（AgentReplyText.kt:11 / CompanionMessageWorker.kt:409）
+            // 早就有这道清洗，iOS 之前漏了。
+            Text(sanitizedDisplay(message))
                 .textSelection(.enabled)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -135,6 +140,18 @@ struct ChatView: View {
         }
     }
 
+/// 显示前的清洗。
+    ///
+    /// 用户消息原样返回（它不是模型输出，不会带标记）；
+    /// 模型消息走 `ImageGenProtocol/sanitizeForDisplay`；
+    /// 若整条只有画面描述则显示占位文案。
+    private func sanitizedDisplay(_ message: ChatSession.Message) -> String {
+        guard message.role != .user else { return message.text }
+        if ImageGenProtocol.isPromptOnly(message.text) {
+            return "\u{1F3A8} 已生成画面"
+        }
+        return ImageGenProtocol.sanitizeForDisplay(message.text)
+    }
     private func disclosure(_ title: String, text: String) -> some View {
         DisclosureGroup(title) {
             Text(text)
