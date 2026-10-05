@@ -206,11 +206,4 @@ enum ApiProbeService {
             return .failure(.rustFailed(String(describing: error)))
         }
     }
-
-    /// 该服务商不提供模型列表端点。
-    ///
-    /// 这是**正常分支,不是故障**:OpenAI 兼容的 `GET /models` 并非业界标准,
-    /// Gemini / Claude 等都另有自己的形状（或不提供）。
-    /// Android 侧同样如此,它的 UI 因此另外提供「测试连接」作为退路。
-    case modelsNotSupportedByProvider(String)
 }
