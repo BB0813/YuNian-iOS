@@ -36,9 +36,19 @@ settings:
     # 因为 @testable import 会为 YuNianTests target 再编译一遍生产源码，
     # 而 YuNianTests **不继承** YuNian 的 OTHER_LDFLAGS。
     # 放这里两个 target 都能拿到。
+    # ⚠️ 第 97 轮：删掉 `-framework CommonCrypto`。
+    # 它是我第 79 轮为修 CCKeyDerivationPBKDF2 加的，第 80 轮提升到工程级。
+    # 但第 81 轮我**已改用 CryptoKit 自建 PBKDF2**（BackupKDF.swift），
+    # 完全不再依赖 CommonCrypto —— 却把这个链接标志留下了。
+    # 结果 CI 链接期报：
+    #     ld: framework 'CommonCrypto' not found
+    # （模拟器 SDK 里 CommonCrypto 不是可链接 framework。）
+    #
+    # 教训与第 61/73/94/95 轮的"两份副本互相覆盖"同族：
+    # **修掉一个依赖后，要连它引入的构建标志一起清**。我只清了 import，
+    # 没清 linker flag，于是一个已解决的问题以新形态回来了。
     OTHER_LDFLAGS:
       - "-lc++"
-      - "-framework CommonCrypto"
 
 packages:
   GRDB:
