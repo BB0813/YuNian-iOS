@@ -122,7 +122,12 @@ final class BackupImporter {
             for s in groups {
                 let oldId = s["id"] as? Int64 ?? 0
                 let name = s["name"] as? String ?? ""
-                let backupMembers = Self.parseIdCsv(s["companionIds"] as? String)
+                // ⚠️ 第 84 轮：`parseIdCsv` 形参是非可选 String，
+                // 而 `s["companionIds"] as? String` 是可选。
+                // CI 报 BackupImporter.swift:125 "value of optional type
+                // 'String?' must be unwrapped to a value of type 'String'"。
+                // 用 `?? ""` 拍平（缺失等价于空 CSV，与原语义一致）。
+                let backupMembers = Self.parseIdCsv(s["companionIds"] as? String ?? "")
                     .map { companionIdMap[$0] ?? $0 }
                 if let existing = existingGroups[name] {
                     let merged = Array(Set(existing.members).union(backupMembers)).sorted()

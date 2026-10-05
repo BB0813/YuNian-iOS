@@ -108,7 +108,13 @@ enum BackupCrypto {
         let derived = BackupKDF.deriveKey(
             password: password,
             salt: salt,
-            iterations: pbkdf2Iterations,
+            // ⚠️ 第 84 轮：`pbkdf2Iterations` 声明是 **UInt32**（第 33 行，
+            // 因为 CommonCrypto 的 API 要 UInt），而 BackupKDF 的形参是 Int。
+            // CI 报 BackupCrypto.swift:111 "cannot convert value of type
+            // 'UInt32' to expected argument type 'Int'"。
+            // 这里显式转换，而不是把 BackupKDF 的签名改成 UInt32 ——
+            // 算法内部（Range、count）用 Int 更自然。
+            iterations: Int(pbkdf2Iterations),
             keyLength: keyLength
         )
         return SymmetricKey(data: derived)
