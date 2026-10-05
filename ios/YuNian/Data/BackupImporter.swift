@@ -157,7 +157,11 @@ final class BackupImporter {
             let bySnapshot = Dictionary(grouping: chatMessages) { $0["companionId"] as? Int64 ?? 0 }
             for (oldCompanionId, list) in bySnapshot {
                 guard let localCompanionId = companionIdMap[oldCompanionId] else { continue }
-                let existing = try Self.existingChatKeys(db, localCompanionId: localCompanionId)
+                // ⚠️ 第 85 轮：`existing` 是 `let`，而下面第 193 行
+                // `existing.insert(key)` 要改它 —— CI 报
+                // "Cannot use mutating member on immutable value: 'existing' is a 'let' constant"。
+                // 与第 84 轮 existingCompanionIds 是同族问题（Set/字典写回却声明成常量）。
+                var existing = try Self.existingChatKeys(db, localCompanionId: localCompanionId)
                 for s in list.sorted(by: { ($0["timestamp"] as? Int64 ?? 0) < ($1["timestamp"] as? Int64 ?? 0) }) {
                     let key = ChatKey(
                         timestamp: s["timestamp"] as? Int64 ?? 0,
@@ -209,7 +213,9 @@ final class BackupImporter {
             let byGroup = Dictionary(grouping: groupMessages) { $0["groupId"] as? Int64 ?? 0 }
             for (oldGroupId, list) in byGroup {
                 guard let localGroupId = groupIdMap[oldGroupId] else { continue }
-                let existing = try Self.existingGroupKeys(db, localGroupId: localGroupId)
+                // ⚠️ 第 85 轮：同族 —— 下面第 242 行 `existing.insert(key)` 要改它。
+                // 编译器一次只报一个，所以两处一起修。
+                var existing = try Self.existingGroupKeys(db, localGroupId: localGroupId)
                 for s in list.sorted(by: { ($0["timestamp"] as? Int64 ?? 0) < ($1["timestamp"] as? Int64 ?? 0) }) {
                     let oldSender = s["companionId"] as? Int64 ?? 0
                     let sender = oldSender == Self.systemSenderId
