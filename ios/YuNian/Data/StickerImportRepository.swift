@@ -87,7 +87,7 @@ struct StickerImportRepository {
         let fileSize = Int64(data.count)
 
         do {
-            let entryId = try database.pool.write { db in
+            let entryId: Int64 = try database.pool.write { db in
                 // 上限检查（Android L333：entries.size >= MAX → 拒绝）
                 let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sticker_entries") ?? 0
                 if count >= Self.maxImportedCount {
@@ -100,7 +100,12 @@ struct StickerImportRepository {
                 if existing != nil {
                     throw ImportError.duplicate
                 }
-                return try db.execute(
+                // ⚠️ 第 116 轮：GRDB 6 的 `db.execute` 返回 **Void**，
+                // 拿不到插入 id —— CI 报 "cannot convert value of type '()' to
+                // expected argument type 'Int64'"。正确写法是本仓既有惯例：
+                // execute 之后读 `db.lastInsertedRowID`（BackupImporter.swift:112
+                // 等处四例一致）。
+                try db.execute(
                     sql: """
                         INSERT INTO sticker_entries
                           (description, hash, tags, fileName, source, fileSize,
@@ -110,6 +115,7 @@ struct StickerImportRepository {
                     arguments: [
                         trimmedDescription, hash, tags, fileName, "imported", fileSize, now, now,
                     ])
+                return db.lastInsertedRowID
             }
             // 导入后重建聚合表，与 Android rebuildTagStats 同结论
             try rebuildTagStats()

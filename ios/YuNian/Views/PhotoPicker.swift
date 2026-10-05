@@ -45,9 +45,9 @@ struct PhotoPicker: UIViewControllerRepresentable {
             let lock = NSLock()
 
             for result in results {
-                // 优先按 UTType 取，取不到退回通用 object
+                // 优先按 UTType.image 取，取不到退回 provider 注册的第一个图片类型
                 let provider = result.itemProvider
-                let typeId = provider.registeredTypeIdentifiers(for: .image).first
+                let typeId = provider.registeredTypeIdentifiers(for: UTType.image).first
                     ?? UTType.image.identifier
                 group.enter()
                 provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, _ in
@@ -69,13 +69,18 @@ struct PhotoPicker: UIViewControllerRepresentable {
         ///
         /// Android 侧是三级判定（DISPLAY_NAME → MIME → 魔数嗅探），
         /// 因为 SAF/微信/QQ/华为等 provider 常不给后缀或返回 octet-stream。
-        /// PHPicker 给的是内存数据，没有原文件名，故这里按魔数兜底 ——
+        /// PHPicker 给的是内存数据、没有原文件名，故这里按魔数兜底 ——
         /// 同样是"不能想当然认为有后缀"。
+        ///
+        /// ⚠️ 第 116 轮：`UTType.webp` **在这个 SDK 上不存在**（CI 报
+        /// "type 'UTType' has no member 'webp'"）。webp 只能靠魔数
+        /// `RIFF....WEBP` 识别，而这正是下面 sniffExtension 已覆盖的。
         private func extensionHint(for typeId: String, data: Data) -> String {
-            if let ut = UTType(typeId), ut.conforms(to: .png) { return "png" }
-            if let ut = UTType(typeId), ut.conforms(to: .jpeg) { return "jpg" }
-            if let ut = UTType(typeId), ut.conforms(to: .gif) { return "gif" }
-            if let ut = UTType(typeId), ut.conforms(to: .webp) { return "webp" }
+            if let ut = UTType(typeId) {
+                if ut.conforms(to: .png) { return "png" }
+                if ut.conforms(to: .jpeg) { return "jpg" }
+                if ut.conforms(to: .gif) { return "gif" }
+            }
             return sniffExtension(data)
         }
 
