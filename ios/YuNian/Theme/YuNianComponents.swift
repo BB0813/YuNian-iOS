@@ -108,23 +108,24 @@ struct YuNianGlassCard<Content: View>: View {
     }
 
     var body: some View {
-        Group {
+        // ⚠️ 第 125 轮：原写法是 `Group { if let onClick {...} else {...} }`
+        // 后接 `.animation(...)`，CI 报 "cannot call value of non-function type
+        // 'Animation'"。代码本身合法，但 Group + 可选闭包 + 链式 animation
+        // 让推断崩了。改成把可点/不可点两条路各自组装好再统一包一层，
+        // 每段类型都显式，不留推断死角。
+        let content = cardBody
+            .scaleEffect(pressed ? 0.985 : 1.0)              // GlassCard.kt:55-59
+            .animation(.spring(dampingRatio: 0.78, stiffness: 520.0), value: pressed)
+
+        return Group {
             if let onClick {
-                Button(action: onClick) { cardBody }
+                Button(action: onClick) { content }
                     .buttonStyle(.plain)
             } else {
-                cardBody
+                content
             }
         }
-        .scaleEffect(pressed ? 0.985 : 1.0)          // GlassCard.kt:55-59
-        // ⚠️ 第 124 轮：`.spring(dampingRatio:stiffness:)` 两个参数都是 Double，
-        // 字面量 0.78 / 520 会因 `Animation` 上下文推断不出而报
-        // "cannot call value of non-function type 'Animation'"。
-        // 用显式 Double 常量最稳。
-        .animation(.spring(dampingRatio: 0.78, stiffness: 520.0), value: pressed)
         .simultaneousGesture(
-            // ⚠️ 第 124 轮：`DragGesture` 的形参是 **minimumDistance**，
-            // 我写成了 `minLength`，CI 报 "extra argument 'minLength' in call"。
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in pressed = true }
                 .onEnded { _ in pressed = false }
