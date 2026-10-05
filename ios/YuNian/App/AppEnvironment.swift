@@ -326,7 +326,16 @@ final class AppEnvironment: ObservableObject {
     /// 于是每回合前都把这两个键覆盖丢。这正是第 8 轮记录的教训:
     /// 「同一个契约两处各自硬编码、互相掩盖」。
     private func currentSettings() -> AgentSettings {
-        let s = AgentSettings.withSystemTimezone()
+        // ⚠️ 第 110 轮：`AgentSettings` 是 struct，`let s = ...` 拿到的是 let 值绑定，
+        // 不能逐字段赋值（CI 报 330/331 "cannot assign to property: 's' is a 'let' constant"）。
+        //
+        // ⚠️ 第二个坑（差点犯）：不能图省事只 `AgentSettings(workingMemoryLimit:200,
+        // imageGenRules:...)`。`withSystemTimezone()` 除那两个键外还设了
+        // **role = "GIRLFRIEND"** 与 **timezone = 系统当前时区**（AgentDTOs.swift:202-208），
+        // 丢掉 timezone 会让 Rust 时间感知退化为 UTC（注释明写「不能省」）。
+        //
+        // 用 var 局部变量，把 withSystemTimezone() 的三个键原样继承，再补第四、第五个。
+        var s = AgentSettings.withSystemTimezone()
         s.workingMemoryLimit = 200
         s.imageGenRules = ImageGenProtocol.defaultPrompt
         return s
