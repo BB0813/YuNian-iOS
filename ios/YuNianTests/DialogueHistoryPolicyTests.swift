@@ -10,22 +10,25 @@ final class DialogueHistoryPolicyTests: XCTestCase {
 
     private func sanitize(_ history: [(role: AgentHistoryRole, content: String)])
         -> [(role: AgentHistoryRole, content: String)]
-
-    /// 把消息序列渲染成 [String]，用于 XCTAssertEqual。
-    ///
-    /// ⚠️ 第 91 轮：[(role:content:)] 是**具名元组**数组，
-    /// 而 Swift 元组不能遵循 Equatable（元组无法加 extension）——
-    /// CI 报 6 处 "type '(role: AgentHistoryRole, content: String)'
-    /// cannot conform to 'Equatable'"。
-    /// 不改被测代码，只在测试侧渲染成可比较的字符串。
-    private func render(_ msgs: [(role: AgentHistoryRole, content: String)]) -> [String] {
-        msgs.map { "\($0.role.rawValue):\($0.content)" }
-    }
-
     {
         DialogueHistoryPolicy.sanitizeForModel(
             history.map { AgentHistoryMessage(role: $0.role, content: $0.content) }
         ).map { ($0.role, $0.content) }
+    }
+
+    /// 把消息序列渲染成 [String]，用于 XCTAssertEqual。
+    ///
+    /// ⚠️ 第 92 轮：上一轮我的自动改写脚本把本函数**插进了 `sanitize` 的
+    /// 签名中间**（在 `-> [...]` 之后、函数体的 `{` 之前），
+    /// 结果 `sanitize` 的函数体失去归属 —— CI 报 "expected declaration"。
+    /// 现在移到 sanitize 完整定义之后。
+    ///
+    /// 为什么需要它：[(role:content:)] 是**具名元组**数组，
+    /// 而 Swift 元组不能遵循 Equatable（元组无法加 extension）——
+    /// CI 曾报 6 处 "cannot conform to 'Equatable'"。
+    /// 不改被测代码，只在测试侧渲染成可比较的字符串。
+    private func render(_ msgs: [(role: AgentHistoryRole, content: String)]) -> [String] {
+        msgs.map { "\($0.role.rawValue):\($0.content)" }
     }
 
     // MARK: - 过滤
