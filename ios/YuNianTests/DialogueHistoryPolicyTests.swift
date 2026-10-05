@@ -10,6 +10,18 @@ final class DialogueHistoryPolicyTests: XCTestCase {
 
     private func sanitize(_ history: [(role: AgentHistoryRole, content: String)])
         -> [(role: AgentHistoryRole, content: String)]
+
+    /// 把消息序列渲染成 [String]，用于 XCTAssertEqual。
+    ///
+    /// ⚠️ 第 91 轮：[(role:content:)] 是**具名元组**数组，
+    /// 而 Swift 元组不能遵循 Equatable（元组无法加 extension）——
+    /// CI 报 6 处 "type '(role: AgentHistoryRole, content: String)'
+    /// cannot conform to 'Equatable'"。
+    /// 不改被测代码，只在测试侧渲染成可比较的字符串。
+    private func render(_ msgs: [(role: AgentHistoryRole, content: String)]) -> [String] {
+        msgs.map { "\($0.role.rawValue):\($0.content)" }
+    }
+
     {
         DialogueHistoryPolicy.sanitizeForModel(
             history.map { AgentHistoryMessage(role: $0.role, content: $0.content) }
@@ -48,8 +60,8 @@ final class DialogueHistoryPolicyTests: XCTestCase {
 
     func testNonOperationalTextIsKept() {
         XCTAssertEqual(
-            sanitize([(.user, "你好"), (.assistant, "在的")]),
-            [(.user, "你好"), (.assistant, "在的")]
+            render(sanitize([(.user, "你好"), (.assistant, "在的")])),
+            render([(.user, "你好"), (.assistant, "在的")])
         )
     }
 
@@ -84,38 +96,38 @@ final class DialogueHistoryPolicyTests: XCTestCase {
 
     func testConsecutiveSameRoleAreMerged() {
         XCTAssertEqual(
-            sanitize([(.user, "a"), (.user, "b"), (.assistant, "c")]),
-            [(.user, "a\nb"), (.assistant, "c")]
+            render(sanitize([(.user, "a"), (.user, "b"), (.assistant, "c")])),
+            render([(.user, "a\nb"), (.assistant, "c")])
         )
     }
 
     func testMergeUsesTrimEndAndTrimStart() {
         XCTAssertEqual(
-            sanitize([(.user, "a  "), (.user, "  b")]),
-            [(.user, "a\nb")]
+            render(sanitize([(.user, "a  "), (.user, "  b")])),
+            render([(.user, "a\nb")])
         )
     }
 
     /// TOOL 角色**不参与**合并（Kotlin 的 `last.role != TOOL` 条件）。
     func testToolRoleIsNeverMerged() {
         XCTAssertEqual(
-            sanitize([(.tool, "t1"), (.tool, "t2")]),
-            [(.tool, "t1"), (.tool, "t2")]
+            render(sanitize([(.tool, "t1"), (.tool, "t2")])),
+            render([(.tool, "t1"), (.tool, "t2")])
         )
     }
 
     func testThreeConsecutiveAreAllMerged() {
         XCTAssertEqual(
-            sanitize([(.user, "a"), (.user, "b"), (.user, "c")]),
-            [(.user, "a\nb\nc")]
+            render(sanitize([(.user, "a"), (.user, "b"), (.user, "c")])),
+            render([(.user, "a\nb\nc")])
         )
     }
 
     /// 过滤在合并**之前**：被丢掉的消息不应触发合并逻辑。
     func testFilteringHappensBeforeMerging() {
         XCTAssertEqual(
-            sanitize([(.user, "a"), (.user, "网络连接超时"), (.user, "b")]),
-            [(.user, "a\nb")],
+            render(sanitize([(.user, "a"), (.user, "网络连接超时"), (.user, "b")])),
+            render([(.user, "a\nb")]),
             "中间的操作性消息应被丢掉，然后 a/b 才合并"
         )
     }
