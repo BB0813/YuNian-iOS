@@ -359,7 +359,15 @@ jobs:
           code=$?
           set -e
           echo "xcodebuild 退出码：$code"
-          tail -n 300 "$RUNNER_TEMP/xcodebuild.log" || true
+          # ⚠️ 第 83 轮：300 行还是不够 —— 带 `文件:行号` 的诊断行排在
+          # "Testing failed:" 摘要**之前**，而摘要之后还有一大段
+          # SwiftCompile 的命令回显。于是我只看到摘要、看不到位置。
+          # 这类事已发生三次（第 30 轮的 tail -n 80、第 78 轮 set -e 杀脚本、
+          # 第 83 轮行数不够），根因是同一个：**我在反复削减我要读的东西**。
+          # 现在：完整日志进 artifact，stdout 打足够长的尾部，并显式 grep 出诊断行。
+          grep -n 'error:' "$RUNNER_TEMP/xcodebuild.log" | head -n 60 || true
+          echo "---- 尾部 200 行 ----"
+          tail -n 200 "$RUNNER_TEMP/xcodebuild.log" || true
           exit $code
 
       - name: 上传构建日志
