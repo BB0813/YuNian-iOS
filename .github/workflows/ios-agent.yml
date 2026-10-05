@@ -467,13 +467,13 @@ jobs:
         run: |
           set -euo pipefail
           xcodegen generate
-          # ⚠️ 第 103 轮：Bundle ID 可用环境变量覆盖。
-          # 起因：用户拿未签名 IPA 用爱思助手 + 免费 Apple ID 自签，报
-          # 「描述文件生成失败」。最可能原因是 com.yunian.ai 已被他人注册，
-          # 免费账号申请不到 provisioning profile。
-          # 用命令行构建设置覆盖（优先级高于工程），不依赖 XcodeGen 的
-          # 环境变量语法是否支持 —— 那种语法我没验证过，不敢直接用。
-          BUNDLE_ID="${YUNIAN_BUNDLE_ID:-com.yunian.ai}"
+          # ⚠️ 第 104 轮：默认 Bundle ID 从 com.yunian.ai 改为 com.bb0813.yunian。
+          # 原因：用户拿未签名 IPA 用爱思助手 + 免费 Apple ID 自签，报
+          # 「签名失败：描述文件生成失败」—— 最可能是 com.yunian.ai 已被其他
+          # Apple 账号注册，免费账号申请不到 provisioning profile。
+          # 新 ID 取自其 GitHub 账号名，被他人注册的可能性低。
+          # 如需再改：设置仓库变量 YUNIAN_BUNDLE_ID 即可覆盖。
+          BUNDLE_ID="${YUNIAN_BUNDLE_ID:-com.bb0813.yunian}"
           echo "使用 Bundle ID：$BUNDLE_ID"
           set +e
           xcodebuild archive \

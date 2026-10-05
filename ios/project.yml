@@ -15,7 +15,10 @@
 
 name: YuNian
 options:
-  bundleIdPrefix: com.yunian.ai
+  # ⚠️ 第 104 轮：默认 Bundle ID 从 com.yunian.ai 改为 com.bb0813.yunian。
+  # 原 ID 很可能已被其他 Apple 账号注册，导致用户用爱思助手免费签名时报
+  # 「描述文件生成失败」。CI 侧还会用命令行再覆盖一层（见 workflow）。
+  bundleIdPrefix: com.bb0813.yunian
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -76,7 +79,7 @@ targets:
 
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.yunian.ai
+        PRODUCT_BUNDLE_IDENTIFIER: com.bb0813.yunian
         INFOPLIST_FILE: YuNian/Resources/Info.plist
         # ⚠️ 免费 Apple ID 无法启用 Push Notifications capability。
         #    需要 APNs 时必须使用付费开发者账号 —— 见 docs/ios-port-feasibility.md §3.2。
@@ -109,7 +112,7 @@ targets:
       - target: YuNian
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.yunian.ai.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.bb0813.yunian.tests
         GENERATE_INFOPLIST_FILE: YES
 
 # ── 测试策略 ────────────────────────────────────────────────────
