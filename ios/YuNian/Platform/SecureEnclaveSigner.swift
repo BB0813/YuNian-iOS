@@ -144,12 +144,19 @@ enum SecureEnclaveSigner {
 
     static func publicKey() throws -> SecKey {
         let key = try privateKey()
-        // ⚠️ 第 88 轮：`SecKeyCopyPublicKey` 在这个 SDK 上返回**非可选** SecKey，
-        // 所以 `guard let public = ... else` 报
-        //   expected pattern / unwrap condition requires a valid identifier /
-        //   expected 'else' after 'guard' condition ...
-        // 一条 guard let 引出一串语法级报错。
-        return SecKeyCopyPublicKey(key)
+        // ⚠️ 第 90 轮：我第 89 轮修错了方向。
+        // 原代码是 `guard let public = SecKeyCopyPublicKey(key) else {...}`，
+        // 报的是一串语法错（expected pattern / expected 'else' after 'guard' ...）。
+        // 我断言"SecKeyCopyPublicKey 返回非可选"并去掉了 guard ——
+        // 结果 CI 改报 "value of optional type 'SecKey?' must be unwrapped"。
+        //
+        // 真正的根因：**`public` 是 Swift 关键字**，不能做变量名。
+        // 报错列 147:19 正好落在变量名那个位置，而我只看了错误文本、没对列号。
+        // 改名即可，guard let 本身没问题。
+        guard let publicKey = SecKeyCopyPublicKey(key) else {
+            throw SignerError.publicKeyUnavailable
+        }
+        return publicKey
     }
 
     /// 测试与「重置设备身份」用。
