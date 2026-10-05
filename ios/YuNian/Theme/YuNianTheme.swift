@@ -317,7 +317,11 @@ enum YuNianTheme {
 
     // MARK: - 字号（规格 §2，实际项目里用的覆盖值）
 
-    enum Font {
+    /// ⚠️ 第 124 轮：原名 `Font`，但它**遮蔽了 `SwiftUI.Font`**，
+    /// 导致本文件内所有 `Font.system(size:weight:)` 都解析到我自己定义的枚举上
+    /// （CI 报 "type 'YuNianTheme.Font' has no member 'system'" ×12）。
+    /// 改名为 `TextStyle`，与 SwiftUI 的 Font 区分开。
+    enum TextStyle {
         /// `HomeScreen.kt:119-122` 首页标题
         static func homeTitle(_ c: Colors) -> Font { .system(size: 22, weight: .bold) }
         /// `GlassTopBar.kt:72-75`

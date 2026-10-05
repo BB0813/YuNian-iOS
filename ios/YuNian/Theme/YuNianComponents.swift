@@ -110,23 +110,27 @@ struct YuNianGlassCard<Content: View>: View {
     var body: some View {
         Group {
             if let onClick {
-                Button(action: onClick) { body }
+                Button(action: onClick) { cardBody }
                     .buttonStyle(.plain)
             } else {
-                body
+                cardBody
             }
         }
         .scaleEffect(pressed ? 0.985 : 1.0)          // GlassCard.kt:55-59
         .animation(.spring(dampingRatio: 0.78, stiffness: 520), value: pressed)
         .simultaneousGesture(
-            DragGesture(minLength: 0)
+            // ⚠️ 第 124 轮：`DragGesture` 的形参是 **minimumDistance**，
+            // 我写成了 `minLength`，CI 报 "extra argument 'minLength' in call"。
+            DragGesture(minimumDistance: 0)
                 .onChanged { _ in pressed = true }
                 .onEnded { _ in pressed = false }
         )
         .disabled(onClick == nil)
     }
 
-    private var body: some View {
+    /// ⚠️ 第 124 轮：原名 `body`，与 `View` 协议要求的 `body` 重名，
+    /// CI 报 "invalid redeclaration of 'body'" 且 View conformance 失败。
+    private var cardBody: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(YuNianTheme.Space.cardPadding)
             .yuNianGlass(colors, radius: YuNianTheme.Radius.glassCard,
@@ -218,7 +222,7 @@ struct YuNianTopBar<Actions: View>: View {
     var body: some View {
         HStack(spacing: YuNianTheme.Space.standard) {
             Text(title)
-                .font(YuNianTheme.Font.topBarTitle)
+                .font(YuNianTheme.TextStyle.topBarTitle)
                 .foregroundStyle(colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: YuNianTheme.Space.standard) { actions }
@@ -305,7 +309,7 @@ struct YuNianStatChip: View {
             if let systemImage {
                 Image(systemName: systemImage).font(.system(size: 12))
             }
-            Text(text).font(YuNianTheme.Font.statChip)
+            Text(text).font(YuNianTheme.TextStyle.statChip)
         }
         .padding(.horizontal, YuNianTheme.Space.standard)
         .padding(.vertical, YuNianTheme.Space.tight)
@@ -327,7 +331,7 @@ struct YuNianSectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(YuNianTheme.Font.sectionLabel)
+            .font(YuNianTheme.TextStyle.sectionLabel)
             .foregroundStyle(YuNianTheme.colors(scheme).textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, YuNianTheme.Space.minUnit)
@@ -367,11 +371,11 @@ struct YuNianGlyphRow: View {
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
                 Text(title)
-                    .font(YuNianTheme.Font.settingsRowTitle)
+                    .font(YuNianTheme.TextStyle.settingsRowTitle)
                     .foregroundStyle(colors.textPrimary)
                 if let subtitle {
                     Text(subtitle)
-                        .font(YuNianTheme.Font.settingsRowSubtitle)
+                        .font(YuNianTheme.TextStyle.settingsRowSubtitle)
                         .foregroundStyle(colors.textSecondary)
                 }
             }
