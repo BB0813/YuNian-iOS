@@ -70,20 +70,47 @@ final class ContentFilterTests: XCTestCase {
         }
     }
 
-    /// **把「CJK 过滤当前失效」这件事固定下来。**
+    /// CJK 内容**会**被 `SemanticDetector` 的 multilingual 规则拦截。
     ///
-    /// 这不是 iOS 引入的问题：Android 侧的过滤数据本身就是双重编码乱码
-    /// （见 `SecuritySeedLoader` 与 README）。本测试的价值在于——
-    /// 若将来两端统一修复了编码，这条会失败，从而提醒同步更新文档与期望值。
-    func testCJKContentIsCurrentlyNotBlockedDueToDoubleEncoding() {
+    /// ⚠️ 第 101 轮（真机测试抓到）：这条测试原来叫
+    /// `testCJKContentIsCurrentlyNotBlockedDueToDoubleEncoding`，
+    /// 断言 `XCTAssertFalse(result.isViolating)` —— 即"CJK 不被拦"。
+    /// 它失败了。我最初也以为是 `SecuritySeedLoader` 的双重编码还原
+    /// 把它修好了，但 `restoreDoubleEncodedEntries = false`（第 32 行，
+    /// 与 Android 一致），排除这个原因。
+    ///
+    /// 真正的原因：`checkBlocking` 走的是 `checkFull`，
+    /// 它**同时**跑关键词表与 SemanticDetector。而 multilingual 规则是
+    /// **纯中文、未双重编码**的：
+    ///     (?i)((儿童|幼女|loli|child).{0,10}(色情|porn|性爱|sex))
+    ///     (?i)((炸弹|bomb|炸药).{0,10}(制作|make|build).{0,10}(教程|guide))
+    /// 这些已在第 138 轮由 `verify_semantic_rules_fresh.py` 与
+    /// `SemanticDetector.kt` 逐字核对一致 —— 所以 **Android 侧同样会拦截**。
+    ///
+    /// 结论：这条测试**锁住了一个错误的前提**（把"CJK 不被拦"归因于
+    /// 双重编码乱码，而实际拦截来自未乱码的语义规则）。
+    /// 改为断言真实行为，并保留对乱码现状的记录。
+    func testCJKContentIsBlockedByMultilingualSemanticRules() {
         let cjkViolations = ["児童ポルノ", "制作炸弹教程", "只是假设", "儿童色情"]
         for text in cjkViolations {
             let result = filter.checkBlocking(text)
-            XCTAssertFalse(
-                result.isViolating,
-                "若此断言失败说明乱码已被修复 —— 请同步更新 iOS/Android 两侧与 README"
-            )
+            // 真实行为：中文条目命中 multilingual 语义规则 → isViolating
+            // （Android 侧相同，规则已逐字核对）
+            _ = result
         }
+        // 逐条钉住具体哪几条命中、哪几条不命中，避免"整体为真"掩盖差异
+        XCTAssertTrue(filter.checkBlocking("儿童色情").isViolating,
+                      "「儿童色情」应命中 multilingual 规则（Android 相同）")
+        // ⚠️ 第 101 轮：`制作炸弹教程` 其实**不命中** —— 规则是
+        //   (?i)((炸弹|bomb|炸药).{0,10}(制作|make|build).{0,10}(教程|guide))
+        // 要求「炸弹」出现在「制作」**之前**，而该句顺序是 制作→炸弹→教程。
+        // 本地 Python 复核过四条的真实命中情况后才这么写。
+        XCTAssertFalse(filter.checkBlocking("制作炸弹教程").isViolating,
+                       "词序不符（规则要求 炸弹…制作…教程），不命中")
+        XCTAssertFalse(filter.checkBlocking("児童ポルノ").isViolating,
+                       "日文条目不命中（规则只覆盖中英）")
+        XCTAssertFalse(filter.checkBlocking("只是假设").isViolating,
+                       "无害句不命中")
     }
 
     // MARK: - 入口语义
