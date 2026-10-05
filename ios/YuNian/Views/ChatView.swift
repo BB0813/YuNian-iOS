@@ -9,6 +9,9 @@ struct ChatView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @StateObject private var session = ChatSession()
     @State private var draft: String = ""
+    /// 表情选择面板。⚠️ 第 120 轮加 —— 让用户能主动发表情，
+    /// 不必等模型 send_sticker。
+    @State private var showStickerPicker = false
     @State private var companionName: String = "对话"
     /// 伴侣绑定失败时的可见提示。
     ///
@@ -149,10 +152,11 @@ struct ChatView: View {
 
     /// 从消息文本解析表情。
     ///
-    /// 只认 [<纯数字>] 且来自 assistant —— 用户自己打 [123]
-    /// 不应被当成表情（Android 渲染层同样只对模型侧生效）。
+    /// ⚠️ 第 120 轮改为按**显式字段**判断，不再"文本是 [数字] 就当成表情"。
+    /// 反推的问题：用户手动打 `[123]` 会被渲染成表情，而模型真发的表情
+    /// 反而不一定带得上格式。展示层要有自己的真值。
     private func sticker(for message: ChatSession.Message) -> StickerBubbleModel? {
-        guard message.role != .user,
+        guard message.isSticker,
               message.text.hasPrefix("["), message.text.hasSuffix("]"),
               message.text.count > 2,
               let id = Int64(message.text.dropFirst().dropLast()),
@@ -167,18 +171,11 @@ struct ChatView: View {
     /// 与 Android"资源缺失时显示描述"的处理一致。
     private func stickerBubble(_ sticker: StickerBubbleModel) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let image = sticker.image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: 160, maxHeight: 160)
-                    .cornerRadius(10)
-            } else {
-                Image(systemName: "photo")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 120, height: 120)
-            }
+            // ⚠️ 第 120 轮：改用 StickerThumbnail，不再自己读文件。
+            // 气泡和选择器都要"按 fileName 读图 + 占位"，两份各写会分叉。
+            StickerThumbnail(fileName: sticker.fileName)
+                .frame(maxWidth: 160, maxHeight: 160)
+                .cornerRadius(10)
             if let label = sticker.label {
                 Text(label)
                     .font(.caption2)
@@ -219,6 +216,19 @@ struct ChatView: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
+            // ⚠️ 第 120 轮：表情按钮。
+            // 在此之前表情只能由模型 send_sticker 发出，用户被绑在
+            // "等模型心情好"上。库为空时按钮仍显示，点进去给出导入引导 ——
+            // 比藏起来更好，否则用户不知道"没有"还是"没这个功能"。
+            Button {
+                showStickerPicker = true
+            } label: {
+                Image(systemName: "face.smiling")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(session.isRunning || environment.runtime == nil)
+
             TextField("说点什么…", text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
@@ -246,5 +256,139 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .sheet(isPresented: $showStickerPicker) {
+            StickerPickerSheet { entryId in
+                session.sendSticker(entryId: entryId, in: environment)
+            }
+        }
+    }
+
+    // MARK: - 表情选择器
+
+    /// 快速选表情面板。
+    ///
+    /// 只读 sticker_entries（与表情库同一数据源），不做额外缓存 ——
+    /// 打开时取一次即可，选完即发。
+    private struct StickerPickerSheet: View {
+        let onPick: (Int64) -> Void
+
+        @Environment(\.dismiss) private var dismiss
+        @EnvironmentObject private var environment: AppEnvironment
+
+        @State private var stickers: [StickerLibraryRepository.Entry] = []
+        @State private var loadError: String?
+
+        private let columns = [GridItem(.adaptive(minimum: 84), spacing: 12)]
+
+        var body: some View {
+            NavigationStack {
+                Group {
+                    if let loadError {
+                        errorState(loadError)
+                    } else if stickers.isEmpty {
+                        emptyState
+                    } else {
+                        grid
+                    }
+                }
+                .navigationTitle("选表情")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { dismiss() }
+                    }
+                    // 顺手：面板里直接能跳去导表情，不用退出再找
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink {
+                            StickerImportView()
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                }
+            }
+            .task { reload() }
+            // 从导入页回来时刷新（sheet dismiss 即重取）
+            .onDisappear { reload() }
+        }
+
+        private var grid: some View {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(stickers) { sticker in
+                        Button {
+                            if let id = Int64(stickerId(sticker)) {
+                                onPick(id)
+                                dismiss()
+                            }
+                        } label: {
+                            stickerCell(sticker)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding()
+            }
+        }
+
+        private func stickerCell(_ sticker: StickerLibraryRepository.Entry) -> some View {
+            VStack(spacing: 4) {
+                StickerThumbnail(fileName: sticker.fileName)
+                    .frame(width: 64, height: 64)
+                    .cornerRadius(8)
+                Text(sticker.displayName)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        private var emptyState: some View {
+            VStack(spacing: 14) {
+                Image(systemName: "face.smiling")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("还没有可发的表情")
+                    .font(.headline)
+                Text("先导入几个，模型和你都能用。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                NavigationLink("去导入表情") { StickerImportView() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+
+        private func errorState(_ message: String) -> some View {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                Button("重试") { reload() }
+            }
+        }
+
+        private func reload() {
+            guard let database = environment.database else {
+                loadError = "数据库未就绪"
+                return
+            }
+            do {
+                stickers = try StickerLibraryRepository(database: database).entries()
+                loadError = nil
+            } catch {
+                stickers = []
+                loadError = String(describing: error)
+            }
+        }
+
+        private func stickerId(_ sticker: StickerLibraryRepository.Entry) -> String {
+            String(sticker.id)
+        }
     }
 }
