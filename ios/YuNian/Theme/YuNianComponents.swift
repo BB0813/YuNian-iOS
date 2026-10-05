@@ -335,3 +335,52 @@ struct YuNianSectionTitle: View {
             .padding(.bottom, YuNianTheme.Space.minUnit)
     }
 }
+
+// MARK: - 列表行
+
+/// 对应 Android `SettingsRow` —— `SettingsWidgets.kt:92-103`
+///
+/// 标题 15sp、尾部 "›" 13sp 色 `textSecondary`。
+/// **不带自己的玻璃底** —— Android 的 GlassCard 是外层容器，
+/// 这里同样留给调用方包 `YuNianGlassCard`，避免卡片套卡片。
+struct YuNianGlyphRow: View {
+    let title: String
+    let icon: String
+    var subtitle: String? = nil
+    var disabled = false
+
+    @Environment(\.colorScheme) private var scheme
+
+    init(_ title: String, icon: String, subtitle: String? = nil, disabled: Bool = false) {
+        self.title = title
+        self.icon = icon
+        self.subtitle = subtitle
+        self.disabled = disabled
+    }
+
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
+
+    var body: some View {
+        HStack(spacing: YuNianTheme.Space.half) {
+            Image(systemName: icon)
+                .foregroundStyle(colors.primary)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
+                Text(title)
+                    .font(YuNianTheme.Font.settingsRowTitle)
+                    .foregroundStyle(colors.textPrimary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(YuNianTheme.Font.settingsRowSubtitle)
+                        .foregroundStyle(colors.textSecondary)
+                }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(colors.textSecondary)
+        }
+        .padding(.vertical, YuNianTheme.Space.half)
+        .opacity(disabled ? 0.45 : 1.0)
+    }
+}

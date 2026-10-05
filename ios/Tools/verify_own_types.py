@@ -48,7 +48,8 @@ EXTERNAL_ALLOWLIST = {
     # 玻璃组件的竖直高光渐变要用（GlassSurface.kt:52-58 的
     # 0f→White@0.14、0.35f→White@0.04、1f→White@0）；
     # EmptyView 是 YuNianTopBar 的默认 actions 占位。
-    "LinearGradient", "Gradient", "EmptyView",
+    # ⚠️ 同轮：Rectangle —— HomeScreen.kt:164-169 的 1dp 分割线要用。
+    "LinearGradient", "Gradient", "EmptyView", "Rectangle",
     # PhotosUI（相册多选）
     # ⚠️ 第 115 轮：PHPicker* 加入白名单。
     # 表情导入需要相册选择器，对应 Android 的 SAF/相册入口
