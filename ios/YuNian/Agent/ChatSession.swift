@@ -181,10 +181,55 @@ final class ChatSession: ObservableObject {
             lastError = error
             log.error("回合失败：\(error, privacy: .public)")
         }
+        // ⚠️ 第 119 轮：消费回合内产生的 AgentEvent。
+        // StreamSink 只有 text/reasoning/done/error 四个回调，**没有事件回调**
+        // （已核对生成的绑定 L3733-3755），sticker 等事件只存在于
+        // `AgentTurnResult.events` 里。此前完全没读它 ——
+        // 于是模型调 send_sticker 成功也无声无息。
+        applyEvents(result.events, environment: environment)
         // 兜底：sink 没给出任何文本时，用结果里的最终文本落地
         if streamingText.isEmpty, !result.finalText.isEmpty {
             complete(fullText: result.finalText, finishReason: result.finishedReason)
         }
+    }
+
+    // MARK: - 事件落地
+
+    /// 把回合事件转成界面消息。
+    ///
+    /// ## 表情消息的编码约定（**与 Android 全仓统一**）
+    /// `AiResponseFinalizer.kt:448-449`：
+    /// > 贴纸消息编码约定：**普通 TEXT 消息，内容为 `[stickerId]`**，
+    /// > 由渲染层识别为表情包（`MessageType` 无 STICKER 枚举，全仓库统一此约定）。
+    ///
+    /// 所以这里 text 存 `[<entryId>]`，渲染层据此判断是不是表情。
+    ///
+    /// `AgentEvent.extra` 的格式（agent.rs:441-444）**不是 JSON**，是 KV 串：
+    ///     entry_id=123;file_name=custom_1699_1.png
+    /// 需要手工解析，不能想当然按 JSON 解。
+    private func applyEvents(_ events: [AgentEvent], environment: AppEnvironment) {
+        for event in events where event.kind == "sticker" {
+            let fields = parseKeyValues(event.extra)
+            let entryId = fields["entry_id"] ?? ""
+            guard !entryId.isEmpty else { continue }
+
+            // 内容 = "[<entryId>]"，与 Android 约定一致
+            messages.append(Message(role: .assistant, text: "[\(entryId)]"))
+            log.info("表情已落地：entry_id=\(entryId, privacy: .public)")
+        }
+    }
+
+    /// 解析 `k=v;k=v` 形式的 KV 串。
+    private func parseKeyValues(_ raw: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for part in raw.split(separator: ";") {
+            let kv = part.split(separator: "=", maxSplits: 1)
+            if kv.count == 2 {
+                out[String(kv[0]).trimmingCharacters(in: .whitespaces)] =
+                    String(kv[1]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return out
     }
 
     /// 取消当前回合（Rust 侧的 `turn_cancel` 标志会让重试循环中断）。
