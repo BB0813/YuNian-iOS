@@ -1,7 +1,4 @@
 import XCTest
-// ⚠️ 第 68 轮：L66 用了 CryptoKit 的 SymmetricKey。
-// XCTest 只会传递 Foundation，**不会**转出 CryptoKit —— 缺这条 import 编译期直接报错。
-import CryptoKit
 @testable import YuNian
 
 /// `.lybk` 容器解密测试。
@@ -100,11 +97,15 @@ final class BackupCryptoTests: XCTestCase {
 }
 
 private extension Data {
-    init(hexString: String) {
-        var bytes: [UInt8] = []
-        var it = hexString.makeIterator()
+    init(fixtureHex: String) {
+        var bytes = [UInt8]()
+        var it = fixtureHex.makeIterator()
         while let hi = it.next(), let lo = it.next() {
-            bytes.append(UInt8(hi + lo, radix: 16) ?? 0)
+            // ⚠️ 第 93 轮：`hi + lo` 是 Character 相加，结果虽能拼成字符串，
+            // 但 CI 报 "cannot convert value of type 'Character' to expected
+            // argument type 'String'"。显式插值成 String 再交给 UInt8(_:radix:)。
+            // 另外扩展名原先叫 hexString，而调用处写的是 fixtureHex（标签不匹配）。
+            bytes.append(UInt8("\(hi)\(lo)", radix: 16) ?? 0)
         }
         self = Data(bytes)
     }
