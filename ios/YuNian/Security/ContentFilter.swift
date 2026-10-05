@@ -199,7 +199,12 @@ final class ContentFilter {
 
     /// 对应 `checkKeywords`：按等级从高到低，**第一个有命中的等级即返回**。
     func checkKeywords(_ text: String) -> CheckResult {
-        guard let table = lock.withLock({ compiled }), !table.isEmpty else { return .clean }
+        // ⚠️ 第 87 轮：`compiled` 是 `[ViolationLevel: [NSRegularExpression]]`
+        // （非可选字典），`guard let table = ...` 的 conditional binding 要求
+        // 右侧必须可空 —— CI 报 ContentFilter.swift:202
+        // "initializer for conditional binding must have Optional type"。
+        let table = lock.withLock { compiled }
+        guard !table.isEmpty else { return .clean }
         let range = NSRange(text.startIndex..., in: text)
 
         for level in Self.scanOrder {
