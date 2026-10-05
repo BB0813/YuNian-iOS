@@ -415,7 +415,16 @@ jobs:
   app-device:
     name: 导出真机 IPA（未签名）
     needs: rust-ios
-    runs-on: macos-14
+    # 说明：契约检查（Swift 签名一致性 / schema 一致性 / SQL 时序）
+    # 已全部前置到 contract-checks（ubuntu，便宜），此处不再重复。
+
+    # ⚠️ 第 102 轮：runs-on 从 macos-14 改成 macos-15。
+    # 我第一次接这个 job 时写的是 macos-14（自带 Xcode 15.4），
+    # 而 XcodeGen 2.44 生成的工程是 format 70，Xcode 15.4 读不了：
+    #   xcodebuild: error: Unable to read project 'YuNian.xcodeproj'.
+    #   Reason: ...it is in a future Xcode project file format (70).
+    # app-simulator 在第 71 轮就已因此换成 macos-15，我新建 job 时又踩了一次。
+    runs-on: macos-15
     timeout-minutes: 40
 
     steps:
