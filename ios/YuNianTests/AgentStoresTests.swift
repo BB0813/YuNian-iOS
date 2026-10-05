@@ -1,9 +1,4 @@
 import XCTest
-// ⚠️ 第 68 轮：本文件用到了 GRDB 的 Row/StatementArguments/fetchAll，
-// 而 `@testable import YuNian` **不会**把 GRDB 的类型转出来 —— 必须自己 import。
-// 这是第 65 轮那一连串"先看实际代码再动手"的教训的又一次：
-// 我原先凭"测试只 import XCTest 就够了"的印象漏掉了它。
-import GRDB
 @testable import YuNian
 
 /// `AgentStores` 的 JSON 契约测试。
@@ -149,4 +144,23 @@ final class AgentStoresTests: XCTestCase {
             }
         }
     }
+
+/// 把 JSON 字符串解析成字典，供本文件的断言使用。
+///
+/// ⚠️ 第 93 轮：测试里 5 处调用它，但我从未定义它 ——
+/// CI 报 AgentStoresTests.swift:47/74/82/103/107 全部
+/// "cannot find 'object' in scope"。与第 87 轮的 encodeJSON 同型：
+/// **我引用了自己没写的符号**。
+///
+/// ⚠️ 同时这是第 92 轮那个错误的第二次：我第一次把它插进了
+/// `final class` 的文档注释里，把类声明和它的注释切割开。
+/// 现在放在文件末尾。
+private func object(_ json: String) throws -> [String: Any] {
+    guard let data = json.data(using: .utf8),
+          let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw NSError(domain: "AgentStoresTests", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "不是 JSON 对象"])
+    }
+    return dict
+}
 }
