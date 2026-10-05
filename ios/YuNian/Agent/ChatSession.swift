@@ -17,10 +17,23 @@ import Combine   // ObservableObject / @Published —— 不依赖 SwiftUI 的�
 final class ChatSession: ObservableObject {
 
     /// 会话内的一条消息（仅用于展示；发给 Rust 的历史是 `AgentHistoryMessage`）。
+    ///
+    /// ⚠️ `isSticker` 必须是**显式字段**，不能靠"文本是 [数字]"反推。
+    /// 第 120 轮前的实现就是反推的：用户手动打 `[123]` 会被渲染成表情，
+    /// 而模型真发的表情反而不一定带得上格式。协议约定归约定，
+    /// 展示层要有自己的真值。
     struct Message: Identifiable, Equatable {
         let id = UUID()
         let role: AgentHistoryRole
         var text: String
+        /// 是否为表情消息（内容仍按 Android 约定存 `[entryId]`）。
+        var isSticker: Bool = false
+
+        init(role: AgentHistoryRole, text: String, isSticker: Bool = false) {
+            self.role = role
+            self.text = text
+            self.isSticker = isSticker
+        }
     }
 
     @Published private(set) var messages: [Message] = []
@@ -214,7 +227,8 @@ final class ChatSession: ObservableObject {
             guard !entryId.isEmpty else { continue }
 
             // 内容 = "[<entryId>]"，与 Android 约定一致
-            messages.append(Message(role: .assistant, text: "[\(entryId)]"))
+            messages.append(
+                Message(role: .assistant, text: "[\(entryId)]", isSticker: true))
             log.info("表情已落地：entry_id=\(entryId, privacy: .public)")
         }
     }
@@ -230,6 +244,39 @@ final class ChatSession: ObservableObject {
             }
         }
         return out
+    }
+
+    /// 用户手动发送一个表情。
+    ///
+    /// ## 为什么需要（第 120 轮）
+    /// 在此之前表情只能由**模型**通过 `send_sticker` 发出，用户被绑在
+    /// "等模型心情好"上。而 `sticker_pick` 的挑选逻辑本就是共享的 ——
+    /// 用户手动选只是把"谁发起"换掉，链路完全复用。
+    ///
+    /// ## 发送前先落一次使用计数
+    /// 与 `StickerToolBridge` 命中后的处理一致（`modelUsageCount + 1`
+    /// 改为 `userUsageCount + 1`），否则偏好统计里用户发的不算，越用它越排后面。
+    func sendSticker(entryId: Int64, in environment: AppEnvironment) {
+        guard let database = environment.database else { return }
+        // ⚠️ StickerBubbleModel 没实现 Equatable，不能 `== nil`。
+        // 它 init? 失败即返回 nil，故用 let 绑定判断存在性。
+        guard let _ = StickerBubbleModel(entryId: entryId, database: database) else {
+            lastError = "表情不存在或已被删除"
+            return
+        }
+        // 累加用户使用计数（对齐 Android recordUsage 的 USER 来源）
+        try? database.pool.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE sticker_entries
+                    SET userUsageCount = userUsageCount + 1, lastUsedAt = ?
+                    WHERE id = ?
+                    """,
+                arguments: [Int64(Date().timeIntervalSince1970 * 1000), entryId])
+        }
+
+        messages.append(Message(role: .user, text: "[\(entryId)]", isSticker: true))
+        lastError = nil
     }
 
     /// 取消当前回合（Rust 侧的 `turn_cancel` 标志会让重试循环中断）。
