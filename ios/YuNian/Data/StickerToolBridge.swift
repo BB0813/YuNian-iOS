@@ -110,7 +110,10 @@ struct StickerToolBridge {
     static func normalizeTag(_ raw: String) -> String {
         var out = ""
         for ch in raw {
-            if ch.isspace { continue }
+            // ⚠️ 第 120 轮：Swift 的 Character 没有 `isspace`，
+            // 是 `isWhitespace`（CI 报 "value of type 'Character' has no member
+            // 'isspace'"）—— 又一次凭印象写属性名。
+            if ch.isWhitespace { continue }
             if ch.isPunctuation || ch.isSymbol { continue }
             out.append(ch)
             if out.count >= 20 { break }
