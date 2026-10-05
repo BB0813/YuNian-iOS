@@ -54,7 +54,9 @@ final class DeviceToolsTests: XCTestCase {
     /// ⚠️ 用**固定时区的 Calendar** 注入 —— 否则断言会依赖运行机器的 TZ
     /// （我第一版测试就栽在这：日期按 Asia/Shanghai 构造，实现却用 .current）。
     func testExecuteGetTimeProducesAndroidShape() throws {
-        let cal = Calendar(identifier: .gregorian)
+        // ⚠️ 第 91 轮：`Calendar` 是 struct，`let cal` 之后不能再改 timeZone。
+        // CI 报 DeviceToolsTests.swift:58 "cannot assign to property: 'cal' is a 'let' constant"。
+        var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
 
         // 2026-08-07 12:34:56 +08:00 → Python 核算：2026-08-07 是星期五

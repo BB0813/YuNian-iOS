@@ -96,8 +96,14 @@ final class RequestSignerTests: XCTestCase {
     }
 
     /// 常量与 Android 的 `appId` 一致（`X-LianYu-Client` 头）。
-    func testClientIdentifierMatchesAndroid() {
-        XCTAssertEqual(RequestSigner.clientIdentifier, "lianyu-1.5.1")
+    /// ⚠️ 第 91 轮：这条测试在**引用我们在第 122 轮删掉的**
+    /// `RequestSigner.clientIdentifier` —— CI 报 "has no member"。
+    /// 删实现时漏掉了对应的测试，是"删了留残骸"的又一例
+    /// （第 120 轮 find_dead_swift 报过 clientIdentifier 仅被测试引用，
+    ///  我当时该连测试一起处理）。
+    /// Android 的 `appId` 常量改由 `verify_literals.py` 在 CI 上交叉核对，
+    /// 这里不再断言一个已不存在的符号。
+    func testSignatureConstantsMatchAndroid() {
         XCTAssertEqual(RequestSigner.signatureVersion, "v1")
         XCTAssertEqual(RequestSigner.handshakeSegment, "handshake")
     }
