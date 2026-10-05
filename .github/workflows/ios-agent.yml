@@ -365,9 +365,17 @@ jobs:
           # 这类事已发生三次（第 30 轮的 tail -n 80、第 78 轮 set -e 杀脚本、
           # 第 83 轮行数不够），根因是同一个：**我在反复削减我要读的东西**。
           # 现在：完整日志进 artifact，stdout 打足够长的尾部，并显式 grep 出诊断行。
-          grep -n 'error:' "$RUNNER_TEMP/xcodebuild.log" | head -n 60 || true
-          echo "---- 尾部 200 行 ----"
-          tail -n 200 "$RUNNER_TEMP/xcodebuild.log" || true
+          # 这类事已发生四次（第 30 轮 tail -n 80、第 78 轮 set -e 杀脚本、
+          # 第 83 轮 300 行不够、第 96 轮只 grep 'error:' 漏掉链接期详情），
+          # 根因是同一个：**我在反复削减我要读的东西**。
+          # ⚠️ 第 96 轮：grep 模式扩大到链接期关键字。
+          # 本轮 `clang: error: linker command failed` 在日志第 1500 行，
+          # 而真正有用的 "Undefined symbols:" / "ld:" / "symbol(s) not found"
+          # 都在那附近 —— 原先只 grep 'error:' 把它们全漏了。
+          grep -nE 'error:|Undefined symbols|ld: |symbol\(s\) not found|linker command failed|framework not found' \
+            "$RUNNER_TEMP/xcodebuild.log" | head -n 80 || true
+          echo "---- 尾部 300 行 ----"
+          tail -n 300 "$RUNNER_TEMP/xcodebuild.log" || true
           exit $code
 
       - name: 上传构建日志
