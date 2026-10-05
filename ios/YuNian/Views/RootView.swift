@@ -16,20 +16,14 @@ import SwiftUI
 struct RootView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
-    @State private var apiKeyDraft = ""
+    /// 昵称（owner_name）。⚠️ 不属于渠道配置，故留在首屏而不进 ChannelConfigView。
     @State private var ownerNameDraft = ""
-    @State private var credentialError: String?
-    /// 选中的 provider（枚举名，如 "OPENAI"）。
+    /// 预选的服务商（进配置页时带上；根视图默认 OPENAI）。
     ///
     /// ⚠️ 为什么必须有这个选择器而不是默认一个：选错 provider 的后果是
     /// 请求打到**错误的 baseUrl**（静默失败或 404）—— 正是最难看懂的那类故障。
     /// provider 由用户显式决定，代码不替他猜。
     @State private var providerDraft = "OPENAI"
-    /// 模型名。**可为空**：空 = 用该 provider 的预设默认值。
-    ///
-    /// ⚠️ 第 106 轮加。此前没有这个输入框 —— 模型名只能来自预设常量，
-    /// 而预设是从 `YuNianSeed` 生成的，用户改不了。
-    @State private var modelDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -65,109 +59,37 @@ struct RootView: View {
 
             // ── 渠道配置：决定能不能真的聊起来 ──
             Section {
-                // 当前状态一行说明：省得用户猜"我配好了没"
-                HStack {
-                    Text("当前渠道")
-                    Spacer()
-                    Text(channelStatusText)
-                        .foregroundStyle(channelReady ? .green : .secondary)
-                        .font(.caption)
-                }
-
-                Picker("服务商", selection: $providerDraft) {
-                    ForEach(YuNianSeed.apiProviderPresets, id: \.provider) { preset in
-                        Text(preset.displayName).tag(preset.provider)
-                    }
-                }
-                .onChange(of: providerDraft) { _, newProvider in
-                    // 换服务商时带出该家的默认模型名，用户在 placeholder 里看得到
-                    if let preset = YuNianSeed.apiProviderPresets
-                        .first(where: { $0.provider == newProvider }) {
-                        modelDraft = preset.model
-                    }
-                }
-
-                TextField("模型（留空用默认）", text: $modelDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                    .overlay(alignment: .trailing) {
-                        if !modelDraft.isEmpty {
-                            Button {
-                                modelDraft = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 6)
+                // 改为「当前渠道卡片 + 去配置」，对齐 Android 的 PetalApiCard 入口。
+                // ⚠️ 第 122 轮：原先这里把 provider/model/key/昵称全塞在首屏，
+                // 自定义 API 甚至没有填 Base URL 的地方（用户报的缺口）。
+                // Android 的做法是「选服务商 → 打开配置表单」（SettingsScreen.kt:469），
+                // 表单里才有 Base URL / API 格式 / API 名称。
+                // 现在 iOS 照这个结构来：首屏只显示状态 + 入口。
+                NavigationLink {
+                    ChannelConfigView(provider: providerDraft)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: channelReady
+                              ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            .foregroundStyle(channelReady ? .green : .orange)
+                            .font(.title3)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(channelTitle).font(.body)
+                            Text(channelSubtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                    }
-
-                SecureField("API Key", text: $apiKeyDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-
-                TextField("昵称（owner_name）", text: $ownerNameDraft)
-
-                if let credentialError {
-                    Text(credentialError).font(.caption).foregroundStyle(.red)
-                }
-
-                HStack(spacing: 12) {
-                    Button("保存并下发") {
-                        do {
-                            let model = modelDraft
-                                .trimmingCharacters(in: .whitespaces)
-                            try environment.setAPIKey(
-                                apiKeyDraft,
-                                provider: providerDraft,
-                                model: model.isEmpty ? nil : model
-                            )
-                            environment.setOwnerName(ownerNameDraft)
-                            apiKeyDraft = ""
-                            credentialError = nil
-                        } catch {
-                            credentialError = String(describing: error)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    // 拉取模型列表 + 测试连接：配完 key 后的两个验证动作。
-                    // 没有它们，填错 key 的症状是"发消息没反应"（第 40 轮的「上线即故障」）。
-                    if environment.modelsLoading {
-                        ProgressView()
-                    } else {
-                        Button("拉取模型列表") { Task { await environment.loadServerModels() } }
-                        Button("测试连接") { Task { await environment.testConnection() } }
-                    }
-                }
-                .font(.footnote)
-
-                if let msg = environment.modelsMessage {
-                    Text(msg)
-                        .font(.caption)
-                        .foregroundStyle(
-                            environment.serverModels.isEmpty
-                                && !environment.modelsNotSupported ? .red : .secondary
-                        )
-                    if environment.modelsNotSupported {
-                        Text("可直接在上方「模型」处手动填写模型名，再用「测试连接」验证是否可用。")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !environment.serverModels.isEmpty {
-                        Text(environment.serverModels.joined(separator: "、"))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .lineLimit(6)
+                        Spacer(minLength: 4)
+                        Text("配置")
+                            .font(.footnote)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
             } header: {
                 Text("模型渠道")
             } footer: {
-                Text("API Key 存在系统钥匙串，不写入应用数据库。")
+                Text("未配置或填错时，症状是「发消息没反应」且不报错 —— 所以配完请先「测试连接」。")
                     .font(.caption2)
             }
 
@@ -195,36 +117,42 @@ struct RootView: View {
         }
         .task {
             ownerNameDraft = KeychainStore.string(for: KeychainStore.Key.ownerName) ?? ""
-            if let key = KeychainStore.string(for: KeychainStore.Key.apiKey), !key.isEmpty {
-                apiKeyDraft = key
-            }
-            // 用「当前生效的配置」回填，避免用户误以为选的是别家
+            // 用当前生效的配置决定「配置」按钮要把哪个服务商带进表单
             if let active = environment.apiConfigs?.tryActiveConfig(),
                YuNianSeed.apiProviderPresets.contains(where: { $0.provider == active.provider }) {
                 providerDraft = active.provider
-                if !active.model.isEmpty {
-                    modelDraft = active.model
-                }
             }
         }
     }
 
-    // MARK: - 渠道状态
+    // MARK: - 渠道状态展示
 
     private var channelReady: Bool {
-        let hasKey = !apiKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty
-        let configured = environment.credentialsSummary.contains("已配置")
-        return hasKey || configured
+        // ⚠️ 第 122 轮：apiKeyDraft 已随首屏表单一起移除（改由 ChannelConfigView 管）。
+        // 只依据「库里有没有一条启用配置」判断 —— 那正是 Rust 每回合要用的东西。
+        environment.apiConfigs?.tryActiveConfig() != nil
     }
 
-    private var channelStatusText: String {
-        if channelReady {
-            if let active = environment.apiConfigs?.tryActiveConfig() {
-                return "\(active.provider) · \(active.model)"
-            }
-            return "已配置"
+    private var channelTitle: String {
+        if let active = environment.apiConfigs?.tryActiveConfig(),
+           YuNianSeed.apiProviderPresets.contains(where: { $0.provider == active.provider }) {
+            // 与 Android 列表项一致：显示「名称」而非枚举名（SettingsScreen.kt:495）
+            return active.name.isEmpty ? presetName(active.provider) : active.name
         }
-        return "未配置 API Key"
+        return "未配置渠道"
+    }
+
+    private var channelSubtitle: String {
+        guard let active = environment.apiConfigs?.tryActiveConfig() else {
+            return "点此选择服务商并填入 API Key"
+        }
+        // Android 在预设列表副标题显示 baseUrl（SettingsScreen.kt:501），保持同一信息密度
+        let url = active.baseUrl.isEmpty ? "（未填地址）" : active.baseUrl
+        return "\(active.model.isEmpty ? "未填模型" : active.model) · \(url)"
+    }
+
+    private func presetName(_ provider: String) -> String {
+        YuNianSeed.apiProviderPresets.first { $0.provider == provider }?.displayName ?? provider
     }
 
     // MARK: - 启动失败
