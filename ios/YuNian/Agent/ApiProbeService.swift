@@ -18,6 +18,8 @@ enum ApiProbeService {
     enum ProbeError: Error, CustomStringConvertible {
         case notConfigured
         case rustFailed(String)
+        /// 该服务商不提供模型列表端点（**正常分支,不是故障**）。
+        case modelsNotSupportedByProvider(String)
 
         var description: String {
             switch self {
@@ -25,8 +27,14 @@ enum ApiProbeService {
                 return "尚未选择供应商或未填密钥"
             case let .rustFailed(msg):
                 return msg
+            case let .modelsNotSupportedByProvider(provider):
+                return "\(provider) 不支持模型列表查询，请手动填写模型名"
             }
         }
+
+        /// 给界面的提示。当前与 `description` 相同，保留独立入口
+        /// 以便将来 UI 需要更友好的措辞时不必改动 error 语义。
+        var userMessage: String { description }
     }
 
     /// 测试连接：发一个最小请求，验证 key / baseUrl / 协议是否都通。
@@ -182,9 +190,27 @@ enum ApiProbeService {
             let models = try ApiProbe().fetchModels(cfg: cfg, extraHeaders: extraHeaders)
             return .success(models)
         } catch let ApiProbeError.Message(message) {
+            // ⚠️ 第 108 轮：不要再把这句话原样当错误抛给用户。
+            // 它来自 Rust api_probe.rs，是「该服务商不提供 GET /models」的
+            // 正常分支，不是故障。把它当 error 显示，用户看到的就是
+            // 一句看不懂的技术错误 —— 而这个信息真正该说的是
+            // 「这家不支持列表查询，模型名请手动填」。
+            let lower = message.lowercased()
+            let unsupported = lower.contains("不支持") || lower.contains("not support")
+                || lower.contains("404") || lower.contains("method not allowed")
+            if unsupported {
+                return .failure(.modelsNotSupportedByProvider(config.provider))
+            }
             return .failure(.rustFailed(message))
         } catch {
             return .failure(.rustFailed(String(describing: error)))
         }
     }
+
+    /// 该服务商不提供模型列表端点。
+    ///
+    /// 这是**正常分支,不是故障**:OpenAI 兼容的 `GET /models` 并非业界标准,
+    /// Gemini / Claude 等都另有自己的形状（或不提供）。
+    /// Android 侧同样如此,它的 UI 因此另外提供「测试连接」作为退路。
+    case modelsNotSupportedByProvider(String)
 }

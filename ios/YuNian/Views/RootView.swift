@@ -158,7 +158,17 @@ struct RootView: View {
                 if let msg = environment.modelsMessage {
                     Text(msg)
                         .font(.caption)
-                        .foregroundStyle(environment.serverModels.isEmpty ? .red : .secondary)
+                        // ⚠️ 第 108 轮：「该服务商不支持模型列表」是正常分支，
+                        // 不是故障。此前一律标红，用户以为出错了。
+                        .foregroundStyle(
+                            environment.serverModels.isEmpty
+                                && !environment.modelsNotSupported ? .red : .secondary
+                        )
+                    if environment.modelsNotSupported {
+                        Text("可直接在上方「模型」处手动填写模型名，再用「测试连接」验证是否可用。")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 // 测试连接：解决「fetchModels 报"该API不支持模型列表查询"时
