@@ -61,7 +61,10 @@ struct PhotoPicker: UIViewControllerRepresentable {
                     guard let data, !data.isEmpty else { return }
                     lock.lock()
                     datas.append(data)
-                    exts.append(extensionHint(for: typeId, data: data))
+                    // ⚠️ 第 118 轮：闭包里调 Coordinator 自己的方法必须显式 self.
+                    // CI 报 "requires explicit use of 'self' to make capture
+                    // semantics explicit" —— 最基本的 Swift 规则，我漏了。
+                    exts.append(self.extensionHint(for: typeId, data: data))
                     lock.unlock()
                 }
             }
