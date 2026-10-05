@@ -45,10 +45,16 @@ struct PhotoPicker: UIViewControllerRepresentable {
             let lock = NSLock()
 
             for result in results {
-                // 优先按 UTType.image 取，取不到退回 provider 注册的第一个图片类型
                 let provider = result.itemProvider
-                let typeId = provider.registeredTypeIdentifiers(for: UTType.image).first
-                    ?? UTType.image.identifier
+                // ⚠️ 第 117 轮：不再用 `registeredTypeIdentifiers(for:)`。
+                // 该 API 在这个 SDK 上被解析成 **[String] 属性**而非方法，
+                // CI 报 "cannot call value of non-function type '[String]'"。
+                // 它的用途只是"要一个能读出数据的 UTI"；而 `public.image`
+                // 就是图像数据的通用 UTI，足够。
+                //
+                // 具体是 png/jpg/gif/webp 由下面 extensionHint 的**魔数嗅探**定 ——
+                // 这更可靠：PHPicker 给的是内存数据，没有原文件名可依赖。
+                let typeId = UTType.image.identifier
                 group.enter()
                 provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, _ in
                     defer { group.leave() }
