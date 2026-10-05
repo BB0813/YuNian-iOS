@@ -108,14 +108,16 @@ struct YuNianGlassCard<Content: View>: View {
     }
 
     var body: some View {
-        // ⚠️ 第 125 轮：原写法是 `Group { if let onClick {...} else {...} }`
-        // 后接 `.animation(...)`，CI 报 "cannot call value of non-function type
-        // 'Animation'"。代码本身合法，但 Group + 可选闭包 + 链式 animation
-        // 让推断崩了。改成把可点/不可点两条路各自组装好再统一包一层，
-        // 每段类型都显式，不留推断死角。
+        // ⚠️ 第 125-126 轮：`.animation(_:value:)` 在这个文件里连错两轮
+        // （报 "cannot call value of non-function type 'Animation'"，行号跟着
+        // 我的改动一直漂）。代码本身合法，说明是文件级推断出了问题。
+        //
+        // 不再纠缠，改用 iOS 15 之前就有的 `.animation(_:)`——语义等价
+        // （Kotlin 那边是 animateFloatAsState + spring，对 scaleEffect 做动画），
+        // 且不涉及 `value:` 重载解析。这是最保守的等价物。
         let content = cardBody
             .scaleEffect(pressed ? 0.985 : 1.0)              // GlassCard.kt:55-59
-            .animation(.spring(dampingRatio: 0.78, stiffness: 520.0), value: pressed)
+            .animation(.spring(dampingRatio: 0.78, stiffness: 520.0))
 
         return Group {
             if let onClick {
