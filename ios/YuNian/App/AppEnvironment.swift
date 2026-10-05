@@ -48,6 +48,11 @@ final class AppEnvironment: ObservableObject {
     @Published private(set) var modelsMessage: String?
     /// 是否正在拉取。
     @Published private(set) var modelsLoading = false
+    /// 最近一次拉取是否属于「该服务商不支持列表查询」。
+    ///
+    /// ⚠️ 第 108 轮加。这是**正常分支,不是故障**,UI 据此不标红，
+    /// 并提示改走「手动填模型名 + 测试连接」。
+    @Published private(set) var modelsNotSupported = false
     /// 安全基线播种结果（keywords / quiz_questions 各写入多少行）。
     @Published private(set) var securitySeedSummary: String = "—"
     /// 内容过滤是否已装载（对应 Android 的 `ContentFilter.initialize`）。
@@ -56,9 +61,14 @@ final class AppEnvironment: ObservableObject {
     @Published private(set) var maintenanceSummary: String = "—"
 
     private var didBoot = false
-    private var settings = AgentSettings.withSystemTimezone()
+    // ⚠️ 初始值也走 currentSettings()，与 boot()/syncRuntimeConfig() 同一来源
+    private var settings: AgentSettings
 
-    private init() {}
+    private init() {
+        settings = AgentSettings.withSystemTimezone()
+        settings.workingMemoryLimit = 200
+        settings.imageGenRules = ImageGenProtocol.defaultPrompt
+    }
 
     /// 幂等启动；失败时把原因暴露给 UI（不 crash —— 首启失败要有可读提示）。
     func boot() {
@@ -90,9 +100,7 @@ final class AppEnvironment: ObservableObject {
             //     [[生图: 描述]] 这个语法，用户要图时它不会输出该标记。
             //   · workingMemoryLimit 缺失 → 退回 Rust 默认值（恰好也是 200，
             //     所以此前无症状，但那是巧合不是等价）。
-            settings = AgentSettings.withSystemTimezone()
-            settings.workingMemoryLimit = 200
-            settings.imageGenRules = ImageGenProtocol.defaultPrompt
+            settings = currentSettings()
             //
             // owner_name 是**有意的跨端分歧**：Android 从不发它，iOS 因「用户昵称」
             // 功能而多注入一行「群主：{昵称}」。详见 AgentSettings.ownerName 注释。
@@ -311,6 +319,19 @@ final class AppEnvironment: ObservableObject {
         refreshCredentialsSummary(credentials: credentials)
     }
 
+    /// 构造当前生效的 settings —— **全仓唯一入口**。
+    ///
+    /// ⚠️ 第 107 轮从 boot() 里抽出。此前 boot() 与 syncRuntimeConfig()
+    /// **各自拼一份 settings**,后者漏了 imageGenRules / workingMemoryLimit,
+    /// 于是每回合前都把这两个键覆盖丢。这正是第 8 轮记录的教训:
+    /// 「同一个契约两处各自硬编码、互相掩盖」。
+    private func currentSettings() -> AgentSettings {
+        let s = AgentSettings.withSystemTimezone()
+        s.workingMemoryLimit = 200
+        s.imageGenRules = ImageGenProtocol.defaultPrompt
+        return s
+    }
+
     /// 测试连接：发一个最小请求验证 key / baseUrl / 协议。
     func testConnection() async {
         modelsLoading = true
@@ -344,6 +365,7 @@ final class AppEnvironment: ObservableObject {
     func loadServerModels() async {
         modelsLoading = true
         modelsMessage = nil
+        modelsNotSupported = false
         defer { modelsLoading = false }
 
         guard let config = try? apiConfigs?.activeConfig() else {
@@ -365,10 +387,17 @@ final class AppEnvironment: ObservableObject {
         switch result {
         case let .success(models):
             serverModels = models
+            modelsNotSupported = false
             modelsMessage = models.isEmpty ? "服务端返回空列表" : "拉到 \(models.count) 个模型"
         case let .failure(error):
             serverModels = []
-            modelsMessage = error.description
+            if case let .modelsNotSupportedByProvider(provider) = error {
+                modelsNotSupported = true
+                modelsMessage = "\(provider) 不支持模型列表查询"
+            } else {
+                modelsNotSupported = false
+                modelsMessage = error.description
+            }
         }
     }
 
@@ -393,7 +422,12 @@ final class AppEnvironment: ObservableObject {
     ///   **PARTNER 门控已按 Android 语义实现**（读取当前启用配置的 provider）。
     func syncRuntimeConfig() {
         guard let runtime else { return }
-        settings = AgentSettings.withSystemTimezone()
+        // ⚠️ 第 107 轮：与 boot() 用同一个构造路径，不要在这里重新拼 settings。
+        // 上一版这里写 `settings = AgentSettings.withSystemTimezone()`，
+        // 只设 role + timezone —— 把 boot() 里补的 imageGenRules 和
+        // workingMemoryLimit **在每次回合前覆盖丢**。这类"两处各写一份"正是
+        // 第 8 轮的教训：同一个契约两处各自维护就会互相掩盖。
+        settings = currentSettings()
         // owner_name 是有意的跨端分歧，见 AgentSettings.ownerName 注释
         settings.ownerName = KeychainStore.string(for: KeychainStore.Key.ownerName)
         runtime.updateSettings(settingsJson: settings.jsonString())
