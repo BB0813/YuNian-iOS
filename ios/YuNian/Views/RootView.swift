@@ -177,6 +177,12 @@ struct RootView: View {
                     .disabled(environment.database == nil)
                 NavigationLink("搜索消息") { MessageSearchView() }
                     .disabled(environment.database == nil)
+                // ⚠️ 第 113 轮：补表情库入口。
+                // sticker_entries / sticker_tags 从 v45 就在 schema 里，
+                // StickerTagProvider 也读后者给 Rust 兜底，但用户侧一直无界面 ——
+                // 全新安装下表是空的，用户无从判断"没有"还是"没显示"。
+                NavigationLink("表情库") { StickerLibraryView() }
+                    .disabled(environment.database == nil)
             }
 
             // ── 开发者入口：默认收起，不打扰用户 ──
