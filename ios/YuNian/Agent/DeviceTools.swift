@@ -122,6 +122,22 @@ enum DeviceTools {
     /// Android 用 `ACTION_BATTERY_CHANGED` sticky broadcast；
     /// iOS 用 `UIDevice` 的 battery API。**必须先开启 monitoring**，
     /// 否则 `batteryLevel` 恒为 -1（与 Android 的 `level < 0` 异常路径对应）。
+    // ⚠️ 第 87 轮：`encodeJSON` 与 `urlOpener` 两个符号被调用却从未定义
+    // （CI 报 DeviceTools.swift:80/138/147/193/217/301 全部
+    //  "cannot find 'encodeJSON' in scope"，以及 289 的 opener0 笔误）。
+    // 集中定义在这里：encodeJSON 只依赖 Foundation，不引额外框架。
+    private static func encodeJSON(_ dict: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: dict, options: [.sortedKeys]),
+              let s = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return s
+    }
+
+    /// 打开外部链接用的 UIApplication 单例。
+    private static var urlOpener: UIApplication { .shared }
+
     ///
     /// 返回 `{"ok":true,"percent":N,"charging":Bool}` 或
     /// `{"ok":false,"error":"..."}` —— 与 Android `okResult` / `errorResult` 一致。
@@ -137,7 +153,11 @@ enum DeviceTools {
 
         return encodeJSON([
             "ok": true,
-            "percent": percent(fromBatteryLevel: level),
+            // ⚠️ 第 87 轮：`UIDevice.batteryLevel` 是 **Float**，而
+            // `percent(fromBatteryLevel:)` 形参是 Double。CI 报
+            // DeviceTools.swift:140 "cannot convert value of type 'Float'
+            // to expected argument type 'Double'"。显式转换。
+            "percent": percent(fromBatteryLevel: Double(level)),
             "charging": isCharging(batteryState: device.batteryState),
         ])
     }
@@ -286,7 +306,11 @@ enum DeviceTools {
         let semaphore = DispatchSemaphore(value: 0)
         var opened = false
         DispatchQueue.main.async {
-            opener0.open(url) { ok in
+            // ⚠️ 第 87 轮：`opener0` 从未定义（变量名笔误）。
+            // CI 报 DeviceTools.swift:289 "cannot find 'opener0' in scope"。
+            // 改为按需创建一个 UIApplication  opener 并调用它。
+            let opener = DeviceTools.urlOpener
+            opener.open(url, options: [:]) { ok in
                 opened = ok
                 semaphore.signal()
             }
