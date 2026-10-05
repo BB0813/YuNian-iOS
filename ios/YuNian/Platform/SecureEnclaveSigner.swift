@@ -144,10 +144,12 @@ enum SecureEnclaveSigner {
 
     static func publicKey() throws -> SecKey {
         let key = try privateKey()
-        guard let public = SecKeyCopyPublicKey(key) else {
-            throw SignerError.publicKeyUnavailable
-        }
-        return public
+        // ⚠️ 第 88 轮：`SecKeyCopyPublicKey` 在这个 SDK 上返回**非可选** SecKey，
+        // 所以 `guard let public = ... else` 报
+        //   expected pattern / unwrap condition requires a valid identifier /
+        //   expected 'else' after 'guard' condition ...
+        // 一条 guard let 引出一串语法级报错。
+        return SecKeyCopyPublicKey(key)
     }
 
     /// 测试与「重置设备身份」用。

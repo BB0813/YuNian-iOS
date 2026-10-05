@@ -68,7 +68,17 @@ struct MessageSearchView: View {
         .listStyle(.plain)
         .navigationTitle("搜索消息")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, placement: .navigationBarDrawMode(displayMode: .automatic), prompt: "搜索消息内容")
+        // ⚠️ 第 89 轮：这里原来写的是
+        //   .searchable(text:placement:.navigationBarDrawMode(displayMode:.automatic), prompt:)
+        // CI 报 "type 'SearchFieldPlacement' has no member 'navigationBarDrawMode'"。
+        // **那个成员名是我在第 68 轮凭印象编的** —— 当时我还"验证"过
+        // iOS 17 API 覆盖并得出"全覆盖、无 iOS 18+ API"的结论，
+        // 而那个结论完全建立在记忆上，没有任何权威来源。
+        //
+        // 已两次被"凭印象写 API 名"咬到（第 23 轮 percentEncodedPath、
+        // 本轮 navigationBarDrawMode）。不再猜第三个：退回**一定存在**的
+        // `.automatic` placement，它不指定 drawer 行为，由系统决定。
+        .searchable(text: $query, placement: .automatic, prompt: "搜索消息内容")
         .onSubmit(of: .search) { runSearch() }
         .onChange(of: query) { _, new in
             // 与 Android 一致：清空即回到未搜索态，不做实时检索（输入中文时逐字查无意义）
