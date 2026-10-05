@@ -1,6 +1,8 @@
 import XCTest
-// ⚠️ 第 68 轮：本文件用 Row.fetchAll / Int64.fetchAll / String.fetchAll，
-// 而 `@testable import YuNian` 不会转出 GRDB 的类型。
+// ⚠️ 第 94 轮：本文件用了 GRDB 的 Row/Int64/String.fetchAll。
+// 我第 72 轮加过这条 import，但后来某次同步把它覆盖丢了 ——
+// CI 终于报出来（"cannot find type 'StatementArguments'/Row' in scope"）。
+// 已固化成本地扫描：用了 GRDB 符号却没 import GRDB 的测试文件。
 import GRDB
 @testable import YuNian
 
