@@ -451,9 +451,49 @@ def main() -> int:
 
     repo2 = read(SWIFT_DIR / "Data/Repositories/ApiConfigRepository.swift")
     report.check("iOS 有 ApiConfigRepository", "func activeConfig()" in repo2)
-    report.check("SQL 逐字对应 Android 的 getActiveEnabledConfig",
-                 "provider = 'PARTNER'" in repo2 and "isEnabled = 1" in repo2
-                 and "ORDER BY id DESC LIMIT 1" in repo2)
+    # ⚠️ 第 121 轮：这条断言本身**就是 bug 的帮凶**，必须改。
+    # 它原本要求 SQL 里出现 `provider = 'PARTNER'`（即照抄 Android 的
+    #   `(apiKey IS NOT NULL AND apiKey != '' OR provider='PARTNER')
+    #    AND isEnabled = 1`）。但 iOS 刻意把行内 apiKey 写成空串
+    #   （不把明文落进未加密 SQLite），那个谓词在 iOS 上**恒不成立**，
+    #   导致 activeConfig() 保存后仍返回 nil、UI 恒显示"未配置"。
+    #   → 关卡在论证"抄对了"，而正确性前提根本不成立。
+    # 现在改为核对**引擎的真实读法**：Rust load_api_config 用
+    # `WHERE isEnabled = 1 ORDER BY id DESC LIMIT 1`（native_gateway.rs）。
+    # 宿主观测必须与引擎读法一致，否则"UI 说没配、回合却照样跑"。
+    #
+    # ⚠️ 第 121 轮：断言那段 SQL 的**完整形态**。
+    # 我在这上面连错三次，记下来免得再犯：
+    #   1) 通用剥注释（/\*.*?\*/）→ 文件里错配的 /* 与远处 */ 把含 SQL 的
+    #      整段代码吃掉，变异后关卡照样全绿 = **假阴性**（比误报更坏）。
+    #   2) 全文搜 `FROM api_configs … ORDER BY … LIMIT 1` → 文档注释里
+    #      逐字引用了同一段 SQL，非贪婪匹配先命中注释，又一次假阴性。
+    #   3) 限定 `func activeConfig` 函数体 → 仍可能被嵌套右括号截断，不稳。
+    # 现在改成：SQL 必须**整段**等于下面的期望串。
+    # 只要有人把 apiKey 谓词加回去，这段串就对不上 —— 一次性判断，
+    # 不依赖"找到 WHERE 子句再解析"这种多步正则。
+    expected_active_sql = (
+        "SELECT id, provider, name, baseUrl, model, formatHint, isEnabled\n"
+        "            FROM api_configs\n"
+        "            WHERE isEnabled = 1\n"
+        "            ORDER BY id DESC LIMIT 1"
+    )
+    report.check(
+        "activeConfig 的 SQL 与 Rust load_api_config 读法逐字一致",
+        expected_active_sql in repo2)
+    # 单独再钉一次：整个文件里不得出现 Android 那个 apiKey 非空谓词的**代码**形态。
+    # 只在 SQL 字符串里才危险；注释里引用它是为了解释为什么改，属正常。
+    # 判法：该谓词只允许出现在 // 或 /// 开头的行。
+    bad_apikey_predicate = [
+        ln for ln in repo2.splitlines()
+        if "apiKey IS NOT NULL" in ln and not ln.lstrip().startswith(("//", "*", "/*"))
+    ]
+    report.check(
+        "代码里不得残留 Android 的 apiKey 非空谓词（iOS 行内恒为空串）",
+        not bad_apikey_predicate)
+    # 顺带钉住 upsertActiveConfig 的空串决策，防止将来"顺手把 key 也存进去"
+    report.check("upsertActiveConfig 仍刻意写空 apiKey（不落明文）",
+                 "apiKey = ''" in repo2)
 
     print()
     print(f"通过 {report.passed} 项，失败 {len(report.failed)} 项")
