@@ -49,7 +49,7 @@ final class MemoryRepository {
     /// 否则界面显示的与会话实际用的不是同一批。
     func listActive(now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> [Memory] {
         (try? database.pool.read { db in
-            try Memory.fetchAll(db, sql: """
+            try Row.fetchAll(db, sql: """
             SELECT id, content, memoryType, scope, source, sourceId, importance,
                    accessCount, observedAt, expiresAt, isDeleted
             FROM unified_memories
@@ -64,7 +64,7 @@ final class MemoryRepository {
     /// 对应 Android `getAllSync`：`ORDER BY observedAt DESC`，**不过滤 isDeleted**。
     func listAll() -> [Memory] {
         (try? database.pool.read { db in
-            try Memory.fetchAll(db, sql: """
+            try Row.fetchAll(db, sql: """
             SELECT id, content, memoryType, scope, source, sourceId, importance,
                    accessCount, observedAt, expiresAt, isDeleted
             FROM unified_memories
