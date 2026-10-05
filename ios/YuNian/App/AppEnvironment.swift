@@ -160,6 +160,17 @@ final class AppEnvironment: ObservableObject {
                 host: toolHost
             )
 
+            // ⚠️ 第 119 轮：注册 `sticker_pick` —— Rust builtin_send_sticker 的预选回调。
+            // 不注册的后果链：Rust 调 execute("sticker_pick") 拿不到 handler
+            // → 预选失败 → 因"表情库为空时 allow_passthrough=false"
+            //   （agent.rs:455-459）→ 直接告诉模型"没有可用表情包，改用文字"
+            // → 用户永远收不到表情，且**不报错**。
+            // 这是发送侧最后一环：标签表（第 100 轮前的 stickers 下发）→
+            // 预选（本轮）→ 事件落地（ChatSession.applyEvents）。
+            toolHost.register("sticker_pick") { argsJson, _ in
+                StickerToolBridge(database: database).pick(argumentsJson: argsJson)
+            }
+
             // 首启播种：Rust 的 load_companion 会按 id 读 companions；
             // 没有伴侣行就无法进行带人设的回合（Rust 返回 Err）。
             seedDefaultCompanionIfNeeded(companions)

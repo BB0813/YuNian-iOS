@@ -121,29 +121,82 @@ struct ChatView: View {
     private func bubble(_ message: ChatSession.Message) -> some View {
         HStack {
             if message.role == .user { Spacer(minLength: 40) }
-            // ⚠️ 第 112 轮：模型回复先过 ImageGenProtocol.sanitizeForDisplay 再显示。
-            // 不这样做，模型按协议输出的 [[生图: 画面描述]] 会被当成普通文字原样展示
-            // —— 用户看到一串标记，画也没出来。
-            // Android 侧（AgentReplyText.kt:11 / CompanionMessageWorker.kt:409）
-            // 早就有这道清洗，iOS 之前漏了。
-            Text(sanitizedDisplay(message))
-                .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(message.role == .user
-                              ? Color.accentColor.opacity(0.18)
-                              : Color(uiColor: .secondarySystemBackground))
-                )
+            // 第 119 轮：表情消息按 Android 约定识别。
+            // AiResponseFinalizer.kt:448-449：贴纸消息 = 普通 TEXT 消息，
+            // 内容为 [stickerId]。据此分支：是表情渲染图片，
+            // 否则走原文本路径（含生图标记清洗）。
+            if let sticker = sticker(for: message) {
+                stickerBubble(sticker)
+            } else {
+                // 第 112 轮：模型回复先过 ImageGenProtocol.sanitizeForDisplay
+                // 再显示，否则 [[生图: 画面描述]] 会被当普通文字原样展示。
+                Text(sanitizedDisplay(message))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(message.role == .user
+                                   ? Color.accentColor.opacity(0.18)
+                                   : Color(uiColor: .secondarySystemBackground))
+                    )
+            }
             if message.role != .user { Spacer(minLength: 40) }
         }
     }
 
-/// 显示前的清洗。
+    // MARK: - 表情消息
+
+    /// 从消息文本解析表情。
+    ///
+    /// 只认 [<纯数字>] 且来自 assistant —— 用户自己打 [123]
+    /// 不应被当成表情（Android 渲染层同样只对模型侧生效）。
+    private func sticker(for message: ChatSession.Message) -> StickerBubbleModel? {
+        guard message.role != .user,
+              message.text.hasPrefix("["), message.text.hasSuffix("]"),
+              message.text.count > 2,
+              let id = Int64(message.text.dropFirst().dropLast()),
+              id > 0
+        else { return nil }
+        return StickerBubbleModel(entryId: id, database: environment.database)
+    }
+
+    /// 表情气泡。图片从 stickers 目录按 fileName 读。
+    ///
+    /// 读不到文件时显示占位（消息仍可见），
+    /// 与 Android"资源缺失时显示描述"的处理一致。
+    private func stickerBubble(_ sticker: StickerBubbleModel) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let image = sticker.image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 160, maxHeight: 160)
+                    .cornerRadius(10)
+            } else {
+                Image(systemName: "photo")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 120, height: 120)
+            }
+            if let label = sticker.label {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+    }
+
+    /// 显示前的清洗。
     ///
     /// 用户消息原样返回（它不是模型输出，不会带标记）；
-    /// 模型消息走 `ImageGenProtocol/sanitizeForDisplay`；
+    /// 模型消息走 ImageGenProtocol/sanitizeForDisplay；
     /// 若整条只有画面描述则显示占位文案。
     private func sanitizedDisplay(_ message: ChatSession.Message) -> String {
         guard message.role != .user else { return message.text }
