@@ -242,24 +242,35 @@ final class AppEnvironment: ObservableObject {
 
     /// 保证有一条启用的 `api_configs` 行（Rust 的关键路径依赖它）。
     ///
-    /// 已存在启用行时**保持原样**（用户可能在别处配置过）；
-    /// 完全没有时才用预设默认值建一条。
+    /// ⚠️ 第 106 轮：`model` 显式传入时才允许覆盖已有行。
+    /// 上一版只要有启用行就 return —— 用户改 provider 或 model 都**静默无效**，
+    /// 日志还打"已创建启用配置"（其实早就有、没建新的），
+    /// 症状是"我明明选了 Claude 怎么还是走 OpenAI"。
     func ensureActiveApiConfig(provider: String = "OPENAI", model: String? = nil) throws {
         guard let repo = apiConfigs else { return }
-        if let existing = try repo.activeConfig(), !existing.model.isEmpty {
-            return   // 已有可用配置，不动
+        let existing = try repo.activeConfig()
+        let explicitModel = (model?.isEmpty == false) ? model! : nil
+
+        // 已有可用配置且未显式传 model → 不动（可能是从别处配好的）
+        if let existing, !existing.model.isEmpty, explicitModel == nil {
+            return
         }
         // 从预设备里取该 provider 的默认 baseUrl / model
         let preset = YuNianSeed.apiProviderPresets.first { $0.provider == provider }
             ?? YuNianSeed.apiProviderPresets.first { $0.provider == "OPENAI" }
         guard let preset else { return }
+        let finalModel = explicitModel ?? preset.model
         _ = try repo.upsertActiveConfig(
             provider: preset.provider,
-            model: (model?.isEmpty == false) ? model! : preset.model,
+            model: finalModel,
             baseUrl: preset.baseUrl,
             formatHint: preset.formatHint
         )
-        log.info("已创建启用配置：\(preset.provider, privacy: .public) / \(preset.model, privacy: .public)")
+        if existing != nil {
+            log.info("已更新启用配置：\(preset.provider, privacy: .public) / \(finalModel, privacy: .public)")
+        } else {
+            log.info("已创建启用配置：\(preset.provider, privacy: .public) / \(finalModel, privacy: .public)")
+        }
     }
 
     /// 设置 PARTNER 会话（suflow.cloud）。

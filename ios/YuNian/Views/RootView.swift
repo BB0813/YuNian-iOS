@@ -18,6 +18,13 @@ struct RootView: View {
     /// 请求打到**错误的 baseUrl**（静默失败或 404）—— 正是最难看懂的那类故障。
     /// provider 由用户显式决定，代码不替他猜。
     @State private var providerDraft = "OPENAI"
+    /// 模型名。**可为空**：空 = 用该 provider 的预设默认值。
+    ///
+    /// ⚠️ 第 106 轮加。此前没有这个输入框 —— 模型名只能来自预设，
+    /// 而预设是从 `YuNianSeed` 生成的常量，用户改不了。
+    /// 后果：服务商上架了新模型（或换了模型命名），iOS 侧无法跟进，
+    /// 「拉取模型列表」列出来的名字也只能"可选中复制"、没有回填处。
+    @State private var modelDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -182,6 +189,34 @@ struct RootView: View {
                         Text(preset.displayName).tag(preset.provider)
                     }
                 }
+                .onChange(of: providerDraft) { _, newProvider in
+                    // 换服务商时，把模型输入框重置为该服务商的预设默认值，
+                    // 并在 placeholder 里显示它 —— 用户看得到"不填就用这个"。
+                    if let preset = YuNianSeed.apiProviderPresets.first(where: { $0.provider == newProvider }) {
+                        modelDraft = preset.model
+                    }
+                }
+
+                // ⚠️ 第 106 轮：模型名改为用户可填。
+                // 此前只能"可选中复制"模型列表里的名字，没有回填入口；
+                // 真正生效的 model 只有预设常量一个来源，用户改不了。
+                // 现在：留空 = 用预设默认值；填写 = 覆盖。
+                TextField("模型（留空用默认）", text: $modelDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.body.monospaced())
+                    .overlay(alignment: .trailing) {
+                        if !modelDraft.isEmpty {
+                            Button {
+                                modelDraft = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 6)
+                        }
+                    }
 
                 TextField("昵称（owner_name）", text: $ownerNameDraft)
 
@@ -191,7 +226,13 @@ struct RootView: View {
 
                 Button("保存并下发") {
                     do {
-                        try environment.setAPIKey(apiKeyDraft, provider: providerDraft)
+                        // ⚠️ modelDraft 空串按"用预设"处理，不要传空串覆盖
+                        let model = modelDraft.trimmingCharacters(in: .whitespaces)
+                        try environment.setAPIKey(
+                            apiKeyDraft,
+                            provider: providerDraft,
+                            model: model.isEmpty ? nil : model
+                        )
                         environment.setOwnerName(ownerNameDraft)
                         apiKeyDraft = ""
                         credentialError = nil
@@ -231,6 +272,12 @@ struct RootView: View {
             if let active = environment.apiConfigs?.tryActiveConfig(),
                YuNianSeed.apiProviderPresets.contains(where: { $0.provider == active.provider }) {
                 providerDraft = active.provider
+                // ⚠️ 第 106 轮：同时回填已生效的模型名。
+                // 不回填的话，用户想"只改 model"时会看见空框，
+                // 一旦留空保存就把 model 覆盖成预设值 —— 静默丢配置。
+                if !active.model.isEmpty {
+                    modelDraft = active.model
+                }
             }
         }
     }
