@@ -396,22 +396,120 @@ jobs:
   # 免费 Apple ID 无法启用 Push Notifications capability，因此该任务默认不执行。
   # 启用前需要配置以下 secrets：APPLE_TEAM_ID / BUILD_CERTIFICATE_BASE64 /
   # P12_PASSWORD / PROVISIONING_PROFILE_BASE64 / KEYCHAIN_PASSWORD
+  # ── 3. 真机 IPA 导出（未签名，交由第三方工具如爱思助手签名）──────────
+  # 为什么不再是空壳：第 102 轮接上真实构建。
+  #
+  # ⚠️ 与 app-simulator 的关键区别：
+  #   app-simulator 用的是 `platform=iOS Simulator` + CODE_SIGNING_ALLOWED=NO，
+  #   产物架构是 arm64-apple-ios-**simulator**，**装不上真机**。
+  #   本 job 用 `generic/platform=iOS` + `-sdk iphoneos`，产物是设备架构。
+  #
+  # 为什么不直接签名：签名需要 Apple ID 证书 + provisioning profile。
+  # 免费账号虽可签，但限制 7 天过期且**没有推送**；付费账号需 $99/年。
+  # 因此这里只导出**未签名**的 .ipa，签名交给用户的爱思助手完成。
+  #
+  # ⚠️ 已知限制（不要静默忽略）：
+  #   · Xcode 的 exportArchive 通常要求签名，未签名导出用
+  #     `xcodebuild archive` + 手工组装 .ipa（Payload/ 结构）绕过。
+  #   · 免费 Apple ID 签名后无 APNs → 「主动找你」功能不可用。
   app-device:
-    name: 真机签名构建（需付费账号，手动）
+    name: 导出真机 IPA（未签名）
     needs: rust-ios
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_tests == true && vars.ENABLE_DEVICE_BUILD == 'true' }}
     runs-on: macos-14
     timeout-minutes: 40
+
     steps:
       - uses: actions/checkout@v4
-      - name: 下载 Rust 产物
+
+      - name: 下载 Rust 产物（设备+模拟器切片的 xcframework）
         uses: actions/download-artifact@v4
         with:
           name: lianyu-agent-ios
           path: ios
-      - name: 说明
+
+      - name: 确认产物架构
+        working-directory: ios
         run: |
-          echo "真机签名构建尚未接线。"
-          echo "需要先在仓库 Variables 中设置 ENABLE_DEVICE_BUILD=true，并配置签名 secrets。"
-          echo "详见 docs/ios-port-feasibility.md §3.2（签名与推送的硬约束）。"
-          exit 1
+          set -euo pipefail
+          echo "── xcframework 切片 ──"
+          ls -1 Frameworks/lianyu_agent.xcframework/ 2>/dev/null || true
+          echo "── 设备切片的架构 ──"
+          for slice in Frameworks/lianyu_agent.xcframework/*/; do
+            [ -d "$slice" ] || continue
+            echo "  $slice"
+            lipo -info "$slice/liblianyu_agent.a" 2>/dev/null || true
+          done
+
+      - name: 安装 XcodeGen（锁定版本）
+        run: |
+          set -euo pipefail
+          brew list xcodegen >/dev/null 2>&1 && brew uninstall --force xcodegen
+          VER=2.44.0
+          curl -fsSL -o /tmp/xcodegen.zip \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${VER}/xcodegen.zip"
+          rm -rf /tmp/xg && mkdir -p /tmp/xg
+          unzip -qo /tmp/xcodegen.zip -d /tmp/xg
+          sudo cp -r /tmp/xg/xcodegen/share /usr/local/
+          sudo cp -r /tmp/xg/xcodegen/bin /usr/local/
+          /usr/local/bin/xcodegen --version
+
+      - name: 生成工程并 archive（设备架构，不签名）
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          set +e
+          xcodebuild archive \
+            -project YuNian.xcodeproj \
+            -scheme YuNian \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/YuNian.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            > "$RUNNER_TEMP/archive.log" 2>&1
+          code=$?
+          set -e
+          echo "xcodebuild archive 退出码：$code"
+          grep -nE 'error:|Undefined symbols|ld: |symbol\(s\) not found|framework not found' \
+            "$RUNNER_TEMP/archive.log" | head -n 60 || true
+          tail -n 120 "$RUNNER_TEMP/archive.log" || true
+          exit $code
+
+      - name: 组装未签名 .ipa
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/YuNian.xcarchive/Products/Applications/YuNian.app"
+          test -d "$APP" || { echo "找不到 .app：$APP"; ls -R "$RUNNER_TEMP/YuNian.xcarchive" | head -40; exit 1; }
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          # 未签名 .ipa：Payload/ 打成 zip 即可。爱思助手等工具会重签。
+          rm -f YuNian-unsigned.ipa
+          zip -qr YuNian-unsigned.ipa Payload
+          ls -l YuNian-unsigned.ipa
+          echo "── .app 架构 ──"
+          lipo -info "$APP/YuNian" 2>/dev/null || true
+          echo "── 是否含 Rust 静态库符号 ──"
+          nm -u "$APP/YuNian" 2>/dev/null | grep -c lianyu_agent || true
+
+      - name: 上传未签名 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuNian-unsigned-ipa
+          path: "${{ runner.temp }}/YuNian-unsigned.ipa"
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 上传 archive 日志（失败时定位用）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-archive-log
+          path: |
+            ${{ runner.temp }}/archive.log
+          retention-days: 7
+          if-no-files-found: ignore
