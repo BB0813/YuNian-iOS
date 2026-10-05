@@ -299,8 +299,23 @@ final class BackupImporter {
             }
 
             for s in tokenUsages {
+                // ⚠️ 第 100 轮（真机测试抓到）：第二次导入同一备份时报
+                //   SQLite error 19: UNIQUE constraint failed:
+                //     token_usage.companionId, token_usage.date, token_usage.deviceId
+                // 因为该表有 UNIQUE 索引 (companionId, date, deviceId)
+                // （AppDatabase.kt:833），而我用了裸 INSERT。
+                //
+                // Android 侧走 `TokenUsageDao.insert(...)`，那条 @Query 本身就是
+                // `INSERT OR REPLACE INTO token_usage ...`
+                // 配 COALESCE 从已有行累加（TokenUsageDao.kt:37-45）。
+                // 所以 Android 重复导入不会炸 —— 它靠 upsert 语义。
+                //
+                // 这里改成 INSERT OR REPLACE 以对齐；但**不完全等同**：
+                // Android 的 COALESCE 会把同键行的 token 数累加，而 OR REPLACE 是覆盖。
+                // 备份导入的语义是"恢复快照"而非"累加用量"，覆盖更合理；
+                // 这一点与 Android 有差异，已记录待确认。
                 try db.execute(sql: """
-                    INSERT INTO token_usage
+                    INSERT OR REPLACE INTO token_usage
                       (companionId, date, inputTokens, outputTokens, totalTokens,
                        requestCount, timestamp, deviceId)
                     VALUES (?,?,?,?,?,?,?,?)
