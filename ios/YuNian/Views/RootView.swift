@@ -102,7 +102,7 @@ struct RootView: View {
                                         .foregroundStyle(colors.textSecondary)
                                 }
                                 Text("回合经 Rust 决策，SSE 流式输出。")
-                                    .font(YuNianTheme.Font.settingsRowSubtitle)
+                                    .font(YuNianTheme.TextStyle.settingsRowSubtitle)
                                     .foregroundStyle(colors.textSecondary)
                             }
                         }
@@ -121,7 +121,7 @@ struct RootView: View {
                                           ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                                         .foregroundStyle(channelReady ? colors.success : colors.warning)
                                     Text(channelTitle)
-                                        .font(YuNianTheme.Font.settingsRowTitle)
+                                        .font(YuNianTheme.TextStyle.settingsRowTitle)
                                         .foregroundStyle(colors.textPrimary)
                                     Spacer(minLength: 0)
                                     Text("配置")
@@ -129,7 +129,7 @@ struct RootView: View {
                                         .foregroundStyle(colors.primary)
                                 }
                                 Text(channelSubtitle)
-                                    .font(YuNianTheme.Font.settingsRowSubtitle)
+                                    .font(YuNianTheme.TextStyle.settingsRowSubtitle)
                                     .foregroundStyle(colors.textSecondary)
                                     .lineLimit(1)
                             }
@@ -188,10 +188,10 @@ struct RootView: View {
                     YuNianGlassCard {
                         VStack(alignment: .leading, spacing: YuNianTheme.Space.tight) {
                             Text("予念 · iOS")
-                                .font(YuNianTheme.Font.settingsRowTitle)
+                                .font(YuNianTheme.TextStyle.settingsRowTitle)
                                 .foregroundStyle(colors.textPrimary)
                             Text("Rust Agent 运行时 + SwiftUI 原生壳。")
-                                .font(YuNianTheme.Font.settingsRowSubtitle)
+                                .font(YuNianTheme.TextStyle.settingsRowSubtitle)
                                 .foregroundStyle(colors.textSecondary)
                         }
                     }
@@ -250,7 +250,7 @@ struct RootView: View {
     }
 
     private func presetName(_ provider: String) -> String {
-        YuNianSeed.ApiProviderPresets.first { $0.provider == provider }?.displayName ?? provider
+        YuNianSeed.apiProviderPresets.first { $0.provider == provider }?.displayName ?? provider
     }
 
     // MARK: - 启动失败
