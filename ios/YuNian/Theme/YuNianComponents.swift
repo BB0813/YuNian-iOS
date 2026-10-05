@@ -117,7 +117,11 @@ struct YuNianGlassCard<Content: View>: View {
             }
         }
         .scaleEffect(pressed ? 0.985 : 1.0)          // GlassCard.kt:55-59
-        .animation(.spring(dampingRatio: 0.78, stiffness: 520), value: pressed)
+        // ⚠️ 第 124 轮：`.spring(dampingRatio:stiffness:)` 两个参数都是 Double，
+        // 字面量 0.78 / 520 会因 `Animation` 上下文推断不出而报
+        // "cannot call value of non-function type 'Animation'"。
+        // 用显式 Double 常量最稳。
+        .animation(.spring(dampingRatio: 0.78, stiffness: 520.0), value: pressed)
         .simultaneousGesture(
             // ⚠️ 第 124 轮：`DragGesture` 的形参是 **minimumDistance**，
             // 我写成了 `minLength`，CI 报 "extra argument 'minLength' in call"。
