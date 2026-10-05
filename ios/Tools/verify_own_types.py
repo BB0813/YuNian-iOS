@@ -43,6 +43,13 @@ EXTERNAL_ALLOWLIST = {
     "String", "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16",
     "UInt32", "UInt64", "Double", "Float", "Bool", "Character", "Array", "Dictionary",
     "Set", "Optional", "Result", "Error", "Never", "Void", "Any", "AnyObject",
+    # Foundation（URL 组件解析）
+    # ⚠️ 第 89 轮：URLComponents 加入白名单。
+    # RequestSigner.path(from:) 原先用了 URL 上并不存在的
+    # percentEncodedPath/percentEncodedQuery（CI 报 has no member），
+    # 改用 URLComponents。这道关卡随即要求把新外部依赖显式登记 ——
+    # 这正是它该有的行为：新依赖不能悄悄进来。
+    "URLComponents",
     "Task", "AsyncStream", "Continuation", "CheckedContinuation", "UUID", "Date",
     "Data", "URL", "FileManager", "Bundle", "UserDefaults", "JSONSerialization",
     "NSLock", "NSNumber", "NSString", "NSNull", "NSArray", "NSDictionary",

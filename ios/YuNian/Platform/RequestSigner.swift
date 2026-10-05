@@ -175,12 +175,15 @@ enum RequestSigner {
     /// 我原先用 Swift 的 `url.path`，那是**已解码**的路径 ——
     /// 对 `/v1/chat/completions` 这类纯 ASCII 路径恰好相同，
     /// 但路径含空格/非 ASCII/`%2F` 时会与服务端签名不一致（表现为 401 且极难定位）。
-    /// 因此这里用 `percentEncodedPath`。
-    /// 查询串同理：`url.query` 是解码后的，`percentEncodedQuery` 才是编码后的。
+    ///
+    /// ⚠️ 第 88 轮：`URL` **没有** `percentEncodedPath` / `percentEncodedQuery`
+    /// 这两个成员（我第 23 轮凭印象写的，CI 报 "has no member"）。
+    /// 带这两个成员的是 `URLComponents` —— 改用它。
     static func path(from url: URL) -> String {
-        let encodedPath = url.percentEncodedPath
+        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let encodedPath = comps?.percentEncodedPath ?? url.path
         var path = encodedPath.isEmpty ? "/" : encodedPath
-        if let query = url.percentEncodedQuery, !query.isEmpty {
+        if let query = comps?.percentEncodedQuery, !query.isEmpty {
             path += "?" + query
         }
         return path
