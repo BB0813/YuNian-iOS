@@ -37,8 +37,24 @@ enum MessageSearchTokenizer {
     }
 
     /// 查询串 → FTS `MATCH` 表达式；空串返回 nil（调用方应跳过检索）。
+    ///
+    /// ⚠️ 第 98 轮（真机测试第一次抓到的**真实跨端分歧**）：
+    /// CI 上 392 条断言首次真正执行，其中一条挂：
+    ///   matchQuery(" ")  返回 Optional("\"u20z\"")，而 Android 侧期望 nil
+    /// 我的 Swift 少了 Kotlin `matchQuery` 开头的**空白查询**判定：
+    ///   Kotlin: val codePoints = normalizedCodePoints(query); if (codePoints.isEmpty()) return null
+    ///   —— Kotlin 的 normalizedCodePoints 是 `trim().lowercase().codePoints()`，
+    ///      所以全空白查询 trim 后为空 → 返回 null。
+    /// 我的 Swift 只判了空串，没判"trim 后为空"。
+    /// 后果：用户只输入空格时会发起一次必然无结果的 FTS 查询。
     static func matchQuery(_ query: String) -> String? {
-        let cps = normalizedCodePoints(query)
+        // ⚠️ trim 后**再分词** —— Kotlin 的 normalizedCodePoints 是
+        // `value.trim().lowercase().codePoints()`，trim 在里面。
+        // 若只 trim 来做判空却用原串分词，`" ab "` 会多出一个前导空格 bigram。
+        // 本地 Python 模型已对齐：match_query(" ab ") == '"b61x62z"'
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let cps = normalizedCodePoints(trimmed)
         guard !cps.isEmpty else { return nil }
 
         let tokens: [String]
