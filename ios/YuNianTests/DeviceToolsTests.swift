@@ -34,7 +34,13 @@ final class DeviceToolsTests: XCTestCase {
     func testWeekdayNameIsExhaustiveAndDistinct() {
         let mapped = (1...7).map { DeviceTools.weekdayName(calendarWeekday: $0) }
         XCTAssertEqual(Set(mapped).count, 7, "7 个 weekday 值应映射到 7 个不同星期名")
-        XCTAssertTrue(mapped.allSatisfy { $0.hasSuffix("星期") && $0.count == 3 })
+        // ⚠️ 第 99 轮：这里原来写 `hasSuffix("星期")` —— **方向写反了**。
+        // 中文星期名是 3 个字「星 + 期 + X」（星期一 / 星期二 ...），
+        // 它**以**"星期"开头，而不是以它结尾。真机测试第一次跑就抓到这条，
+        // 报 XCTAssertTrue failed。
+        // 我写断言时凭印象，没拼一次实际字符串 —— 与第 23/68/89 轮
+        // "凭印象写 API/字面量"完全同型。
+        XCTAssertTrue(mapped.allSatisfy { $0.hasPrefix("星期") && $0.count == 3 })
     }
 
     // MARK: - 工具契约
