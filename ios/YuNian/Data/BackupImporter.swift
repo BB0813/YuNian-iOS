@@ -222,7 +222,19 @@ final class BackupImporter {
                         ? Self.systemSenderId
                         : (companionIdMap[oldSender] ?? oldSender)
                     let content = s["content"] as? String ?? ""
-                    let key = (timestamp: s["timestamp"] as? Int64 ?? 0, sender: sender, content: content)
+                    // ⚠️ 第 86 轮：这里原来是**具名元组**
+                    //   let key = (timestamp:, sender:, content:)
+                    // CI 报 BackupImporter.swift:226
+                    //   type '(timestamp: Int64, sender: Int64, content: String)'
+                    //   cannot conform to 'Collection'
+                    // 根因：`existing` 是 Set<GroupKey>，而元组既非 Hashable
+                    // 也不是 GroupKey —— `existing.contains(key)` / `.insert(key)`
+                    // 都用不了。上一版的 `let` 错误先被报出，掩盖了这一点。
+                    let key = GroupKey(
+                        timestamp: s["timestamp"] as? Int64 ?? 0,
+                        sender: sender,
+                        content: content
+                    )
                     if existing.contains(key) { continue }
                     try db.execute(sql: """
                         INSERT INTO messages
