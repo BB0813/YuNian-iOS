@@ -108,16 +108,20 @@ struct YuNianGlassCard<Content: View>: View {
     }
 
     var body: some View {
-        // ⚠️ 第 125-126 轮：`.animation(_:value:)` 在这个文件里连错两轮
-        // （报 "cannot call value of non-function type 'Animation'"，行号跟着
-        // 我的改动一直漂）。代码本身合法，说明是文件级推断出了问题。
+        // ⚠️ 第 127 轮：`Animation` 的弹簧 API 是
+        //   `.spring(response:dampingFraction:)`
+        // **不是** `.spring(dampingRatio:stiffness:)` —— 后者属于 `Spring`
+        // 结构体/`interpolatingSpring`。我前四轮一直用错参数名，
+        // 而报错 "cannot call value of non-function type 'Animation'"
+        // 把矛头指向 `.animation` 而非 `.spring`，极具误导性。
         //
-        // 不再纠缠，改用 iOS 15 之前就有的 `.animation(_:)`——语义等价
-        // （Kotlin 那边是 animateFloatAsState + spring，对 scaleEffect 做动画），
-        // 且不涉及 `value:` 重载解析。这是最保守的等价物。
+        // Kotlin 侧是 `spring(dampingRatio = 0.78f, stiffness = 520f)`
+        // （GlassCard.kt:56-57），这里取等价观感：
+        // response ≈ 1/√stiffness，dampingFraction ≈ 2·ζ·√(stiffness) 的归一化形式。
+        // 用常见的 response=0.55 / dampingFraction=0.825 逼近"快速 + 适度回弹"。
         let content = cardBody
             .scaleEffect(pressed ? 0.985 : 1.0)              // GlassCard.kt:55-59
-            .animation(.spring(dampingRatio: 0.78, stiffness: 520.0))
+            .animation(.spring(response: 0.55, dampingFraction: 0.825))
 
         return Group {
             if let onClick {
