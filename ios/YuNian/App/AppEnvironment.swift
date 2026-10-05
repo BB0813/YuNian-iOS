@@ -82,7 +82,17 @@ final class AppEnvironment: ObservableObject {
             // working_memory_limit /（条件）image_gen_rules。
             // **不要**加 `session_id` —— Android 无此键，多发会让 Rust 往
             // system prompt 注入一行「会话ID：」，两端提示词就此分叉。（曾误加过，已删。）
+            // ⚠️ 第 105 轮补两个漏发的键。上一版到这里就停了，
+            // 而 Kotlin 的 buildSettingsJson 四键全发（role / timezone /
+            // working_memory_limit / image_gen_rules）：
+            //   · imageGenRules 缺失 → Rust 的 setting_str("image_gen_rules")
+            //     返回 None，**生图协议的提示词文本整块消失**，模型不知道
+            //     [[生图: 描述]] 这个语法，用户要图时它不会输出该标记。
+            //   · workingMemoryLimit 缺失 → 退回 Rust 默认值（恰好也是 200，
+            //     所以此前无症状，但那是巧合不是等价）。
             settings = AgentSettings.withSystemTimezone()
+            settings.workingMemoryLimit = 200
+            settings.imageGenRules = ImageGenProtocol.defaultPrompt
             //
             // owner_name 是**有意的跨端分歧**：Android 从不发它，iOS 因「用户昵称」
             // 功能而多注入一行「群主：{昵称}」。详见 AgentSettings.ownerName 注释。
