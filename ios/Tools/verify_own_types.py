@@ -43,6 +43,16 @@ EXTERNAL_ALLOWLIST = {
     "String", "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16",
     "UInt32", "UInt64", "Double", "Float", "Bool", "Character", "Array", "Dictionary",
     "Set", "Optional", "Result", "Error", "Never", "Void", "Any", "AnyObject",
+    # PhotosUI（相册多选）
+    # ⚠️ 第 115 轮：PHPicker* 加入白名单。
+    # 表情导入需要相册选择器，对应 Android 的 SAF/相册入口
+    # （StickerManager.importStickerFile 的 uri 来源）。
+    # 选 PHPicker 而非 UIImagePickerController：前者不需相册权限、支持多选。
+    # 这道关卡要求新外部依赖显式登记 —— 正是它该有的行为。
+    "PHPickerConfiguration", "PHPickerViewController", "PHPickerResult",
+    # UIKit（图片数据 → 导入前的本地预览）
+    # ⚠️ 第 115 轮：UIImage 加入白名单。
+    "UIImage",
     # Foundation（URL 组件解析）
     # ⚠️ 第 89 轮：URLComponents 加入白名单。
     # RequestSigner.path(from:) 原先用了 URL 上并不存在的

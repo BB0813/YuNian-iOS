@@ -16,6 +16,8 @@ struct StickerLibraryView: View {
     @State private var entries: [StickerLibraryRepository.Entry] = []
     @State private var tags: [StickerLibraryRepository.TagStat] = []
     @State private var loadError: String?
+    /// 导入面板。⚠️ 第 115 轮加 —— 此前空态只能引导去备份导入。
+    @State private var showImport = false
 
     var body: some View {
         Group {
@@ -29,7 +31,27 @@ struct StickerLibraryView: View {
         }
         .navigationTitle("表情库")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // ⚠️ 第 115 轮：列表顶部也放一个导入按钮。
+            // 只在空态放的话，导入了第一批之后用户就找不到入口了。
+            if environment.database != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showImport = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+        }
         .task { reload() }
+        .sheet(isPresented: $showImport) {
+            StickerImportView()
+        }
+        // 导入完成后重新读取（sheet dismiss 时刷新）
+        .onChange(of: showImport) { _, shown in
+            if !shown { reload() }
+        }
     }
 
     // MARK: - 列表
@@ -105,6 +127,20 @@ struct StickerLibraryView: View {
                 NavigationLink("去备份导入") { BackupImportView() }
                     .buttonStyle(.bordered)
             }
+            // ⚠️ 第 115 轮：补上导入入口。
+            // 上一版空态只引导"去备份导入"，但用户更自然的想法是"从相册选一张"。
+            // 没有它，表情库永远是空的 —— 读侧做得再完整也无内容可读。
+            if environment.database != nil {
+                Button {
+                    showImport = true
+                } label: {
+                    Label("从相册导入表情", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .sheet(isPresented: $showImport) {
+            StickerImportView()
         }
     }
 
