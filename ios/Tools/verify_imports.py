@@ -98,6 +98,21 @@ def _main_imports() -> int:
                         f"{p.relative_to(REPO_ROOT)}: 用到 {sym} 但未 import {module}"
                     )
                     break
+            else:
+                # ⚠️ 第 172 轮：补"模块限定形式"的检查。
+                # 原来的循环只匹配裸符号名，于是 `GRDB.Row.fetchAll(...)`
+                # 这种写法**完全漏过** —— CI（d7d0f06）报
+                # "cannot find 'GRDB' in scope"，而本地关卡一声不响。
+                #
+                # 这是同一个坑第二次：第 139 轮 MessageSearchView 漏
+                # import GRDB（那次是用裸符号，关卡抓到了）；
+                # 这次我用限定名避开类型名冲突，反而绕过了关卡。
+                # 修法：`<Module>.<任意标识符>` 形态也视为用到该模块。
+                if re.search(rf"\b{module}\s*\.\s*[A-Za-z_]", text):
+                    problems.append(
+                        f"{p.relative_to(REPO_ROOT)}: 用到 {module}.X 限定形式但未 import {module}"
+                    )
+                    break
 
     if problems:
         print(f"[FAIL] 缺失 import {len(problems)} 处：")

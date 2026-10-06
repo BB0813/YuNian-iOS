@@ -1,4 +1,11 @@
 import Foundation
+// ⚠️ 第 172 轮：补 import GRDB。
+// 上一版用了 `GRDB.Row.fetchAll(...)` 却没 import GRDB ——
+// CI（d7d0f06）报 "cannot find 'GRDB' in scope"。
+// 这与第 139 轮 MessageSearchView 漏 import GRDB 是完全同一个错误，
+// 同一个坑第二次踩。（仓内 verify_imports 关卡按「用了哪些 GRDB 符号」
+// 反推 import，我用了限定名 `GRDB.Row`，它没认出来。）
+import GRDB
 
 /// 会话列表数据 —— 对应 Android `HomeViewModel` + `ConversationSummaryDao`
 /// + `CompanionDao.getAllCompanions()`。
