@@ -95,7 +95,7 @@ struct YuNianLiquidTabs: View {
 
             ZStack(alignment: .leading) {
                 // ── 选中的滑动药丸（近似 Kotlin selectionModifier）──
-                RoundedRectangle(cornerRadius: .infty, style: .continuous)
+                RoundedRectangle(cornerRadius: .infinity, style: .continuous)
                     .fill(colors.primary.opacity(0.18))
                     .frame(
                         width: tabWidth,
