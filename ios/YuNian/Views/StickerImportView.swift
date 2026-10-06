@@ -60,8 +60,10 @@ struct StickerImportView: View {
                                 // 本地预览：让用户在导入前确认选对了图
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: YuNianTheme.Space.standard) {
-                                        ForEach(Array(pickedData.enumerated()), id: \\.offset) { _, data in
-                                            if let ui = UIImage(data: data) {
+                                        // enumerated() 的产物没有 .offset key path，CI 报
+                                        // "expected expression path in Swift key path"。改用 indices。
+                                        ForEach(Array(pickedData.indices), id: \.self) { i in
+                                            if let ui = UIImage(data: pickedData[i]) {
                                                 Image(uiImage: ui)
                                                     .resizable()
                                                     .scaledToFill()
