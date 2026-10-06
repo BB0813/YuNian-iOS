@@ -236,6 +236,7 @@ final class ImageGenTriggerTests: XCTestCase {
     /// Kotlin Test:36-44 —— auto 模式取主 API 连接
     func testEffectiveAutoUsesMainConnection() {
         var g = config()
+        g.enabled = true            // ⚠️ 第 158 轮：ready 要求 global.enabled
         g.connectionMode = "auto"
         g.baseUrl = ""
         g.apiKey = ""
@@ -250,6 +251,7 @@ final class ImageGenTriggerTests: XCTestCase {
     /// Kotlin Test:46-54 —— auto 且 mainConnection=nil → 未就绪
     func testEffectiveAutoWithoutMainNotReady() {
         var g = config()
+        g.enabled = true            // ⚠️ 第 158 轮
         g.connectionMode = "auto"
         let e = ImageGenTrigger.resolveEffective(
             global: g, override: .init(), mainConnection: nil)
@@ -259,6 +261,7 @@ final class ImageGenTriggerTests: XCTestCase {
     /// Kotlin Test:56-64 —— CUSTOM 但 apiKey 空 → 未就绪
     func testEffectiveCustomMissingApiKeyNotReady() {
         var g = config()
+        g.enabled = true            // ⚠️ 第 158 轮
         g.connectionMode = "CUSTOM"
         g.apiKey = ""
         let e = ImageGenTrigger.resolveEffective(
