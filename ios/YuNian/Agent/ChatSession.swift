@@ -261,17 +261,21 @@ final class ChatSession: ObservableObject {
                 }
             )
         )
-        coordinator.onMessage = { (text: String, isError: Bool) in
-            messages.append(Message(role: .assistant, text: text, isSticker: false))
-            if isError { lastError = text }
+        // ⚠️ 第 162 轮：闭包里必须显式 self.（ChatSession 是 class，
+        // 闭包是 escaping）。CI（ca98194）报 3 处
+        // "reference to property 'messages'/'lastError' in closure
+        //  requires explicit use of 'self'"。
+        coordinator.onMessage = { [weak self] (text: String, isError: Bool) in
+            self?.messages.append(Message(role: .assistant, text: text, isSticker: false))
+            if isError { self?.lastError = text }
         }
-        coordinator.onImages = { (datas: [Data], _: String) in
+        coordinator.onImages = { [weak self] (datas: [Data], _: String) in
             // 一条图片消息一张图（Kotlin ImageGenTrigger.kt:367-384）。
             // ⚠️ iOS 侧消息是内存数组，无图片落库路径；
             // 这里以图片消息占位（content = "[图片]"，与 Android 约定一致），
             // 渲染层后续要接真实图片。
             for _ in datas {
-                messages.append(
+                self?.messages.append(
                     Message(role: .assistant, text: "[图片]", isSticker: false))
             }
         }
