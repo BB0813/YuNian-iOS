@@ -17,6 +17,11 @@ import SwiftUI
 struct DiagnosticsView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
+    /// 第 129 轮：语义色。诊断页是给开发者看的，仍保留 List/Section 的
+    /// 高信息密度结构，但配色/字号接进设计系统，不再用系统默认灰。
+    @Environment(\.colorScheme) private var scheme
+
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
     var body: some View {
         List {
@@ -129,15 +134,17 @@ struct DiagnosticsView: View {
     }
 
     private func statusRow(_ title: String, ok: Bool, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: YuNianTheme.Space.standard) {
             Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(ok ? .green : .red)
+                .foregroundStyle(ok ? colors.success : colors.danger)
                 .font(.caption)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline)
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
+                Text(title)
+                    .font(YuNianTheme.TextStyle.settingsRowTitle)
+                    .foregroundStyle(colors.textPrimary)
                 Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(colors.textSecondary)
                     .textSelection(.enabled)
             }
             Spacer(minLength: 0)
