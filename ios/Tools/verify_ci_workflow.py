@@ -81,6 +81,20 @@ def main() -> int:
                 problems.append(f"job {current} 内步骤名重复：{name}")
             per_job_steps[current].add(name)
 
+    # ── 第 180 轮新增：legacy 档那一遍必须存在 ──────────────────
+    #
+    # 起因：`#available(iOS 26.0, *)` 在 CI 的 iOS 26 模拟器上恒真，
+    # 所以 **iOS 17–25 那条 `.ultraThinMaterial` 分支 CI 从来没跑过**。
+    # 用户要的是"17 与 26 分水岭"，结果一半分支零验证。
+    #
+    # 加这条断言是为了防"将来有人（包括我）把第二遍删了"——
+    # 删了不会立刻出问题，只会让一条分支悄悄失去验证。
+    if "YUNIAN_GLASS_STYLE=legacy" not in text:
+        problems.append(
+            "workflow 缺少 YUNIAN_GLASS_STYLE=legacy 那一遍测试 —— "
+            "iOS 17-25 分支将零验证（第 180 轮加的，别删）"
+        )
+
     if problems:
         print(f"[FAIL] workflow 不自洽，{len(problems)} 处：")
         for p in problems:

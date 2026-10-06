@@ -78,9 +78,27 @@ enum YuNianGlassStyle: String, CaseIterable, Identifiable {
     }
 
     /// 当前应生效的档位（读 UserDefaults + OS 版本）。
+    /// 当前应生效的档位。
+    ///
+    /// 优先级：**环境变量 > 用户设置 > OS 版本**。
+    ///
+    /// ⚠️ 第 180 轮加环境变量一档。
+    /// 起因：CI 跑在 iOS 26 模拟器上，`#available` 判断恒真 ——
+    /// 也就是说 **iOS 17–25 那条路（`.ultraThinMaterial`）CI 从来没跑过**。
+    /// 用户要的是"分水岭"，结果一半分支零验证。
+    ///
+    /// 加了 `YUNIAN_GLASS_STYLE` 后，CI 可以把测试跑两遍：
+    /// 一遍强制 liquidGlass、一遍强制 legacy，两条路都验。
     static func current() -> YuNianGlassStyle {
-        resolved(raw: UserDefaults.standard.string(forKey: overrideKey))
+        if let forced = ProcessInfo.processInfo.environment["YUNIAN_GLASS_STYLE"],
+           let style = YuNianGlassStyle(rawValue: forced) {
+            return style
+        }
+        return resolved(raw: UserDefaults.standard.string(forKey: overrideKey))
     }
+
+    /// 环境变量名（CI 用它强制档位）。
+    static let envOverrideKey = "YUNIAN_GLASS_STYLE"
 }
 
 // MARK: - 环境注入
