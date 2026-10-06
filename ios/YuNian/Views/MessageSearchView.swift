@@ -1,22 +1,24 @@
 import SwiftUI
-import GRDB   // StatementArguments（ids 逐个绑定）
 
-/// 消息搜索界面（第 142 轮发现 FTS 只写不读，此处补上查询侧消费方）。
+/// 消息搜索 —— 第 129 轮套上设计系统。
 ///
-/// ## 背景
-/// `YuNianDatabase.searchMessageIds(matching:)` 与 FTS 的写入/维护侧早已实现并通过
-/// 真实 SQLite 验证，但 iOS 侧**没有任何界面调用它** —— 也就是 FTS 索引只写不读。
-/// 本视图是那个缺失的消费方。
+/// ## 数据与分词
+/// 检索走 `MessageRepository.searchMessageIds`，查询串经
+/// `MessageSearchTokenizer.matchQuery` 生成 FTS `MATCH` 表达式
+/// （逐字复刻自 Android，回归测试在 `YuNianTests`）。
 ///
-/// ## 与 Android 的对应
-/// Android 聊天页顶部有搜索框，输入后走 `MessageDao` 的 FTS 查询。
-/// 这里做最小可用版：全局搜索（跨会话），结果按 rowid 倒序（新→旧）。
+/// ## 与 Android 的一致性
+/// 清空即回到未搜索态，不做实时检索（输入中文时逐字查无意义）。
 struct MessageSearchView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
+    /// ⚠️ 第 129 轮：语义色跟随系统明暗。
+    @Environment(\.colorScheme) private var scheme
     @State private var query = ""
     @State private var results: [MessageRow] = []
     @State private var searched = false
+
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
     /// 一条命中（只取展示需要的列）。
     struct MessageRow: Identifiable {
@@ -30,42 +32,20 @@ struct MessageSearchView: View {
     }
 
     var body: some View {
-        List {
-            if searched && results.isEmpty {
-                ContentUnavailableView {
-                    Label("没有找到", systemImage: "magnifyingglass")
-                } description: {
-                    Text(MessageSearchTokenizer.matchQuery(query).map { _ in
-                        "换个关键词试试；中文检索用字/词均可（内部分词处理）"
-                    } ?? "输入至少一个字符")
+        ScrollView {
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
+                if searched && results.isEmpty {
+                    emptyState
                 }
-            }
-            ForEach(results) { row in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(row.isFromUser ? "我" : "对方")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(row.isFromUser ? Color.blue.opacity(0.15) : Color.gray.opacity(0.15))
-                            .clipShape(Capsule())
-                        Spacer()
-                        Text(Self.formatTimestamp(row.timestamp))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(row.snippet)
-                        .font(.callout)
-                        .lineLimit(3)
-                        .textSelection(.enabled)
-                    Text("\(row.conversationType == "chat" ? "单聊" : "群聊") #\(row.conversationId)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                ForEach(results) { row in
+                    YuNianGlassCard { row(row) }
                 }
-                .padding(.vertical, 2)
+                Spacer(minLength: YuNianTheme.Space.pageTop)
             }
+            .padding(.horizontal, YuNianTheme.Space.page)
+            .padding(.top, YuNianTheme.Space.standard)
         }
-        .listStyle(.plain)
+        .background(colors.background.ignoresSafeArea())
         .navigationTitle("搜索消息")
         .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 第 89 轮：这里原来写的是
@@ -89,50 +69,62 @@ struct MessageSearchView: View {
         }
     }
 
-    private func runSearch() {
-        searched = true
-        guard let database = environment.database, let repo = try? MessageRepository(database: database) else {
-            results = []
-            return
+    // MARK: - 子视图
+
+    private var emptyState: some View {
+        VStack(spacing: YuNianTheme.Space.cardPadding) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 40))
+                .foregroundStyle(colors.textTertiary)
+            Text("没有找到")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(colors.textPrimary)
+            Text(MessageSearchTokenizer.matchQuery(query).map { _ in
+                    "换个关键词试试；中文检索用字/词均可（内部分词处理）"
+                } ?? "输入至少一个字符")
+                .font(.system(size: 12))
+                .foregroundStyle(colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, YuNianTheme.Space.page)
         }
-        // ① FTS 命中 message id
-        let ids = (try? database.searchMessageIds(matching: query, limit: 50)) ?? []
-        guard !ids.isEmpty else {
-            results = []
-            return
-        }
-        // ② 回查元数据 + 正文
-        let marks = ids.map { _ in "?" }.joined(separator: ",")
-        do {
-            let rows = try database.pool.read { db in
-                try Row.fetchAll(db, sql: """
-                    SELECT m.id AS messageId, m.conversationId, m.conversationType,
-                           m.isFromUser, m.timestamp, b.content
-                    FROM messages m
-                    LEFT JOIN message_bodies b ON b.messageId = m.id
-                    WHERE m.id IN (\(marks))
-                    """, arguments: StatementArguments(ids))
+        .padding(.top, YuNianTheme.Space.pageTop)
+    }
+
+    private func row(_ row: MessageRow) -> some View {
+        VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
+            HStack(spacing: YuNianTheme.Space.half) {
+                Text(row.isFromUser ? "我" : "对方")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(colors.primary)
+                    .padding(.horizontal, YuNianTheme.Space.standard)
+                    .padding(.vertical, YuNianTheme.Space.tight)
+                    .background(colors.primary.opacity(0.12))
+                    .clipShape(Capsule())
+
+                Spacer()
+
+                Text(Self.formatTimestamp(row.timestamp))
+                    .font(.system(size: 10))
+                    .foregroundStyle(colors.textTertiary)
             }
-            results = rows.map { r in
-                MessageRow(
-                    messageId: r["messageId"] as Int64? ?? 0,
-                    conversationId: r["conversationId"] as Int64? ?? 0,
-                    conversationType: r["conversationType"] as String? ?? "",
-                    isFromUser: (r["isFromUser"] as Int? ?? 0) != 0,
-                    timestamp: r["timestamp"] as Int64? ?? 0,
-                    snippet: r["content"] as String? ?? ""
-                )
-            }
-        } catch {
-            results = []
+
+            Text(row.snippet)
+                .font(.system(size: 14))
+                .foregroundStyle(colors.textPrimary.opacity(0.9))
+                .lineLimit(3)
+                .textSelection(.enabled)
+
+            Text("\(row.conversationType == "chat" ? "单聊" : "群聊") #\(row.conversationId)")
+                .font(.system(size: 10))
+                .foregroundStyle(colors.textTertiary)
         }
     }
 
-    private static func formatTimestamp(_ ms: Int64) -> String {
-        let d = Date(timeIntervalSince1970: Double(ms) / 1000)
+    static func formatTimestamp(_ ms: Int64) -> String {
+        let date = Date(timeIntervalSince1970: Double(ms) / 1000)
         let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.string(from: d)
+        return f.string(from: date)
     }
 }

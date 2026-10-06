@@ -1,144 +1,139 @@
 import SwiftUI
-import UIKit
+import UniformTypeIdentifiers
 
-/// 备份导入界面（V8）。
+/// 备份导入 —— 第 129 轮套上设计系统。
 ///
-/// ## 背景
-/// 第 120 轮发现：`BackupCrypto` 与 `BackupImporter` 完成并各有单测，
-/// 但**没有任何 UI 入口** —— 用户拿不到这个能力。本视图补上那一环。
+/// ## 与 Android 的关系
+/// 备份文件由 Android 端「设置 -> 数据备份」导出（BackupExportService），
+/// 经文件 App / AirDrop 传到本机后在这里解密导入。
+/// 解密与落库逻辑在 BackupCrypto + BackupImporter，均逐字对齐 Android。
 ///
-/// ## 流程
-/// 选择 `.lybk` 文件 → 输入导出时设的密码 → 导入 → 显示结果。
-/// 解密与写入由 `BackupImportService` 编排（容器解密 + 9 分区写入），
-/// 各步骤的失败都有明确文案，不让用户看到裸异常。
+/// ## 幂等性
+/// 同一文件重复导入是安全的：伴侣按名称匹配复用，消息按时间戳与内容去重。
 struct BackupImportView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.colorScheme) private var scheme
     @State private var password = ""
     @State private var pickedFile: BackupFile?
     @State private var showPicker = false
     @State private var outcome: BackupImportService.Outcome?
     @State private var importing = false
 
-    /// 选中的文件（`UIViewControllerRepresentable` 传来的 URL 需立即读取，
-    /// 因为安全作用域的 URL 在回调外不可用）。
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
+
     struct BackupFile: Equatable {
         var name: String
         var data: Data
     }
 
     var body: some View {
-        Form {
-            Section("备份文件") {
-                Button("选择 .lybk 备份文件") { showPicker = true }
-                if let f = pickedFile {
-                    LabeledContent("已选择", value: f.name)
-                    Text("\(f.data.count) 字节")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("从 Android 端「设置 → 数据备份」导出后，通过文件 App / AirDrop / 隔空投送传到本机。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
-            Section("密码") {
-                SecureField("导出时设置的密码", text: $password)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
+                YuNianSectionTitle(title: "备份文件")
 
-            Section {
-                Button {
-                    Task { await runImport() }
-                } label: {
-                    HStack {
-                        Text("导入")
-                        if importing {
-                            Spacer()
-                            ProgressView()
+                YuNianGlassCard {
+                    VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                        YuNianGlassButton(onClick: { showPicker = true }, height: 44) {
+                            Image(systemName: "doc")
+                            Text("选择 .lybk 备份文件")
+                                .font(YuNianTheme.TextStyle.cardAction)
+                        }
+
+                        if let f = pickedFile {
+                            LabeledContent {
+                                Text(f.name).font(.system(size: 13))
+                            } label: {
+                                Text("已选择")
+                                    .font(YuNianTheme.TextStyle.settingsRowSubtitle)
+                            }
+                            Text("\(f.data.count) 字节")
+                                .font(.system(size: 11))
+                                .foregroundStyle(colors.textTertiary)
+                        } else {
+                            Text("从 Android 端「设置 -> 数据备份」导出后，通过文件 App / AirDrop 传到本机。")
+                                .font(.system(size: 12))
+                                .foregroundStyle(colors.textSecondary)
                         }
                     }
                 }
-                .disabled(pickedFile == nil || password.isEmpty || importing)
-            }
 
-            if let outcome {
-                Section("结果") {
-                    Label(outcome.ok ? "导入成功" : "导入失败",
-                          systemImage: outcome.ok ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                        .foregroundStyle(outcome.ok ? .green : .red)
-                    Text(outcome.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                YuNianSectionTitle(title: "密码")
+
+                YuNianGlassCard {
+                    YuNianField("导出时设置的密码", text: $password, isSecure: true)
                 }
-            }
 
-            Section {
-                // 幂等性说明：同一文件重复导入是安全的
+                YuNianGlassButton(
+                    onClick: { Task { await runImport() } },
+                    height: 48
+                ) {
+                    Text("导入").bold()
+                    if importing { ProgressView() }
+                }
+                .disabled(pickedFile == nil || password.isEmpty || importing)
+
+                if let outcome {
+                    YuNianGlassCard {
+                        VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
+                            Label(outcome.ok ? "导入成功" : "导入失败",
+                                  systemImage: outcome.ok ? "checkmark.circle.fill"
+                                                        : "xmark.octagon.fill")
+                                .font(YuNianTheme.TextStyle.settingsRowTitle)
+                                .foregroundStyle(outcome.ok ? colors.success : colors.danger)
+                            Text(outcome.summary)
+                                .font(.system(size: 11))
+                                .foregroundStyle(colors.textSecondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
                 Text("同一备份可重复导入：伴侣按名称匹配复用，消息按时间戳与内容去重。")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(colors.textTertiary)
+                    .padding(.horizontal, YuNianTheme.Space.minUnit)
+
+                Spacer(minLength: YuNianTheme.Space.pageTop)
             }
+            .padding(.horizontal, YuNianTheme.Space.page)
+            .padding(.top, YuNianTheme.Space.standard)
         }
+        .background(colors.background.ignoresSafeArea())
         .navigationTitle("备份导入")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPicker) {
             DocumentPicker(onPick: { url in
                 pickedFile = loadFile(url)
                 outcome = nil
+                showPicker = false
             })
         }
     }
+
+    // MARK: - 导入
 
     private func runImport() async {
         guard let file = pickedFile, let database = environment.database else { return }
         importing = true
         defer { importing = false }
-        // 解密是 CPU 密集（PBKDF2 10 万次），放到后台避免卡界面
+
+        let service = BackupImportService(database: database)
         let result = await Task.detached(priority: .userInitiated) {
-            BackupImportService().importFile(
-                data: file.data, password: password, database: database)
+            service.import(data: file.data, password: password)
         }.value
+
         outcome = result
+        if result.ok {
+            environment.syncRuntimeConfig()
+        }
     }
 
-    /// 读取选中的文件。必须在 picker 回调的**同一轮**里读完并 startAccessing。
     private func loadFile(_ url: URL) -> BackupFile? {
-        let needsScope = url.startAccessingSecurityScopedResource()
-        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        defer { url.stopAccessingSecurityScopedResource() }
         guard let data = try? Data(contentsOf: url) else { return nil }
         return BackupFile(name: url.lastPathComponent, data: data)
-    }
-}
-
-/// `.lybk` 文件选择器。
-private struct DocumentPicker: UIViewControllerRepresentable {
-
-    var onPick: (URL) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data])
-        picker.allowsMultipleSelection = false
-        picker.shouldShowFileExtensions = true
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ v: UIDocumentPickerViewController, context: Context) {}
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPick: (URL) -> Void
-        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
-
-        func documentPicker(_ controller: UIDocumentPickerViewController,
-                            didPickDocumentsAt urls: [URL]) {
-            guard let url = urls.first else { return }
-            onPick(url)
-        }
     }
 }
