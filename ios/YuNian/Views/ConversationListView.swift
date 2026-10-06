@@ -43,7 +43,7 @@ struct ConversationListView: View {
     /// iOS 侧只有"全部"有内容，故只留一个常量占位 —— 不放两个空 tab。
     @State private var selectedTab = HomeTab.all
 
-    @State private var rows: [ConversationRepository.Row] = []
+    @State private var rows: [ConversationRepository.ConvRow] = []
     @State private var chatCount = 0
     @State private var loaded = false
     @State private var companionForChat: CompanionRepository.Companion?
@@ -135,7 +135,7 @@ struct ConversationListView: View {
     // MARK: - item
 
     /// 单聊 item（HomeScreen.kt:439-549）
-    private func rowView(_ row: ConversationRepository.Row) -> some View {
+    private func rowView(_ row: ConversationRepository.ConvRow) -> some View {
         HStack(alignment: .top, spacing: YuNianTheme.Space.standard) {   // avatarGap 8dp
             // 头像 + 未读圆点（Box TopEnd，溢出在圆外）
             ZStack(alignment: .topTrailing) {
@@ -241,7 +241,7 @@ struct ConversationListView: View {
     }
 
     /// 用 id 反查 Companion（点进去要带完整对象）。
-    private func companion(for row: ConversationRepository.Row)
+    private func companion(for row: ConversationRepository.ConvRow)
         -> CompanionRepository.Companion?
     {
         guard let db = environment.database else { return nil }

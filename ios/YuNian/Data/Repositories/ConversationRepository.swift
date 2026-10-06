@@ -33,7 +33,11 @@ struct ConversationRepository {
     }
 
     /// 列表项。
-    struct Row: Identifiable, Equatable {
+    /// ⚠️ 第 171 轮：改名为 `ConvRow`。
+    /// 原名 `Row` 与 GRDB 的 `Row` 同名 —— 在这个文件里
+    /// `Row.fetchAll(...)` 会解析到本 struct 而不是 GRDB.Row，
+    /// CI（3c4cd6f）报 "type 'ConversationRepository.Row' has no member 'fetchAll'"。
+    struct ConvRow: Identifiable, Equatable {
         let companionId: Int64
         var name: String
         var avatarUrl: String?
@@ -75,7 +79,7 @@ struct ConversationRepository {
     /// 但**排除 REASONING**（Kotlin 的未读统计排它，
     /// 而 rebuildSummaryForChat 只显式排 TOOL_ACTIVITY ——
     /// 这里取更严格的那个，避免列表里出现"思考过程"）。
-    func rows(limit: Int = 200) throws -> [Row] {
+    func rows(limit: Int = 200) throws -> [ConvRow] {
         try database.pool.read { db in
             let sql = """
                 SELECT
@@ -102,9 +106,9 @@ struct ConversationRepository {
                 ORDER BY c.updatedAt DESC
                 LIMIT ?
                 """
-            let rows = try Row.fetchAll(db, sql: sql, arguments: [limit])
-            return rows.map { r in
-                var row = Row(
+            let grdbRows = try GRDB.Row.fetchAll(db, sql: sql, arguments: [limit])
+            return grdbRows.map { r in
+                var row = ConvRow(
                     companionId: r["companionId"] as Int64? ?? 0,
                     name: r["name"] as String? ?? "",
                     avatarUrl: r["avatarUrl"] as String?,
