@@ -14,6 +14,8 @@ struct BackupImportView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.colorScheme) private var scheme
+    /// 第 143 轮：改用 YuNianGlassPage 后，顶栏返回按钮需要它。
+    @Environment(\.dismiss) private var dismiss
     @State private var password = ""
     @State private var pickedFile: BackupFile?
     @State private var showPicker = false
