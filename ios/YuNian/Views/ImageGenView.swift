@@ -13,9 +13,14 @@ import SwiftUI
 /// Kotlin 侧是 `ImageGenCoordinator`（关键词→概率→冷却）自动触发的，
 /// iOS 侧那套判定逻辑未移植 —— **这是手动触发页，不是自动触发**。
 ///
-/// ⚠️ 未做：自动触发（关键词/概率/冷却）、流式分片累积、
+/// ## ⚠️ 未做：自动触发（关键词/概率/冷却）、流式分片累积、
 /// 写入消息库（`data[].revised_prompt` 与 `partial_image_index` 分支）。
 /// 这些要么需要服务端确认，要么属于对话链路改造，超出本页范围。
+///
+/// ## 凭证来源（第 154 轮更正）
+/// baseUrl 取 `ApiConfigRepository.activeConfig()`，apiKey 取
+/// `KeychainStore.Key.apiKey`（`AppEnvironment.setAPIKey` 写入）。
+/// 两者都在本页读取，无需额外配置。
 struct ImageGenView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
@@ -185,13 +190,18 @@ struct ImageGenView: View {
 
     /// 取当前启用渠道的 baseUrl + apiKey。
     ///
-    /// ⚠️ iOS 侧 apiKey 不明文入库（第 121 轮的设计），故这里只能拿到
-    /// baseUrl；**apiKey 需要 Keychain。** 当前 Keychain 未存 apiKey，
-    /// 所以这里只回传空串 —— 表现为「未配置」，由用户去渠道页补。
-    /// 这是已知缺口，不是 bug：Keychain 存 apiKey 属另一项改动。
+    /// ⚠️ 第 154 轮：上一版这里写"apiKey 需要 Keychain，当前拿不到"——
+    /// **那个判断是错的**。apiKey 一直都在 Keychain 里
+    /// （`KeychainStore.Key.apiKey`，`AppEnvironment.setAPIKey` 第 252-260 行
+    ///  写入），我只是没去读。
+    ///
+    /// 我据一个错误结论在提交信息和 Release 里都写了"已知缺口"，
+    /// 而实际只是漏读一行 API。这比真缺口更糟：
+    /// 假缺口会让下一个人（或下一轮的我）以为必须做一项大改动。
     private func credentials() -> (String, String)? {
         guard let repo = environment.apiConfigs,
               let cfg = try? repo.activeConfig() else { return nil }
-        return (cfg.baseUrl, "")
+        let key = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
+        return (cfg.baseUrl, key)
     }
 }
