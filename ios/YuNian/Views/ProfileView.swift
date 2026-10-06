@@ -63,6 +63,11 @@ struct ProfileView: View {
                 menuGroup([
                     .init(icon: "brain", title: "记忆管理", subtitle: "查看记住的关于你的事"),
                     .init(icon: "cpu", title: "模型渠道", subtitle: "配置 API Key 与服务商"),
+                    // ⚠️ 第 170 轮：AI 能力中心。
+                    // 原来在旧首页（homeView）作为入口，tab 0 换成会话列表后
+                    // 移到这里 —— 入口不丢。
+                    .init(icon: "square.stack.3d.up", title: "AI 能力中心",
+                          subtitle: "内置技能与加载链路"),
                 ])
                 Spacer(minLength: 12)
 
@@ -223,6 +228,7 @@ struct ProfileView: View {
         switch item.title {
         case "记忆管理": MemoryListView()
         case "模型渠道": ChannelConfigView(provider: "OPENAI")
+        case "AI 能力中心": SkillLibraryView()
         case "表情库": StickerLibraryView()
         case "备份导入": BackupImportView()
         case "搜索消息": MessageSearchView()
