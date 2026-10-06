@@ -14,6 +14,10 @@ struct SkillLibraryView: View {
     @EnvironmentObject private var environment: AppEnvironment
     /// ⚠️ 第 128 轮：语义色跟随系统明暗。
     @Environment(\.colorScheme) private var scheme
+    /// 第 133 轮：玻璃顶栏的返回按钮用。
+    /// 这些页面由 RootView 的 NavigationLink push 进来，
+    /// 系统不自动给可见返回钮，故自绘顶栏需要它。
+    @Environment(\.dismiss) private var dismiss
     @State private var skills: [SkillRow] = []
     @State private var selected: SkillRow?
     @State private var errorMessage: String?
@@ -44,7 +48,9 @@ struct SkillLibraryView: View {
     /// - `CapabilitySectionLabel`：14sp Medium `onSurfaceVariant`
     ///   （SkillsCenterScreen.kt:201-206）
     var body: some View {
-        ScrollView {
+        // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar），
+        // 不再用系统 NavigationBar。
+        YuNianGlassPage(title: "AI 能力中心", onBack: { dismiss() }) {
             VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                 if let errorMessage {
@@ -82,9 +88,6 @@ struct SkillLibraryView: View {
             .padding(.horizontal, YuNianTheme.Space.page)
             .padding(.top, YuNianTheme.Space.standard)
         }
-        .background(colors.background.ignoresSafeArea())
-        .navigationTitle("AI 能力中心")
-        .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selected) { skill in
             NavigationStack {
                 SkillDetailView(skill: skill)
@@ -190,8 +193,6 @@ private struct SkillDetailView: View {
                 }
             }
         }
-        .navigationTitle(skill.name)
-        .navigationBarTitleDisplayMode(.inline)
         .task { load() }
     }
 

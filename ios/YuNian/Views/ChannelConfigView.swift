@@ -60,9 +60,10 @@ struct ChannelConfigView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
+        // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar/GlassPageScaffold），
+        // 不再用系统 NavigationBar + ScrollView。
+        YuNianGlassPage(title: "模型渠道", onBack: { dismiss() }) {
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                     YuNianSectionTitle(title: "服务商")
 
@@ -192,22 +193,8 @@ struct ChannelConfigView: View {
                 .padding(.horizontal, YuNianTheme.Space.page)
                 .padding(.top, YuNianTheme.Space.standard)
             }
-            .background(colors.background.ignoresSafeArea())
-            .navigationTitle("模型渠道")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                        .foregroundStyle(colors.textSecondary)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .bold()
-                        .foregroundStyle(colors.primary)
-                }
-            }
             .task { prefill() }
-        }
+
     }
 
     // MARK: - 预填 / 切换预设

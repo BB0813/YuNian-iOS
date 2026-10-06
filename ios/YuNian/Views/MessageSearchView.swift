@@ -17,6 +17,10 @@ struct MessageSearchView: View {
     @EnvironmentObject private var environment: AppEnvironment
     /// ⚠️ 第 129 轮：语义色跟随系统明暗。
     @Environment(\.colorScheme) private var scheme
+    /// 第 133 轮：玻璃顶栏的返回按钮用。
+    /// 这些页面由 RootView 的 NavigationLink push 进来，
+    /// 系统不自动给可见返回钮，故自绘顶栏需要它。
+    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var results: [MessageRow] = []
     @State private var searched = false
@@ -35,7 +39,9 @@ struct MessageSearchView: View {
     }
 
     var body: some View {
-        ScrollView {
+        // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar），
+        // 不再用系统 NavigationBar。
+        YuNianGlassPage(title: "搜索消息", onBack: { dismiss() }) {
             VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
                 if searched && results.isEmpty {
                     emptyState
@@ -51,9 +57,6 @@ struct MessageSearchView: View {
             .padding(.horizontal, YuNianTheme.Space.page)
             .padding(.top, YuNianTheme.Space.standard)
         }
-        .background(colors.background.ignoresSafeArea())
-        .navigationTitle("搜索消息")
-        .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 第 89 轮：这里原来写的是
         //   .searchable(text:placement:.navigationBarDrawMode(displayMode:.automatic), prompt:)
         // CI 报 "type 'SearchFieldPlacement' has no member 'navigationBarDrawMode'"。
