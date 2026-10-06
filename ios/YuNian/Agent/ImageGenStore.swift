@@ -50,6 +50,10 @@ struct ImageGenStore {
         static let cooldownMinutes = "image_gen_cooldown_minutes"
         static let lastGenAt = "image_gen_last_at"      // 单伴侣简化
         static let connectionMode = "image_gen_connection_mode"
+        /// ⚠️ 第 163 轮：补上漏定义的 key（CI e24655c 报
+        /// `type 'ImageGenStore.K' has no member 'promptTemplate'`）。
+        /// save() 里用了它，但 enum 里没这一项。
+        static let promptTemplate = "image_gen_prompt_template"
     }
 
     private static let defaults = UserDefaults.standard
