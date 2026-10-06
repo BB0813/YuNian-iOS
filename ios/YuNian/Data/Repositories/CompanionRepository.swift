@@ -26,7 +26,13 @@ final class CompanionRepository {
     }
 
     /// 完整伴侣行。
-    struct Companion: Sendable, Equatable, Identifiable {
+    /// ⚠️ 第 142 轮：补 `Hashable`。
+    /// `navigationDestination(item:)` 要求 D : Hashable（不只是 Identifiable）——
+    /// CI 完整错误是 "requires that 'CompanionRepository.Companion' conform to
+    /// 'Hashable'"，而我上一轮只看到被截断的半句 "conforms to ..."，
+    /// 猜成 Identifiable 白改了一轮 ChatView。
+    /// **截断的错误文本会让我改错方向** —— 这是第二次（第 30/78/83/96 轮那族）。
+    struct Companion: Sendable, Equatable, Identifiable, Hashable {
         var id: Int64
         var name: String
         var avatarUrl: String?
