@@ -78,7 +78,7 @@ TYPE_POSITION_PATTERNS = [
 ]
 
 
-def main() -> int:
+def _main_imports() -> int:
     files = sorted(SRC.rglob("*.swift"))
     if not files:
         print("[FAIL] 没有找到 Swift 文件")
@@ -107,6 +107,51 @@ def main() -> int:
 
     print(f"import 覆盖核对通过（{len(files)} 个文件 / {len(MODULE_BY_SYMBOL)} 个符号映射）")
     return 0
+
+
+def check_testable_import() -> int:
+    """所有测试文件必须有 `@testable import YuNian`（第 140 轮新增）。
+
+    起因：我新写 YuNianLiquidTabsTests 时只写了 `import XCTest`，
+    结果测试 target 看不到 App target 的类型，CI 报 10 处
+    "cannot find 'YuNianTheme' in scope"。
+    仓内其它 14 个测试文件都有这一行，我漏了 —— 而这种遗漏
+    **编译期才发现**，代价是一整轮 CI。
+
+    这条规则把「写新测试文件必带 @testable import」固化成关卡。
+    """
+    tests = REPO_ROOT / "ios/YuNianTests"
+    if not tests.exists():
+        return 0
+    bad = []
+    for f in sorted(tests.glob("*.swift")):
+        # ⚠️ 第 140 轮：必须**按行**判断，不能子串搜索整个文件。
+        # 我第一版用 `"@testable import YuNian" not in text`，
+        # 结果变异测试一跑就发现是**假阴性**：
+        # 文件顶部的说明注释里逐字提到了这个字符串，
+        # 于是真把 import 删掉，关卡照样放行。
+        # （同一坑第 50/72/121 轮踩过三次：注释会骗过子串匹配。）
+        has = any(
+            ln.lstrip().startswith("@testable import YuNian")
+            for ln in f.read_text(encoding="utf-8", errors="ignore").splitlines()
+        )
+        if not has:
+            bad.append(f.name)
+    if bad:
+        print("[FAIL] 测试文件缺少 `@testable import YuNian`：")
+        for n in bad:
+            print(f"  - {n}")
+        print("       （测试 target 需经它才能看到 App target 的类型）")
+        return 1
+    print(f"[ok] {len(list(tests.glob('*.swift')))} 个测试文件都有 @testable import YuNian")
+    return 0
+
+
+def main() -> int:
+    rc = check_testable_import()
+    if rc:
+        return rc
+    return _main_imports()
 
 
 if __name__ == "__main__":

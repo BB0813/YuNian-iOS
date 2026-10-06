@@ -1,4 +1,9 @@
 import XCTest
+// ⚠️ 第 140 轮：漏了这一行。
+// 少了 `@testable import YuNian`，测试 target 就看不到 App target 的类型，
+// CI 报 10 处 "cannot find 'YuNianTheme' in scope"。
+// 仓内其它 14 个测试文件都有这一行，我写新文件时漏了。
+@testable import YuNian
 
 /// `YuNianLiquidTabs` 的规格测试。
 ///
