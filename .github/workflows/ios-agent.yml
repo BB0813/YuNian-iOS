@@ -374,6 +374,17 @@ jobs:
           # 都在那附近 —— 原先只 grep 'error:' 把它们全漏了。
           grep -nE 'error:|Undefined symbols|ld: |symbol\(s\) not found|linker command failed|framework not found' \
             "$RUNNER_TEMP/xcodebuild.log" | head -n 80 || true
+          # ⚠️ 第 139 轮：补"测试结果"专属 grep。
+          # 上一轮模拟器 job 失败但**搜不到任何 error: 行** ——
+          # 说明失败在测试执行阶段（断言失败 / simulator 起不来），
+          # 而 xcodebuild 用的是 "XCTAssert ... failed" 和
+          # "** TEST FAILED **" 这类措辞，全都不含 "error:"。
+          # 我为了拿这个日志连试了 6 种方式全部失败
+          # （job logs 端点返回的 85KB 内容不是 zip），
+          # 所以改成把测试结果直接 grep 到 step stdout，看得到的地方打出来。
+          echo "---- 测试结果 ----"
+          grep -nE 'XCTAssert|: failed|Executed [0-9]+ test|Test Suite .*(passed|failed)|\*\* TEST (SUCCEEDED|FAILED) \*\*|Testing failed|Unable to (boot|find)' \
+            "$RUNNER_TEMP/xcodebuild.log" | head -n 80 || true
           echo "---- 尾部 300 行 ----"
           tail -n 300 "$RUNNER_TEMP/xcodebuild.log" || true
           exit $code
