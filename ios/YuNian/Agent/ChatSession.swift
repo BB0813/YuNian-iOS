@@ -564,8 +564,15 @@ final class ChatSession: ObservableObject {
     /// 没有它，用户追问「再生成一张」时模型看不到上一张画的是什么 ——
     /// Kotlin 的测试 `图片消息送给模型时附带画面描述`（Test:438-459）正是锁这条。
     ///
-    /// 写成 static 以便单测（否则被 private 挡住，测试只能间接验证）。
-    static func contentForModel(_ message: Message) -> String {
+    /// 写成 `nonisolated static` 有两个原因：
+    /// 1. 便于单测（否则被 private 挡住，测试只能间接验证）；
+    /// 2. ⚠️ ChatSession 是 `@MainActor`（ObservableObject），
+    ///    static 方法默认继承 main-actor 隔离 —— 同步的 XCTest
+    ///    是非隔离上下文，直接调会编译不过
+    ///    （CI 2ceaabc 报 9 处 "call to main actor-isolated static method
+    ///     'contentForModel' in a synchronous nonisolated context"）。
+    ///    本方法是纯字符串变换，不碰任何隔离状态，故可安全 nonisolated。
+    nonisolated static func contentForModel(_ message: Message) -> String {
         guard message.imageData != nil,
               let prompt = message.imagePrompt,
               !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
