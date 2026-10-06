@@ -239,25 +239,33 @@ final class ChatSession: ObservableObject {
         aiText: String,
         environment: AppEnvironment
     ) async {
-        guard let prefs = ImageGenStore.load() else { return }   // 未配置 → 不触发
+        // ⚠️ 第 161 轮：`var` 而非 `let` —— saveLastGenAt 闭包要改它。
+        guard let loaded = ImageGenStore.load() else { return }   // 未配置 → 不触发
+        var prefs = loaded
         guard let cfg = try? environment.apiConfigs?.activeConfig() else { return }
+
+        // apiKey 取一次，避免闭包里重复读 Keychain
+        let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
 
         var coordinator = ImageGenCoordinator(
             deps: .init(
-                global: prefs.globalConfig,
+                global: prefs.global,
                 override: .init(),
-                mainConnection: (cfg.baseUrl, KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""),
+                mainConnection: (cfg.baseUrl, apiKey),
                 configBaseUrl: cfg.baseUrl,
-                configApiKey: KeychainStore.string(for: KeychainStore.Key.apiKey) ?? "",
+                configApiKey: apiKey,
                 lastGenAtMs: prefs.lastGenAtMs,
-                saveLastGenAt: { prefs.lastGenAtMs = $0; ImageGenStore.save(prefs) }
+                saveLastGenAt: { ms in
+                    prefs.lastGenAtMs = ms
+                    ImageGenStore.save(prefs)
+                }
             )
         )
-        coordinator.onMessage = { text, isError in
+        coordinator.onMessage = { (text: String, isError: Bool) in
             messages.append(Message(role: .assistant, text: text, isSticker: false))
             if isError { lastError = text }
         }
-        coordinator.onImages = { datas, _ in
+        coordinator.onImages = { (datas: [Data], _: String) in
             // 一条图片消息一张图（Kotlin ImageGenTrigger.kt:367-384）。
             // ⚠️ iOS 侧消息是内存数组，无图片落库路径；
             // 这里以图片消息占位（content = "[图片]"，与 Android 约定一致），
