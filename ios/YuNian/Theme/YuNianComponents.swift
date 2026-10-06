@@ -150,7 +150,18 @@ struct YuNianGlassButton<Content: View>: View {
     }
 
     var body: some View {
-        Button(action: onClick) {
+        // ⚠️ 第 178 轮：玻璃按钮**从来没用过玻璃**。
+        // 它叫 YuNianGlassButton，但 body 里一直是
+        // `.background(Capsule().fill(fallback ?? .clear))` —— 纯色胶囊。
+        // 第 177 轮只分叉了 `yuNianGlass` 修饰符，没覆盖到这里，
+        // 于是 iOS 26 的液态玻璃在按钮上是断的。
+        //
+        // 现在两条路都走原生：
+        //   · iOS 26+         → `.buttonStyle(.glass)`（+ `.tint` 有着色时）
+        //   · iOS 17–25       → `.ultraThinMaterial` 胶囊；
+        //                       调用方显式传了 surfaceColor/tint 时仍照办
+        //                       （那是 Kotlin "无 backdrop 回退" 的语义）
+        let button = Button(action: onClick) {
             HStack(spacing: YuNianTheme.Space.standard) { content }   // spacedBy(8)
                 .padding(.horizontal, horizontalPadding)
                 .frame(maxWidth: .infinity)
@@ -158,9 +169,29 @@ struct YuNianGlassButton<Content: View>: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .background(Capsule().fill(fallback ?? .clear))
         .opacity(enabled ? 1.0 : 0.45)                    // DisabledAlpha GlassButton.kt:45
         .disabled(!enabled)
+
+        return applyGlass(to: button)
+    }
+
+    /// 按毛玻璃档位给按钮上玻璃。
+    @ViewBuilder
+    private func applyGlass<V: View>(to view: V) -> some View {
+        if #available(iOS 26.0, *), YuNianGlassStyle.current() == .liquidGlass {
+            // 原生液态玻璃按钮。有着色时才套 tint —— 不套时让系统自己决定。
+            if let tint {
+                view.buttonStyle(.glass).tint(tint)
+            } else {
+                view.buttonStyle(.glass)
+            }
+        } else if let fallback {
+            // 调用方显式指定了表面色（Kotlin "无 backdrop 回退"）→ 照办
+            view.background(Capsule().fill(fallback))
+        } else {
+            // 原生材质
+            view.background(Capsule().fill(.ultraThinMaterial))
+        }
     }
 }
 

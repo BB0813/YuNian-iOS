@@ -52,7 +52,28 @@ struct RootView: View {
     ///   （MainBottomBar.kt:79-91）
     ///
     /// SwiftUI 侧用 `TabView(.page)` + 底部浮层等价实现。
+    ///
+    /// ⚠️ 第 178 轮：iOS 26 下套 `GlassEffectContainer`。
+    ///
+    /// 不包容器的话，每个 `glassEffect` 是**相互隔离**的孤岛 ——
+    /// 而 Liquid Glass 的招牌行为恰恰是"相邻玻璃之间会融合、拉伸出连续曲面"
+    /// （Apple 26 代 HIG）。包了容器，底部玻璃栏与页面里其它玻璃
+    /// （卡片、顶栏动作键）才会一起参与融合。
+    ///
+    /// iOS 17–25 没有这个容器类型，直接走原结构。
+    @ViewBuilder
     private var tabbedView: some View {
+        if #available(iOS 26.0, *), YuNianGlassStyle.current() == .liquidGlass {
+            GlassEffectContainer(spacing: YuNianTheme.Space.standard) {
+                tabbedContent
+            }
+        } else {
+            tabbedContent
+        }
+    }
+
+    /// tab 容器本体（两档共用）。
+    private var tabbedContent: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 // ⚠️ 第 170 轮：tab 0 换成会话列表（ConversationListView），
