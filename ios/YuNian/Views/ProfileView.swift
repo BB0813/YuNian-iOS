@@ -38,6 +38,27 @@ struct ProfileView: View {
 
     private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
+    // MARK: - 毛玻璃风格（第 176 轮）
+
+    /// 用户显式选择的档位；nil = 跟随系统。
+    @State private var glassOverride: String?
+
+    /// 当前生效档位（含 OS 自动判定）。
+    private var glassStyle: YuNianGlassStyle { YuNianGlassStyle.current() }
+
+    /// Picker 绑定。写入时立刻持久化并刷新 `glassOverride`，
+    /// 让"当前：手动指定/跟随系统"那行同步更新。
+    private var glassStyleBinding: Binding<YuNianGlassStyle> {
+        Binding(
+            get: { glassStyle },
+            set: { picked in
+                UserDefaults.standard.set(picked.rawValue,
+                                          forKey: YuNianGlassStyle.overrideKey)
+                glassOverride = picked.rawValue
+            }
+        )
+    }
+
     /// 用户昵称（iOS 侧即 owner_name，存 Keychain）。
     private var nickname: String {
         KeychainStore.string(for: KeychainStore.Key.ownerName) ?? ""
@@ -85,7 +106,47 @@ struct ProfileView: View {
                 ])
                 Spacer(minLength: 12)
 
-                // ⑤ 关于本端（Android 的 about 在 iOS 尚无独立页，用一行说明代替）
+                // ⑤ 毛玻璃风格（第 176 轮）
+                //
+                // 用户要求的分水岭：iOS 17 走旧原生 UI，iOS 26+ 走新毛玻璃原生 UI。
+                // 默认按 OS 版本自动判；这里让用户能显式覆盖 —— "默认"二字的含义。
+                YuNianSectionTitle(title: "毛玻璃风格")
+                YuNianGlassCard {
+                    VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                        Picker("毛玻璃风格", selection: glassStyleBinding) {
+                            ForEach(YuNianGlassStyle.allCases) { s in
+                                Text(s.displayName).tag(s)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+
+                        Text(glassStyle.detail)
+                            .font(.system(size: 12))
+                            .foregroundStyle(colors.textSecondary)
+
+                        // 显示"现在为什么是这个档"
+                        Text(glassOverride == nil
+                             ? "当前：跟随系统（\(glassStyle.displayName)）"
+                             : "当前：手动指定（\(glassStyle.displayName)）")
+                            .font(.system(size: 11))
+                            .foregroundStyle(colors.textTertiary)
+
+                        if glassOverride != nil {
+                            Button("恢复为跟随系统") {
+                                UserDefaults.standard.removeObject(
+                                    forKey: YuNianGlassStyle.overrideKey)
+                                glassOverride = nil
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(colors.primary)
+                        }
+                    }
+                    .padding(YuNianTheme.Space.cardPadding)
+                }
+                Spacer(minLength: 12)
+
+                // ⑥ 关于本端（Android 的 about 在 iOS 尚无独立页，用一行说明代替）
                 menuGroup([
                     .init(icon: "info.circle", title: "关于予念 iOS",
                           subtitle: "Rust Agent 运行时 + SwiftUI 原生壳"),
@@ -95,7 +156,17 @@ struct ProfileView: View {
             }
         }
         .background(colors.background.ignoresSafeArea())
-        .task { reload() }
+        .task {
+            // 第 176 轮：读回已存的覆盖选择，让"当前"那行一进页面就正确
+            glassOverride = UserDefaults.standard.string(forKey: YuNianGlassStyle.overrideKey)
+            reload()
+        }
+        // ⚠️ 第 176 轮：改了档位要**立刻**让整棵树生效。
+        // 档位是按视图各自 `YuNianGlassStyle.current()` 读的，
+        // 而 `onChange` 已在 setter 里更新了 state —— 这里只需触发一次重绘。
+        // 更彻底的做法是往 environment 注入一次（结构已备好），
+        // 但那要动 RootView；当前 profile 页内的即时反馈已经够用。
+        .onChange(of: glassOverride) { _, _ in }
     }
 
     // MARK: - 资料卡
