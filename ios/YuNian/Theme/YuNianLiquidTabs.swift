@@ -93,8 +93,12 @@ struct YuNianLiquidTabs: View {
         GeometryReader { geo in
             let tabWidth = tabWidth(for: geo.size.width)
 
-            ZStack(alignment: .leading) {
+            let core = ZStack(alignment: .leading) {
                 // ── 选中的滑动药丸（近似 Kotlin selectionModifier）──
+                // ⚠️ 第 179 轮：药丸**不玻璃化**，仍是着色叠加。
+                // 它与容器同在 GlassEffectContainer 内，若也 glassEffect
+                // 会按 spacing 与容器融合成一团 —— 选中态就消失了。
+                // 保持叠加是刻意的：看得出来的选中态比"什么都玻璃"重要。
                 RoundedRectangle(cornerRadius: .infinity, style: .continuous)
                     .fill(colors.primary.opacity(0.18))
                     .frame(
@@ -116,16 +120,12 @@ struct YuNianLiquidTabs: View {
             .padding(YuNianTheme.Space.minUnit)      // contentPadding = 4dp
             .frame(height: YuNianTheme.LiquidMetric.barHeight)  // containerHeight = 64dp
             .frame(maxWidth: .infinity)
-            .background(
-                Capsule().fill(containerColor)
-            )
-            .overlay(
-                Capsule().strokeBorder(borderColor, lineWidth: 0.8)
-            )
-            .onAppear { visualIndex = CGFloat(selectedIndex) }
-            .onChange(of: selectedIndex) { _, new in
-                visualIndex = CGFloat(new)
-            }
+
+            container(to: core)
+                .onAppear { visualIndex = CGFloat(selectedIndex) }
+                .onChange(of: selectedIndex) { _, new in
+                    visualIndex = CGFloat(new)
+                }
         }
         .frame(height: YuNianTheme.LiquidMetric.barHeight)
     }
@@ -135,6 +135,34 @@ struct YuNianLiquidTabs: View {
     private func tabWidth(for containerWidth: CGFloat) -> CGFloat {
         let padding = YuNianTheme.Space.minUnit
         return (containerWidth - padding * 2) / CGFloat(max(tabs.count, 1))
+    }
+
+    /// tab 容器外观 —— 按毛玻璃档位分叉（第 179 轮）。
+    ///
+    /// ## 之前这里不是玻璃
+    /// 一直是 `Capsule().fill(containerColor)` + 一道描边 ——
+    /// 半透明**纯色**。而 tab 栏是全 App 最显眼的 chrome，
+    /// 它在 iOS 26 上不是液态玻璃，整套分叉就断在最显眼的地方。
+    ///
+    /// ## 两档
+    /// - iOS 26+ → `.glassEffect(.regular, in: .rect(cornerRadius: .infinity))`
+    ///   （`.rect(cornerRadius: .infinity)` 是第 177 轮已验证可编译的形式；
+    ///   对宽胶囊元素而言它与 Capsule 视觉等价）
+    /// - iOS 17–25 → 原纯色胶囊 + 描边（Kotlin LiquidBottomTabs.kt:170-175 的取值）
+    ///
+    /// ## 为什么选中药丸不一起玻璃化
+    /// 二者同在 `GlassEffectContainer` 内，药丸若也 glassEffect，
+    /// 会按 spacing 与容器融合成一团，选中态消失。
+    /// 所以药丸保持 `colors.primary.opacity(0.18)` 叠加 —— 见 body 内注释。
+    @ViewBuilder
+    private func container<V: View>(to view: V) -> some View {
+        if #available(iOS 26.0, *), YuNianGlassStyle.current() == .liquidGlass {
+            view.glassEffect(.regular, in: .rect(cornerRadius: .infinity))
+        } else {
+            view
+                .background(Capsule().fill(containerColor))
+                .overlay(Capsule().strokeBorder(borderColor, lineWidth: 0.8))
+        }
     }
 
     /// 单个 tab。
