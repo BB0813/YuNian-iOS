@@ -72,6 +72,11 @@ EXTERNAL_ALLOWLIST = {
     # 改用 URLComponents。这道关卡随即要求把新外部依赖显式登记 ——
     # 这正是它该有的行为：新依赖不能悄悄进来。
     "URLComponents",
+    # ⚠️ 第 178 轮：GlassEffectContainer / Glass 加入白名单。
+    # Liquid Glass 的容器与样式类型（iOS 26 SDK）。
+    # 不包 GlassEffectContainer 的话，每个 glassEffect 是相互隔离的孤岛，
+    # 拿不到"相邻玻璃融合"这个 26 代招牌行为。
+    "GlassEffectContainer", "Glass",
     # ⚠️ 第 175 轮：RadialGradient 加入白名单。
     # 群聊头像兜底要用（GroupListItem 的
     # radialGradient(PinkPrimary@0.6 → PinkPrimary@0.3)，HomeScreen.kt:388-391）。
