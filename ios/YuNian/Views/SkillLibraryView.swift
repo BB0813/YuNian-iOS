@@ -12,9 +12,13 @@ import SwiftUI
 struct SkillLibraryView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
+    /// ⚠️ 第 128 轮：语义色跟随系统明暗。
+    @Environment(\.colorScheme) private var scheme
     @State private var skills: [SkillRow] = []
     @State private var selected: SkillRow?
     @State private var errorMessage: String?
+
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
     /// 列表行（从 `listSkills` 的 JSON 提取）。
     struct SkillRow: Identifiable, Equatable {
@@ -27,33 +31,59 @@ struct SkillLibraryView: View {
         let tools: [String]
     }
 
+    /// 第 128 轮：套上设计系统。
+    ///
+    /// 对照 `feature/skills/.../SkillsCenterScreen.kt`：
+    /// - 页面标题 **"AI 能力中心"**（SkillsCenterScreen.kt:106）——
+    ///   我上一版叫"技能库"，与 Android 不一致，本版对齐
+    /// - `CapabilityCard`：**16dp 圆角** + drawGlass + padding(16)，
+    ///   头部有 8dp 状态圆点（SkillsCenterScreen.kt:220-225）
+    /// - `SkillRow`：**14dp 圆角** + drawGlass + Row padding(14)，
+    ///   名称 Medium、外部技能加 11sp "AI 安装" `primary`、
+    ///   描述 13sp/lineHeight 17sp（SkillsCenterScreen.kt:281-285）
+    /// - `CapabilitySectionLabel`：14sp Medium `onSurfaceVariant`
+    ///   （SkillsCenterScreen.kt:201-206）
     var body: some View {
-        List {
-            if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
-            Section {
-                if skills.isEmpty {
-                    Text("还没有技能。内置的「聊天工具协议」技能应已在启动时播种。")
+                if let errorMessage {
+                    Text(errorMessage)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(colors.danger)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, YuNianTheme.Space.minUnit)
+                }
+
+                YuNianSectionTitle(title: "技能库（AI 可自主加载）")
+
+                if skills.isEmpty {
+                    YuNianGlassCard {
+                        Text("还没有技能。内置的「聊天工具协议」技能应已在启动时播种。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(colors.textSecondary)
+                    }
                 } else {
                     ForEach(skills) { skill in
-                        Button { selected = skill } label: { row(skill) }
-                            .foregroundStyle(.primary)
+                        YuNianGlassCard {
+                            Button { selected = skill } label: { row(skill) }
+                                .buttonStyle(.plain)
+                        }
                     }
                 }
-            } footer: {
+
                 Text("模型通过 load_skill 工具按需加载正文；这里只影响可见性与增删。")
-                    .font(.caption2)
+                    .font(.system(size: 11))
+                    .foregroundStyle(colors.textTertiary)
+                    .padding(.horizontal, YuNianTheme.Space.minUnit)
+
+                Spacer(minLength: YuNianTheme.Space.pageTop)
             }
+            .padding(.horizontal, YuNianTheme.Space.page)
+            .padding(.top, YuNianTheme.Space.standard)
         }
-        .navigationTitle("技能库")
+        .background(colors.background.ignoresSafeArea())
+        .navigationTitle("AI 能力中心")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selected) { skill in
             NavigationStack {
@@ -66,31 +96,36 @@ struct SkillLibraryView: View {
 
     // MARK: - 子视图
 
+    /// 单条技能 —— 对应 `SkillRow`（SkillsCenterScreen.kt:264-285）。
     private func row(_ skill: SkillRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(skill.name).font(.headline)
+        VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
+            HStack(spacing: YuNianTheme.Space.half) {
+                Text(skill.name)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(colors.textPrimary)
                 Spacer()
                 if !skill.enabled {
                     Text("已禁用")
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.18))
+                        .font(.system(size: 11))
+                        .foregroundStyle(colors.warning)
+                        .padding(.horizontal, YuNianTheme.Space.standard)
+                        .padding(.vertical, YuNianTheme.Space.tight)
+                        .background(colors.warning.opacity(0.15))
                         .clipShape(Capsule())
                 }
             }
+
             Text(skill.description)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13))
+                .foregroundStyle(colors.textSecondary)
                 .lineLimit(2)
+
             if !skill.tools.isEmpty {
                 Text(skill.tools.joined(separator: " · "))
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11).monospaced())
+                    .foregroundStyle(colors.textTertiary)
             }
         }
-        .padding(.vertical, 2)
     }
 
     // MARK: - 数据
