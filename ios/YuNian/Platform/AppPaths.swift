@@ -61,6 +61,30 @@ enum AppPaths {
         return dir
     }
 
+    /// 生图产物目录（第 167 轮）。
+    ///
+    /// 对应 Kotlin `ImageGenerationService.kt:475` 的
+    /// `GENERATED_IMAGE_DIR = "generated_images"`，落在
+    /// `getExternalFilesDir`（ImageGenerationProvider.kt:51-55 要求持久目录，
+    /// **不可用 cache** —— 否则重启丢图）。
+    ///
+    /// iOS 侧对应物是 Application Support（与数据库/表情同根），
+    /// 已由 `applicationSupport()` 保证创建。
+    static func generatedImagesDirectory() throws -> URL {
+        let dir = try applicationSupport().appendingPathComponent("generated_images", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 生图文件的完整路径。
+    ///
+    /// 命名与 Kotlin 侧对齐：「时间戳_序号.png」，
+    /// 便于跨端排查时不至于把两端的产物搞混。
+    static func generatedImageURL(messageId: Int64) throws -> URL {
+        try generatedImagesDirectory()
+            .appendingPathComponent("gen_\(messageId).png", isDirectory: false)
+    }
+
     /// 审计日志目录，对应 Android 的 `filesDir/lianyu_audit`。
     static func auditDirectory() throws -> URL {
         let dir = try applicationSupport().appendingPathComponent("audit", isDirectory: true)
