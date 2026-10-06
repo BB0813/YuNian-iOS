@@ -3,28 +3,28 @@ import SwiftUI
 /// 渠道配置页 —— 对齐 Android `PetalApiConfigEditDialog`
 /// (feature/settings/.../ui/screen/PetalApiCards.kt:126-540)。
 ///
-/// ## 为什么之前"自定义 API 没地方填 URL"
-/// `ApiConfigRepository.upsertActiveConfig` **一直支持** `name` / `baseUrl` /
-/// `formatHint` 三个形参，但 iOS 的 UI 只暴露了 provider / model / apiKey。
-/// 于是在 CUSTOM provider 下 baseUrl 永远是预设里的空串 ——
-/// 用户选了「自定义 API」却发现无处可填，而这正是它唯一必须填的一项。
+/// ## 第 128 轮：套上设计系统
+/// 上一版是裸 `Form` + 系统 `TextField`，与 Android 观感完全无关。
+/// 本版逐条对照 Kotlin 的表单规格：
+/// - 输入框 `OutlinedTextField` 统一 `shape = RoundedCornerShape(12.dp)`、
+///   容器 `surfaceVariant@0.62`、聚焦边框 `PetalPrimary`、未聚焦 `outline`
+///   （PetalApiCards.kt:248-255）→ 改用 `YuNianField`
+/// - 卡片 16dp 圆角玻璃（PetalApiCards.kt:669）→ `YuNianGlassCard`
+/// - 保存/取消用 `GlassButton` 的全胶囊 + 高度 48dp
 ///
-/// ## 字段与显示条件（逐条对照 Kotlin，不自己发明）
+/// ## 显示条件（逐字对应 Kotlin，不自己发明）
 /// | 字段 | Kotlin | 本实现 |
 /// |---|---|---|
-/// | API 名称 | 仅 `isCustom` | 仅 CUSTOM |
-/// | API Key | 总是，密码样式 | 同 |
-/// | Base URL | 总是，placeholder「填到能拼 /chat/completions 的那一层」 | 同 |
-/// | API 格式 | 仅 `isCustom`，下拉 openai/anthropic | 同 |
-/// | Model | `isCustomAnthropic` 时必填 | 同 |
-///
-/// ⚠️ 未移植：`temperature` / `maxTokens` 滑杆。Android 有，
-/// 但 `upsertActiveConfig` 已有默认值(0.7 / nil)，且它们是调参项不是接入项 ——
-/// 先补"能不能接上"，再谈"调得多好"。
+/// | API 名称 | isCustom | CUSTOM |
+/// | API Key | 总是（密码样式） | 同 |
+/// | Base URL | 总是 | 同 |
+/// | API 格式 | isCustom（openai/anthropic） | 同 |
+/// | Model | isCustomAnthropic | 同 |
 struct ChannelConfigView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
 
     /// 预选的服务商（从首屏带进来；根视图默认 OPENAI）。
     let initialProvider: String
@@ -43,6 +43,9 @@ struct ChannelConfigView: View {
         _provider = State(initialValue: provider)
     }
 
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
+    private var isDark: Bool { scheme == .dark }
+
     /// 是否为自定义 API —— 决定 API 名称 / API 格式 两个字段是否显示。
     private var isCustom: Bool { provider == "CUSTOM" }
 
@@ -58,106 +61,149 @@ struct ChannelConfigView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                // ── 服务商选择 ──
-                Section {
-                    Picker("服务商", selection: $provider) {
-                        ForEach(YuNianSeed.apiProviderPresets, id: \.provider) { p in
-                            Text(p.displayName).tag(p.provider)
-                        }
-                    }
-                    .onChange(of: provider) { _, newValue in
-                        applyPreset(newValue)
-                    }
-                } footer: {
-                    // Android 在预设列表里直接把 baseUrl 显示在副标题
-                    // （SettingsScreen.kt:501），这里保持同一信息密度。
-                    if let preset, !preset.baseUrl.isEmpty {
-                        Text("默认地址：\(preset.baseUrl)")
-                            .font(.caption2)
-                    }
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
-                Section {
-                    if isCustom {
-                        // ⚠️ 顺序与 Kotlin 一致：API 名称在最前（PetalApiCards.kt:241）
-                        TextField("API 名称", text: $name)
-                            .autocorrectionDisabled()
-                    }
+                    YuNianSectionTitle(title: "服务商")
 
-                    SecureField("API Key", text: $apiKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    // 服务商选择卡。Android 是「添加 API」后弹预设列表
+                    // （SettingsScreen.kt:440-514），每项 ProviderLogo + 两行文字；
+                    // 这里是已选定后的单卡展示 + Picker。
+                    YuNianGlassCard {
+                        VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                            Picker("服务商", selection: $provider) {
+                                ForEach(YuNianSeed.apiProviderPresets, id: \.provider) { p in
+                                    Text(p.displayName).tag(p.provider)
+                                }
+                            }
+                            .onChange(of: provider) { _, newValue in
+                                applyPreset(newValue)
+                            }
 
-                    // ⚠️ Base URL 此前**完全没暴露**，这是用户报的缺口
-                    TextField("Base URL", text: $baseUrl)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                        .keyboardType(.URL)
-
-                    if isCustom {
-                        Picker("API 格式", selection: $formatHint) {
-                            Text("OpenAI 兼容").tag("openai")
-                            Text("Anthropic 兼容").tag("anthropic")
+                            if let preset, !preset.baseUrl.isEmpty {
+                                Text("默认地址：\(preset.baseUrl)")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(colors.textTertiary)
+                                    .textSelection(.enabled)
+                            }
                         }
                     }
 
-                    TextField("Model", text: $model)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                } header: {
-                    Text("接入参数")
-                } footer: {
+                    YuNianSectionTitle(title: "接入参数")
+
+                    YuNianGlassCard {
+                        VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                            if isCustom {
+                                // 顺序与 Kotlin 一致：API 名称在最前
+                                YuNianField("API 名称", text: $name)
+                            }
+
+                            YuNianField("API Key", text: $apiKey, isSecure: true)
+
+                            // Base URL 此前完全没暴露，这是用户报的缺口
+                            YuNianField("Base URL", text: $baseUrl,
+                                        monospaced: true, keyboard: .URL)
+
+                            if isCustom {
+                                VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
+                                    Text("API 格式")
+                                        .font(YuNianTheme.Font.settingsRowSubtitle)
+                                        .foregroundStyle(colors.textSecondary)
+                                    Picker("API 格式", selection: $formatHint) {
+                                        Text("OpenAI 兼容").tag("openai")
+                                        Text("Anthropic 兼容").tag("anthropic")
+                                    }
+                                    .pickerStyle(.segmented)
+                                }
+                            }
+
+                            YuNianField("Model", text: $model, monospaced: true)
+                        }
+                    }
+
                     // Kotlin 的 placeholder 原文（PetalApiCards.kt:302-308）
                     Text("Base URL 填到能拼 /chat/completions 的那一层，如 https://api.openai.com/v1")
-                        .font(.caption2)
-                }
+                        .font(.system(size: 11))
+                        .foregroundStyle(colors.textTertiary)
+                        .padding(.horizontal, YuNianTheme.Space.minUnit)
 
-                // ── 校验动作（复用既有能力，不重写一遍探测逻辑）──
-                Section {
-                    if environment.modelsLoading {
-                        ProgressView()
-                    } else {
-                        Button("拉取模型列表") { Task { await environment.loadServerModels() } }
-                        Button("测试连接") { Task { await environment.testConnection() } }
+                    YuNianSectionTitle(title: "验证")
+
+                    YuNianGlassCard {
+                        VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                            if environment.modelsLoading {
+                                HStack(spacing: YuNianTheme.Space.standard) {
+                                    ProgressView()
+                                    Text("正在请求…")
+                                        .font(YuNianTheme.Font.settingsRowSubtitle)
+                                        .foregroundStyle(colors.textSecondary)
+                                }
+                            } else {
+                                HStack(spacing: YuNianTheme.Space.standard) {
+                                    YuNianGlassButton(
+                                        onClick: { Task { await environment.loadServerModels() } },
+                                        height: 34, horizontalPadding: 12
+                                    ) {
+                                        Text("拉取模型列表")
+                                            .font(YuNianTheme.Font.cardAction)
+                                            .foregroundStyle(colors.textPrimary)
+                                    }
+                                    YuNianGlassButton(
+                                        onClick: { Task { await environment.testConnection() } },
+                                        height: 34, horizontalPadding: 12
+                                    ) {
+                                        Text("测试连接")
+                                            .font(YuNianTheme.Font.cardAction)
+                                            .foregroundStyle(colors.textPrimary)
+                                    }
+                                }
+                            }
+
+                            if let msg = environment.modelsMessage {
+                                Text(msg)
+                                    .font(.caption)
+                                    .foregroundStyle(
+                                        environment.serverModels.isEmpty
+                                            && !environment.modelsNotSupported
+                                            ? colors.danger : colors.textSecondary
+                                    )
+                                    .textSelection(.enabled)
+                            }
+                            if !environment.serverModels.isEmpty {
+                                Text(environment.serverModels.joined(separator: "、"))
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(colors.textSecondary)
+                                    .textSelection(.enabled)
+                                    .lineLimit(8)
+                            }
+                        }
                     }
 
-                    if let msg = environment.modelsMessage {
-                        Text(msg)
-                            .font(.caption)
-                            .foregroundStyle(
-                                environment.serverModels.isEmpty
-                                    && !environment.modelsNotSupported ? .red : .secondary
-                            )
-                    }
-                    if !environment.serverModels.isEmpty {
-                        Text(environment.serverModels.joined(separator: "、"))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .lineLimit(8)
-                    }
-                }
-
-                if let errorText {
-                    Section {
+                    if let errorText {
                         Text(errorText)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(colors.danger)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, YuNianTheme.Space.minUnit)
                     }
+
+                    Spacer(minLength: YuNianTheme.Space.pageTop)
                 }
+                .padding(.horizontal, YuNianTheme.Space.page)
+                .padding(.top, YuNianTheme.Space.standard)
             }
+            .background(colors.background.ignoresSafeArea())
             .navigationTitle("模型渠道")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .foregroundStyle(colors.textSecondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
                         .bold()
+                        .foregroundStyle(colors.primary)
                 }
             }
             .task { prefill() }
@@ -186,9 +232,8 @@ struct ChannelConfigView: View {
     ///
     /// 与 Android 从预设新建配置时同源（SettingsScreen.kt:469-476）。
     private func applyPreset(_ value: String) {
-        guard let p = YuNianSeed.apiProviderPresets.first(where: { $0.provider == value }) else {
-            return
-        }
+        guard let p = YuNianSeed.apiProviderPresets
+            .first(where: { $0.provider == value }) else { return }
         baseUrl = p.baseUrl
         model = p.model
         formatHint = p.formatHint
@@ -201,7 +246,6 @@ struct ChannelConfigView: View {
     // MARK: - 保存
 
     private func save() {
-        // ── 校验（对齐 Rust load_api_config 的硬性要求，见仓库注释 L128）──
         let trimmedBase = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -228,7 +272,6 @@ struct ChannelConfigView: View {
         }
 
         do {
-            // 先落库（Rust 的关键路径依赖这条启用行），再写 Keychain
             _ = try environment.apiConfigs?.upsertActiveConfig(
                 provider: provider,
                 model: trimmedModel,
@@ -236,11 +279,7 @@ struct ChannelConfigView: View {
                 name: name.isEmpty ? (preset?.displayName ?? provider) : name,
                 formatHint: formatHint
             )
-            try environment.setAPIKey(
-                trimmedKey,
-                provider: provider,
-                model: trimmedModel
-            )
+            try environment.setAPIKey(trimmedKey, provider: provider, model: trimmedModel)
             environment.syncRuntimeConfig()
             saved = true
             errorText = nil
