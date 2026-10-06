@@ -174,7 +174,7 @@ struct ImageGenClient {
                 guard (200...299).contains(code) else {
                     throw ImageGenError.http(extractErrorMessage(data) ?? "HTTP \(code)")
                 }
-                return try parseImageItems(data)
+                return try await parseImageItems(data)
             } catch let e as ImageGenError {
                 throw e
             } catch {
@@ -267,7 +267,14 @@ struct ImageGenClient {
     }
 
     /// 取图：`b64_json` 优先，`url` 回退（Kotlin :27、:208）。
-    private func parseImageItems(_ data: Data) throws -> [Data] {
+    ///
+    /// ⚠️ 第 151 轮：改成 `async`。
+    /// Kotlin 的 `parseImageItems` 是普通函数，但它内部调的是同步的
+    /// `runBlocking`/OkHttp 同步调用；Swift 侧 `URLSession.data(from:)`
+    /// 是 async，所以本函数必须是 async。
+    /// CI（f2a194e）报 :282 "'async' call in a function that does not
+    /// support concurrency" —— 正是这里。
+    private func parseImageItems(_ data: Data) async throws -> [Data] {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let arr = root["data"] as? [[String: Any]] else {
             throw ImageGenError.noImageData
