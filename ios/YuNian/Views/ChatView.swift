@@ -7,6 +7,8 @@ import SwiftUI
 struct ChatView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
+    /// ⚠️ 第 128 轮：语义色跟随系统明暗。气泡/输入栏/输入框都从这儿取色。
+    @Environment(\.colorScheme) private var scheme
     @StateObject private var session = ChatSession()
     @State private var draft: String = ""
     /// 表情选择面板。⚠️ 第 120 轮加 —— 让用户能主动发表情，
@@ -19,6 +21,9 @@ struct ChatView: View {
     /// 模型仍能回答，用户看到的是一个「没有角色的机器人」，且不报错。
     /// 这种失败必须在界面上说出来，而不是靠用户自己察觉。
     @State private var companionWarning: String?
+
+    /// ⚠️ 第 128 轮：语义色跟随系统明暗，气泡/输入栏都从这儿取。
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -121,31 +126,76 @@ struct ChatView: View {
         }
     }
 
+    /// 气泡。
+    ///
+    /// ## 第 128 轮：套设计系统 + 补气泡小尾巴
+    /// Android 的气泡是 `AppBubbleShape`（AppBubbleShape.kt:34-159）：
+    /// **箭头只开在一侧** —— 对方在左（`BubbleSide.Start`）、自己在右（`End`），
+    /// 箭头宽 5dp / 高 8dp / Y 偏移 14dp（ChatMessageFrame.kt:56,73,74）。
+    ///
+    /// SwiftUI 没有等价的自定义 Shape，这里用 `tail` 画三角小尾巴，
+    /// 尺寸照 Kotlin 的 5/8 换算。
+    ///
+    /// 颜色来自语义 token：自己 = `selfBubbleBackground`、
+    /// 对方 = `aiBubbleBackground`，描边 `aiBubbleBorer` 0.6dp
+    /// （ChatMessageFrame.kt:88-89,96-97）。
     private func bubble(_ message: ChatSession.Message) -> some View {
-        HStack {
-            if message.role == .user { Spacer(minLength: 40) }
-            // 第 119 轮：表情消息按 Android 约定识别。
-            // AiResponseFinalizer.kt:448-449：贴纸消息 = 普通 TEXT 消息，
-            // 内容为 [stickerId]。据此分支：是表情渲染图片，
-            // 否则走原文本路径（含生图标记清洗）。
-            if let sticker = sticker(for: message) {
-                stickerBubble(sticker)
-            } else {
-                // 第 112 轮：模型回复先过 ImageGenProtocol.sanitizeForDisplay
-                // 再显示，否则 [[生图: 画面描述]] 会被当普通文字原样展示。
-                Text(sanitizedDisplay(message))
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(message.role == .user
-                                   ? Color.accentColor.opacity(0.18)
-                                   : Color(uiColor: .secondarySystemBackground))
-                    )
+        let mine = message.role == .user
+        return HStack(alignment: .bottom, spacing: YuNianTheme.Space.minUnit) {
+            if mine { Spacer(minLength: 40) }
+
+            HStack(alignment: .bottom, spacing: 0) {
+                if !mine { tail(isMine: false, colors: colors) }
+
+                if let sticker = sticker(for: message) {
+                    stickerBubble(sticker)
+                } else {
+                    Text(sanitizedDisplay(message))
+                        .textSelection(.enabled)
+                        .padding(.horizontal, YuNianTheme.Space.cardPadding)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: YuNianTheme.Radius.glassDefault,
+                                             style: .continuous)
+                                .fill(mine ? colors.selfBubbleBackground
+                                           : colors.aiBubbleBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: YuNianTheme.Radius.glassDefault,
+                                             style: .continuous)
+                                .strokeBorder(colors.aiBubbleBorder, lineWidth: 0.6)
+                        )
+                        .foregroundStyle(mine ? colors.selfBubbleContent
+                                              : colors.aiBubbleContent)
+                }
+
+                if mine { tail(isMine: true, colors: colors) }
             }
-            if message.role != .user { Spacer(minLength: 40) }
+
+            if !mine { Spacer(minLength: 40) }
         }
+    }
+
+    /// 气泡小尾巴 —— 对应 `AppBubbleShape` 的单侧箭头
+    /// （ChatMessageFrame.kt:73-74：宽 5dp / 高 8dp / Y 偏移 14dp）。
+    private func tail(isMine: Bool, colors: YuNianTheme.Colors) -> some View {
+        Canvas { ctx, _ in
+            var path = Path()
+            if isMine {
+                path.move(to: CGPoint(x: 0, y: 0))
+                path.addLine(to: CGPoint(x: 5, y: 4))
+                path.addLine(to: CGPoint(x: 0, y: 8))
+            } else {
+                path.move(to: CGPoint(x: 5, y: 0))
+                path.addLine(to: CGPoint(x: 0, y: 4))
+                path.addLine(to: CGPoint(x: 5, y: 8))
+            }
+            path.closeSubpath()
+            ctx.fill(path, with: .color(isMine ? colors.selfBubbleBackground
+                                                : colors.aiBubbleBackground))
+        }
+        .frame(width: 5, height: 8)
+        .padding(.bottom, 14)
     }
 
     // MARK: - 表情消息
@@ -214,8 +264,13 @@ struct ChatView: View {
 
     // MARK: - 输入区
 
+    /// 输入栏。
+    ///
+    /// ## 第 128 轮：套设计系统
+    /// 对照 `WeChatChatInputBar.kt:122,126`：输入框圆角 **21dp**
+    /// （不是别处的 12/16/24，聊天专用），外框是玻璃胶囊。
     private var composer: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: YuNianTheme.Space.standard) {
             // ⚠️ 第 120 轮：表情按钮。
             // 在此之前表情只能由模型 send_sticker 发出，用户被绑在
             // "等模型心情好"上。库为空时按钮仍显示，点进去给出导入引导 ——
@@ -225,19 +280,26 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 22))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(colors.textSecondary)
             }
             .disabled(session.isRunning || environment.runtime == nil)
 
             TextField("说点什么…", text: $draft, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, YuNianTheme.Space.cardPadding)
+                .padding(.vertical, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(Color(uiColor: .secondarySystemBackground))
+                    RoundedRectangle(cornerRadius: YuNianTheme.Radius.chatInput,
+                                     style: .continuous)
+                        .fill(colors.card.opacity(0.62))
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: YuNianTheme.Radius.chatInput,
+                                     style: .continuous)
+                        .strokeBorder(colors.divider, lineWidth: 0.6)
+                )
+                .foregroundStyle(colors.textPrimary)
                 .disabled(session.isRunning || environment.runtime == nil)
 
             Button {
@@ -247,6 +309,7 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 28))
+                    .foregroundStyle(colors.primary)
             }
             .disabled(
                 draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -254,8 +317,9 @@ struct ChatView: View {
                 || environment.runtime == nil
             )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, YuNianTheme.Space.page)
+        .padding(.vertical, YuNianTheme.Space.standard)
+        .background(colors.surface)
         .sheet(isPresented: $showStickerPicker) {
             StickerPickerSheet { entryId in
                 session.sendSticker(entryId: entryId, in: environment)
