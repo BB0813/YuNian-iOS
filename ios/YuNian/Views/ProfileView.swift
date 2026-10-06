@@ -71,6 +71,11 @@ struct ProfileView: View {
                     .init(icon: "face.smiling", title: "表情库", subtitle: "导入与管理表情"),
                     .init(icon: "tray.and.arrow.down", title: "备份导入", subtitle: "从 Android 备份恢复"),
                     .init(icon: "magnifyingglass", title: "搜索消息", subtitle: "全文检索聊天记录"),
+                    // ⚠️ 第 150 轮：生图入口。
+                    // Kotlin 侧是 ImageGenCoordinator 自动触发（关键词→概率→冷却），
+                    // iOS 侧那套判定未移植，故这是**手动触发页**。
+                    .init(icon: "photo.badge.sparkles", title: "AI 生图",
+                          subtitle: "OpenAI 兼容协议，手动生成"),
                     .init(icon: "stethoscope", title: "诊断", subtitle: "运行时与契约自检"),
                 ])
                 Spacer(minLength: 12)
@@ -221,6 +226,7 @@ struct ProfileView: View {
         case "表情库": StickerLibraryView()
         case "备份导入": BackupImportView()
         case "搜索消息": MessageSearchView()
+        case "AI 生图": ImageGenView()
         default: DiagnosticsView()
         }
     }

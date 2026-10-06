@@ -72,6 +72,12 @@ EXTERNAL_ALLOWLIST = {
     # 改用 URLComponents。这道关卡随即要求把新外部依赖显式登记 ——
     # 这正是它该有的行为：新依赖不能悄悄进来。
     "URLComponents",
+    # ⚠️ 第 150 轮：URLRequest / URLSession 加入白名单。
+    # ImageGenClient（生图，第 149 轮）要自己发 HTTP —— 之前仓里所有网络
+    # 都走 Rust Agent，iOS 侧这是**第一个直连**网络的组件。
+    # 关卡要求显式登记新外部依赖：这正是它该有的行为。
+    "URLRequest", "URLSession",
+    "HTTPURLResponse", "URLResponse",
     "Task", "AsyncStream", "Continuation", "CheckedContinuation", "UUID", "Date",
     "Data", "URL", "FileManager", "Bundle", "UserDefaults", "JSONSerialization",
     "NSLock", "NSNumber", "NSString", "NSNull", "NSArray", "NSDictionary",
