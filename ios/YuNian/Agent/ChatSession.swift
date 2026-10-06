@@ -28,11 +28,26 @@ final class ChatSession: ObservableObject {
         var text: String
         /// 是否为表情消息（内容仍按 Android 约定存 `[entryId]`）。
         var isSticker: Bool = false
+        /// 生图产出的图片字节（第 165 轮）。
+        ///
+        /// ⚠️ 与 `isSticker` 同理：**显式字段**，不靠文本反推。
+        /// Android 侧图片消息是 `type=IMAGE` + `linkString=<文件路径>`
+        /// （ImageGenTrigger.kt:370-381），iOS 侧消息是内存数组、
+        /// 无落库路径，故直接把字节带在消息上。
+        ///
+        /// 展示层 `ChatView` 据此渲染；为 nil 时走普通文本气泡。
+        var imageData: Data?
+        /// 画面描述（对应 Android 的 `searchContent`）。
+        /// 供将来回喂模型与 UI 说明，当前不进历史。
+        var imagePrompt: String?
 
-        init(role: AgentHistoryRole, text: String, isSticker: Bool = false) {
+        init(role: AgentHistoryRole, text: String, isSticker: Bool = false,
+             imageData: Data? = nil, imagePrompt: String? = nil) {
             self.role = role
             self.text = text
             self.isSticker = isSticker
+            self.imageData = imageData
+            self.imagePrompt = imagePrompt
         }
     }
 
@@ -269,14 +284,15 @@ final class ChatSession: ObservableObject {
             self?.messages.append(Message(role: .assistant, text: text, isSticker: false))
             if isError { self?.lastError = text }
         }
-        coordinator.onImages = { [weak self] (datas: [Data], _: String) in
+        coordinator.onImages = { [weak self] (datas: [Data], prompt: String) in
             // 一条图片消息一张图（Kotlin ImageGenTrigger.kt:367-384）。
-            // ⚠️ iOS 侧消息是内存数组，无图片落库路径；
-            // 这里以图片消息占位（content = "[图片]"，与 Android 约定一致），
-            // 渲染层后续要接真实图片。
-            for _ in datas {
+            // ⚠️ 第 165 轮：把字节带进消息，不再是 "[图片]" 文本占位。
+            // text 仍存 "[图片]"，与 Android 的系统保留标签约定一致
+            // （ImageGenTrigger.kt:408-409），但真值在 imageData 上。
+            for data in datas {
                 self?.messages.append(
-                    Message(role: .assistant, text: "[图片]", isSticker: false))
+                    Message(role: .assistant, text: "[图片]", isSticker: false,
+                            imageData: data, imagePrompt: prompt))
             }
         }
 
