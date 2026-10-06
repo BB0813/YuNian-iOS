@@ -40,6 +40,7 @@ enum ImageGenTrigger {
         var probability = 0                     // :66
         var promptTemplate = "{content}"        // :69
         var cooldownMinutes = 3                 // :68
+        var keywords: [String] = ImageGenTrigger.defaultKeywords   // :67（Kotlin 侧由 DataStore 提供）
     }
 
     /// Kotlin `ImageGenCompanionOverride`（ImageGenTrigger.kt:77-81）
@@ -205,7 +206,7 @@ enum ImageGenTrigger {
             && !global.model.trimmingCharacters(in: .whitespaces).isEmpty
 
         let probability = (override.enabled ? override.probability : global.probability)
-            .clamped(to: 0...100)                        // coerceIn(0,100)（:149）
+            .clampPercent()                                    // coerceIn(0,100)（:149）
         let keywords = override.enabled ? override.keywords : global.keywords
 
         return Effective(
@@ -240,7 +241,7 @@ enum ImageGenTrigger {
         } else if let kw = matchedKeyword {
             let stripped = userText.replacingOccurrences(of: kw, with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            content = stried.isEmpty
+            content = stripped.isEmpty
                 ? ImageGenProtocol.sanitizeForDisplay(aiText)  // ② 回落 AI 正文
                 : stripped
         } else {
@@ -267,7 +268,16 @@ enum ImageGenTrigger {
 }
 
 private extension Int {
-    func clamped(to range: ClosedRange<Int>) -> Int {
-        min(max(self, range.lowerBound), range.upperBound)
+    /// Kotlin `coerceIn(0, 100)`（ImageGenTrigger.kt:149）。
+    ///
+    /// ⚠️ 第 157 轮：改名 `clampPercent`。原名 `clamped(to:)` 与实例的
+    /// `min`/`max` 冲突 —— CI（277634b）报
+    /// "static member 'min' cannot be used on instance of type 'Int'"。
+    ///
+    /// 函数体不用 `Swift.min` 限定形式：那会被 verify_own_types 当成
+    /// 未登记的外部类型。Int 自有 min/max，直接调用即可。
+    func clampPercent() -> Int {
+        let lo = self < 0 ? 0 : self
+        return lo > 100 ? 100 : lo
     }
 }
