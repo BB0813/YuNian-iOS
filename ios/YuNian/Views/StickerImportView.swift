@@ -47,8 +47,9 @@ struct StickerImportView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        // 第 143 轮：改用 YuNianGlassPage（对照 Android GlassTopBar/GlassPageScaffold），
+        // 与其它 push 子页统一。
+        YuNianGlassPage(title: "导入表情", onBack: { dismiss() }) {
                 VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                     YuNianSectionTitle(title: "图片")
@@ -127,15 +128,6 @@ struct StickerImportView: View {
                 .padding(.horizontal, YuNianTheme.Space.page)
                 .padding(.top, YuNianTheme.Space.standard)
             }
-            .background(colors.background.ignoresSafeArea())
-            .navigationTitle("导入表情")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                        .foregroundStyle(colors.textSecondary)
-                }
-            }
             .sheet(isPresented: $showPicker) {
                 PhotoPicker(maxSelection: 20) { data, exts in
                     pickedData = data
@@ -145,7 +137,6 @@ struct StickerImportView: View {
                     showPicker = false
                 }
             }
-        }
     }
 
     // MARK: - 导入
