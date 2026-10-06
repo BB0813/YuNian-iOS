@@ -21,6 +21,9 @@ struct RootView: View {
     /// 请求打到**错误的 baseUrl**（静默失败或 404）—— 正是最难看懂的那类故障。
     /// provider 由用户显式决定，代码不替他猜。
     @State private var providerDraft = "OPENAI"
+    /// 当前一级 tab 索引（0 予念 / 1 通讯录 / 2 我）。
+    /// 第 141 轮加 —— 对应 Android MainScreen.kt:121 的 lastTabPage。
+    @State private var selectedTab = 0
 
     var body: some View {
         NavigationStack {
@@ -28,13 +31,50 @@ struct RootView: View {
                 if let error = environment.startupError {
                     failureView(error)
                 } else if environment.runtime != nil {
-                    homeView
+                    tabbedView
                 } else {
                     ProgressView("正在启动…")
                 }
             }
             .background(Color.clear)
             .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    // MARK: - 三个一级 tab
+
+    /// 第 141 轮：按 Android 的一级 tab 结构重组。
+    ///
+    /// Kotlin 侧（MainNavGraph.kt:436-518）：
+    /// - `home` / `contacts` / `profile` 三页放进 `HorizontalPager`
+    /// - `FloatingGlassBottomNav` 作为**浮层**盖在 pager 之上（align BottomCenter）
+    /// - 选中提交是两段式：先更新视觉索引，等一帧再 scrollToPage
+    ///   （MainBottomBar.kt:79-91）
+    ///
+    /// SwiftUI 侧用 `TabView(.page)` + 底部浮层等价实现。
+    private var tabbedView: some View {
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                homeView
+                    .tag(0)
+                ContactsView()
+                    .tag(1)
+                ProfileView()
+                    .tag(2)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            // 液态玻璃底栏（浮层）
+            YuNianLiquidTabs(
+                tabs: [
+                    .init(title: "予念", icon: "message", route: "home"),
+                    .init(title: "通讯录", icon: "person.2", route: "contacts"),
+                    .init(title: "我", icon: "person", route: "profile"),
+                ],
+                selectedIndex: $selectedTab
+            )
+            .padding(.horizontal, YuNianTheme.Space.page)
+            .padding(.bottom, YuNianTheme.Space.half)
         }
     }
 
