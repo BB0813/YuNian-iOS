@@ -97,26 +97,28 @@ extension EnvironmentValues {
     }
 }
 
-// MARK: - 分叉的玻璃修饰符
+
+// MARK: - 分叉的玻璃修饰符（第 177 轮重写为 ViewModifier）
 
 extension View {
 
-    /// 毛玻璃背景 —— 按 `YuNianGlassStyle` 分叉。
+    /// 毛玻璃背景 —— 按 `YuNianGlassStyle` 分叉到两条原生实现。
     ///
     /// - Parameters:
-    ///   - colors: 语义色。legacy 档用于取描边色与"无材质时的兜底纯色"，
-    ///     liquidGlass 档只用于 glass tint。
-    ///   - radius: 圆角。两档都用；liquidGlass 用 `.rect(cornerRadius:)`。
-    ///   - tint: 玻璃着色。liquidGlass 档映射到 `.glassEffect(.tint(...))`。
+    ///   - colors: 语义色。legacy 档用于描边色；liquidGlass 档不用它。
+    ///   - radius: 圆角。两档都用。
+    ///   - surfaceColor: 可选底色。liquidGlass 档下作为 tint 传入。
+    ///   - tint: 玻璃着色。显式传入时优先于 surfaceColor。
     ///
-    /// ## 两条分支
-    /// ```
-    /// iOS 26+  → .glassEffect(.regular.tint(c), in: .rect(cornerRadius: r))
-    /// iOS 17-25 → .background(.ultraThinMaterial) + 暗色描边
-    /// ```
+    /// ⚠️ 第 177 轮重写。上一版的两个编译错：
+    ///   1. `@available(iOS 26.0, *)` 标在**辅助方法**上不够 ——
+    ///      调用点没有 `#available` 守卫，编译器仍报
+    ///      "'liquidGlass(radius:tint:)' is only available in iOS 26.0 or newer"。
+    ///   2. `var out = self.background(...)` 后 `out = out.overlay(...)` ——
+    ///      opaque `some View` 不能重新赋值。
     ///
-    /// ⚠️ 与手搓版的视觉差异是**预期的**：手搓版是对 Android 玻璃的近似，
-    /// 这两档都是 Apple 原生。用户的新目标就是"要原生，不要近似"。
+    /// 改用 `ViewModifier` 结构体两个都消失：可用性标在 struct 上、
+    /// 调用点在 `if #available` 块内；body 里是链式调用、不重新赋值。
     @ViewBuilder
     func yuNianGlass(
         _ colors: YuNianTheme.Colors,
@@ -125,55 +127,23 @@ extension View {
         tint: Color? = nil,
         isDark: Bool
     ) -> some View {
-        let style = YuNianGlassStyle.current()
-        switch style {
-        case .liquidGlass:
-            liquidGlass(radius: radius, tint: tint ?? surfaceColor)
-        case .legacy:
-            legacyGlass(colors: colors, radius: radius,
-                        surfaceColor: surfaceColor, isDark: isDark)
-        }
-    }
-
-    /// iOS 26+ 原生 Liquid Glass。
-    @available(iOS 26.0, *)
-    private func liquidGlass(radius: CGFloat, tint: Color?) -> some View {
-        let glass: Glass = {
-            guard let tint else { return .regular }
-            return .regular.tint(tint)          // 只有 tint 非空才包一层
-        }()
-        return self
-            .glassEffect(glass, in: .rect(cornerRadius: radius))
-    }
-
-    /// iOS 17–25 原生材质。
-    ///
-    /// 暗色下加 0.5dp 白@0.07 描边 —— 沿用 `GlassCard.kt:49` 的取值，
-    /// 因为 ultraThinMaterial 在暗色下边缘太糊，需要一道边才立得住。
-    private func legacyGlass(
-        colors: YuNianTheme.Colors,
-        radius: CGFloat,
-        surfaceColor: Color?,
-        isDark: Bool
-    ) -> some View {
-        var out = self
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        if isDark {
-            out = out.overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5)
+        if #available(iOS 26.0, *), YuNianGlassStyle.current() == .liquidGlass {
+            self.modifier(
+                LiquidGlassModifier(radius: radius, tint: tint ?? surfaceColor)
+            )
+        } else {
+            self.modifier(
+                LegacyMaterialModifier(radius: radius, isDark: isDark)
             )
         }
-        return out
     }
 
-    /// 第 123–174 轮的手搓三层实现 —— **已废弃，仅作参考保留**。
+    /// 第 123–175 轮的手搓三层实现 —— **已废弃，仅作参考保留**。
     ///
-    /// 保留原因：它是逐条对齐 Kotlin `GlassSurface.kt:25-64` 的复刻，
-    /// 将来若要在某个平台复现 Android 原样观感，这份代码是唯一的依据。
-    /// 默认路径已不走这里（见 `yuNianGlass` 的分叉）。
-    @available(*, deprecated, message: "改用 yuNianGlass（按 OS 分叉到原生材质/原生 Liquid Glass）")
+    /// 保留原因：它逐条对齐 Kotlin `GlassSurface.kt:25-64`，
+    /// 将来若要复现 Android 原样观感，这份代码是唯一依据。
+    /// 默认路径已不走这里。
+    @available(*, deprecated, message: "改用 yuNianGlass（按 OS 分叉到原生材质 / 原生 Liquid Glass）")
     func yuNianGlassHandRolled(
         _ colors: YuNianTheme.Colors,
         radius: CGFloat = YuNianTheme.Radius.glassDefault,
@@ -181,6 +151,7 @@ extension View {
         isDark: Bool
     ) -> some View {
         let base = surfaceColor ?? colors.glassSurface
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return self
             .background(
                 ZStack {
@@ -196,11 +167,57 @@ extension View {
                     )
                 }
             )
-            .cornerRadius(radius)
+            .clipShape(shape)
             .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(isDark ? Color.white.opacity(0.07) : Color.clear,
-                                  lineWidth: 0.5)
+                shape.strokeBorder(
+                    isDark ? Color.white.opacity(0.07) : Color.black.opacity(0.06),
+                    lineWidth: 0.5
+                )
+            )
+    }
+}
+
+// MARK: - 两个原生实现
+
+/// iOS 26+ 原生 Liquid Glass。
+///
+/// Apple 26 代的玻璃会自动采样背后的内容并与相邻玻璃融合，
+/// 这正是手搓版做不到的那部分。
+@available(iOS 26.0, *)
+private struct LiquidGlassModifier: ViewModifier {
+    let radius: CGFloat
+    let tint: Color?
+
+    func body(content: Content) -> some View {
+        if let tint {
+            content.glassEffect(.regular.tint(tint), in: .rect(cornerRadius: radius))
+        } else {
+            content.glassEffect(.regular, in: .rect(cornerRadius: radius))
+        }
+    }
+}
+
+/// iOS 17–25 原生材质。
+///
+/// 用 `.ultraThinMaterial` —— 系统自己的模糊材质，
+/// 与同期系统控件（导航栏、Sheet、Alert）观感一致。
+///
+/// 暗色下加 0.5dp 白@0.07 描边：取值沿用 `GlassCard.kt:49`，
+/// 因为 ultraThinMaterial 在暗色下边缘太糊，需要一道边才立得住。
+private struct LegacyMaterialModifier: ViewModifier {
+    let radius: CGFloat
+    let isDark: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(.ultraThinMaterial)
+            .clipShape(shape)
+            .overlay(
+                shape.strokeBorder(
+                    isDark ? Color.white.opacity(0.07) : Color.clear,
+                    lineWidth: isDark ? 0.5 : 0
+                )
             )
     }
 }
