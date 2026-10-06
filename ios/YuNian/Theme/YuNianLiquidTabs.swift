@@ -85,9 +85,13 @@ struct YuNianLiquidTabs: View {
     }
 
     var body: some View {
+        // ⚠️ 第 136 轮：tabWidth 抽成私有计算属性。
+        // 原写法把 `(geo.size.width - minUnit*2) / count` 内联在 GeometryReader
+        // 闭包里，与外层 ZStack/HStack/overlay 一起超出编译器推导预算，
+        // CI 报 "unable to type-check this expression in reasonable time"
+        // （同一类错误第 131 轮在 StickerImportView 也犯过）。
         GeometryReader { geo in
-            let tabWidth = (geo.size.width - YuNianTheme.Space.minUnit * 2)
-                / CGFloat(max(tabs.count, 1))
+            let tabWidth = tabWidth(for: geo.size.width)
 
             ZStack(alignment: .leading) {
                 // ── 选中的滑动药丸（近似 Kotlin selectionModifier）──
@@ -124,6 +128,13 @@ struct YuNianLiquidTabs: View {
             }
         }
         .frame(height: YuNianTheme.LiquidMetric.barHeight)
+    }
+
+    /// Kotlin `LiquidBottomTabs.kt:253-255`：
+    /// `tabWidthPx = (maxWidthPx - contentPadding * 2) / tabsCount`
+    private func tabWidth(for containerWidth: CGFloat) -> CGFloat {
+        let padding = YuNianTheme.Space.minUnit
+        return (containerWidth - padding * 2) / CGFloat(max(tabs.count, 1))
     }
 
     /// 单个 tab。
@@ -163,15 +174,24 @@ struct YuNianLiquidTabs: View {
     }
 }
 
-// MARK: - 尺寸 token
 
-enum YuNianLiquidMetric {
-    /// `LiquidBottomTabs.kt:158` containerHeight = 64.dp
-    static let barHeight: CGFloat = 64
-    /// `LiquidBottomTabs.kt:182` outerLensRadius = 24.dp
-    static let outerLensRadius: CGFloat = 24
-    /// `LiquidBottomTabs.kt:183` selectionLensRadius = 10.dp
-    static let selectionLensRadius: CGFloat = 10
-    /// `LiquidBottomTabs.kt:184` selectionChromaticRadius = 14.dp
-    static let selectionChromaticRadius: CGFloat = 14
+extension YuNianTheme {
+    /// 液态 Tab 尺寸 token。
+    ///
+    /// ⚠️ 第 136 轮：原本写成顶层 `enum YuNianLiquidMetric`，
+    /// 调用处写 `YuNianTheme.LiquidMetric` 就解析不到
+    /// （CI 报 "type 'YuNianTheme' has no member 'LiquidMetric'"）。
+    /// 改成嵌套，与 Radius / Space / TextStyle 的组织方式一致。
+    ///
+    /// 来源：`LiquidBottomTabs.kt`
+    enum LiquidMetric {
+        /// `containerHeight = 64.dp`（:158）
+        static let barHeight: CGFloat = 64
+        /// `outerLensRadius = 24.dp`（:182）
+        static let outerLensRadius: CGFloat = 24
+        /// `selectionLensRadius = 10.dp`（:183）
+        static let selectionLensRadius: CGFloat = 10
+        /// `selectionChromaticRadius = 14.dp`（:184）
+        static let selectionChromaticRadius: CGFloat = 14
+    }
 }
