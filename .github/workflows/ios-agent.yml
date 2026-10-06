@@ -368,6 +368,37 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             > "$RUNNER_TEMP/xcodebuild.log" 2>&1
           code=$?
+
+          # ⚠️ 第 180 轮：再用 legacy 档跑一遍。
+          #
+          # 起因：`#available(iOS 26.0, *)` 在这个模拟器上恒真 ——
+          # 也就是说 **iOS 17–25 那条路（`.ultraThinMaterial`）CI 从来没跑过**。
+          # 用户要的是"17 与 26 分水岭"，结果一半分支零验证。
+          #
+          # `YUNIAN_GLASS_STYLE=legacy` 让 `YuNianGlassStyle.current()`
+          # 返回 legacy（优先级高于 OS 判断），于是同一份 iOS 26 模拟器
+          # 也能走到旧原生 UI 那条分支。
+          #
+          # 第一遍失败就不再跑第二遍 —— 分水岭的一条腿断了也是断。
+          if [ "$code" -eq 0 ]; then
+            echo "==== 第二遍：强制 legacy 档（验证 iOS 17–25 分支）===="
+            YUNIAN_GLASS_STYLE=legacy xcodebuild test \
+              -project YuNian.xcodeproj \
+              -scheme YuNian \
+              -destination "platform=iOS Simulator,name=$DEVICE" \
+              -configuration Debug \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              > "$RUNNER_TEMP/xcodebuild-legacy.log" 2>&1
+            legacy_code=$?
+            echo "legacy 档 xcodebuild 退出码：$legacy_code"
+            if [ "$legacy_code" -ne 0 ]; then
+              # 把 legacy 的日志并进主日志，统一走后面的 grep / artifact
+              cat "$RUNNER_TEMP/xcodebuild-legacy.log" >> "$RUNNER_TEMP/xcodebuild.log"
+              code=$legacy_code
+            fi
+          fi
           set -e
           echo "xcodebuild 退出码：$code"
           # ⚠️ 第 83 轮：300 行还是不够 —— 带 `文件:行号` 的诊断行排在

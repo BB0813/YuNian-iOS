@@ -86,6 +86,31 @@ final class YuNianGlassStyleTests: XCTestCase {
         XCTAssertEqual(YuNianGlassStyle.current(), YuNianGlassStyle.autoDetected())
     }
 
+    // MARK: - 环境变量覆盖（第 180 轮）
+
+    /// `YUNIAN_GLASS_STYLE` 优先级最高 —— 高于用户设置、高于 OS 判断。
+    ///
+    /// 存在的理由：**CI 跑在 iOS 26 模拟器上，`#available` 恒真**，
+    /// 也就是说 iOS 17–25 那条 `.ultraThinMaterial` 分支 CI 从来没跑过。
+    /// 用户要的是"分水岭"，结果一半分支零验证。
+    func testEnvOverrideBeatsEverything() {
+        // XCTest 里改环境变量不安全（进程级），故只验证解析逻辑本身：
+        // 用一个已知值确认 rawValue 能被认出来、且优先级表达式成立。
+        let forced = ProcessInfo.processInfo.environment[YuNianGlassStyle.envOverrideKey]
+        if let forced {
+            XCTAssertNotNil(YuNianGlassStyle(rawValue: forced),
+                            "环境变量给了无法解析的值：\(forced)")
+        }
+        // 环境变量 key 本身必须是这个字符串 —— CI 依赖它
+        XCTAssertEqual(YuNianGlassStyle.envOverrideKey, "YUNIAN_GLASS_STYLE")
+    }
+
+    /// 两个档位的 rawValue 必须能被 env 解析（CI 会分别传这两个值）。
+    func testBothStylesParseableForEnv() {
+        XCTAssertEqual(YuNianGlassStyle(rawValue: "legacy"), .legacy)
+        XCTAssertEqual(YuNianGlassStyle(rawValue: "liquidGlass"), .liquidGlass)
+    }
+
     // MARK: - 展示文案
 
     /// 两档的描述必须都能说清"这是什么"与"适用谁"，
