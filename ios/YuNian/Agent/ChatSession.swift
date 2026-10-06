@@ -204,10 +204,78 @@ final class ChatSession: ObservableObject {
         if streamingText.isEmpty, !result.finalText.isEmpty {
             complete(fullText: result.finalText, finishReason: result.finishedReason)
         }
+
+        // ⚠️ 第 160 轮：回合结束后尝试生图。
+        // Kotlin 在 `ChatGenerationManager.kt:1419-1456` 用**独立协程**做这件事，
+        // 绝不阻塞聊天主流程；这里同样放在 `defer` 之外、`isRunning` 置回 false
+        // **之前**调用，保证用户看到的"停止"状态与生图互斥。
+        await maybeTriggerImageGen(
+            userText: trimmed,
+            aiText: result.finalText,
+            environment: environment
+        )
+    }
+
+    // MARK: - 生图协调
+
+    /// 回合结束后的生图尝试。
+    ///
+    /// ## 权威来源（第 160 轮）
+    /// Kotlin `ChatGenerationManager.kt:1419-1456`：
+    /// 独立协程 + 总开关预检（:1420）+ 异常全吞（生图失败绝不影响聊天）。
+    ///
+    /// ## iOS 侧的开关从哪来
+    /// Kotlin 用 DataStore 的 `image_gen_enabled`（默认 false）。
+    /// iOS 侧没有那份设置，故此处**恒不自动触发**，除非：
+    /// - 用户已在「AI 生图」页保存过配置（见 `ImageGenStore`）
+    ///
+    /// 这样默认行为与 Kotlin 的 `DEFAULT_IMAGE_GEN_ENABLED = false` 一致，
+    /// 不会在用户没要生图时突然弹图。
+    ///
+    /// ⚠️ 未做：per-companion override（Kotlin 的
+    /// `ChatDetailSettingsStore` 那套）。iOS 恒传空 override。
+    private func maybeTriggerImageGen(
+        userText: String,
+        aiText: String,
+        environment: AppEnvironment
+    ) async {
+        guard let prefs = ImageGenStore.load() else { return }   // 未配置 → 不触发
+        guard let cfg = try? environment.apiConfigs?.activeConfig() else { return }
+
+        var coordinator = ImageGenCoordinator(
+            deps: .init(
+                global: prefs.globalConfig,
+                override: .init(),
+                mainConnection: (cfg.baseUrl, KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""),
+                configBaseUrl: cfg.baseUrl,
+                configApiKey: KeychainStore.string(for: KeychainStore.Key.apiKey) ?? "",
+                lastGenAtMs: prefs.lastGenAtMs,
+                saveLastGenAt: { prefs.lastGenAtMs = $0; ImageGenStore.save(prefs) }
+            )
+        )
+        coordinator.onMessage = { text, isError in
+            messages.append(Message(role: .assistant, text: text, isSticker: false))
+            if isError { lastError = text }
+        }
+        coordinator.onImages = { datas, _ in
+            // 一条图片消息一张图（Kotlin ImageGenTrigger.kt:367-384）。
+            // ⚠️ iOS 侧消息是内存数组，无图片落库路径；
+            // 这里以图片消息占位（content = "[图片]"，与 Android 约定一致），
+            // 渲染层后续要接真实图片。
+            for _ in datas {
+                messages.append(
+                    Message(role: .assistant, text: "[图片]", isSticker: false))
+            }
+        }
+
+        _ = await coordinator.run(
+            userText: userText,
+            aiText: aiText,
+            companionId: companionId ?? 0
+        )
     }
 
     // MARK: - 事件落地
-
     /// 把回合事件转成界面消息。
     ///
     /// ## 表情消息的编码约定（**与 Android 全仓统一**）
