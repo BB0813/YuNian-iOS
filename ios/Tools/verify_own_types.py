@@ -43,6 +43,11 @@ EXTERNAL_ALLOWLIST = {
     "String", "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16",
     "UInt32", "UInt64", "Double", "Float", "Bool", "Character", "Array", "Dictionary",
     "Set", "Optional", "Result", "Error", "Never", "Void", "Any", "AnyObject",
+    # SwiftUI
+    # ⚠️ 第 141 轮：TabView 加入白名单。
+    # 三个一级 tab（予念/通讯录/我）用 TabView(.page) 实现，
+    # 对应 Android MainNavGraph.kt:436-474 的 HorizontalPager。
+    "TabView",
     # SwiftUI 基础视图/图形
     # ⚠️ 第 123 轮：LinearGradient / EmptyView / Gradient.Stop 加入白名单。
     # 玻璃组件的竖直高光渐变要用（GlassSurface.kt:52-58 的
