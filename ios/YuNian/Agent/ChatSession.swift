@@ -312,10 +312,24 @@ final class ChatSession: ObservableObject {
             // ⚠️ 第 165 轮：把字节带进消息，不再是 "[图片]" 文本占位。
             // text 仍存 "[图片]"，与 Android 的系统保留标签约定一致
             // （ImageGenTrigger.kt:408-409），但真值在 imageData 上。
+            //
+            // ⚠️ 第 167 轮：写文件 + 落库 + 填 linkString。
+            // 上一版只在内存里带字节 —— App 一重启图就没了。
+            // Kotlin 把图存 `getExternalFilesDir/generated_images`
+            // （ImageGenerationProvider.kt:51-55 明确**不可用 cache**）；
+            // iOS 侧对应物是 Application Support 下的 generated_images。
+            //
+            // ⚠️ 落库失败**不阻断**渲染：图已经在屏幕上了，
+            // 重启后少这一条比"这条消息挡住下一张"好。
             for data in datas {
                 self?.messages.append(
                     Message(role: .assistant, text: "[图片]", isSticker: false,
                             imageData: data, imagePrompt: prompt))
+            // 需要 repo 才能落库；拿不到就只在内存里显示
+            //（拿不到 database 的情况极少，且上面已 guard 过一次）。
+            if let repo = self?.messageRepository(for: environment) {
+                self?.persistImage(data: data, prompt: prompt, repo: repo)
+            }
             }
         }
 
@@ -466,10 +480,59 @@ final class ChatSession: ObservableObject {
         for r in rows {
             let key = "\(r.isFromUser ? "user" : "assistant")|\(r.content)|false|-1"
             if seen.contains(key) { continue }
+
+            // ⚠️ 第 167 轮：图片消息从 linkString 读文件回来。
+            // 上一版读到 "[图片]" 就只是个文本占位 —— 重启后图没了。
+            // 读不到文件时退回文本（消息仍可见），与 Android
+            // "资源缺失时显示描述"的处理一致。
+            if r.type == "image" {
+                if let link = r.linkString,
+                   let data = FileManager.default.contents(atPath: link) {
+                    loaded.append(Message(role: r.isFromUser ? .user : .assistant,
+                                          text: r.content, isSticker: false,
+                                          imageData: data,
+                                          imagePrompt: r.searchContent))
+                    continue
+                }
+            }
             loaded.append(Message(role: r.isFromUser ? .user : .assistant, text: r.content))
         }
         guard !loaded.isEmpty else { return }
         messages.insert(contentsOf: loaded, at: 0)
+    }
+
+    /// 把生图结果落盘 + 落库（第 167 轮）。
+    ///
+    /// ## 顺序很关键
+    /// 先写库拿到 `messageId`，再用它命名文件 —— 这样
+    /// `linkString`（Android 侧的绝对路径）与文件名永远对得上，
+    /// 不会出现"库里有 messageId 27、磁盘上却是 gen_28.png"。
+    ///
+    /// ## Kotlin 对应
+    /// `ImageGenTrigger.kt:370-381` 的 `ChatMessage` 构造：
+    /// `content = "[图片]"`（系统保留标签）、`type = IMAGE`、
+    /// `linkString = image.filePath`、`searchContent = prompt`。
+    /// iOS 侧 type 用字符串 "image"（MessageType 序列名）。
+    private func persistImage(data: Data, prompt: String, repo: MessageRepository) {
+        do {
+            let messageId = try repo.insert(
+                conversationId: companionId ?? 0,
+                conversationType: .chat,
+                isFromUser: false,
+                senderId: 0,
+                type: "image",
+                content: "[图片]",
+                searchContent: prompt
+            )
+            let url = try AppPaths.generatedImageURL(messageId: messageId)
+            try data.write(to: url, options: .atomic)
+            // 把路径回填进 linkString（Kotlin 的附件就是它，无独立附件表）。
+            try repo.updateLinkString(messageId: messageId, linkString: url.path)
+        } catch {
+            // 落盘/落库失败只进日志：图已在屏幕上显示，
+            // 用户此刻的体验不受影响；重启后少这一条是可接受的损失。
+            log.error("生图落库失败：\(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// 组装发给 Rust 的历史。

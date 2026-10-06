@@ -199,6 +199,26 @@ final class MessageRepository {
         var linkString: String?
     }
 
+    /// 只更新 `message_bodies.linkString`（第 167 轮）。
+    ///
+    /// ## 为什么单独一个方法
+    /// 生图落库时 `insert` 先返回 messageId，再用它命名文件，
+    /// 然后**回填**路径。Kotlin 侧 `ChatMessage.linkString` 是构造时
+    /// 一次性给的（ImageGenTrigger.kt:379），因为它那边文件路径可预知
+    /// （时间戳命名）；iOS 侧选择用 messageId 命名，故需要回填。
+    ///
+    /// 不做 FTS 刷新 —— linkString 不进索引，与 Kotlin 一致。
+    @discardableResult
+    func updateLinkString(messageId: Int64, linkString: String) throws -> Bool {
+        try database.pool.write { db in
+            try db.execute(
+                sql: "UPDATE message_bodies SET linkString = ? WHERE messageId = ?",
+                arguments: [linkString, messageId]
+            )
+            return db.changesCount > 0
+        }
+    }
+
     /// 更新正文并同步刷新检索索引。
     ///
     /// 对应 Android `MessageDao.updateMessageContent`：**只有真的更新到行才重建索引**
