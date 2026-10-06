@@ -115,16 +115,21 @@ struct ConversationRepository {
                 """
             let grdbRows = try GRDB.Row.fetchAll(db, sql: sql, arguments: [limit])
             return grdbRows.map { r in
+                // ⚠️ 第 173 轮：不用 memberwise init。
+                // ConvRow 有 8 个字段（其中 3 个带默认值），合成 init 的
+                // 参数顺序按**声明顺序**，而我按业务顺序写标签就会报
+                // "incorrect argument labels in call"（CI 8383de8）。
+                // 逐字段赋值不依赖顺序，也不受将来加字段影响。
                 var row = ConvRow(
                     companionId: r["companionId"] as Int64? ?? 0,
                     name: r["name"] as String? ?? "",
                     avatarUrl: r["avatarUrl"] as String?,
-                    lastMessage: r["lastContent"] as String?
-                        .map { String($0.prefix(100)) },      // take(100)
+                    lastMessage: (r["lastContent"] as String?).map { String($0.prefix(100)) },
                     lastMessageAt: r["lastTs"] as Int64?,
+                    lastMessageFromUser: (r["lastFromUser"] as Int? ?? 0) != 0,
+                    hasUnread: false,
                     intimacy: r["intimacy"] as Int? ?? 0
                 )
-                row.lastMessageFromUser = (r["lastFromUser"] as Int? ?? 0) != 0
                 return row
             }
         }
