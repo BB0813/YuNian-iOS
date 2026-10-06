@@ -118,6 +118,7 @@ xcodebuild test \
 | `ImageGenTriggerTests` | 生图触发判定：判定顺序（总开关→配置→关键词→概率→冷却）/ 概率严格 `<` 边界（roll 29 中 30 不中）/ 冷却三条边界（含"正好等于"不冷却）/ override 成对覆盖且无权动冷却 / parseKeywords 三分隔符保序去重 / buildPrompt 四级优先级与 800 截断 |
 | `ContentForModelTests` | 图片消息回喂模型的系统注记：**逐字**对齐 Kotlin 措辞（BUG-1 教训）/ 无 prompt 或纯空白时原样 / 非图片消息不变 |
 | `ReadCursorTests` | 已读游标：无游标时全未读 / 用户消息与 TOOL_ACTIVITY、REASONING 不计 / **同一毫秒内用 (timestamp, id) 二元组判界** / markRead 后新消息重新计未读 / 最新是 TOOL_ACTIVITY 不推进游标 |
+| `YuNianGlassStyleTests` | 毛玻璃分水岭：显式覆盖优先于 OS / 垃圾值与 nil 回落自动 / autoDetected 在 iOS 26+ 返回 liquidGlass、26 以下返回 legacy / rawValue 往返 / current() 读写 UserDefaults / 文案点明"原生"与 OS 范围 |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译

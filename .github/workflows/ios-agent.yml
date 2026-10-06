@@ -277,19 +277,30 @@ jobs:
   app-simulator:
     name: 编译模拟器 App（无需签名）
     needs: rust-ios
-    # ⚠️ 第 71 轮：从 macos-14 换成 macos-15。
-    # macos-14 自带 Xcode 15.4，它与 xcodegen 生成的 project format 不匹配：
-    #   · xcodegen 2.46 → format 77（装最新版时撞到）
-    #   · xcodegen 2.44 → format 70（锁版本后仍撞到）
-    # 两次都在"猜哪个 xcodegen 版本配哪代 Xcode"，而这是猜不完的。
-    # 改为让**运行器的 Xcode 去匹配生成器**：macos-15 自带 Xcode 16.x，
-    # 读 format 70/77 都没有问题。
-    # 只改这个 job —— rust-ios 在 macos-14 上已验证通过，不动它。
-    runs-on: macos-15
+    # ⚠️ 第 176 轮：从 macos-15 换成 macos-26（Xcode 16.x → 26.x）。
+    #
+    # 起因是用户的新要求：**iOS 17 与 26 分水岭** ——
+    #   · iOS 17–25 走旧原生 UI
+    #   · iOS 26+ 走新的毛玻璃（Liquid Glass）原生 UI
+    # iOS 26 的原生玻璃 API（`.glassEffect` / `GlassEffectContainer` 等）
+    # 只有 Xcode 26 的 iOS 26 SDK 才有。macos-15 自带 Xcode 16.4，
+    # 连 `#available(iOS 26.0, *)` 里的 API 都编译不了。
+    #
+    # 这不是"为了用新东西而升级"，是**没有 iOS 26 SDK 就写不了 iOS 26 的 UI**。
+    # 若 macos-26 镜像的 xcodegen 读不了 format 70，回退 macos-15 即可
+    # （改了运行时分支、不引新 API 的那部分仍可在 16.4 上编译）。
+    runs-on: macos-26
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: 打印 Xcode 与 SDK 版本
+        # 新 runner 上第一个要确认的就是"到底有没有 iOS 26 SDK"。
+        # 之前几轮都在猜 runner 带什么版本，这次直接打出来。
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
 
       - name: 下载 Rust 产物
         uses: actions/download-artifact@v4
@@ -429,17 +440,19 @@ jobs:
     # 说明：契约检查（Swift 签名一致性 / schema 一致性 / SQL 时序）
     # 已全部前置到 contract-checks（ubuntu，便宜），此处不再重复。
 
-    # ⚠️ 第 102 轮：runs-on 从 macos-14 改成 macos-15。
-    # 我第一次接这个 job 时写的是 macos-14（自带 Xcode 15.4），
-    # 而 XcodeGen 2.44 生成的工程是 format 70，Xcode 15.4 读不了：
-    #   xcodebuild: error: Unable to read project 'YuNian.xcodeproj'.
-    #   Reason: ...it is in a future Xcode project file format (70).
-    # app-simulator 在第 71 轮就已因此换成 macos-15，我新建 job 时又踩了一次。
-    runs-on: macos-15
+    # ⚠️ 第 176 轮：runs-on 从 macos-15 改成 macos-26。
+    # 见 app-simulator job 里的说明：iOS 26 原生玻璃 UI 需要 Xcode 26
+    # 的 iOS 26 SDK，macos-15 的 Xcode 16.4 编译不了。
+    runs-on: macos-26
     timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: 打印 Xcode 与 SDK 版本
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
 
       - name: 下载 Rust 产物（设备+模拟器切片的 xcframework）
         uses: actions/download-artifact@v4

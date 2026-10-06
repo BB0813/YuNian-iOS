@@ -25,49 +25,6 @@ struct YuNianGlass {
     }
 }
 
-// MARK: - 玻璃修饰符
-
-extension View {
-    /// 对应 `Modifier.drawGlass(shape:surfaceColor:)` —— `GlassSurface.kt:25-64`
-    ///
-    /// 三层叠加，与 Kotlin `onDrawSurface` 的两步一致：
-    /// 1. `glassColor @ 0.50` 半透明底（`GlassSurface.kt:51`）
-    /// 2. 竖直渐变高光：0→白@0.14、0.35→白@0.04、1→白@0（`GlassSurface.kt:52-58`）
-    ///
-    /// 暗色额外加 0.5dp 白@0.07 描边（`GlassCard.kt:49`），亮色不加（`GlassCard.kt:48-52`）。
-    func yuNianGlass(
-        _ colors: YuNianTheme.Colors,
-        radius: CGFloat = YuNianTheme.Radius.glassDefault,
-        surfaceColor: Color? = nil,
-        isDark: Bool
-    ) -> some View {
-        let base = surfaceColor ?? colors.glassSurface
-        return self
-            .background(
-                ZStack {
-                    base.opacity(0.50)
-                    LinearGradient(
-                        stops: [
-                            .init(color: .white.opacity(0.14), location: 0),
-                            .init(color: .white.opacity(0.04), location: 0.35),
-                            .init(color: .white.opacity(0), location: 1),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-            )
-            .cornerRadius(radius)
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(
-                        isDark ? Color.white.opacity(0.07) : Color.black.opacity(0.06),
-                        lineWidth: 0.5
-                    )
-            )
-    }
-}
-
 // MARK: - GlassCard
 
 /// 对应 `GlassCard` —— `GlassCard.kt`
