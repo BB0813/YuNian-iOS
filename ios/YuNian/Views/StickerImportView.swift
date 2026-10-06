@@ -4,10 +4,14 @@ import SwiftUI
 ///
 /// ## 与 Android 对齐的校验（同一来源：`StickerManager` + `StickerPreferenceFacade`）
 /// - 文件名格式 `custom_<ms>_<0..999>.<ext>`
-/// - 按内容 SHA-256 去重（重复内容拒绝）
+/// - 按内容 SHA-256 去重（唯一索引 idx_sticker_entries_hash）
 /// - 上限 500（Android `MAX_IMPORTED_COUNT`）
 /// - 标签：填了走 normalizeTags，没填走 deriveTags
 /// - 来源标记 `imported`
+///
+/// ## 第 129 轮：套上设计系统
+/// 上一版是裸 `Form` + 系统 `TextField`，与 Android 观感无关。
+/// 改用 `YuNianGlassCard` + `YuNianField` + `YuNianGlassButton`。
 ///
 /// ## iOS 侧差异（已记录）
 /// Android 还有「系统保留名」校验（保留名会被发送侧无条件跳过）。
@@ -17,6 +21,8 @@ struct StickerImportView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    /// ⚠️ 第 129 轮：语义色跟随系统明暗。
+    @Environment(\.colorScheme) private var scheme
 
     @State private var pickedData: [Data] = []
     @State private var pickedExts: [String] = []
@@ -28,85 +34,95 @@ struct StickerImportView: View {
     @State private var isImporting = false
     @State private var importedCount = 0
 
+    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Button {
-                        showPicker = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "photo.on.rectangle.angled")
-                            Text(pickedData.isEmpty ? "从相册选择图片" : "重新选择（已选 \(pickedData.count) 张）")
-                        }
-                    }
-                    .disabled(isImporting)
+            ScrollView {
+                VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
-                    if !pickedData.isEmpty {
-                        // 本地预览：让用户在导入前确认选对了图
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(Array(pickedData.enumerated()), id: \.offset) { idx, data in
-                                    if let ui = UIImage(data: data) {
-                                        Image(uiImage: ui)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 72, height: 72)
-                                            .clipped()
-                                            .cornerRadius(8)
+                    YuNianSectionTitle(title: "图片")
+
+                    YuNianGlassCard {
+                        VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                            YuNianGlassButton(
+                                onClick: { showPicker = true },
+                                height: 44, horizontalPadding: 12
+                            ) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                Text(pickedData.isEmpty
+                                     ? "从相册选择图片" : "重新选择（已选 \\(pickedData.count) 张）")
+                                    .font(YuNianTheme.TextStyle.cardAction)
+                            }
+                            .disabled(isImporting)
+
+                            if !pickedData.isEmpty {
+                                // 本地预览：让用户在导入前确认选对了图
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: YuNianTheme.Space.standard) {
+                                        ForEach(Array(pickedData.enumerated()), id: \\.offset) { _, data in
+                                            if let ui = UIImage(data: data) {
+                                                Image(uiImage: ui)
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 72, height: 72)
+                                                    .clipped()
+                                                    .cornerRadius(8)
+                                            }
+                                        }
                                     }
                                 }
                             }
+
+                            Text("支持 png / jpg / gif / webp。内容相同（SHA-256）的表情会被去重。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(colors.textTertiary)
                         }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     }
-                } header: {
-                    Text("图片")
-                } footer: {
-                    Text("支持 png / jpg / gif / webp。内容相同（SHA-256）的表情会被去重。")
-                        .font(.caption2)
-                }
 
-                Section {
-                    TextField("表情名", text: $nameDraft)
-                        .disabled(isImporting)
-                    TextField("标签（用逗号分隔，可留空）", text: $tagsDraft)
-                        .disabled(isImporting)
-                } header: {
-                    Text("元数据")
-                } footer: {
-                    Text("标签留空时由表情名自动拆分生成（最多 3 个）。标签是模型挑选表情的依据，填得准更容易被用到。")
-                        .font(.caption2)
-                }
+                    YuNianSectionTitle(title: "元数据")
 
-                if let statusMessage {
-                    Section {
+                    YuNianGlassCard {
+                        VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                            YuNianField("表情名", text: $nameDraft)
+                                .disabled(isImporting)
+                            YuNianField("标签（用逗号分隔，可留空）", text: $tagsDraft)
+                                .disabled(isImporting)
+                            Text("标签留空时由表情名自动拆分生成（最多 3 个）。标签是模型挑选表情的依据，填得准更容易被用到。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(colors.textTertiary)
+                        }
+                    }
+
+                    if let statusMessage {
                         Text(statusMessage)
                             .font(.caption)
-                            .foregroundStyle(importedCount > 0 ? .green : .red)
+                            .foregroundStyle(importedCount > 0 ? colors.success : colors.danger)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, YuNianTheme.Space.minUnit)
                     }
-                }
 
-                Section {
-                    Button {
-                        Task { await runImport() }
-                    } label: {
-                        HStack {
-                            Text("导入")
-                            if isImporting {
-                                Spacer()
-                                ProgressView()
-                            }
-                        }
+                    YuNianGlassButton(
+                        onClick: { Task { await runImport() } },
+                        height: 48
+                    ) {
+                        Text("导入").bold()
+                        if isImporting { ProgressView() }
                     }
                     .disabled(pickedData.isEmpty || isImporting)
+
+                    Spacer(minLength: YuNianTheme.Space.pageTop)
                 }
+                .padding(.horizontal, YuNianTheme.Space.page)
+                .padding(.top, YuNianTheme.Space.standard)
             }
+            .background(colors.background.ignoresSafeArea())
             .navigationTitle("导入表情")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
+                        .foregroundStyle(colors.textSecondary)
                 }
             }
             .sheet(isPresented: $showPicker) {
@@ -146,15 +162,14 @@ struct StickerImportView: View {
             let ext = idx < pickedExts.count ? pickedExts[idx] : "png"
             let ms = Int64(Date().timeIntervalSince1970 * 1000)
             let rand = Int.random(in: 0...999)
-            let fileName = "custom_\(ms)_\(rand).\(ext)"
+            let fileName = "custom_\\(ms)_\\(rand).\\(ext)"
 
             do {
                 _ = try repo.importSticker(
                     data: data,
                     fileName: fileName,
                     // 多张时名字加序号，避免"已有同名"之外还能看出区别
-                    description: pickedData.count > 1
-                        ? "\(baseName) \(idx + 1)" : baseName,
+                    description: pickedData.count > 1 ? "\\(baseName) \\(idx + 1)" : baseName,
                     userTags: userTags
                 )
                 ok += 1
@@ -168,11 +183,10 @@ struct StickerImportView: View {
         importedCount = ok
         if ok > 0 {
             // 刷新首屏的表情标签展示，并重新下发给 Rust
-            // （settings.stickers 是 builtin_send_sticker 的匹配依据）
             // ⚠️ 用 syncRuntimeConfig() 而非自以为存在的 refreshStickerTags()
-            // —— 前者才真实存在，且做的事正是"重建 stickers 并推送"。
             environment.syncRuntimeConfig()
-            statusMessage = "已导入 \(ok) 个表情" + (failures.isEmpty ? "" : "；\(failures.count) 个失败：\(failures.first!)")
+            statusMessage = "已导入 \\(ok) 个表情"
+                + (failures.isEmpty ? "" : "；\\(failures.count) 个失败：\\(failures.first!)")
         } else {
             statusMessage = failures.first ?? "导入失败"
         }
