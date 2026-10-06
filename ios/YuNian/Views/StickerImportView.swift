@@ -36,6 +36,16 @@ struct StickerImportView: View {
 
     private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
+    /// 选图按钮文案。第 131 轮：从 body 里抽出来。
+    /// CI 报 StickerImportView:39 "the compiler is unable to type-check this
+    /// expression in reasonable time" —— YuNianGlassButton 的 content 闭包里
+    /// 套三元 + ViewBuilder，单表达式太深。抽成计算属性后每层独立推导。
+    private var pickButtonLabel: String {
+        pickedData.isEmpty
+            ? "从相册选择图片"
+            : "重新选择（已选 \(pickedData.count) 张）"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -50,8 +60,7 @@ struct StickerImportView: View {
                                 height: 44, horizontalPadding: 12
                             ) {
                                 Image(systemName: "photo.on.rectangle.angled")
-                                Text(pickedData.isEmpty
-                                     ? "从相册选择图片" : "重新选择（已选 \\(pickedData.count) 张）")
+                                Text(pickButtonLabel)
                                     .font(YuNianTheme.TextStyle.cardAction)
                             }
                             .disabled(isImporting)
