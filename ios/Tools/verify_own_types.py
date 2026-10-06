@@ -72,6 +72,11 @@ EXTERNAL_ALLOWLIST = {
     # 改用 URLComponents。这道关卡随即要求把新外部依赖显式登记 ——
     # 这正是它该有的行为：新依赖不能悄悄进来。
     "URLComponents",
+    # ⚠️ 第 175 轮：RadialGradient 加入白名单。
+    # 群聊头像兜底要用（GroupListItem 的
+    # radialGradient(PinkPrimary@0.6 → PinkPrimary@0.3)，HomeScreen.kt:388-391）。
+    # 第 123 轮加 LinearGradient 时漏了它 —— 那次只做了玻璃卡的高光渐变。
+    "RadialGradient",
     # ⚠️ 第 150 轮：URLRequest / URLSession 加入白名单。
     # ImageGenClient（生图，第 149 轮）要自己发 HTTP —— 之前仓里所有网络
     # 都走 Rust Agent，iOS 侧这是**第一个直连**网络的组件。

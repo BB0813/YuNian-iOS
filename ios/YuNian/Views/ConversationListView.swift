@@ -30,10 +30,15 @@ import SwiftUI
 /// | 行内排布 | Column(spacedBy 3dp)：[标题 weight1f][8dp][时间戳] → 3dp → 副标题 | :506-536 |
 ///
 /// ## iOS 侧省略（如实记录，不是遗漏）
-/// - **群聊区**（`GroupListItem`）—— iOS 无群聊数据模型，`chat_groups` 表虽在 schema 里但无写入方
-/// - **"群聊 / 好友" 两个 tab** —— 同上，没有可分组的内容
 /// - 添加好友/创建群聊两个按钮 —— 对应页面 iOS 均无
 /// - 自适应三档（COMPACT/MEDIUM/EXPANDED）—— iOS 恒取 COMPACT
+///
+/// ## 第 175 轮修正
+/// 初版注释写"iOS 无群聊数据模型，`chat_groups` 表虽在 schema 里但无写入方"，
+/// 据此省掉了整个群聊区与两个 tab。**那个判断是错的** ——
+/// `BackupImporter.swift:143` 就有 `INSERT INTO chat_groups`，
+/// 用户从 Android 备份恢复时群聊会一起导入，`ConversationType.group`
+/// 也早在 `MessageRepository` 里定义。数据一直在，只是我没接 UI。
 struct ConversationListView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
@@ -44,6 +49,9 @@ struct ConversationListView: View {
     @State private var selectedTab = HomeTab.all
 
     @State private var rows: [ConversationRepository.ConvRow] = []
+    /// 群聊列表（第 175 轮）。Android 由 `ChatGroupViewModel.groups` 提供
+    /// （HomeScreen.kt:89 → ChatGroupViewModel.kt:18）。
+    @State private var groups: [ConversationRepository.GroupRow] = []
     @State private var chatCount = 0
     @State private var loaded = false
     @State private var companionForChat: CompanionRepository.Companion?
@@ -56,6 +64,111 @@ struct ConversationListView: View {
     }
 
     private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
+
+    /// 当前 tab 下要显示的群聊（第 175 轮）。
+    ///
+    /// Kotlin `HomeScreen.kt:192-204`：
+    /// ```
+    /// val displayGroups = when (selectedTab) {
+    ///     HomeTab.ALL, HomeTab.GROUP -> groups
+    ///     HomeTab.FRIEND -> emptyList()
+    /// }
+    /// ```
+    private var displayGroups: [ConversationRepository.GroupRow] {
+        switch selectedTab {
+        case .all, .group: return groups
+        case .friend: return []
+        }
+    }
+
+    /// 当前 tab 下要显示的单聊（Kotlin HomeScreen.kt:196-204 的 displayChats）。
+    private var displayChats: [ConversationRepository.ConvRow] {
+        switch selectedTab {
+        case .all, .friend: return rows
+        case .group: return []
+        }
+    }
+
+    /// 三段 TabBar（第 175 轮）。
+    ///
+    /// Kotlin `HomeTabBar`（HomeScreen.kt:284-347）用的是
+    /// `LiquidBottomTabs(containerHeight = 56.dp, contentPadding = 4.dp)`，
+    /// 选中块高 = 56 - 4×2 = 48dp、圆角 outerLens 24 / selectionLens 10。
+    ///
+    /// iOS 侧这里用 `YuNianLiquidTabs`（第 146 轮已复刻那一套），
+    /// 但 containerHeight 固定 64 —— Kotlin 这里是 56。
+    /// ⚠️ 如实记录：64 vs 56 的差异我没做参数化，
+    /// 因为 YuNianLiquidTabs 的高度是编译期常量，改它要动三个调用点。
+    /// 视觉差 8dp，不影响功能。
+    private var tabBar: some View {
+        YuNianLiquidTabs(
+            tabs: [
+                .init(title: HomeTab.all.rawValue, icon: "message", route: "all"),
+                .init(title: HomeTab.group.rawValue, icon: "person.2", route: "group"),
+                .init(title: HomeTab.friend.rawValue, icon: "person", route: "friend"),
+            ],
+            selectedIndex: Binding(
+                get: { HomeTab.allCases.firstIndex(of: selectedTab) ?? 0 },
+                set: { selectedTab = HomeTab.allCases[$0] }
+            )
+        )
+        .padding(.horizontal, YuNianTheme.Space.cardPadding)
+    }
+
+    /// 群聊 item（第 175 轮）—— Kotlin `GroupListItem`（HomeScreen.kt:350-436）。
+    ///
+    /// | 项 | Kotlin 值 | 行号 |
+    /// |---|---|:---|
+    /// | 容器 | ContinuousCapsule + drawGlass(surfaceVariant) + padding h14/v12 | :401-407 |
+    /// | 无头像 | radialGradient(PinkPrimary@0.6→0.3) + Users 图标 | :360-395 |
+    /// | 主标题 | group.name，14sp Normal，onSurface，1 行 | :414-423 |
+    /// | 副标题 | "N 人"，13sp lineHeight 20sp，onSurfaceVariant | :424-433 |
+    /// | 时间戳/未读 | **都没有** | — |
+    private func groupRowView(_ g: ConversationRepository.GroupRow) -> some View {
+        HStack(alignment: .top, spacing: YuNianTheme.Space.standard) {   // avatarGap 8dp
+            ZStack {
+                Circle().fill(colors.card)
+                if let url = g.avatarUrl,
+                   let asset = AvatarResolver.assetName(for: url) {
+                    Image(asset).resizable().scaledToFill()
+                } else {
+                    // Kotlin 的 radialGradient(PinkPrimary@0.6→0.3)  +
+                    // Users 图标 @ iconSize(COMPACT 20dp)
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [colors.primary.opacity(0.6),
+                                         colors.primary.opacity(0.3)],
+                                center: .center, startRadius: 0, endRadius: 20
+                            )
+                        )
+                    Image(systemName: "person.2")
+                        .font(.system(size: 20))
+                        .foregroundStyle(colors.textPrimary)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.tight) {
+                Text(g.name)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(colors.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(g.memberLine)
+                    .font(.system(size: 13))
+                    .lineSpacing(20 - 13)                 // 固定 lineHeight 20sp
+                    .foregroundStyle(colors.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, YuNianTheme.Space.listItem)   // h14
+        .padding(.vertical, YuNianTheme.Space.topBar)       // v12
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .yuNianGlass(colors, radius: .infinity,
+                     surfaceColor: colors.card, isDark: scheme == .dark)
+    }
 
     var body: some View {
         NavigationStack {
@@ -71,9 +184,12 @@ struct ConversationListView: View {
                         .frame(height: YuNianTheme.Space.hairline)
                     Color.clear.frame(height: YuNianTheme.Space.standard)
 
-                    // ⑧ 计数文本 —— Kotlin "${chatCount} 个会话 · N 个群聊"
-                    // iOS 无群聊，故只报会话数。
-                    Text("\(chatCount) 个会话")
+                    // ⑥ 三段 TabBar（第 175 轮补）
+                    tabBar
+                    Color.clear.frame(height: YuNianTheme.Space.half)   // ⑦ Spacer 8dp
+
+                    // ⑧ 计数文本 —— Kotlin "${chatCount} 个会话 · ${groups.size} 个群聊"
+                    Text("\(chatCount) 个会话 · \(groups.count) 个群聊")
                         .font(.system(size: 12))
                         .foregroundStyle(colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,11 +197,15 @@ struct ConversationListView: View {
                         .padding(.bottom, YuNianTheme.Space.half)
 
                     // ⑨ 内容区
-                    if rows.isEmpty {
+                    if displayGroups.isEmpty && rows.isEmpty {
                         emptyState
                     } else {
                         LazyVStack(spacing: YuNianTheme.Space.standard) {   // spacedBy 8dp
-                            ForEach(rows) { row in
+                            // ⚠️ 群聊 item 在单聊**之前**（HomeScreen.kt:243-258）
+                            ForEach(displayGroups) { g in
+                                groupRowView(g)
+                            }
+                            ForEach(displayChats) { row in
                                 if let companion = companion(for: row) {
                                     Button {
                                         companionForChat = companion
@@ -230,6 +350,7 @@ struct ConversationListView: View {
         guard let db = environment.database else { return }
         let repo = ConversationRepository(database: db)
         rows = (try? repo.rows()) ?? []
+        groups = (try? repo.groupRows()) ?? []      // 第 175 轮
         chatCount = (try? repo.chatCount()) ?? 0
 
         // 未读逐个查（第 174 轮：改按 read-through cursor 精确计算，

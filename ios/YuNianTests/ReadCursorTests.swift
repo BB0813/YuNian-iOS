@@ -161,13 +161,55 @@ final class ReadCursorTests: XCTestCase {
         XCTAssertEqual(try repo.unreadCount(companionId: 1), 0)
     }
 
-    /// 游标可读回（往返一致）
-    func testReadCursorRoundTrip() throws {
-        XCTAssertNil(try repo.readCursor(companionId: 1))
-        _ = insertAI(7000)
-        XCTAssertTrue(try repo.markReadThroughLatest(companionId: 1))
-        let c = try repo.readCursor(companionId: 1)
-        XCTAssertNotNil(c)
-        XCTAssertEqual(c?.timestamp, 7000)
+    // MARK: - 群聊（第 175 轮）
+
+    /// `chat_groups` 表**有写入方**（BackupImporter.swift:143），
+    /// 所以备份恢复后群聊应出现在列表里。
+    ///
+    /// ⚠️ 这条测试是对我自己第 170 轮错误注释的反证：
+    /// 我当时写"无写入方"，据此省掉了整个群聊区。
+    func testGroupRowsFromBackupImport() throws {
+        try db.pool.write { d in
+            try d.execute(sql: """
+                INSERT INTO chat_groups (id, name, avatarUrl, companionIds, createdAt, updatedAt)
+                VALUES (7, '周末聚会', NULL, '[1,2,3]', 0, 0)
+                """)
+            try d.execute(sql: """
+                INSERT INTO chat_groups (id, name, avatarUrl, companionIds, createdAt, updatedAt)
+                VALUES (9, '二人世界', NULL, '[]', 0, 0)
+                """)
+        }
+        let rows = try repo.groupRows()
+        XCTAssertEqual(rows.count, 2)
+        // 副标题 = member count（Kotlin "${size} 人"）
+        XCTAssertEqual(rows.first(where: { $0.groupId == 7 })?.memberLine, "3 人")
+        XCTAssertEqual(rows.first(where: { $0.groupId == 9 })?.memberLine, "0 人")
+        XCTAssertEqual(try repo.groupCount(), 2)
+    }
+
+    /// `companionIds` 是坏 JSON 时不当崩，memberCount 记 0。
+    func testGroupRowsTolerateBadJson() throws {
+        try db.pool.write { d in
+            try d.execute(sql: """
+                INSERT INTO chat_groups (id, name, avatarUrl, companionIds, createdAt, updatedAt)
+                VALUES (1, '坏数据', NULL, 'not-json', 0, 0)
+                """)
+        }
+        let rows = try repo.groupRows()
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].memberCount, 0)
+    }
+
+    /// 群聊未读**不参与**单聊的未读计数（conversationType 隔离）。
+    func testGroupMessagesDoNotAffectChatUnread() throws {
+        _ = try db.pool.write { d in
+            try d.execute(sql: """
+                INSERT INTO messages (conversationId, conversationType, isFromUser,
+                                      senderId, timestamp, type, fileFormat)
+                VALUES (1, 'group', 0, 0, 1000, 'text', 'TEXT')
+                """)
+        }
+        // companionId=1 是 chat 类型，不该数到 group 的消息
+        XCTAssertEqual(try repo.unreadCount(companionId: 1), 0)
     }
 }

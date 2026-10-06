@@ -252,4 +252,78 @@ struct ConversationRepository {
             try Int.fetchOne(db, sql: "SELECT COUNT(*) AS c FROM companions") ?? 0
         }
     }
+
+    // MARK: - 群聊（第 175 轮）
+
+    /// 群聊列表项。
+    ///
+    /// ## Kotlin 对应
+    /// `GroupListItem`（HomeScreen.kt:350-436）：
+    /// | 项 | 值 | 行号 |
+    /// |---|---|---|
+    /// | 头像 | avatarSize 圆，无头像时 radialGradient(PinkPrimary@0.6→0.3) + Users 图标 | :360-395 |
+    /// | 主标题 | group.name，bodyLarge Normal，onSurface，1 行 | :414-423 |
+    /// | 副标题 | "${companionIdList.size} 人"，bodyMedium (fontSizeBody-1) lineHeight 20sp，onSurfaceVariant | :424-433 |
+    /// | 时间戳 | **无** | — |
+    /// | 未读 | **无** | — |
+    ///
+    /// ⚠️ Kotlin 的群聊 item **不读 conversation_summary**，
+    /// 所以没有最后消息/时间戳/未读数 —— 即使
+    /// `GroupMessageRepository` 维护了 sessionType="group" 的 summary
+    /// （GroupMessageRepository.kt:288-340）。iOS 照搬这个取舍：
+    /// 群聊 item 就是"头像 + 名字 + N 人"。
+    struct GroupRow: Identifiable, Equatable {
+        let groupId: Int64
+        var name: String
+        var avatarUrl: String?
+        /// 群成员数（`companionIds` JSON 数组长度）。
+        var memberCount: Int
+
+        var id: Int64 { groupId }
+
+        /// Kotlin 副标题原文：`"${group.getCompanionIdList().size} 人"`
+        var memberLine: String { "\(memberCount) 人" }
+    }
+
+    /// 取群聊列表。
+    ///
+    /// 排序 `ORDER BY updatedAt DESC`，与
+    /// `ChatGroupDao.getAllGroups()`（ChatGroupDao.kt:14）一致。
+    ///
+    /// ⚠️ 第 175 轮修正一处我自己的错误注释：
+    /// 第 170 轮我写"`chat_groups` 表虽在 schema 里但**无写入方**"——
+    /// **这是错的**。`BackupImporter.swift:143` 就有 `INSERT INTO chat_groups`，
+    /// 用户从 Android 备份恢复时群聊会一起导入。
+    /// 我据一个没验证的结论省掉了整个群聊区，而数据其实一直在。
+    func groupRows(limit: Int = 100) throws -> [GroupRow] {
+        try database.pool.read { db in
+            let rows = try GRDB.Row.fetchAll(db, sql: """
+                SELECT id, name, avatarUrl, companionIds
+                FROM chat_groups
+                ORDER BY updatedAt DESC
+                LIMIT ?
+                """, arguments: [limit])
+            return rows.map { r in
+                let idsJson = r["companionIds"] as String? ?? "[]"
+                var count = 0
+                if let data = idsJson.data(using: .utf8),
+                   let arr = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+                    count = arr.count
+                }
+                return GroupRow(
+                    groupId: r["id"] as Int64? ?? 0,
+                    name: r["name"] as String? ?? "",
+                    avatarUrl: r["avatarUrl"] as String?,
+                    memberCount: count
+                )
+            }
+        }
+    }
+
+    /// 群聊数量（计数器文本用）。
+    func groupCount() throws -> Int {
+        try database.pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) AS c FROM chat_groups") ?? 0
+        }
+    }
 }
