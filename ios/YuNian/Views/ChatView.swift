@@ -6,6 +6,10 @@ import SwiftUI
 ///        → Rust 决策 + 直连 LLM 的 SSE → `StreamSink` 增量 → 打字机效果。
 struct ChatView: View {
 
+    /// 要对话的伴侣。第 141 轮加 —— 通讯录页点好友行进入时带上。
+    /// 为 nil 时沿用启动时播种的默认伴侣（原行为不变）。
+    let companion: CompanionRepository.Companion?
+
     @EnvironmentObject private var environment: AppEnvironment
     /// ⚠️ 第 128 轮：语义色跟随系统明暗。气泡/输入栏/输入框都从这儿取色。
     @Environment(\.colorScheme) private var scheme
@@ -49,17 +53,25 @@ struct ChatView: View {
             chatTopBar
         }
         .task {
-            // 绑定默认伴侣：Rust 的 load_companion 依赖它才能拿到人设。
+            // 绑定伴侣：Rust 的 load_companion 依赖它才能拿到人设。
             // 失败时给出可见提示，而不是静默继续（否则用户得到无设定的对话）。
             guard session.companionId == nil else { return }
-            if let companion = environment.defaultCompanion {
-                session.companionId = companion.id
-                companionName = companion.name
+            // ⚠️ 第 141 轮：优先用**外部传入**的伴侣（通讯录点进来的），
+            // 没有才回落到启动时播种的默认伴侣。
+            let target = companion ?? environment.defaultCompanion
+            if let target {
+                session.companionId = target.id
+                companionName = target.name
                 companionWarning = nil
             } else {
                 companionWarning = "未能绑定默认伴侣：本轮对话没有人设（Rust 的 load_companion 取不到角色）。"
             }
         }
+    }
+
+    /// companion 为 nil 时仍可无参构造（首屏入口等原有调用点不变）。
+    init(companion: CompanionRepository.Companion? = nil) {
+        self.companion = companion
     }
 
     // MARK: - 消息区
