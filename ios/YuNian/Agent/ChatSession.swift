@@ -548,13 +548,43 @@ final class ChatSession: ObservableObject {
     /// 不清洗的后果：把 toast / API 错误提示 / 空消息也喂给模型，
     /// 且相邻同角色消息不合并（协议上通常是 user/assistant 交替，
     /// 连续两条同角色可能被上游拒绝或行为异常）。
+    /// 消息喂给模型时的正文（第 168 轮）。
+    ///
+    /// ## Kotlin 对应
+    /// `ChatMessage.contentForModel()`（ChatTypeConverters.kt:37-43）：
+    /// type == IMAGE **且** searchContent 非空时，给 content 附加一段
+    /// 「系统注记」。content 本身不变 —— 渲染层仍按 "[图片]" 标签渲染气泡。
+    ///
+    /// ⚠️ **措辞逐字对齐，别顺手"优化"**。
+    /// Kotlin 的注释（ChatTypeConverters.kt:33-35）记着一个真实事故：
+    /// 早期版本写成 `[图片]（画面：xxx）`，模型会把这段**原样抄进回复**，
+    /// 导致画面描述泄漏成独立文本气泡（BUG-1 的根因诱导源）。
+    /// 现在的写法用「系统注记 + 显式禁止模仿」，让模型没有可照抄的模板。
+    ///
+    /// 没有它，用户追问「再生成一张」时模型看不到上一张画的是什么 ——
+    /// Kotlin 的测试 `图片消息送给模型时附带画面描述`（Test:438-459）正是锁这条。
+    ///
+    /// 写成 static 以便单测（否则被 private 挡住，测试只能间接验证）。
+    static func contentForModel(_ message: Message) -> String {
+        guard message.imageData != nil,
+              let prompt = message.imagePrompt,
+              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return message.text
+        }
+        return "\(message.text)（系统注记：该图画面描述为 \(prompt)；"
+            + "此注记仅用于你理解图片内容，禁止在回复中输出任何「画面：」或括号包裹的画面描述）"
+    }
+
     private func historyForRequest() -> [AgentHistoryMessage] {
         let raw = messages.map { message in
+            // ⚠️ 第 168 轮：图片消息走 contentForModel 附加系统注记。
+            let text = Self.contentForModel(message)
             switch message.role {
-            case .user: return AgentHistoryMessage.user(message.text)
-            case .assistant: return AgentHistoryMessage.assistant(message.text)
-            case .system: return AgentHistoryMessage.system(message.text, preserve: true)
-            case .tool: return AgentHistoryMessage.tool(message.text, toolCallId: "")
+            case .user: return AgentHistoryMessage.user(text)
+            case .assistant: return AgentHistoryMessage.assistant(text)
+            case .system: return AgentHistoryMessage.system(text, preserve: true)
+            case .tool: return AgentHistoryMessage.tool(text, toolCallId: "")
             }
         }
         return DialogueHistoryPolicy.sanitizeForModel(raw)
