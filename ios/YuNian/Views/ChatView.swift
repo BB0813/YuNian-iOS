@@ -294,7 +294,7 @@ struct ChatView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(colors.textPrimary)
                     .lineLimit(1)
-                if session.isRuning {
+                if session.isRunning {
                     Text("对方正在输入…")
                         .font(.system(size: 14))
                         .foregroundStyle(colors.textSecondary)

@@ -17,23 +17,23 @@ final class YuNianLiquidTabsTests: XCTestCase {
 
     /// Kotlin `LiquidBottomTabs.kt:158` `containerHeight = 64.dp`
     func testBarHeightMatchesKotlin() {
-        XCTAssertEqual(YuNianLiquidMetric.barHeight, 64,
+        XCTAssertEqual(YuNianTheme.LiquidMetric.barHeight, 64,
                        "containerHeight 必须等于 Kotlin 的 64.dp")
     }
 
     /// Kotlin `LiquidBottomTabs.kt:182` `outerLenRadius = 24.dp`
     func testOuterLensRadiusMatchesKotlin() {
-        XCTAssertEqual(YuNianLiquidMetric.outerLensRadius, 24)
+        XCTAssertEqual(YuNianTheme.LiquidMetric.outerLensRadius, 24)
     }
 
     /// Kotlin `LiquidBottomTabs.kt:183` `selectionLensRadius = 10.dp`
     func testSelectionLensRadiusMatchesKotlin() {
-        XCTAssertEqual(YuNianLiquidMetric.selectionLensRadius, 10)
+        XCTAssertEqual(YuNianTheme.LiquidMetric.selectionLensRadius, 10)
     }
 
     /// Kotlin `LiquidBottomTabs.kt:184` `selectionChromaticRadius = 14.dp`
     func testSelectionChromaticRadiusMatchesKotlin() {
-        XCTAssertEqual(YuNianLiquidMetric.selectionChromaticRadius, 14)
+        XCTAssertEqual(YuNianTheme.LiquidMetric.selectionChromaticRadius, 14)
     }
 
     /// `LiquidBottomTabs.kt:159` `contentPadding = 4.dp`
@@ -78,7 +78,7 @@ final class YuNianLiquidTabsTests: XCTestCase {
 
     /// `LiquidBottomTabs.kt:181,414` 选中块高 = `containerHeight - contentPadding×2`
     func testSelectionHeightFormula() {
-        let barHeight = YuNianLiquidMetric.barHeight
+        let barHeight = YuNianTheme.LiquidMetric.barHeight
         let padding = YuNianTheme.Space.minUnit
 
         // 组件里写的是 barHeight - minUnit*2
