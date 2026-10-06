@@ -94,18 +94,27 @@ struct YuNianGlassTopBar<Trailing: View>: View {
 ///
 /// statusBars inset 用 SwiftUI 的 `.safeAreaInset` 处理(Kotlin 是 topBar 自己
 /// `windowInsetsPadding(statusBars)`，见 GlassTopBar.kt:51)。
-struct YuNianGlassPage<Content: View>: View {
+struct YuNianGlassPage<Content: View, Trailing: View>: View {
     let title: String
     let onBack: (() -> Void)?
     @ViewBuilder var content: Content
+    /// 顶栏右侧动作槽。对应 Kotlin `GlassTopBar.kt:97-102` 的 actions 插槽
+    /// （Capsule 内 Alignment.CenterEnd、wrap content、无固定宽度）。
+    ///
+    /// ⚠️ 第 145 轮加。此前没有这个槽，导致 `ChannelConfigView.save()`
+    /// 定义了却**没有任何调用方** —— 用户填完渠道配置无法保存。
+    /// find_dead_swift 关卡抓到的。
+    @ViewBuilder var trailing: Trailing
 
     @Environment(\.colorScheme) private var scheme
 
     init(title: String,
          onBack: (() -> Void)? = nil,
+         @ViewBuilder trailing: () -> Trailing = { EmptyView() },
          @ViewBuilder content: () -> Content) {
         self.title = title
         self.onBack = onBack
+        self.trailing = trailing()
         self.content = content()
     }
 
@@ -123,7 +132,7 @@ struct YuNianGlassPage<Content: View>: View {
             }
         }
         .safeAreaInset(edge: .top) {
-            YuNianGlassTopBar(title: title, onBack: onBack)
+            YuNianGlassTopBar(title: title, onBack: onBack, trailing: { trailing })
                 .background(colors.background.opacity(0.001))   // 让点击穿透到空白处
         }
     }

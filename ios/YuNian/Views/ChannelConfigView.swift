@@ -62,7 +62,18 @@ struct ChannelConfigView: View {
     var body: some View {
         // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar/GlassPageScaffold），
         // 不再用系统 NavigationBar + ScrollView。
-        YuNianGlassPage(title: "模型渠道", onBack: { dismiss() }) {
+        // ⚠️ 第 145 轮：trailing 槽接上「保存」。
+        // 在此之前 YuNianGlassPage 没有动作槽，save() 定义了却无人调用 ——
+        // 用户填完渠道配置**无法保存**。find_dead_swift 关卡抓到的。
+        YuNianGlassPage(
+            title: "模型渠道",
+            onBack: { dismiss() },
+            trailing: {
+                Button("保存") { save() }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(colors.primary)
+            }
+        ) {
             VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                     YuNianSectionTitle(title: "服务商")
