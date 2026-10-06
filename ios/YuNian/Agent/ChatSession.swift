@@ -107,6 +107,29 @@ final class ChatSession: ObservableObject {
             }
         }
 
+        // ⚠️ 第 166 轮：落库。此前 `messages` 是纯内存数组，App 一重启
+        // 聊天历史全丢 —— 现在写入 SQLite（messages + message_bodies + FTS 索引）。
+        //
+        // conversationId 用 companionId（iOS 侧无群聊数据模型，恒 chat）。
+        // 落库失败**不阻断发送**：打招呼/首轮对话比持久化更重要，
+        // 失败只进日志。
+        let conversationId = companionId ?? 0
+        if let repo = messageRepository(for: environment) {
+            do {
+                _ = try repo.insert(
+                    conversationId: conversationId,
+                    conversationType: .chat,
+                    isFromUser: true,
+                    senderId: 0,
+                    type: "text",
+                    content: trimmed,
+                    searchContent: trimmed
+                )
+            } catch {
+                log.error("用户消息落库失败：\(error.localizedDescription, privacy: .public)")
+            }
+        }
+
         messages.append(Message(role: .user, text: trimmed))
         streamingText = ""
         reasoningText = ""
@@ -179,10 +202,10 @@ final class ChatSession: ObservableObject {
                 case let .reasoningDelta(delta):
                     self.reasoningText += delta
                 case let .done(fullText, finishReason):
-                    self.complete(fullText: fullText, finishReason: finishReason)
+                    self.complete(fullText: fullText, finishReason: finishReason, environment: environment)
                 case let .error(message):
                     self.lastError = message
-                    self.complete(fullText: self.streamingText, finishReason: "error")
+                    self.complete(fullText: self.streamingText, finishReason: "error", environment: environment)
                 }
             }
         }
@@ -217,7 +240,7 @@ final class ChatSession: ObservableObject {
         applyEvents(result.events, environment: environment)
         // 兜底：sink 没给出任何文本时，用结果里的最终文本落地
         if streamingText.isEmpty, !result.finalText.isEmpty {
-            complete(fullText: result.finalText, finishReason: result.finishedReason)
+            complete(fullText: result.finalText, finishReason: result.finishedReason, environment: environment)
         }
 
         // ⚠️ 第 160 轮：回合结束后尝试生图。
@@ -382,12 +405,71 @@ final class ChatSession: ObservableObject {
 
     // MARK: - 内部
 
-    private func complete(fullText: String, finishReason: String) {
+    private func complete(fullText: String, finishReason: String,
+                          environment: AppEnvironment) {
         let text = fullText.isEmpty ? streamingText : fullText
         streamingText = ""
         reasoningText = ""
         guard !text.isEmpty else { return }
         messages.append(Message(role: .assistant, text: text))
+
+        // ⚠️ 第 166 轮：AI 回复落库。`searchContent` 与 `content` 同值 ——
+        // Android 侧图片消息在这里存画面描述（ImageGenTrigger.kt:381），
+        // 文本消息两者一致（MessageSearchTokenizer 会再切词）。
+        // 落库失败不阻断对话（同上）。
+        if let repo = messageRepository(for: environment) {
+            do {
+                _ = try repo.insert(
+                    conversationId: companionId ?? 0,
+                    conversationType: .chat,
+                    isFromUser: false,
+                    senderId: 0,
+                    type: "text",
+                    content: text,
+                    searchContent: text
+                )
+            } catch {
+                log.error("AI 回复落库失败：\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// 构造消息 repository（第 166 轮）。
+    ///
+    /// 没有数据库时返回 nil —— 调用方据此跳过错库。
+    private func messageRepository(for environment: AppEnvironment) -> MessageRepository? {
+        guard let database = environment.database else { return nil }
+        return MessageRepository(database: database)
+    }
+
+    /// 装载该会话的历史消息（第 166 轮）。
+    ///
+    /// ⚠️ **不覆盖已有消息**。若上层已灌入消息，这里只补数据库里更早的部分。
+    ///
+    /// ## 去重是近似的（如实记录）
+    /// `Message` 没有 dbId 字段，只能用「role + text + 类型」近似判重。
+    /// 精确去重需要给 `Message` 加 `messageId` —— 那会动所有构造点，
+    /// 不是一行能完事，属下轮。
+    func loadHistory(from environment: AppEnvironment, limit: Int = 100) {
+        guard companionId != nil else { return }     // 未绑定伴侣无从查
+        guard let repo = messageRepository(for: environment) else { return }
+        guard let rows = try? repo.history(
+            conversationId: companionId ?? 0, type: .chat, limit: limit) else { return }
+        guard !rows.isEmpty else { return }
+
+        var seen = Set<String>()
+        for m in messages {
+            seen.insert("\(m.role.rawValue)|\(m.text)|\(m.isSticker)|\(m.imageData?.count ?? -1)")
+        }
+
+        var loaded: [Message] = []
+        for r in rows {
+            let key = "\(r.isFromUser ? "user" : "assistant")|\(r.content)|false|-1"
+            if seen.contains(key) { continue }
+            loaded.append(Message(role: r.isFromUser ? .user : .assistant, text: r.content))
+        }
+        guard !loaded.isEmpty else { return }
+        messages.insert(contentsOf: loaded, at: 0)
     }
 
     /// 组装发给 Rust 的历史。

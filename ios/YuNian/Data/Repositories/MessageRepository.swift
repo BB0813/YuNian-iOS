@@ -115,6 +115,90 @@ final class MessageRepository {
         }
     }
 
+    // MARK: - 历史装载（第 166 轮）
+
+    /// 分页取某个会话的消息，按 (timestamp, id) 升序。
+    ///
+    /// ## 为什么需要它
+    /// iOS 侧此前**没有**从数据库读消息的入口 —— `ChatSession.messages`
+    /// 是纯内存数组，App 一重启历史全丢。
+    /// `MessageSearchView` 当初是用裸 SQL 自己查的，说明查询逻辑散在调用方。
+    ///
+    /// 这个方法把它收敛到 repository 层，供 `ChatSession` 启动时装载。
+    ///
+    /// - Parameters:
+    ///   - conversationId: 会话 id（iOS 侧即 companionId）
+    ///   - type: 会话类型（iOS 侧恒为 chat —— 无群聊数据模型）
+    ///   - limit: 最多取多少条（按时间倒序取，再翻正序返回）
+    ///   - before: 只取此时间戳之前的消息（毫秒）；nil 表示不限。
+    ///     用于"向上翻页"。
+    /// - Returns: `(timestamp, id)` 升序的消息数组。
+    func history(
+        conversationId: Int64,
+        type: ConversationType = .chat,
+        limit: Int = 100,
+        before: Int64? = nil
+    ) throws -> [HistoryRow] {
+        try database.pool.read { db in
+            let sql: String
+            var args: StatementArguments = [
+                conversationId, type.rawValue, limit,
+            ]
+            if let before {
+                sql = """
+                    SELECT m.id, m.isFromUser, m.timestamp, m.type, m.turnId,
+                           b.content, b.searchContent, b.linkString
+                    FROM messages m
+                    LEFT JOIN message_bodies b ON b.messageId = m.id
+                    WHERE m.conversationId = ? AND m.conversationType = ?
+                      AND m.timestamp < ?
+                    ORDER BY m.timestamp DESC, m.id DESC
+                    LIMIT ?
+                    """
+                args = [conversationId, type.rawValue, before, limit]
+            } else {
+                sql = """
+                    SELECT m.id, m.isFromUser, m.timestamp, m.type, m.turnId,
+                           b.content, b.searchContent, b.linkString
+                    FROM messages m
+                    LEFT JOIN message_bodies b ON b.messageId = m.id
+                    WHERE m.conversationId = ? AND m.conversationType = ?
+                    ORDER BY m.timestamp DESC, m.id DESC
+                    LIMIT ?
+                    """
+            }
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
+            return rows.map { r in
+                HistoryRow(
+                    messageId: r["id"] as Int64? ?? 0,
+                    isFromUser: (r["isFromUser"] as Int? ?? 0) != 0,
+                    timestamp: r["timestamp"] as Int64? ?? 0,
+                    type: r["type"] as String? ?? "text",
+                    turnId: r["turnId"] as String?,
+                    content: r["content"] as String? ?? "",
+                    searchContent: r["searchContent"] as String?,
+                    linkString: r["linkString"] as String?
+                )
+            }
+            .reversed()      // 翻成升序
+        }
+    }
+
+    /// `history(...)` 的一行。
+    struct HistoryRow: Equatable {
+        var messageId: Int64
+        var isFromUser: Bool
+        var timestamp: Int64
+        /// `messages.type` —— "text" / "image" 等（对应 Android `MessageType.serialName`）
+        var type: String
+        var turnId: String?
+        var content: String
+        var searchContent: String?
+        /// 附件路径/字节的载体。Android 存文件绝对路径；
+        /// iOS 侧当前生图不落库，故为空。
+        var linkString: String?
+    }
+
     /// 更新正文并同步刷新检索索引。
     ///
     /// 对应 Android `MessageDao.updateMessageContent`：**只有真的更新到行才重建索引**

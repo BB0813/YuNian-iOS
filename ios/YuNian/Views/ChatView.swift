@@ -55,17 +55,22 @@ struct ChatView: View {
         .task {
             // 绑定伴侣：Rust 的 load_companion 依赖它才能拿到人设。
             // 失败时给出可见提示，而不是静默继续（否则用户得到无设定的对话）。
-            guard session.companionId == nil else { return }
             // ⚠️ 第 141 轮：优先用**外部传入**的伴侣（通讯录点进来的），
             // 没有才回落到启动时播种的默认伴侣。
-            let target = companion ?? environment.defaultCompanion
-            if let target {
-                session.companionId = target.id
-                companionName = target.name
-                companionWarning = nil
-            } else {
-                companionWarning = "未能绑定默认伴侣：本轮对话没有人设（Rust 的 load_companion 取不到角色）。"
+            if session.companionId == nil {
+                let target = companion ?? environment.defaultCompanion
+                if let target {
+                    session.companionId = target.id
+                    companionName = target.name
+                    companionWarning = nil
+                } else {
+                    companionWarning = "未能绑定默认伴侣：本轮对话没有人设（Rust 的 load_companion 取不到角色）。"
+                }
             }
+
+            // ⚠️ 第 166 轮：装载历史。放在绑定之后 ——
+            // `loadHistory` 依赖 companionId 才知道查哪个会话。
+            session.loadHistory(from: environment)
         }
     }
 
