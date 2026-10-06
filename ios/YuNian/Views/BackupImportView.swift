@@ -28,7 +28,9 @@ struct BackupImportView: View {
     }
 
     var body: some View {
-        ScrollView {
+        // 第 143 轮：改用 YuNianGlassPage（对照 Android GlassTopBar/GlassPageScaffold），
+        // 与其它 push 子页统一。
+        YuNianGlassPage(title: "备份导入", onBack: { dismiss() }) {
             VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                 YuNianSectionTitle(title: "备份文件")
@@ -100,9 +102,6 @@ struct BackupImportView: View {
             .padding(.horizontal, YuNianTheme.Space.page)
             .padding(.top, YuNianTheme.Space.standard)
         }
-        .background(colors.background.ignoresSafeArea())
-        .navigationTitle("备份导入")
-        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPicker) {
             DocumentPicker(onPick: { url in
                 pickedFile = loadFile(url)
