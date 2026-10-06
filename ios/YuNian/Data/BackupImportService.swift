@@ -29,11 +29,18 @@ struct BackupImportService {
 
     /// 从备份文件字节导入。
     ///
+    /// ⚠️ 第 131 轮：加 `static`。
+    /// 调用方（BackupImportView）拿不到可用的实例 init —— 结构体唯一的
+    /// stored property 是 `log`，隐式 memberwise init 是 `(log:)`，不实用。
+    /// 本方法也不使用任何实例状态，故改 static，调用点写
+    /// `BackupImportService.importFile(...)`，与 `BackupCrypto.decrypt(...)`
+    /// 的静态风格一致。
+    ///
     /// - Parameters:
     ///   - data: `.lybk` 文件内容（二进制，含 LYBK magic + salt + IV + 密文）
     ///   - password: 用户在 Android 侧导出时设的密码
     ///   - database: 目标库
-    func importFile(data: Data, password: String, database: YuNianDatabase) -> Outcome {
+    static func importFile(data: Data, password: String, database: YuNianDatabase) -> Outcome {
         // ① 容器解密
         let plain: Data
         do {
