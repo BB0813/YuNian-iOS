@@ -9,6 +9,9 @@ struct ChatView: View {
     @EnvironmentObject private var environment: AppEnvironment
     /// ⚠️ 第 128 轮：语义色跟随系统明暗。气泡/输入栏/输入框都从这儿取色。
     @Environment(\.colorScheme) private var scheme
+    /// 第 135 轮：自绘顶栏的返回按钮用。
+    /// ChatView 由 RootView 的 NavigationLink push 进来。
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var session = ChatSession()
     @State private var draft: String = ""
     /// 表情选择面板。⚠️ 第 120 轮加 —— 让用户能主动发表情，
@@ -40,30 +43,10 @@ struct ChatView: View {
             Divider()
             composer
         }
-        .navigationTitle(companionName)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // 头像（第 144 轮接上 AvatarResolver）：默认伴侣的 avatarUrl 是
-            // Android 资源 URI，不翻译就永远加载不出头像 —— 此前整个枚举无调用方。
-            ToolbarItem(placement: .topBarLeading) {
-                if let url = environment.defaultCompanion?.avatarUrl,
-                   let asset = AvatarResolver.assetName(for: url) {
-                    Image(asset)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                } else {
-                    Image(systemName: "person.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if session.isRunning {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("停止") { session.cancel(in: environment) }
-                }
-            }
+        // ⚠️ 第 135 轮：改用自绘玻璃顶栏，替换系统 NavigationBar。
+        // 规格来自 ChatTopBerRegion.kt:63-124 + GlassTopBar.kt。
+        .safeAreaInset(edge: .top) {
+            chatTopBar
         }
         .task {
             // 绑定默认伴侣：Rust 的 load_companion 依赖它才能拿到人设。
@@ -269,6 +252,105 @@ struct ChatView: View {
     /// ## 第 128 轮：套设计系统
     /// 对照 `WeChatChatInputBar.kt:122,126`：输入框圆角 **21dp**
     /// （不是别处的 12/16/24，聊天专用），外框是玻璃胶囊。
+    // MARK: - 顶栏
+
+    /// 对话页玻璃顶栏。
+    ///
+    /// ## 权威来源（第 135 轮，来自源码勘察）
+    /// `feature/chat/.../ChatTopBarRegion.kt` + `glass/GlassTopBar.kt`：
+    ///
+    /// | 项 | Kotlin 值 | 行号 |
+    /// |---|---|---|
+    /// | 外层内边距 | `padding(top=48, start/end=listHorizontalPadding)` | ChatTopBarRegion.kt:63 |
+    /// | 胶囊圆角 | `RoundedCornerShape(28.dp)` | :111 |
+    /// | 胶囊内边距 | `padding(horizontal=12, vertical=8)` | :124 |
+    /// | 标题字号 | `titleMedium.copy(SemiBold, 15sp)` | :216-219 |
+    /// | "正在输入" | `titleMedium.copy(Normal, 14sp)` | :192-196 |
+    /// | 动作位尺寸 | `ActionSize = 32.dp` | :44 |
+    /// | 返回钮 | `IconButton.size(32)` + 图标 20dp | :86-97 |
+    ///
+    /// ⚠️ 与 Kotlin 的差异：Kotlin 用 drawGlass 真折射；SwiftUI 无跨层采样，
+    /// 这里用 yuNianGlass 三层叠加 —— 视觉近似，非实现等同。
+    private var chatTopBar: some View {
+        HStack(spacing: YuNianTheme.Space.cardPadding) {
+            // 返回钮（Kotlin: ActionSize=32 + 图标 20dp）
+            Button {
+                // 由外层 NavigationStack 处理 pop；这里给出可见返回。
+                dismissFromChat()
+            } label: {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(colors.textPrimary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+
+            // 头像（第 144 轮接上 AvatarResolver）
+            avatar
+
+            // 角色名 / 正在输入（Kotlin: 两行互换，isRunning 时显示 typing）
+            VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
+                Text(companionName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(colors.textPrimary)
+                    .lineLimit(1)
+                if session.isRuning {
+                    Text("对方正在输入…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(colors.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // 动作位（Kotlin: ActionSize = 32dp）
+            if session.isRunning {
+                Button("停止") { session.cancel(in: environment) }
+                    .font(YuNianTheme.TextStyle.settingsRowSubtitle)
+                    .foregroundStyle(colors.danger)
+                    .frame(minWidth: 32, minHeight: 32)
+            } else {
+                Color.clear.frame(width: 32, height: 32)
+            }
+        }
+        .padding(.horizontal, YuNianTheme.Space.cardPadding)   // :124 horizontal=12
+        .padding(.vertical, YuNianTheme.Space.standard)        // :124 vertical=8
+        .padding(.top, 4)
+        .background(colors.background.opacity(0.001))
+        .yuNianGlass(colors, radius: YuNianTheme.Radius.topBarCapsule,
+                     surfaceColor: colors.card, isDark: scheme == .dark)
+        .padding(.horizontal, YuNianTheme.Space.page)
+        .padding(.top, 4)
+    }
+
+    /// 伴侣头像。`avatarUrl` 是 Android 资源 URI，需经 AvatarResolver 翻译
+    /// 成本地 asset 名 —— 不翻译就永远加载不出图（第 144 轮的发现）。
+    private var avatar: some View {
+        Group {
+            if let url = environment.defaultCompanion?.avatarUrl,
+               let asset = AvatarResolver.assetName(for: url) {
+                Image(asset)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "person.circle.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(colors.textTertiary)
+            }
+        }
+        .frame(width: 32, height: 32)
+        .clipShape(Circle())
+    }
+
+    /// 顶栏返回。ChatView 由 NavigationLink push 进来，
+    /// 这里显式 dismiss 以给出可见返回路径。
+    private func dismissFromChat() {
+        // ChatView 自己持有一个 NavigationStack 之外的环境，
+        // 故用 presentationMode 兼容两种进入方式。
+        dismiss()
+    }
+
     private var composer: some View {
         HStack(spacing: YuNianTheme.Space.standard) {
             // ⚠️ 第 120 轮：表情按钮。
