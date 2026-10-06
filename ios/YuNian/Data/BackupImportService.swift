@@ -14,7 +14,10 @@ import os
 /// 因此同一文件重复导入不会产生重复数据（`BackupImporterTests` 已覆盖）。
 struct BackupImportService {
 
-    private let log = Logger(subsystem: "com.yunian.ai", category: "backup.import")
+    /// ⚠️ 第 132 轮：改 `static let`。
+    /// `importFile` 改为 static 后，实例属性 `log` 在静态上下文里取不到。
+    /// Logger 本身可作静态常量（无状态），与 `StickerImportRepository` 等处一致。
+    static let log = Logger(subsystem: "com.yunian.ai", category: "backup.import")
 
     struct Outcome: Equatable {
         var ok: Bool
