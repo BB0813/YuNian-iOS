@@ -16,6 +16,10 @@ struct MemoryListView: View {
     @EnvironmentObject private var environment: AppEnvironment
     /// ⚠️ 第 128 轮：语义色跟随系统明暗。
     @Environment(\.colorScheme) private var scheme
+    /// 第 133 轮：玻璃顶栏的返回按钮用。
+    /// 这些页面由 RootView 的 NavigationLink push 进来，
+    /// 系统不自动给可见返回钮，故自绘顶栏需要它。
+    @Environment(\.dismiss) private var dismiss
     @State private var memories: [MemoryRepository.Memory] = []
     @State private var counts: (active: Int, total: Int, deleted: Int) = (0, 0, 0)
     @State private var showDeleted = false
@@ -33,7 +37,9 @@ struct MemoryListView: View {
     ///   （MemoryScreen.kt:611-616）
     /// - 正文 14sp / lineHeight 20sp `onSurface@0.9`；摘要 11sp；时间 10sp
     var body: some View {
-        ScrollView {
+        // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar），
+        // 不再用系统 NavigationBar。
+        YuNianGlassPage(title: "记忆", onBack: { dismiss() }) {
             VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                 // 统计行 —— GlassCard 的 Metric 三态（GlassCard.kt:38-47）
@@ -87,9 +93,6 @@ struct MemoryListView: View {
             .padding(.horizontal, YuNianTheme.Space.page)
             .padding(.top, YuNianTheme.Space.standard)
         }
-        .background(colors.background.ignoresSafeArea())
-        .navigationTitle("记忆")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(showDeleted ? "隐藏已删除" : "显示已删除") {

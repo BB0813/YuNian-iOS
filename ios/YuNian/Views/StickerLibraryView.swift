@@ -15,6 +15,10 @@ struct StickerLibraryView: View {
     @EnvironmentObject private var environment: AppEnvironment
     /// ⚠️ 第 129 轮：语义色跟随系统明暗。
     @Environment(\.colorScheme) private var scheme
+    /// 第 133 轮：玻璃顶栏的返回按钮用。
+    /// 这些页面由 RootView 的 NavigationLink push 进来，
+    /// 系统不自动给可见返回钮，故自绘顶栏需要它。
+    @Environment(\.dismiss) private var dismiss
 
     @State private var entries: [StickerLibraryRepository.Entry] = []
     @State private var tags: [StickerLibraryRepository.TagStat] = []
@@ -25,7 +29,9 @@ struct StickerLibraryView: View {
     private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
     var body: some View {
-        ScrollView {
+        // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar），
+        // 不再用系统 NavigationBar。
+        YuNianGlassPage(title: "表情库", onBack: { dismiss() }) {
             VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
 
                 if let loadError {
@@ -97,9 +103,6 @@ struct StickerLibraryView: View {
             .padding(.horizontal, YuNianTheme.Space.page)
             .padding(.top, YuNianTheme.Space.standard)
         }
-        .background(colors.background.ignoresSafeArea())
-        .navigationTitle("表情库")
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // 第 115 轮：列表顶部也放一个导入按钮。
             // 只在空态放的话，导入了第一批之后用户就找不到入口了。
