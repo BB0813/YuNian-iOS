@@ -144,6 +144,9 @@ struct ChatView: View {
 
                 if let sticker = sticker(for: message) {
                     stickerBubble(sticker)
+                } else if let data = message.imageData,
+                          let ui = UIImage(data: data) {
+                    imageBubble(ui, prompt: message.imagePrompt, mine: mine)
                 } else {
                     Text(sanitizedDisplay(message))
                         .textSelection(.enabled)
@@ -191,6 +194,38 @@ struct ChatView: View {
         }
         .frame(width: 5, height: 8)
         .padding(.bottom, 14)
+    }
+
+    // MARK: - 生图消息
+
+    /// 生图气泡（第 165 轮）。
+    ///
+    /// Android 侧图片消息是 `type=IMAGE` + `linkString=<路径>`
+    /// （ImageGenTrigger.kt:370-381）；iOS 侧消息是内存数组、
+    /// 字节直接带在 `Message.imageData` 上，这里解码渲染。
+    ///
+    /// 尺寸上限与气泡圆角/边框沿用文本气泡的 token，
+    /// 保证同一会话里视觉一致。prompt 作为可选说明显示在下方 ——
+    /// 对应 Kotlin 的 searchContent（对 UI 可见的那一半）；
+    /// Kotlin 只在 `contentForModel()` 里把它喂回模型
+    /// （ChatTypeConverters.kt:37-43），iOS 侧历史不带它。
+    private func imageBubble(_ image: UIImage, prompt: String?, mine: Bool) -> some View {
+        VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 220)
+                .clipShape(RoundedRectangle(cornerRadius: YuNianTheme.Radius.glassDefault,
+                                            style: .continuous))
+            if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(prompt)
+                    .font(.system(size: 11))
+                    .foregroundStyle(colors.textSecondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, YuNianTheme.Space.minUnit)
+        .padding(.vertical, YuNianTheme.Space.minUnit)
     }
 
     // MARK: - 表情消息
