@@ -113,6 +113,7 @@ xcodebuild test \
 | `SecuritySeedLoaderTests` | 种子装载与诊断 |
 | `RequestSignerTests` | path 编码 / clientId / nonce |
 | `LiteralContractTests` | 字面量取值钉死 |
+| `YuNianLiquidTabsTests` | 底部 Tab 的 Kotlin 几何规格：64dp 容器 / 4dp 内边距 / 2dp 图文字距 / 24-10-14 lens 半径 / tab 宽度与选中块高公式 |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译
