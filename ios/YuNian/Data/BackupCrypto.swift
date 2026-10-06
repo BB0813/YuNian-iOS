@@ -40,6 +40,11 @@ enum BackupCrypto {
         let tag: Data
 
         /// Java `doFinal` 的输入是 ciphertext 与 tag 已拼接的形式。
+        ///
+        /// ⚠️ 第 146 轮：生产路径**不用**这个属性（`BackupImportService` 走
+        /// `decrypt(data:password:)` 拿整个 `Data`，不需要拆箱再拼回）。
+        /// 它是为与 Java `Cipher.doFinal` 的输入格式对齐而保留的**等价物**,
+        /// 让 Kotlin 侧读代码的人能一眼看出两端一致。不是死代码残留。
         var sealedBox: Data { ciphertext + tag }
     }
 
@@ -139,6 +144,11 @@ enum BackupCrypto {
     }
 
     /// 便捷入口：直接得到 JSON 字符串。
+    ///
+    /// ⚠️ 第 146 轮：当前无调用方。`BackupImportService` 拿到 `Data` 后
+    /// 直接交给 `BackupImporter` 解析，不需要先转 String。
+    /// 保留它是为了调试时能一把看出解密结果（`lybk` 容器解密出来就是 JSON），
+    /// 以及为将来的 CLI 诊断工具预留。不是漏接。
     static func decryptToString(_ data: Data, password: String) throws -> String {
         let plain = try decrypt(data, password: password)
         guard let s = String(data: plain, encoding: .utf8) else {

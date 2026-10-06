@@ -113,7 +113,7 @@ struct MemoryListView: View {
                 .font(.system(size: 22, weight: .semibold).monospacedDigit())
                 .foregroundStyle(colors.textPrimary)
             Text(label)
-                .font(.system(size: 11))
+                .font(YuNianTheme.TextStyle.memorySummary)
                 .foregroundStyle(colors.textSecondary)
         }
     }
@@ -123,8 +123,9 @@ struct MemoryListView: View {
         VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
             HStack(spacing: YuNianTheme.Space.half) {
                 // 分类徽标：11sp Medium + primary@0.8（MemoryScreen.kt:611-616）
+                // ⚠️ 第 146 轮：改用 token
                 Text(memory.memoryType)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(YuNianTheme.TextStyle.memorySummary)
                     .foregroundStyle(colors.primary.opacity(0.8))
                     .padding(.horizontal, YuNianTheme.Space.standard)
                     .padding(.vertical, YuNianTheme.Space.tight)
@@ -132,24 +133,25 @@ struct MemoryListView: View {
                     .clipShape(Capsule())
 
                 Text(memory.scope)
-                    .font(.system(size: 11))
+                    .font(YuNianTheme.TextStyle.memorySummary)
                     .foregroundStyle(colors.textSecondary)
 
                 Spacer()
 
                 Text(String(format: "%.2f", memory.importance))
-                    .font(.system(size: 10).monospacedDigit())
+                    .font(YuNianTheme.TextStyle.memoryTime.monospacedDigit())
                     .foregroundStyle(colors.textSecondary)
             }
 
             // 正文：14sp，lineHeight 20sp，onSurface@0.9
+            // ⚠️ 第 146 轮：改用 token，不再写字面量。
             Text(memory.content)
-                .font(.system(size: 14))
+                .font(YuNianTheme.TextStyle.memoryBody)
                 .foregroundStyle(colors.textPrimary.opacity(0.9))
 
             if let expiresAt = memory.expiresAt {
                 Text("过期于 \(format(expiresAt))")
-                    .font(.system(size: 10))
+                    .font(YuNianTheme.TextStyle.memoryTime)
                     .foregroundStyle(colors.warning)
             }
         }
