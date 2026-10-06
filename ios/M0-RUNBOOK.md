@@ -116,6 +116,7 @@ xcodebuild test \
 | `YuNianLiquidTabsTests` | 底部 Tab 的 Kotlin 几何规格：64dp 容器 / 4dp 内边距 / 2dp 图文字距 / 24-10-14 lens 半径 / tab 宽度与选中块高公式 |
 | `ImageGenClientTests` | 生图纯逻辑：4 级参数回退序列与 distinct / 参数类错误判定 / 生图模型启发式（hint 命中且 exclude 不命中）/ base 候选规范化 |
 | `ImageGenTriggerTests` | 生图触发判定：判定顺序（总开关→配置→关键词→概率→冷却）/ 概率严格 `<` 边界（roll 29 中 30 不中）/ 冷却三条边界（含"正好等于"不冷却）/ override 成对覆盖且无权动冷却 / parseKeywords 三分隔符保序去重 / buildPrompt 四级优先级与 800 截断 |
+| `ContentForModelTests` | 图片消息回喂模型的系统注记：**逐字**对齐 Kotlin 措辞（BUG-1 教训）/ 无 prompt 或纯空白时原样 / 非图片消息不变 |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译
