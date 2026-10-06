@@ -108,6 +108,10 @@ struct ConversationListView: View {
                 ChatView(companion: c)
             }
             .task { reload() }
+            // ⚠️ 第 174 轮：从对话页返回时刷新未读。
+            // 未读是在 ChatView 的 .task 里清的，列表页在它之后已经渲染完 ——
+            // 不刷新的话，圆点会在"已经读过的会话"上一直留着。
+            .onAppear { reload() }
         }
     }
 
@@ -228,11 +232,12 @@ struct ConversationListView: View {
         rows = (try? repo.rows()) ?? []
         chatCount = (try? repo.chatCount()) ?? 0
 
-        // hasUnread 逐个查（Android 是 summary 表物化，iOS 侧没有）
+        // 未读逐个查（第 174 轮：改按 read-through cursor 精确计算，
+        // 不再"有 AI 消息就恒亮"）。
         // ⚠️ N+1 查询，但伴侣数量级在个位到十位，可接受。
         let companionRepo = CompanionRepository(database: db)
         for (i, row) in rows.enumerated() {
-            rows[i].hasUnread = (try? repo.hasUnread(companionId: row.companionId)) ?? false
+            rows[i].hasUnread = ((try? repo.unreadCount(companionId: row.companionId)) ?? 0) > 0
             if let c = try? companionRepo.fetch(id: row.companionId) {
                 rows[i].intimacy = c.intimacy
             }

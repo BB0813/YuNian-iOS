@@ -135,29 +135,114 @@ struct ConversationRepository {
         }
     }
 
-    /// 未读判定。
+    /// 未读计数 —— Kotlin `MessageDao.getUnreadMessageCount`（MessageDao.kt:419）。
     ///
-    /// Android 用 `conversation_summary.unreadCount > 0`
-    /// （HomeViewModel.kt:87），而 unreadCount 由
-    /// `MessageDao.getUnreadMessageCount`（:419）那段 cursor 语义维护。
+    /// ⚠️ **游标是 `(timestamp, id)` 二元组比较，不是单纯比时间**。
+    /// 同一毫秒内可能有多条消息，只比 timestamp 会把同刻的先到消息漏判成未读。
+    /// Kotlin 的原文：
+    /// ```
+    /// ... AND (:readThroughTs IS NULL
+    ///      OR timestamp > :readThroughTs
+    ///      OR (timestamp = :readThroughTs AND id > :readThroughId))
+    /// ```
     ///
-    /// iOS 侧没有 read-through cursor 表，故简化为
-    /// **"存在 AI 侧消息即视为有未读"** —— 这是有意的降级：
-    /// 进过对话页后应当已读，但 iOS 的 ChatView 目前**不写已读游标**
-    /// （`markReadThroughLatest` 未复刻）。
-    ///
-    /// ⚠️ 如实记录：因此这个未读标记在 iOS 上会**偏乐观**（聊过就恒亮）。
-    /// 精确复刻需要 read-through cursor，属下轮。
-    func hasUnread(companionId: Int64) throws -> Bool {
-        try database.pool.read { db in
-            let count: Int = try Row.fetchOne(db, sql: """
+    /// 游标 NULL 时视为"全未读"（`IS NULL` 分支）—— 与 Kotlin 一致。
+    func unreadCount(companionId: Int64) throws -> Int {
+        let cursor = try readCursor(companionId: companionId)
+        return try database.pool.read { db in
+            if let ts = cursor?.timestamp, let mid = cursor?.messageId {
+                return try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) AS c
+                    FROM messages
+                    WHERE conversationId = ? AND conversationType = 'chat'
+                      AND isFromUser = 0
+                      AND type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                      AND (timestamp > ?
+                           OR (timestamp = ? AND id > ?))
+                    """, arguments: [companionId, ts, ts, mid]) ?? 0
+            }
+            // 无游标 → 全未读（Kotlin 的 IS NULL 分支）
+            return try Int.fetchOne(db, sql: """
                 SELECT COUNT(*) AS c
                 FROM messages
                 WHERE conversationId = ? AND conversationType = 'chat'
                   AND isFromUser = 0
                   AND type NOT IN ('REASONING', 'TOOL_ACTIVITY')
-                """, arguments: [companionId])?["c"] ?? 0
-            return count > 0
+                """, arguments: [companionId]) ?? 0
+        }
+    }
+
+    /// 读已读游标。没有记录时返回 nil。
+    func readCursor(companionId: Int64) throws -> (timestamp: Int64, messageId: Int64)? {
+        try database.pool.read { db in
+            guard let row = try GRDB.Row.fetchOne(db, sql: """
+                SELECT readThroughMessageTimestamp, readThroughMessageId
+                FROM conversation_summary
+                WHERE sessionId = ? AND sessionType = 'chat'
+                """, arguments: [companionId]) else { return nil }
+            guard let ts = row["readThroughMessageTimestamp"] as Int64?,
+                  let mid = row["readThroughMessageId"] as Int64? else { return nil }
+            return (ts, mid)
+        }
+    }
+
+    /// 把已读游标推到该会话当前最新消息，并清零未读。
+    ///
+    /// ## Kotlin 对应
+    /// `ConversationSummaryDao.markReadThroughLatest`（:43-44）：
+    /// ```
+    /// UPDATE conversation_summary
+    /// SET readThroughMessageTimestamp = lastMessageTimestamp,
+    ///     readThroughMessageId = lastMessageId,
+    ///     unreadCount = 0
+    /// WHERE sessionId = ? AND sessionType = ?
+    /// ```
+    ///
+    /// ⚠️ Kotlin 用的 `lastMessageTimestamp` 是 **summary 表物化的值**，
+    /// 而那个值由 `ChatRepository.updateSummaryForChat` 维护（含 take(100) 等规则）。
+    /// iOS 侧没有那条维护链路，故这里改为**实时从 messages 取最新一条** ——
+    /// 与 Kotlin 的 `rebuildSummaryForChat`（ChatRepository.kt:408-436）
+    /// 取 latest 的口径一致，且不依赖已存在的 summary 行。
+    ///
+    /// ⚠️ 一个 Kotlin 也有的边界：若 latest 是 TOOL_ACTIVITY，
+    /// Kotlin 的 `rebuildSummaryForChat` 会**维持原状直接返回**（:427）。
+    /// 这里同样只把游标推到"非 TOOL_ACTIVITY/REASONING"的最新一条，
+    /// 与未读计数的排除口径保持一致。
+    @discardableResult
+    func markReadThroughLatest(companionId: Int64) throws -> Bool {
+        try database.pool.write { db in
+            guard let latest = try GRDB.Row.fetchOne(db, sql: """
+                SELECT m.id AS id, m.timestamp AS ts
+                FROM messages m
+                WHERE m.conversationId = ? AND m.conversationType = 'chat'
+                  AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                ORDER BY m.timestamp DESC, m.id DESC
+                LIMIT 1
+                """, arguments: [companionId]) else {
+                // 一条消息都没有：无可读。Kotlin 此时 deleteSummary，
+                // iOS 侧不清行（那张行可能由别处建立），只报 false。
+                return false
+            }
+            let ts = latest["ts"] as Int64? ?? 0
+            let mid = latest["id"] as Int64? ?? 0
+
+            // ⚠️ 没有 summary 行时 INSERT 一行 —— 否则 UPDATE 影响 0 行。
+            // Kotlin 那边 summary 行由发送链路建立，iOS 侧没有，
+            // 所以这里要能自行创建。lastMessagePreview 等列给占位值：
+            // 它们只服务会话列表，而列表走 messages 联表、不读这列。
+            try db.execute(sql: """
+                INSERT INTO conversation_summary
+                  (sessionId, sessionType, lastMessageId, lastMessagePreview,
+                   lastMessageTimestamp, lastMessageIsFromUser,
+                   readThroughMessageTimestamp, readThroughMessageId,
+                   unreadCount, isPinned, isMuted)
+                VALUES (?, 'chat', ?, '', ?, 0, ?, ?, 0, 0, 0)
+                ON CONFLICT(sessionId, sessionType) DO UPDATE SET
+                  readThroughMessageTimestamp = excluded.readThroughMessageTimestamp,
+                  readThroughMessageId = excluded.readThroughMessageId,
+                  unreadCount = 0
+                """, arguments: [companionId, mid, ts, ts, mid])
+            return true
         }
     }
 
