@@ -71,6 +71,17 @@ struct ChatView: View {
             // ⚠️ 第 166 轮：装载历史。放在绑定之后 ——
             // `loadHistory` 依赖 companionId 才知道查哪个会话。
             session.loadHistory(from: environment)
+
+            // ⚠️ 第 174 轮：标记已读。
+            // Kotlin 的落点是 ChatScreen 的 `ChatViewModel.markAsRead()`
+            // （ChatViewModel.kt:243-247 → ChatRepository.markReadThroughLatest），
+            // **不是点列表 item 时** —— 进到对话页才算看过。
+            //
+            // 之前 iOS 侧完全没有这个调用，于是未读小圆点"聊过就恒亮"。
+            if let db = environment.database, let cid = session.companionId {
+                try? ConversationRepository(database: db)
+                    .markReadThroughLatest(companionId: cid)
+            }
         }
     }
 
