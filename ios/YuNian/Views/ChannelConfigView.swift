@@ -107,7 +107,7 @@ struct ChannelConfigView: View {
                             if isCustom {
                                 VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
                                     Text("API 格式")
-                                        .font(YuNianTheme.Font.settingsRowSubtitle)
+                                        .font(YuNianTheme.TextStyle.settingsRowSubtitle)
                                         .foregroundStyle(colors.textSecondary)
                                     Picker("API 格式", selection: $formatHint) {
                                         Text("OpenAI 兼容").tag("openai")
@@ -135,7 +135,7 @@ struct ChannelConfigView: View {
                                 HStack(spacing: YuNianTheme.Space.standard) {
                                     ProgressView()
                                     Text("正在请求…")
-                                        .font(YuNianTheme.Font.settingsRowSubtitle)
+                                        .font(YuNianTheme.TextStyle.settingsRowSubtitle)
                                         .foregroundStyle(colors.textSecondary)
                                 }
                             } else {
@@ -145,7 +145,7 @@ struct ChannelConfigView: View {
                                         height: 34, horizontalPadding: 12
                                     ) {
                                         Text("拉取模型列表")
-                                            .font(YuNianTheme.Font.cardAction)
+                                            .font(YuNianTheme.TextStyle.cardAction)
                                             .foregroundStyle(colors.textPrimary)
                                     }
                                     YuNianGlassButton(
@@ -153,7 +153,7 @@ struct ChannelConfigView: View {
                                         height: 34, horizontalPadding: 12
                                     ) {
                                         Text("测试连接")
-                                            .font(YuNianTheme.Font.cardAction)
+                                            .font(YuNianTheme.TextStyle.cardAction)
                                             .foregroundStyle(colors.textPrimary)
                                     }
                                 }

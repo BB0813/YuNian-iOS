@@ -119,9 +119,14 @@ struct BackupImportView: View {
         importing = true
         defer { importing = false }
 
-        let service = BackupImportService(database: database)
+        // ⚠️ 第 130 轮：`BackupImportService` 是**无 init 的结构体**，
+        // 真实 API 是 `importFile(data:password:database:)`。
+        // 我上一轮凭印象写了 `BackupImportService(database:)` + `import(data:password:)`，
+        // CI 报 "argument passed to call that takes no arguments"。
+        // 已从源码核对后改正 —— 不从记忆推断。
         let result = await Task.detached(priority: .userInitiated) {
-            service.import(data: file.data, password: password)
+            BackupImportService.importFile(data: file.data, password: password,
+                                           database: database)
         }.value
 
         outcome = result

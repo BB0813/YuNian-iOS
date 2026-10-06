@@ -1,4 +1,7 @@
 import SwiftUI
+// ⚠️ 第 130 轮：runSearch() 回查元数据用了 StatementArguments（GRDB）。
+// verify_imports 关卡要求显式 import —— 正是它该有的行为。
+import GRDB
 
 /// 消息搜索 —— 第 129 轮套上设计系统。
 ///
@@ -37,8 +40,11 @@ struct MessageSearchView: View {
                 if searched && results.isEmpty {
                     emptyState
                 }
-                ForEach(results) { row in
-                    YuNianGlassCard { row(row) }
+                ForEach(results) { item in
+                    // ⚠️ 参数名不能叫 row —— 会遮蔽同名的 row(_:) 方法，
+                    // CI 报 "cannot call value of non-function type
+                    // 'MessageSearchView.MessageRow'"。
+                    YuNianGlassCard { row(item) }
                 }
                 Spacer(minLength: YuNianTheme.Space.pageTop)
             }
@@ -126,5 +132,51 @@ struct MessageSearchView: View {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: date)
+    }
+
+    // MARK: - 检索
+
+    /// ⚠️ 第 130 轮：补回整体重写时丢掉的 `runSearch()`。
+    /// 我重写这个页面只搬了 UI，把真正干活的检索函数漏了，
+    /// 而且第一版补的还是凭印象写的（`repo.rows(for:)` 根本不存在）。
+    /// 这次**从 git 历史恢复原来的实现** —— 它才是真正跑通过的版本。
+    private func runSearch() {
+        searched = true
+        guard let database = environment.database,
+              let repo = try? MessageRepository(database: database) else {
+            results = []
+            return
+        }
+        // ① FTS 命中 message id
+        let ids = (try? database.searchMessageIds(matching: query, limit: 50)) ?? []
+        guard !ids.isEmpty else {
+            results = []
+            return
+        }
+        // ② 回查元数据 + 正文
+        let marks = ids.map { _ in "?" }.joined(separator: ",")
+        do {
+            let rows = try database.pool.read { db in
+                try Row.fetchAll(db, sql: """
+                    SELECT m.id AS messageId, m.conversationId, m.conversationType,
+                           m.isFromUser, m.timestamp, b.content
+                    FROM messages m
+                    LEFT JOIN message_bodies b ON b.messageId = m.id
+                    WHERE m.id IN (\(marks))
+                    """, arguments: StatementArguments(ids))
+            }
+            results = rows.map { r in
+                MessageRow(
+                    messageId: r["messageId"] as Int64? ?? 0,
+                    conversationId: r["conversationId"] as Int64? ?? 0,
+                    conversationType: r["conversationType"] as String? ?? "",
+                    isFromUser: (r["isFromUser"] as Int? ?? 0) != 0,
+                    timestamp: r["timestamp"] as Int64? ?? 0,
+                    snippet: r["content"] as String? ?? ""
+                )
+            }
+        } catch {
+            results = []
+        }
     }
 }
