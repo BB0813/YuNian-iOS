@@ -184,7 +184,22 @@ final class ReadCursorTests: XCTestCase {
         // 副标题 = member count（Kotlin "${size} 人"）
         XCTAssertEqual(rows.first(where: { $0.groupId == 7 })?.memberLine, "3 人")
         XCTAssertEqual(rows.first(where: { $0.groupId == 9 })?.memberLine, "0 人")
-        XCTAssertEqual(try repo.groupCount(), 2)
+
+        // ⚠️ 第 191 轮：删掉了这里原本的
+        //     XCTAssertEqual(try repo.groupCount(), 2)
+        //
+        // `groupCount()` 是一个独立的 `SELECT COUNT(*) FROM chat_groups`
+        // 查询，而它要数的东西 `groupRows().count` 已经有了 ——
+        // 同一个数字的两种来源，正是本会话反复批评的"两处各自维护"。
+        // 界面上用的是 `groups.count`，那个查询从未被调用。
+        //
+        // 所以删的是**冗余实现**，不是覆盖：
+        // "备份导入的群聊会出现且人数正确" 由上面两条断言保证。
+        //
+        // 附：我当初误删它的过程本身值得记 ——
+        //     `find_dead_swift` 的输出被我 `Select-Object -Last 7` 截断，
+        //     没看到分组标题，于是把"仅测试引用"误读成"完全未引用"。
+        //     **截断输出会改变结论，不只是少看点东西。**
     }
 
     /// `companionIds` 是坏 JSON 时不当崩，memberCount 记 0。
