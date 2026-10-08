@@ -151,7 +151,15 @@ struct DiagnosticsView: View {
                 if diagSavedConfigs.isEmpty {
                     statusRow("已保存渠道", ok: false, detail: "无")
                 } else {
-                    ForEach(diagSavedConfigs) { c in
+                    // ⚠️ 第 190 轮：显式给 `id:`。
+                    // `ApiConfig` 没遵循 `Identifiable`（它有 `id` 字段但没声明
+                    // 一致性），CI 报 "requires that
+                    // 'ApiConfigRepository.ApiConfig' conform to 'Identifiable'"。
+                    //
+                    // 我选择在**调用点**给 id 而不是给该类型加一致性：
+                    // 那个 struct 被仓库/探针/UI 多处使用，加协议一致性是
+                    // 全局影响；这里只是一处渲染需求。改动面小的那个更稳。
+                    ForEach(diagSavedConfigs, id: \.id) { c in
                         let hasKey = !(KeychainStore.string(
                             for: KeychainStore.Key.apiKeyFor(c.id)) ?? "").isEmpty
                         let isPartner = c.provider == "PARTNER"
