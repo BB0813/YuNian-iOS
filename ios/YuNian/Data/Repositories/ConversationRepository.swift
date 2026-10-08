@@ -319,11 +319,4 @@ struct ConversationRepository {
             }
         }
     }
-
-    /// 群聊数量（计数器文本用）。
-    func groupCount() throws -> Int {
-        try database.pool.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) AS c FROM chat_groups") ?? 0
-        }
-    }
 }
