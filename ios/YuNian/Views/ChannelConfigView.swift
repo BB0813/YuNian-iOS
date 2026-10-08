@@ -180,13 +180,65 @@ struct ChannelConfigView: View {
                                             ? colors.danger : colors.textSecondary
                                     )
                                     .textSelection(.enabled)
+
+                                // ⚠️ 第 181 轮：不支持模型列表时给出下一步。
+                                // 之前只显示"XX 不支持模型列表查询"就停了 ——
+                                // 用户看到这句话并不知道该干什么。
+                                // Kotlin 同类提示见 ImageGenerationService.kt:81-83：
+                                // "请确认该地址支持 /images/generations，或手动填写模型名"。
+                                if environment.modelsNotSupported {
+                                    Text("该服务商不提供模型列表，请手动在上方 Model 框填写模型名。")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(colors.textTertiary)
+                                        .padding(.top, YuNianTheme.Space.tight)
+                                }
                             }
                             if !environment.serverModels.isEmpty {
-                                Text(environment.serverModels.joined(separator: "、"))
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(colors.textSecondary)
-                                    .textSelection(.enabled)
-                                    .lineLimit(8)
+                                // ⚠️ 第 181 轮：改成**可点选**列表。
+                                //
+                                // 之前是
+                                //     Text(environment.serverModels.joined(separator: "、"))
+                                //         .lineLimit(8)
+                                // 两个问题：
+                                // 1. 模型一多就被截断，看不到全部
+                                // 2. **点不了** —— 用户得手动回上方 Model 框抄名字
+                                //
+                                // 而 `loadServerModels` 存在的全部意义
+                                // （见 AppEnvironment.swift:381-384 的注释）就是
+                                // "让用户不必手填模型名"。展示成纯文本，
+                                // 等于把这个意义抵消掉了。
+                                VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
+                                    Text("共 \(environment.serverModels.count) 个 · 点选填入上方 Model")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(colors.textTertiary)
+
+                                    ScrollView {
+                                        LazyVStack(alignment: .leading, spacing: 0) {
+                                            ForEach(environment.serverModels, id: \.self) { m in
+                                                        Button {
+                                                            model = m
+                                                        } label: {
+                                                            HStack(spacing: YuNianTheme.Space.half) {
+                                                                Text(m)
+                                                                    .font(.system(size: 12).monospaced())
+                                                                    .lineLimit(1)
+                                                                Spacer(minLength: 0)
+                                                                if m == model {
+                                                                    Image(systemName: "checkmark")
+                                                                        .font(.system(size: 11, weight: .semibold))
+                                                                }
+                                                            }
+                                                            .foregroundStyle(
+                                                                m == model ? colors.primary : colors.textSecondary
+                                                            )
+                                                            .padding(.vertical, YuNianTheme.Space.tight)
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                    }
+                                                }
+                                    }
+                                    .frame(maxHeight: 180)
+                                }
                             }
                         }
                     }
