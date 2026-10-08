@@ -108,7 +108,20 @@ final class AppEnvironment: ObservableObject {
             settings.ownerName = KeychainStore.string(for: KeychainStore.Key.ownerName)
 
             // credentials：Rust 无法解密库里的 apiKey（Tink 密文），必须由宿主传明文
-            let credentials = AgentCredentials.fromKeychain(isPartner: false)
+            //
+            // ⚠️ 第 187 轮：boot 也必须按配置解析 key。
+            // 上一版我漏了这一处（CI 报 "missing argument for parameter 'apiKey'"）——
+            // 它是**启动路径**，`pushCredentials` 是回合前路径，两者都要改。
+            // 只改后者的话，冷启动到第一回合之间 credentials 是错的
+            // （读的是旧单槽，可能为空或属于别家配置）。
+            //
+            // `apiConfigs` 此处是 boot 内的局部变量（L84），到 L150 才赋给 self ——
+            // 所以这里直接用局部那个，不必等 self 就绪。
+            let bootConfig = (try? apiConfigs.activeConfig()) ?? nil
+            let credentials = AgentCredentials.fromKeychain(
+                isPartner: bootConfig?.provider == "PARTNER",
+                apiKey: KeychainStore.resolvedAPIKey(configId: bootConfig?.id)
+            )
 
             let config = AgentGlobalConfig(
                 dbPath: dbURL.path,
