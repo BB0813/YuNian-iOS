@@ -121,6 +121,7 @@ xcodebuild test \
 | `YuNianGlassStyleTests` | 毛玻璃分水岭：显式覆盖优先于 OS / 垃圾值与 nil 回落自动 / autoDetected 在 iOS 26+ 返回 liquidGlass、26 以下返回 legacy / rawValue 往返 / current() 读写 UserDefaults / 文案点明"原生"与 OS 范围 |
 | `ApiConfigSwitchTests` | 多渠道单活语义：列出全部（按创建序）/ 保存第二家自动停用第一家 / **activate 后仍须只有一条启用**（否则 Rust 取 id 最大者、与 UI 不一致）/ 激活失败 id 不影响当前 / 删启用中的那条**不自动顶上** |
 | `PerConfigAPIKeyTests` | 按配置存放 API Key：槽名按 id 分立且不撞旧槽 / 纯规则 `pickAPIKey` —— **按配置优先**、缺失与空串都回退旧单槽、都没有给空串 / 不 trim（防将来"顺手 trim"改行为）。**不碰 Keychain**（测试宿主 entitlement 不可靠，规则与 I/O 已分离） |
+| `BoundConfigUsabilityTests` | 伴侣绑定配置的可用性：配置不存在（provider nil）不可用 / **有 key 的非 PARTNER 可用**（第 188 轮修的 bug —— 旧实现读行内恒空 apiKey 而恒 false）/ 无 key 的非 PARTNER 不可用 / PARTNER 无 key 也可用 / 空格 key 算存在（把"是否 trim"记成被测试的决策） |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译
