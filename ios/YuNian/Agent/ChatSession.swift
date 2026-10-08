@@ -283,7 +283,8 @@ final class ChatSession: ObservableObject {
         guard let cfg = try? environment.apiConfigs?.activeConfig() else { return }
 
         // apiKey 取一次，避免闭包里重复读 Keychain
-        let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
+        // 第 186 轮：按**该条配置**解析 key（不再是全局单槽）
+        let apiKey = KeychainStore.resolvedAPIKey(configId: cfg.id)
 
         var coordinator = ImageGenCoordinator(
             deps: .init(

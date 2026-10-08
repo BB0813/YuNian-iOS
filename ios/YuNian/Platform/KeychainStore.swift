@@ -28,6 +28,36 @@ enum KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
+    /// 按配置解析 API Key —— **全仓唯一实现**（第 186 轮）。
+    ///
+    /// ## 解析顺序
+    /// 1. `api_key_<configId>` —— 按配置存放（第 186 轮起）
+    /// 2. `api_key` —— 旧单槽，**迁移回退**（第 186 轮前装的用户只有它）
+    ///
+    /// ## 为什么放在存储层而不是 AppEnvironment
+    /// 读取方横跨 App 层（`AppEnvironment`）与 Agent 层（`ApiProbeService`），
+    /// 后者不该依赖前者。规则写在存储层，两边都用同一份 ——
+    /// 否则就是第 8 轮记录的教训："同一个契约两处各自维护就会互相掩盖"。
+    ///
+    /// ⚠️ 决策部分抽到 `pickAPIKey` 是为了**可测**：
+    /// 仓内此前没有任何测试碰过 Keychain，说明测试宿主里它不一定可用
+    /// （entitlement 缺失会返回 errSecMissingEntitlement）。
+    /// 把"选哪个"与"从哪读"分开，规则就能在无 Keychain 的环境下验证。
+    static func resolvedAPIKey(configId: Int64?) -> String {
+        let perConfig = configId.flatMap { string(for: Key.apiKeyFor($0)) }
+        return pickAPIKey(perConfig: perConfig,
+                          legacy: string(for: Key.apiKey))
+    }
+
+    /// 纯逻辑：两个候选里选哪个。**不碰 Keychain，可直接单测。**
+    ///
+    /// 规则：按配置的槽优先；它为空（没有或空串）时回退旧单槽。
+    /// 两者都没有则返回空串（调用方据此判"未配置"）。
+    static func pickAPIKey(perConfig: String?, legacy: String?) -> String {
+        if let perConfig, !perConfig.isEmpty { return perConfig }
+        return legacy ?? ""
+    }
+
     /// 写入字符串（存在则覆盖）。
     static func set(_ value: String, for key: String) throws {
         try set(Data(value.utf8), for: key)
@@ -90,7 +120,29 @@ enum KeychainStore {
 
     enum Key {
         /// API Key（Android 侧为 `api_configs.apiKey`，native VMP/Tink 加密）
+        ///
+        /// ⚠️ 第 186 轮：这已**不是**主存放位，改为「按配置一行一个槽」。
+        ///
+        /// 原因：这个单槽让「多配置」名存实亡 ——
+        /// 第 182 轮做的多渠道切换能换 provider/baseUrl/model，
+        /// 但 **key 换不了**（所有配置共用一个槽，谁最后保存是谁的）。
+        /// 角色级 API 隔离（Android `AiService.kt:177-186`）也就无从谈起。
+        ///
+        /// 现在：新写入走 `apiKeyFor(configId)`；
+        /// 这个旧槽只在**按配置读不到时**作迁移回退，
+        /// 保证升级上来的用户不丢已有 key。
         static let apiKey = "api_key"
+
+        /// 按配置存放 API Key 的键名前缀。
+        static let apiKeyPrefix = "api_key_"
+
+        /// 某条 `api_configs` 行的 API Key 槽名。
+        ///
+        /// 用 `id` 而不是 `provider` 作后缀：同一个 provider 可以有多行
+        /// （不同 baseUrl / 不同 key），用 provider 会互相覆盖。
+        static func apiKeyFor(_ configId: Int64) -> String {
+            "\(apiKeyPrefix)\(configId)"
+        }
         /// PARTNER 会话令牌（Rust 注入为 `X-LianYu-Session` 头）
         static let partnerToken = "partner_auth_token"
         /// PARTNER 客户端 id（Rust 注入为 `X-LianYu-Client-Id` 头，并作为签名回调入参）

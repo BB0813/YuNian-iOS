@@ -250,13 +250,33 @@ final class AppEnvironment: ObservableObject {
     /// Rust 的 `load_api_config` 需要它提供 provider / baseUrl / model，
     /// 否则每个回合都报「无可用 API 配置」。详见 `ApiConfigRepository.upsertActiveConfig`。
     func setAPIKey(_ key: String, provider: String = "OPENAI", model: String? = nil) throws {
+        // ⚠️ 第 186 轮：改成**先建/更新配置行，再往那一行自己的槽写 key**。
+        // 旧版顺序反了（先写全局槽再建行），且只有一个全局槽 ——
+        // 于是多配置切换时 key 换不了。
+        try ensureActiveApiConfig(provider: provider, model: model)
+
+        let slot = try apiConfigs?.activeConfig().map { KeychainStore.Key.apiKeyFor($0.id) }
         if key.isEmpty {
-            KeychainStore.remove(KeychainStore.Key.apiKey)
+            if let slot { KeychainStore.remove(slot) }
+            KeychainStore.remove(KeychainStore.Key.apiKey)   // 旧槽一并清，避免残留
+        } else if let slot {
+            try KeychainStore.set(key, for: slot)
         } else {
+            // 极端情况：拿不到配置 id（例如无任何可用预设、建不出行）——
+            // 退回旧单槽，至少不把用户刚输入的 key 丢掉。
             try KeychainStore.set(key, for: KeychainStore.Key.apiKey)
         }
-        try ensureActiveApiConfig(provider: provider, model: model)
         pushCredentials()
+    }
+
+    /// 读取某条配置的 API Key。
+    ///
+    /// ⚠️ 第 186 轮：实现**已下沉到 `KeychainStore.resolvedAPIKey`** ——
+    /// Agent 层（`ApiProbeService`）也要用同一份规则，而它不该依赖
+    /// AppEnvironment。这里只是保留一个语义清晰的转发入口，
+    /// 避免 App 层各处再各写一遍"按配置优先、旧槽回退"。
+    func resolvedAPIKey(configId: Int64?) -> String {
+        KeychainStore.resolvedAPIKey(configId: configId)
     }
 
     /// 保证有一条启用的 `api_configs` 行（Rust 的关键路径依赖它）。
@@ -320,12 +340,19 @@ final class AppEnvironment: ObservableObject {
     }
 
     /// 从 Keychain 重新装配 credentials 并下发。
+    ///
+    /// ⚠️ 第 186 轮：key 改为按**当前启用配置**解析
+    /// （`resolvedAPIKey(configId:)`），不再固定读旧单槽。
     private func pushCredentials() {
         guard let runtime else { return }
         // PARTNER 门控：只有当前启用配置是 PARTNER 时才下发 session / client_id。
         // 对应 Android `syncRuntimeConfig` 的 `if (isPartner) ... else null`。
-        let isPartner = (try? apiConfigs?.isActiveProviderPARTNER()) ?? false
-        let credentials = AgentCredentials.fromKeychain(isPartner: isPartner)
+        let config = (try? apiConfigs?.activeConfig()) ?? nil
+        let isPartner = config?.provider == "PARTNER"
+        let credentials = AgentCredentials.fromKeychain(
+            isPartner: isPartner,
+            apiKey: resolvedAPIKey(configId: config?.id)
+        )
         runtime.updateCredentials(credentialsJson: credentials.jsonString())
         refreshCredentialsSummary(credentials: credentials)
     }
@@ -364,7 +391,7 @@ final class AppEnvironment: ObservableObject {
         }
         let extraHeaders = ApiProbeService.authHeaders(
             provider: config.provider,
-            apiKey: KeychainStore.string(for: KeychainStore.Key.apiKey) ?? "",
+            apiKey: resolvedAPIKey(configId: config.id),
             partnerSession: KeychainStore.string(for: KeychainStore.Key.partnerToken),
             partnerClientId: KeychainStore.string(for: KeychainStore.Key.partnerClientId)
         )
@@ -398,7 +425,7 @@ final class AppEnvironment: ObservableObject {
         // 与回合内的头是两条路径但同一份 Keychain 数据，结论一致。
         let extraHeaders = ApiProbeService.authHeaders(
             provider: config.provider,
-            apiKey: KeychainStore.string(for: KeychainStore.Key.apiKey) ?? "",
+            apiKey: resolvedAPIKey(configId: config.id),
             partnerSession: KeychainStore.string(for: KeychainStore.Key.partnerToken),
             partnerClientId: KeychainStore.string(for: KeychainStore.Key.partnerClientId)
         )
