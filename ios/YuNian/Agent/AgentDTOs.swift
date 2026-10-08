@@ -252,14 +252,21 @@ struct AgentCredentials: Codable, Sendable, Equatable {
     ///   `api_key` / `extra_api_keys` → `all_api_keys()`
     ///   `session` / `client_id`      → `provider_headers()` 的 PARTNER 分支
     ///
-    /// - Parameter isPartner: 当前启用配置是否为 PARTNER。
-    ///   **false 时不下发 session / client_id** —— 对应 Android
-    ///   `syncRuntimeConfig` 的 `sessionToken = if (isPartner) ... else null`。
-    ///   非 PARTNER 走 OpenAI 标准 Bearer，发这两个键没有意义，
-    ///   且会让发出的 JSON 与 Android 不同。
-    static func fromKeychain(isPartner: Bool) -> AgentCredentials {
+    /// - Parameters:
+    ///   - isPartner: 当前启用配置是否为 PARTNER。
+    ///     **false 时不下发 session / client_id** —— 对应 Android
+    ///     `syncRuntimeConfig` 的 `sessionToken = if (isPartner) ... else null`。
+    ///     非 PARTNER 走 OpenAI 标准 Bearer，发这两个键没有意义，
+    ///     且会让发出的 JSON 与 Android 不同。
+    ///   - apiKey: 已经解析好的 API Key。**调用方必须传**（第 186 轮）。
+    ///
+    ///     ⚠️ 为什么不让本方法自己读 Keychain：第 186 轮起 key 是
+    ///     **按配置**存放的（`api_key_<configId>`），只有调用方知道当前
+    ///     生效的是哪条配置。让这里自己读，就会退回到那个"所有配置共用
+    ///     一个槽"的旧行为 —— 也就是本次要修的那个 bug。
+    static func fromKeychain(isPartner: Bool, apiKey: String) -> AgentCredentials {
         AgentCredentials(
-            apiKey: KeychainStore.string(for: KeychainStore.Key.apiKey),
+            apiKey: apiKey.isEmpty ? nil : apiKey,
             extraApiKeys: nil,
             session: isPartner ? KeychainStore.string(for: KeychainStore.Key.partnerToken) : nil,
             clientId: isPartner ? KeychainStore.string(for: KeychainStore.Key.partnerClientId) : nil

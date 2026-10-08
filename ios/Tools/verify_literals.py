@@ -437,15 +437,31 @@ def main() -> int:
                  in coord or "ApiProvider.PARTNER" in coord)
 
     dto2 = read(SWIFT_DIR / "Agent/AgentDTOs.swift")
+    # ⚠️ 第 186 轮：断言从 `fromKeychain(isPartner: Bool)` 放宽到
+    # `fromKeychain(isPartner: Bool`（去掉右括号）。
+    # 该函数新增了 `apiKey:` 参数（key 改为按配置解析，由调用方传入），
+    # 原来的整串匹配就再也命不中了。
+    # **意图没变**：这里要保证的是"PARTNER 门控参数存在于装配入口"，
+    # 不是"签名永远只有这一个参数"。
     report.check("Swift fromKeychain 接受 isPartner 参数",
-                 "fromKeychain(isPartner: Bool)" in dto2)
+                 "fromKeychain(isPartner: Bool" in dto2)
+    report.check("Swift fromKeychain 接受调用方传入的 apiKey（第 186 轮）",
+                 "apiKey: String)" in dto2)
     report.check("Swift 非 PARTNER 时不下发 session/client_id",
                  "isPartner ? KeychainStore.string(for: KeychainStore.Key.partnerToken) : nil"
                  in dto2)
 
     env2 = read(SWIFT_DIR / "App/AppEnvironment.swift")
-    report.check("pushCredentials 计算 isPartner",
-                 "isActiveProviderPARTNER()" in env2)
+    # ⚠️ 第 186 轮：接受两种等价写法。
+    # `pushCredentials` 现在要先拿 `config` 才能取到它的 id（按配置读 key），
+    # 于是顺手用 `config?.provider == "PARTNER"` 判门控，
+    # 不再多查一次 `isActiveProviderPARTNER()`。
+    # **意图没变**：这里要保证的是"pushCredentials 里存在 PARTNER 门控"，
+    # 不是"必须调用某个具体 helper"。两种写法都算通过，
+    # 两种都不在才算门控被删。
+    _partner_gate = ("isActiveProviderPARTNER()" in env2
+                     or 'config?.provider == "PARTNER"' in env2)
+    report.check("pushCredentials 计算 isPartner", _partner_gate)
     report.check("boot 里装配了 ApiConfigRepository",
                  "ApiConfigRepository(database: database)" in env2)
 

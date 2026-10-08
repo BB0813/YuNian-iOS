@@ -397,7 +397,8 @@ struct ImageGenView: View {
     private func credentials() -> (String, String)? {
         guard let repo = environment.apiConfigs,
               let cfg = try? repo.activeConfig() else { return nil }
-        let key = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
+        // 第 186 轮：按该条配置解析 key
+        let key = KeychainStore.resolvedAPIKey(configId: cfg.id)
         return (cfg.baseUrl, key)
     }
 }

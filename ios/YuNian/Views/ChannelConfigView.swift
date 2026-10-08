@@ -372,9 +372,9 @@ struct ChannelConfigView: View {
             baseUrl = active.baseUrl
             model = active.model
             formatHint = active.formatHint
-            if let key = KeychainStore.string(for: KeychainStore.Key.apiKey), !key.isEmpty {
-                apiKey = key
-            }
+            // 第 186 轮：读该条配置自己的 key（旧单槽作迁移回退）
+            let key = KeychainStore.resolvedAPIKey(configId: active.id)
+            if !key.isEmpty { apiKey = key }
         } else {
             applyPreset(initialProvider)
         }

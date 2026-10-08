@@ -57,7 +57,7 @@ enum ApiProbeService {
         config: ApiConfigRepository.ApiConfig,
         extraHeaders: [HttpHeader]
     ) -> Result<String, ProbeError> {
-        let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
+        let apiKey = KeychainStore.resolvedAPIKey(configId: config.id)
         let isPartner = config.provider == "PARTNER"
         guard isPartner || !apiKey.isEmpty else { return .failure(.notConfigured) }
 
@@ -106,7 +106,7 @@ enum ApiProbeService {
         config: ApiConfigRepository.ApiConfig,
         extraHeaders: [HttpHeader]
     ) -> Result<BalanceInfo, ProbeError> {
-        let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
+        let apiKey = KeychainStore.resolvedAPIKey(configId: config.id)
         let isPartner = config.provider == "PARTNER"
         guard isPartner || !apiKey.isEmpty else { return .failure(.notConfigured) }
 
@@ -172,7 +172,7 @@ enum ApiProbeService {
         extraHeaders: [HttpHeader]
     ) -> Result<[String], ProbeError> {
         // PARTNER 模式下 key 可为空（凭 session/clientId），其余必须有 key。
-        let apiKey = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
+        let apiKey = KeychainStore.resolvedAPIKey(configId: config.id)
         let isPartner = config.provider == "PARTNER"
         guard isPartner || !apiKey.isEmpty else { return .failure(.notConfigured) }
 
