@@ -46,6 +46,29 @@ struct ChannelConfigView: View {
     // 于是想切回之前那家只能重新填一遍。
     @State private var savedConfigs: [ApiConfigRepository.ApiConfig] = []
 
+    // MARK: - 内置云通道（第 185 轮）
+    //
+    // PARTNER 在 Kotlin 里是"单独管理"的：`ApiConfig.kt:81` 有它
+    // （`PARTNER("Clove API", SuFlowApi.CHAT_BASE_URL, "auto")`），
+    // 但**不在服务商预设列表里** —— 仓内关卡明确要求
+    // "预设不含 PARTNER（内置云通道单独管理）"
+    // （verify_literals.py:185 / generate_seeds.py:371）。
+    //
+    // 所以它不能走上面的 provider Picker，得有一个独立入口。
+    //
+    // ⚠️ 基础设施早就全有了，只是**没有入口**：
+    //   · `KeychainStore.Key.partnerToken` / `partnerClientId`
+    //   · `AppEnvironment.setPartnerSession(session:clientId:)`（第 143 轮）
+    //   · PARTNER 门控（`isActiveProviderPARTNER()`，只有 PARTNER 才下发会话头）
+    //   · `RequestSigner` 签名（fail-closed）
+    //   · `ApiProbeService.authHeaders` 的 PARTNER 分支
+    // `setPartnerSession` 此前**零 UI 调用方** —— 和第 145 轮的 `save()`、
+    // 第 164 轮的 `ImageGenStore.enable()` 是同一个模式。
+    @State private var partnerSession = ""
+    @State private var partnerClientId = ""
+    @State private var partnerBusy = false
+    @State private var partnerMessage: String?
+
     init(provider: String) {
         self.initialProvider = provider
         _provider = State(initialValue: provider)
@@ -327,6 +350,9 @@ struct ChannelConfigView: View {
                         }
                     }
 
+                    // ── 内置云通道（第 185 轮）────────────────────────
+                    partnerSection
+
                     Spacer(minLength: YuNianTheme.Space.pageTop)
                 }
                 .padding(.horizontal, YuNianTheme.Space.page)
@@ -353,9 +379,107 @@ struct ChannelConfigView: View {
             applyPreset(initialProvider)
         }
         reloadSavedConfigs()
+        reloadPartner()
+    }
+
+    /// 读回已存的 PARTNER 会话（第 185 轮）。
+    private func reloadPartner() {
+        partnerSession = KeychainStore.string(for: KeychainStore.Key.partnerToken) ?? ""
+        partnerClientId = KeychainStore.string(for: KeychainStore.Key.partnerClientId) ?? ""
     }
 
     // MARK: - 已保存渠道的切换与删除（第 182 轮）
+
+    // MARK: - 内置云通道 UI（第 185 轮）
+
+    /// 常量来自 Kotlin `ApiConfig.kt:81` 与 `SuFlowApi.kt`：
+    /// `PARTNER("Clove API", SuFlowApi.CHAT_BASE_URL, "auto")`，
+    /// `CHAT_BASE_URL = "https://suflow.cloud/v1"`（SuFlowApi.kt:9）。
+    private enum Partner {
+        static let displayName = "Clove API"
+        static let baseUrl = "https://suflow.cloud/v1"
+        static let model = "auto"
+    }
+
+    private var partnerSection: some View {
+        Group {
+            YuNianSectionTitle(title: "内置云通道")
+
+            YuNianGlassCard {
+                VStack(alignment: .leading, spacing: YuNianTheme.Space.cardPadding) {
+                    Text("Clove 云通道不需要 API Key，用会话令牌 + 客户端 id 认证。"
+                         + "两者由服务端握手下发，过期后要重新取。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(colors.textTertiary)
+
+                    YuNianField("会话令牌", text: $partnerSession, isSecure: true)
+                    YuNianField("客户端 id", text: $partnerClientId, monospaced: true)
+
+                    HStack(spacing: YuNianTheme.Space.standard) {
+                        YuNianGlassButton(
+                            onClick: { savePartner() },
+                            height: 34, horizontalPadding: 12,
+                            enabled: !partnerBusy
+                        ) {
+                            Text("保存并启用")
+                                .font(YuNianTheme.TextStyle.cardAction)
+                                .foregroundStyle(colors.textPrimary)
+                        }
+
+                        if partnerBusy {
+                            ProgressView()
+                        }
+                    }
+
+                    if let partnerMessage {
+                        Text(partnerMessage)
+                            .font(.caption)
+                            .foregroundStyle(colors.textSecondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(YuNianTheme.Space.cardPadding)
+            }
+        }
+    }
+
+    /// 保存 PARTNER 会话并启用云通道。
+    ///
+    /// 三步，顺序有依赖：
+    /// 1. `setPartnerSession` 写 Keychain（session + clientId）
+    /// 2. `upsertActiveConfig(provider: "PARTNER")` 建/更新行并置启用
+    ///    —— 走仓库方法，**不经预设**，所以"预设不含 PARTNER"的关卡不受影响
+    /// 3. `syncRuntimeConfig()` 让 Rust 立刻拿到新配置与会话头
+    ///
+    /// ⚠️ 第 2 步若失败，第 1 步的 Keychain 已经写了 ——
+    /// 表现为"令牌存了但通道没启用"。所以失败时也给出明确文案。
+    private func savePartner() {
+        let session = partnerSession.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientId = partnerClientId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !session.isEmpty, !clientId.isEmpty else {
+            partnerMessage = "会话令牌与客户端 id 都要填"
+            return
+        }
+        partnerBusy = true
+        partnerMessage = nil
+        defer { partnerBusy = false }
+
+        do {
+            try environment.setPartnerSession(session: session, clientId: clientId)
+            _ = try environment.apiConfigs?.upsertActiveConfig(
+                provider: "PARTNER",
+                model: Partner.model,
+                baseUrl: Partner.baseUrl,
+                name: Partner.displayName,
+                formatHint: "openai"
+            )
+            environment.syncRuntimeConfig()
+            reloadSavedConfigs()
+            partnerMessage = "已启用内置云通道"
+        } catch {
+            partnerMessage = "启用失败：\(error.localizedDescription)"
+        }
+    }
 
     private func reloadSavedConfigs() {
         savedConfigs = (try? environment.apiConfigs?.allConfigs()) ?? []
