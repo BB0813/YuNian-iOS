@@ -130,20 +130,41 @@ final class ApiConfigRepository {
     /// 启用指定配置，其余全部置停用。
     ///
     /// ## 单活语义
-    /// 与 `upsertActiveConfig` 开头的
-    /// `UPDATE api_configs SET isEnabled = 0 WHERE isEnabled = 1` 同一套：
     /// 同一时刻只有一条启用。Rust 侧读的是
     /// `WHERE isEnabled = 1 ORDER BY id DESC LIMIT 1`，
     /// 多条启用会让它取 id 最大的那条 —— 与 UI 显示的不一定一致。
+    ///
+    /// ⚠️ 第 184 轮：**顺序很关键** —— 必须先启用目标，再停用其它。
+    /// 我第一版写的是"先停用全部，再启用目标"：
+    /// ```swift
+    /// try db.execute("UPDATE api_configs SET isEnabled = 0 WHERE isEnabled = 1")
+    /// try db.execute("UPDATE api_configs SET isEnabled = 1 WHERE id = ?", ...)
+    /// ```
+    /// 目标 id 不存在时，第一句**已经把当前生效那条停掉了**，
+    /// 第二句影响 0 行 → 结果是没有一条启用，
+    /// 用户下一次发消息直接失败。
+    ///
+    /// CI（05375fc）的 `testActivateUnknownIdLeavesCurrentIntact`
+    /// 抓到的：`XCTAssertEqual failed: ("nil")` —— activeConfig() 变 nil。
+    ///
+    /// - Returns: 是否真的启用到了行（id 不存在时 false，且不影响当前启用态）。
     @discardableResult
     func activate(id: Int64) throws -> Bool {
         try database.pool.write { db in
-            try db.execute(sql: "UPDATE api_configs SET isEnabled = 0 WHERE isEnabled = 1")
+            // ① 先启用目标。影响 0 行说明 id 不存在 —— 直接返回，
+            //    当前启用态一个字都没动。
             try db.execute(
                 sql: "UPDATE api_configs SET isEnabled = 1 WHERE id = ?",
                 arguments: [id]
             )
-            return db.changesCount > 0
+            guard db.changesCount > 0 else { return false }
+
+            // ② 目标已启用，再停用其它（`id != ?` 保证不会把自己也停掉）
+            try db.execute(
+                sql: "UPDATE api_configs SET isEnabled = 0 WHERE isEnabled = 1 AND id != ?",
+                arguments: [id]
+            )
+            return true
         }
     }
 

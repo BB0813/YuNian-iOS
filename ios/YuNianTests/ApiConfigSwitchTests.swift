@@ -93,15 +93,27 @@ final class ApiConfigSwitchTests: XCTestCase {
 
     // MARK: - 删除
 
-    /// 删掉非启用那条，启用态不受影响。
+    /// 删掉**非启用**那条，启用态不受影响。
+    ///
+    /// ⚠️ 第 184 轮修正：我第一版这个测试名字说"删非启用"，
+    /// 实际删的是 `second`（DASHSCOPE，最后保存所以是启用的）——
+    /// 于是 `activeConfig()` 返回 nil，断言失败。
+    /// **测试自己写错了**，与实现无关（那一版的实现确实有 bug，
+    /// 但由另一个测试 `testActivateUnknownIdLeavesCurrentIntact` 抓到）。
+    ///
+    /// 现在明确删 OPENAI（保存 DASHSCOPE 后被停用的那条）。
     func testDeleteNonActiveKeepsActive() throws {
-        _ = try repo.upsertActiveConfig(provider: "OPENAI", model: "gpt-4o",
-                                        baseUrl: "https://api.openai.com/v1")
-        let second = try repo.upsertActiveConfig(provider: "DASHSCOPE", model: "qwen-plus",
-                                                 baseUrl: "https://dashscope.aliyuncs.com/v1")
-        XCTAssertTrue(try repo.delete(id: second))
+        let openai = try repo.upsertActiveConfig(provider: "OPENAI", model: "gpt-4o",
+                                                 baseUrl: "https://api.openai.com/v1")
+        _ = try repo.upsertActiveConfig(provider: "DASHSCOPE", model: "qwen-plus",
+                                        baseUrl: "https://dashscope.aliyuncs.com/v1")
+        // openai 这时已被停用（DASHSCOPE 是后保存的）
+        XCTAssertFalse(try repo.allConfigs().first { $0.id == openai }!.isEnabled)
+
+        XCTAssertTrue(try repo.delete(id: openai))
         XCTAssertEqual(try repo.allConfigs().count, 1)
-        XCTAssertEqual(try repo.activeConfig()?.provider, "DASHSCOPE")
+        XCTAssertEqual(try repo.activeConfig()?.provider, "DASHSCOPE",
+                       "删非启用那条，启用态不该被动")
     }
 
     /// ⚠️ 删掉**启用中**那条：剩下那条**不自动顶上**。
