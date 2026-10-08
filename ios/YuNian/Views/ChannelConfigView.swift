@@ -38,6 +38,14 @@ struct ChannelConfigView: View {
     @State private var errorText: String?
     @State private var saved = false
 
+    // MARK: - 已保存的渠道（第 182 轮）
+    //
+    // `upsertActiveConfig` 按 provider 找行，所以实际形态是"每家一行"。
+    // 用户切过几家后数据都留着，但仓库层原来只有 `activeConfig()`
+    // （读当前启用那一条）—— **没有任何方法能列出全部**，
+    // 于是想切回之前那家只能重新填一遍。
+    @State private var savedConfigs: [ApiConfigRepository.ApiConfig] = []
+
     init(provider: String) {
         self.initialProvider = provider
         _provider = State(initialValue: provider)
@@ -251,6 +259,74 @@ struct ChannelConfigView: View {
                             .padding(.horizontal, YuNianTheme.Space.minUnit)
                     }
 
+                    // ── 已保存的渠道（第 182 轮）────────────────────
+                    if !savedConfigs.isEmpty {
+                        YuNianSectionTitle(title: "已保存的渠道")
+
+                        YuNianGlassCard {
+                            VStack(alignment: .leading, spacing: YuNianTheme.Space.tight) {
+                                Text("点选切换。同一时刻只有一条生效 —— Rust 读的就是那一条。")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(colors.textTertiary)
+
+                                // ⚠️ 第 183 轮：分隔线只画在**行与行之间**。
+                                // 上一版我写了
+                                //     if cfg.id != savedConfigs.first?.id || true
+                                // `|| true` 恒真 → 第一行上面也多一条。
+                                // 那种"带条件但恒真"的写法比无条件更糟：
+                                // 它看起来像有逻辑，其实没有。
+                                ForEach(Array(savedConfigs.enumerated()), id: \.element.id) { idx, cfg in
+                                    if idx > 0 {
+                                        Divider().overlay(colors.divider.opacity(0.5))
+                                    }
+                                    HStack(spacing: YuNianTheme.Space.half) {
+                                        Button {
+                                            switchTo(cfg)
+                                        } label: {
+                                            HStack(spacing: YuNianTheme.Space.half) {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(cfg.name.isEmpty ? cfg.provider : cfg.name)
+                                                        .font(YuNianTheme.TextStyle.settingsRowTitle)
+                                                        .foregroundStyle(colors.textPrimary)
+                                                        .lineLimit(1)
+                                                    Text("\(cfg.provider) · \(cfg.model)")
+                                                        .font(.system(size: 11).monospaced())
+                                                        .foregroundStyle(colors.textSecondary)
+                                                        .lineLimit(1)
+                                                }
+                                                Spacer(minLength: 0)
+                                                if cfg.isEnabled {
+                                                    Text("使用中")
+                                                        .font(.system(size: 11, weight: .semibold))
+                                                        .foregroundStyle(colors.primary)
+                                                } else {
+                                                    Image(systemName: "arrow.left.arrow.right")
+                                                        .font(.system(size: 12))
+                                                        .foregroundStyle(colors.textTertiary)
+                                                }
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+
+                                        // 删除（启用中的那条不给删 —— 删了就没了生效渠道）
+                                        if !cfg.isEnabled {
+                                            Button {
+                                                deleteConfig(cfg)
+                                            } label: {
+                                                Image(systemName: "trash")
+                                                    .font(.system(size: 12))
+                                                    .foregroundStyle(colors.danger)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.leading, YuNianTheme.Space.half)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(YuNianTheme.Space.cardPadding)
+                        }
+                    }
+
                     Spacer(minLength: YuNianTheme.Space.pageTop)
                 }
                 .padding(.horizontal, YuNianTheme.Space.page)
@@ -275,6 +351,46 @@ struct ChannelConfigView: View {
             }
         } else {
             applyPreset(initialProvider)
+        }
+        reloadSavedConfigs()
+    }
+
+    // MARK: - 已保存渠道的切换与删除（第 182 轮）
+
+    private func reloadSavedConfigs() {
+        savedConfigs = (try? environment.apiConfigs?.allConfigs()) ?? []
+    }
+
+    /// 切到另一条已保存配置。
+    ///
+    /// ⚠️ 切完必须 `syncRuntimeConfig()` —— 否则 Rust 侧还拿着旧渠道，
+    /// 表现为"UI 显示切了，发消息还是打到原来那家"。
+    /// 第 107 轮 `setAPIKey` 里已经踩过同类的坑（写库不同步运行时）。
+    private func switchTo(_ cfg: ApiConfigRepository.ApiConfig) {
+        guard !cfg.isEnabled else { return }        // 已是当前，别重复操作
+        do {
+            _ = try environment.apiConfigs?.activate(id: cfg.id)
+            environment.syncRuntimeConfig()
+            // 表单跟着切过去，让用户看到"现在编辑的就是这一条"
+            provider = cfg.provider
+            name = cfg.name
+            baseUrl = cfg.baseUrl
+            model = cfg.model
+            formatHint = cfg.formatHint
+            reloadSavedConfigs()
+        } catch {
+            errorText = String(describing: error)
+        }
+    }
+
+    /// 删除一条配置。启用中的那条不给删（UI 上也不显示删除钮）。
+    private func deleteConfig(_ cfg: ApiConfigRepository.ApiConfig) {
+        guard !cfg.isEnabled else { return }
+        do {
+            _ = try environment.apiConfigs?.delete(id: cfg.id)
+            reloadSavedConfigs()
+        } catch {
+            errorText = String(describing: error)
         }
     }
 
@@ -333,6 +449,8 @@ struct ChannelConfigView: View {
             environment.syncRuntimeConfig()
             saved = true
             errorText = nil
+            // 第 182 轮：刷新已保存列表 —— 可能是新建了一行
+            reloadSavedConfigs()
             dismiss()
         } catch {
             errorText = String(describing: error)
