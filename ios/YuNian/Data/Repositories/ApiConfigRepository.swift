@@ -93,6 +93,74 @@ final class ApiConfigRepository {
         }
     }
 
+    /// 全部已保存配置（按 id 升序）。
+    ///
+    /// ## 为什么需要
+    /// `upsertActiveConfig` 是按 provider 找行的，所以实际形态是
+    /// "每家服务商一行"。用户切过几家之后，行里都留着数据 ——
+    /// 但仓库层只有 `activeConfig()`（读当前启用那一条），
+    /// **没有任何方法能把全部列出来**，于是：
+    ///   · 用户不知道自己配过哪些
+    ///   · 想切回之前那家，只能重新填一遍 baseUrl/model/key
+    ///
+    /// ## 排序
+    /// `ORDER BY id ASC` —— 配置的创建顺序。启用态由 `isEnabled` 表达，
+    /// 不参与排序（同时只有一条启用，见 `activate`）。
+    func allConfigs() throws -> [ApiConfig] {
+        try database.pool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, provider, name, baseUrl, model, formatHint, isEnabled
+                FROM api_configs
+                ORDER BY id ASC
+                """)
+            return rows.map { row in
+                ApiConfig(
+                    id: row["id"] as Int64? ?? 0,
+                    provider: row["provider"] as String? ?? "",
+                    name: row["name"] as String? ?? "",
+                    baseUrl: row["baseUrl"] as String? ?? "",
+                    model: row["model"] as String? ?? "",
+                    formatHint: row["formatHint"] as String? ?? "",
+                    isEnabled: (row["isEnabled"] as Int? ?? 0) != 0
+                )
+            }
+        }
+    }
+
+    /// 启用指定配置，其余全部置停用。
+    ///
+    /// ## 单活语义
+    /// 与 `upsertActiveConfig` 开头的
+    /// `UPDATE api_configs SET isEnabled = 0 WHERE isEnabled = 1` 同一套：
+    /// 同一时刻只有一条启用。Rust 侧读的是
+    /// `WHERE isEnabled = 1 ORDER BY id DESC LIMIT 1`，
+    /// 多条启用会让它取 id 最大的那条 —— 与 UI 显示的不一定一致。
+    @discardableResult
+    func activate(id: Int64) throws -> Bool {
+        try database.pool.write { db in
+            try db.execute(sql: "UPDATE api_configs SET isEnabled = 0 WHERE isEnabled = 1")
+            try db.execute(
+                sql: "UPDATE api_configs SET isEnabled = 1 WHERE id = ?",
+                arguments: [id]
+            )
+            return db.changesCount > 0
+        }
+    }
+
+    /// 删除一条配置。
+    ///
+    /// 启用中的那条被删时，剩下里 id 最大的一条**不会**自动顶上 ——
+    /// 与 Android 的 `deleteConfig` 行为一致（删完就没有启用的，
+    /// 由用户去挑一个）。顶上来的话，用户没点过它就换了渠道，
+    /// 请求会悄悄打到别家去。
+    @discardableResult
+    func delete(id: Int64) throws -> Bool {
+        try database.pool.write { db in
+            try db.execute(sql: "DELETE FROM api_configs WHERE id = ?", arguments: [id])
+            return db.changesCount > 0
+        }
+    }
+
     /// 当前启用配置是否为 PARTNER（内置 Clove 云通道）。
     ///
     /// 无任何启用配置时返回 **false**（与 Android 一致：
