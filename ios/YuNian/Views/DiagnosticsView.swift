@@ -119,6 +119,37 @@ struct DiagnosticsView: View {
                           detail: ((try? SecureEnclaveSigner.keyId()).map(abbreviated)) ?? "不可用")
             }
 
+            Section("数据库维护（启动时静默执行）") {
+                // ⚠️ 第 201 轮：把维护状态摊开。
+                //
+                // `DatabaseMaintenance.runIfNeeded` 在 boot 时被调用
+                // （`AppEnvironment.swift:214`），带 24 小时窗口 ——
+                // **跑没跑、什么时候跑的，用户与我都看不到**。
+                // 归档把热消息移进 archived_messages，界面表现是
+                // "翻历史时消息还在，但不在热表里"，出问题时无从判断。
+                //
+                // 这里只读 `DatabaseMaintenance` 的公开状态，不触发维护 ——
+                // 诊断页不该有副作用。
+                let lastMs = DatabaseMaintenance.lastRunMilliseconds
+                statusRow(
+                    "上次维护",
+                    ok: lastMs > 0,
+                    detail: lastMs > 0 ? Self.formatMs(lastMs) : "从未跑过（下次启动会跑）"
+                )
+                statusRow(
+                    "是否到期",
+                    ok: true,
+                    detail: DatabaseMaintenance.isDue()
+                        ? "已到期（下次启动会执行）"
+                        : "未到期（间隔 \(Int(DatabaseMaintenance.intervalHours)) 小时）"
+                )
+                statusRow(
+                    "热表上限 / 会话",
+                    ok: true,
+                    detail: "\(DatabaseMaintenance.hotMessagesPerConversation) 条，超出归档"
+                )
+            }
+
             Section("渠道（生效配置与 Key 来源）") {
                 // ⚠️ 这里显示的"生效配置"就是 **Rust 每回合读的那一行**：
                 //   native_gateway.rs:281-286
@@ -202,6 +233,14 @@ struct DiagnosticsView: View {
     private func reloadChannelState() {
         diagActiveConfig = try? environment.apiConfigs?.activeConfig()
         diagSavedConfigs = (try? environment.apiConfigs?.allConfigs()) ?? []
+    }
+
+    /// 把毫秒时间戳格式化成可读时间（第 201 轮，数据库维护自检用）。
+    private static func formatMs(_ ms: Int64) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
     }
 
     private func statusRow(_ title: String, ok: Bool, detail: String) -> some View {
