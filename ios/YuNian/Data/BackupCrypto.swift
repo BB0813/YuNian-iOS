@@ -1,5 +1,8 @@
 import Foundation
 import CryptoKit
+// ⚠️ 第 195 轮：导出侧需要 CSPRNG，加 `Security`（`SecRandomCopyBytes`）。
+// 该框架本就已链接 —— `KeychainStore` 一直在用。
+import Security
 // ⚠️ 第 81 轮：`import CommonCrypto` 已移除。
 // 原有实现用 CCKeyDerivationPBKDF2，但它在 CI 上稳定报
 // "cannot find in scope"（试过 target 级 / 工程级 -framework CommonCrypto
@@ -53,6 +56,10 @@ enum BackupCrypto {
         case badMagic([UInt8])
         case keyDerivationFailed
         case decryptionFailed
+        // ── 第 195 轮：导出侧新增 ──────────────────────────────
+        case randomGenerationFailed(Int32)
+        case badSaltLength(Int)
+        case encryptionFailed
 
         var description: String {
             switch self {
@@ -68,6 +75,14 @@ enum BackupCrypto {
                 return "PBKDF2 密钥派生失败"
             case .decryptionFailed:
                 return "解密失败：密码错误或文件已损坏"
+            case let .randomGenerationFailed(status):
+                // 不降级为弱随机 —— 那会让备份文件可被预测
+                return "无法获取安全随机数（SecRandomCopyBytes status=\(status)）"
+            case let .badSaltLength(n):
+                // 容器格式要求 16 字节；写长了 parse 会切错，写短了容器不可解析
+                return "salt 长度必须是 \(saltLength) 字节，收到 \(n)"
+            case .encryptionFailed:
+                return "加密失败（AES-GCM seal）"
             }
         }
     }
@@ -155,5 +170,73 @@ enum BackupCrypto {
             throw CryptoError.decryptionFailed
         }
         return s
+    }
+
+    // MARK: - 加密（第 195 轮：导出侧）
+
+    /// 密码学安全的随机字节。
+    ///
+    /// ## 为什么用 `SecRandomCopyBytes` 而不是 `UInt8.random(in:)`
+    /// 后者走 `SystemRandomNumberGenerator`，在 Apple 平台上同样是安全的，
+    /// 但这一处的正确性**无法在 CI 上被观测**（输出本就是随机的）。
+    /// 所以选一个语义上无歧义的 API：审阅者看到 `SecRandomCopyBytes`
+    /// 就知道是 CSPRNG，不必去查标准库的保证。
+    private static func randomBytes(_ count: Int) throws -> Data {
+        var bytes = [UInt8](repeating: 0, count: count)
+        let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+        guard status == errSecSuccess else {
+            // ⚠️ **不降级**为弱随机 —— 那会让整份备份的密钥可预测。
+            throw CryptoError.randomGenerationFailed(status)
+        }
+        return Data(bytes)
+    }
+
+    /// 加密为 `.lybk` 容器 —— 与 `decrypt` 严格对称。
+    ///
+    /// ## 布局（逐字节沿用本文件顶部记录的 Android 格式）
+    /// ```
+    /// 0     4     "LYBK"
+    /// 4     16    salt
+    /// 20    12    IV
+    /// 32    rest  ciphertext || tag(16)
+    /// ```
+    /// 由 `encrypt` 产出的字节**必须能通过本文件的 `parse`** ——
+    /// `BackupCryptoTests` 里有一条专门断言这一点，因为只测
+    /// "encrypt 后 decrypt 能还原" 会漏掉布局错误：
+    /// 若 salt/IV 顺序写反，自己加自己解仍能通过，而 Android 读不了。
+    ///
+    /// - Parameter salt: **仅供测试**。生产路径传 nil，由 CSPRNG 生成 ——
+    ///   固定 salt 会让同一密码每次派生出同一密钥，等于失去 salt 的意义。
+    static func encrypt(_ plaintext: Data, password: String, salt: Data? = nil) throws -> Data {
+        let usedSalt: Data
+        if let salt {
+            guard salt.count == saltLength else {
+                throw CryptoError.badSaltLength(salt.count)
+            }
+            usedSalt = salt
+        } else {
+            usedSalt = try randomBytes(saltLength)
+        }
+
+        let key = try deriveKey(password: password, salt: usedSalt)
+        let nonceData = try randomBytes(ivLength)
+
+        let sealed: AES.GCM.SealedBox
+        do {
+            sealed = try AES.GCM.seal(
+                plaintext,
+                using: key,
+                nonce: try AES.GCM.Nonce(data: nonceData)
+            )
+        } catch {
+            throw CryptoError.encryptionFailed
+        }
+
+        var out = Data(magic)
+        out.append(usedSalt)
+        out.append(nonceData)
+        out.append(sealed.ciphertext)
+        out.append(sealed.tag)
+        return out
     }
 }
