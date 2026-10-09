@@ -123,6 +123,7 @@ xcodebuild test \
 | `PerConfigAPIKeyTests` | 按配置存放 API Key：槽名按 id 分立且不撞旧槽 / 纯规则 `pickAPIKey` —— **按配置优先**、缺失与空串都回退旧单槽、都没有给空串 / 不 trim（防将来"顺手 trim"改行为）。**不碰 Keychain**（测试宿主 entitlement 不可靠，规则与 I/O 已分离） |
 | `BoundConfigUsabilityTests` | 伴侣绑定配置的可用性：配置不存在（provider nil）不可用 / **有 key 的非 PARTNER 可用**（第 188 轮修的 bug —— 旧实现读行内恒空 apiKey 而恒 false）/ 无 key 的非 PARTNER 不可用 / PARTNER 无 key 也可用 / 空格 key 算存在（把"是否 trim"记成被测试的决策） |
 | `BackupCryptoEncryptTests` | `.lybk` 容器**加密**侧：往返（ASCII / 中日文+emoji 密码 / 空 / 10KB）/ **产物必须通过 `parse`**（只测"自己加自己解"会漏掉 salt-IV 顺序写反，而 Android 会解不开）/ 前 4 字节 `LYBK` / 空明文容器恰 48 字节不算 tooShort / 随机 salt 使两次产物不同 / 固定 salt 确实落在偏移 4 / 密码错→decryptionFailed / salt 长度错→badSaltLength / 篡改密文与篡改 tag 都失败 |
+| `BackupExportRoundTripTests` | 导出→导入往返（**本地逼近"Android 读得懂"的最强手段**）：明文含全部 9 分区键且无多余键 / 各分区计数（含三处**表名与分区名不一致**：`temp_memory`→`tempMemories`、`token_usage`→`tokenUsages`、`diary_entries`→`diaries`）/ **导出→导入空库后伴侣名、非键字段、单聊与群聊正文、记忆都还原**（查目标库实际行，不看计数字段）/ 密码错必须失败而不是报告成功 / 空库导出仍产出合法容器 |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译
