@@ -96,6 +96,11 @@ struct ProfileView: View {
                 menuGroup([
                     .init(icon: "face.smiling", title: "表情库", subtitle: "导入与管理表情"),
                     .init(icon: "tray.and.arrow.down", title: "备份导入", subtitle: "从 Android 备份恢复"),
+                    // ⚠️ 第 199 轮：导出入口。
+                    // 在此之前 iOS 只能导入不能导出 —— `BackupExporter` 引擎
+                    // （第 197 轮）完成但没有用户可达路径。这一行把它接上，
+                    // V8「跨端数据迁移」至此两端闭环。
+                    .init(icon: "tray.and.arrow.up", title: "备份导出", subtitle: "导出为 .lybk 备份文件"),
                     .init(icon: "magnifyingglass", title: "搜索消息", subtitle: "全文检索聊天记录"),
                     // ⚠️ 第 150 轮：生图入口。
                     // Kotlin 侧是 ImageGenCoordinator 自动触发（关键词→概率→冷却），
@@ -302,6 +307,7 @@ struct ProfileView: View {
         case "AI 能力中心": SkillLibraryView()
         case "表情库": StickerLibraryView()
         case "备份导入": BackupImportView()
+        case "备份导出": BackupExportView()
         case "搜索消息": MessageSearchView()
         case "AI 生图": ImageGenView()
         default: DiagnosticsView()

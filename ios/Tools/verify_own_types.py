@@ -83,6 +83,11 @@ EXTERNAL_ALLOWLIST = {
     # 用途：`BackupCrypto.encrypt` 生成 salt / IV（导出侧）。
     # 该框架本就已链接（`KeychainStore` 一直在用），没有新增依赖。
     "SecRandomCopyBytes",
+    # ⚠️ 第 199 轮：ShareLink 加入白名单。
+    # SwiftUI 的系统分享面板（iOS 16+，本工程部署目标 17.0）。
+    # 用途：备份导出后把 .lybk 交给用户存进「文件」或 AirDrop 出去 ——
+    # 只写进沙盒临时目录等于没备份（系统会回收）。
+    "ShareLink",
     # ⚠️ 第 175 轮：RadialGradient 加入白名单。
     # 群聊头像兜底要用（GroupListItem 的
     # radialGradient(PinkPrimary@0.6 → PinkPrimary@0.3)，HomeScreen.kt:388-391）。
