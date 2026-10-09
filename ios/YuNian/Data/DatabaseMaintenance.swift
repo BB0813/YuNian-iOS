@@ -15,7 +15,7 @@ import os
 ///
 /// ## 为什么是「归档」而不是「删除」
 /// 归档保留完整历史与检索能力（FTS 的 rowid 就是 messageId，行移动后索引仍有效，
-/// 见 `MessageRepository.archiveOldest`）。用户翻历史时仍能读到，只是不在热表里。
+/// 见 `MessageRepository.archiveOldMessages`）。用户翻历史时仍能读到，只是不在热表里。
 ///
 /// ## ⚠️ 会话类型取值
 /// 必须是 `"chat"` / `"group"`（小写业务字面量），**不是枚举名** ——
