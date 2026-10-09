@@ -124,7 +124,12 @@ final class BackupExportRoundTripTests: XCTestCase {
         XCTAssertEqual(outcome.sectionCounts["diaries"], 1, "diary_entries 表 → diaries 分区")
         XCTAssertEqual(outcome.sectionCounts["tokenUsages"], 0)
         XCTAssertEqual(outcome.sectionCounts["unifiedMemories"], 0)
-        XCTAssertEqual(outcome.totalRecords, 6)
+        // ⚠️ 第 198 轮：这里原来写 6，实际 7 —— **是我数错了，不是导出器错**。
+        // seed 覆盖 7 个分区各 1 条：companions / chatGroups / chatMessages /
+        // groupMessages / memoryEntries / tempMemories / diaries。
+        // （tokenUsages 与 unifiedMemories 为 0。）
+        // CI 只报了这一条，上面 9 条分区计数断言全过 —— 说明导出正确、算术错。
+        XCTAssertEqual(outcome.totalRecords, 7)
     }
 
     /// ⚠️ **核心**：导出 → 导入一个空库 → 数据仍在。
