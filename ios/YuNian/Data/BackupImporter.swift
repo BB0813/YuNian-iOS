@@ -2,6 +2,62 @@ import Foundation
 import GRDB
 import os
 
+/// # 交换格式（导入 / 导出共用）—— 第 196 轮固化
+///
+/// `.lybk` 解密后的明文是一份 JSON 对象，顶层 9 个分区。
+/// **本清单不是抄文档得来的，是从下面 `parse()` 里逐处读取的键反推出来的** ——
+/// 也就是说它是**本导入器实际消费的契约**，因而也是导出侧必须产出的契约。
+///
+/// ## 为什么要把这份清单写死在这里
+/// 第 196 轮准备实现导出时，我花了多次检索才拼出完整字段表。
+/// 导出与导入**必须共用同一份规格**，否则会出现"导出看着成功、
+/// Android 却读不出"的数据陷阱 —— 而那时用户已经以为有备份了。
+/// 把它留在消费方（本文件）旁边，改一处就能同时看到另一边。
+///
+/// ## 顶层分区
+/// | 键 | 含义 |
+/// |---|---|
+/// | `companions` | 伴侣 |
+/// | `chatGroups` | 群聊 |
+/// | `chatMessages` | 单聊消息 |
+/// | `groupMessages` | 群聊消息 |
+/// | `memoryEntries` | 记忆（`memory_entries`） |
+/// | `tempMemories` | 临时记忆 |
+/// | `tokenUsages` | Token 用量 |
+/// | `unifiedMemories` | 统一记忆（带 scope） |
+/// | `diaries` | 日记 |
+///
+/// ## 各分区字段（`?` = 导入侧有默认值，缺键不会失败）
+/// - `companions`: `id`, `name`, `avatarUrl?`, `age?`, `personality`,
+///   `backstory?`, `speakingStyle?`, `tags?`, `rawPrompt?`, `systemPrompt?`,
+///   `intimacy?`, `createdAt?`, `updatedAt?`
+///   ⚠️ 导入**不读** `lorebookIdsJson` / `apiConfigId` ——
+///   前者写死 `"[]"`，后者写死 `nil`（跨设备 ID 不可信，见下方注释）。
+/// - `chatGroups`: `id`, `name`, `avatarUrl?`,
+///   **`companionIds`（CSV 字符串，非数组）**, `createdAt?`, `updatedAt?`
+/// - `chatMessages`: `id`, `companionId`, `timestamp`, `isFromUser`,
+///   `content`, `searchContent?`, `type?`, `fileFormat?`, `turnId?`,
+///   `eventIndex?`, `durationMs?`, `linkString?`,
+///   **`anchorMessageId?`（二阶段回填，见下文第 3 条）**
+/// - `groupMessages`: `id`, `groupId`, `companionId`, `timestamp`, `content`,
+///   `type?`, `fileFormat?`, `searchContent?`, `linkString?`
+/// - `memoryEntries`: `companionId`, `content`, `category?`, `importance?`,
+///   `context?`, `accessCount?`, `timestamp?`, `lastAccessed?`
+/// - `tempMemories`: `companionId`, `userInput`, `botResponse`, `timestamp?`
+/// - `tokenUsages`: `companionId`, `date`, `inputTokens?`, `outputTokens?`,
+///   `totalTokens?`, `requestCount?`, `timestamp?`
+/// - `unifiedMemories`: `scope?`, `sourceId`, `memoryType?`, `source?`,
+///   `content`, `summary?`, `confidence?`, `importance?`, `createdAt?`,
+///   `updatedAt?`, `observedAt?`, `expiresAt?`, `accessCount?`, `tags?`
+/// - `diaries`: `companionId`, `title?`, `content?`, `mood?`, `date?`,
+///   `weather?`, `tags?`
+///
+/// ## 容器（`.lybk`）
+/// `magic "LYBK"(4) + salt(16) + IV(12) + ciphertext + tag(16)`，
+/// PBKDF2-HMAC-SHA256 / 100000 次 / 256 位。加密见 `BackupCrypto.encrypt`。
+///
+/// ---
+///
 /// 备份导入 —— 对应 Android `BackupImportService`。
 ///
 /// ## ⚠️ 与 Android 的实质差异：iOS 侧消息不加密
