@@ -143,12 +143,25 @@ enum KeychainStore {
         static func apiKeyFor(_ configId: Int64) -> String {
             "\(apiKeyPrefix)\(configId)"
         }
+        // ── PARTNER 会话：iOS 不接入，但这两槽保留（第 193 轮）──────────
+        //
+        // 它们的**写入路径已删**（原 `AppEnvironment.setPartnerSession`），
+        // 所以 iOS 上永远是 nil。保留是因为它们仍被读：
+        //   · `AgentCredentials.fromKeychain` —— 装配给 Rust 的凭证 JSON
+        //   · `ApiProbeService.authHeaders`   —— 探针的 PARTNER 分支
+        // 删掉就要改 Swift↔Rust 的凭证契约，而那份契约与 Android 共用
+        // （`agent-native/src/` 是两端共享源码，Android 的
+        //  `liblianyu_agent.so` 也从它编出）。
+        //
+        // ⚠️ 原有一个 `partnerSessionKey = "partner_session_key"`
+        // （注释写「Android 侧 `PartnerSession.sessionKey`，本地留存」），
+        // **全仓声明后从未被读写**，本轮删除。Android 有那个字段这条信息
+        // 记在这里，不随常量一起丢。
+
         /// PARTNER 会话令牌（Rust 注入为 `X-LianYu-Session` 头）
         static let partnerToken = "partner_auth_token"
         /// PARTNER 客户端 id（Rust 注入为 `X-LianYu-Client-Id` 头，并作为签名回调入参）
         static let partnerClientId = "partner_client_id"
-        /// PARTNER 会话密钥（Android 侧 `PartnerSession.sessionKey`，本地留存）
-        static let partnerSessionKey = "partner_session_key"
         /// 数据库口令（Android 侧 `lianyu_db_secure_prefs`）
         static let databasePassphrase = "db_passphrase"
         /// 审计链 nonce（Android 侧 `lianyu_audit_chain_prefs`，用于防回滚）

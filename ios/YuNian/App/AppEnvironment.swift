@@ -325,21 +325,27 @@ final class AppEnvironment: ObservableObject {
         }
     }
 
-    /// 设置 PARTNER 会话（suflow.cloud）。
-    /// `session` → `X-LianYu-Session` 头；`clientId` → `X-LianYu-Client-Id` 头 + 签名回调入参。
-    func setPartnerSession(session: String, clientId: String) throws {
-        if session.isEmpty {
-            KeychainStore.remove(KeychainStore.Key.partnerToken)
-        } else {
-            try KeychainStore.set(session, for: KeychainStore.Key.partnerToken)
-        }
-        if clientId.isEmpty {
-            KeychainStore.remove(KeychainStore.Key.partnerClientId)
-        } else {
-            try KeychainStore.set(clientId, for: KeychainStore.Key.partnerClientId)
-        }
-        pushCredentials()
-    }
+    // MARK: - PARTNER 会话：iOS 不接入（第 193 轮）
+    //
+    // 第 185 轮这里有过 `setPartnerSession(session:clientId:)`，
+    // 是 PARTNER 会话（写 Keychain 的 partnerToken / partnerClientId）的
+    // **唯一写入路径**。第 192 轮撤掉 UI 入口后它零调用方，本轮一并删除 ——
+    // 这样"iOS 不接入 Clove 通道"就是**结构性**的：
+    // 没有任何代码路径能在 iOS 上写出一份 PARTNER 会话。
+    //
+    // ## ⚠️ 但 partnerToken / partnerClientId 两个 Keychain 槽**没删**
+    // 它们仍被两处读取：
+    //   · `AgentCredentials.fromKeychain` —— 装配下发给 Rust 的凭证
+    //   · `ApiProbeService.authHeaders` —— 探针的 PARTNER 分支
+    // 删掉就要连带改 Swift↔Rust 的凭证契约，而那份契约与 Android 共用。
+    //
+    // ## ⚠️ 为什么不"彻底删干净"
+    // `agent-native/src/` 的 Rust 源码是 **Android 与 iOS 共享的**：
+    //   · `native_gateway.rs:936  fn inject_partner_signature(...)`
+    //   · `D:\Project\予念\agent-native\src\` 下有同一套实现与其测试
+    // Android 出厂的 `liblianyu_agent.so` 就是从这份 Rust 编的，
+    // **删 Rust 的 PARTNER 支持会打断 Android 的 Clove 通道**。
+    // 因此本轮只删 Swift 侧"iOS 自己"的那部分，不碰共用契约。
 
     func setOwnerName(_ name: String) {
         if name.isEmpty {
