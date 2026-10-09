@@ -58,6 +58,25 @@ final class ChatSession: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var lastRoundsUsed: UInt32 = 0
 
+    // MARK: - 回合交付追踪（第 202 轮：修丢失回复 / 重复交付）
+
+    /// 最近一次**流式已提交**的回合文本。
+    ///
+    /// `StreamSink.onDone` 每个 HTTP 轮都会回调一次（一个回合可能多轮），
+    /// 每轮回调时把该轮文本落成消息并记在这里。回合收尾时用它判断
+    /// 事件里的"规范收尾气泡"是否与流式落地重复（见 `planTurnDelivery`）。
+    private var lastRoundCommittedText: String?
+    /// 上一条流式提交消息的 `id`。
+    ///
+    /// 回合收尾时若最终文本需要挪到工具气泡之后，按 id 精确移除/追加，
+    /// 不按文本查找。
+    private var lastRoundMessageId: UUID?
+    /// 传输层流式错误（`StreamSink.on_error` 透传）。
+    ///
+    /// ⚠️ 它**不是**回合终态：Rust 在未交付增量时可能重试并继续本回合。
+    /// 因此只在回合结束后"没有任何可见输出且无终态错误"时兜底展示。
+    private var lastStreamError: String?
+
     /// 当前会话绑定的伴侣。
     ///
     /// Rust 的 `load_companion` 按这个 id 读 `companions` 表拿到人设；
@@ -134,6 +153,9 @@ final class ChatSession: ObservableObject {
         streamingText = ""
         reasoningText = ""
         lastError = nil
+        lastStreamError = nil
+        lastRoundCommittedText = nil
+        lastRoundMessageId = nil
         isRunning = true
         defer { isRunning = false }
 
@@ -201,11 +223,17 @@ final class ChatSession: ObservableObject {
                     self.streamingText += delta
                 case let .reasoningDelta(delta):
                     self.reasoningText += delta
-                case let .done(fullText, finishReason):
-                    self.complete(fullText: fullText, finishReason: finishReason, environment: environment)
+                case let .done(fullText, _):
+                    // ⚠️ 每个 HTTP 轮结束都会回调一次 onDone（一个回合可能多轮：
+                    // 工具调用后继续请求模型）。这里把该轮已流式显示的文本落成
+                    // 一条消息并清空临时流，让下一轮从空的打字机状态开始。
+                    // **这不代表整个回合结束** —— 回合收尾在 runTurnStream 返回后。
+                    self.commitStreamedRound(fullText: fullText, environment: environment)
                 case let .error(message):
-                    self.lastError = message
-                    self.complete(fullText: self.streamingText, finishReason: "error", environment: environment)
+                    // 传输层错误：Rust 的 send_stream 可能在同一回合内换 Key /
+                    // 重试并继续回调（错误 chunk 不等于回合终止）。故只记录，
+                    // 不落地、不清流；终态由 result.error 判定（见 applyEvents）。
+                    self.lastStreamError = message
                 }
             }
         }
@@ -224,6 +252,9 @@ final class ChatSession: ObservableObject {
 
         // 强制收束：Rust 未回调 onDone/onError 时（非流式降级 / 异常路径）
         // AsyncStream 不会自行结束，这里必须显式关闭，否则 await consumer.value 永久挂起。
+        //
+        // ⚠️ 这是**回合的唯一终止点**：sink 的 onDone/onError 都不再自行关闭
+        // （否则多轮次的后续增量会被丢掉），必须由这里在阻塞调用返回后收束。
         sink.closeAll()
         await consumer.value
 
@@ -234,14 +265,10 @@ final class ChatSession: ObservableObject {
         }
         // ⚠️ 第 119 轮：消费回合内产生的 AgentEvent。
         // StreamSink 只有 text/reasoning/done/error 四个回调，**没有事件回调**
-        // （已核对生成的绑定 L3733-3755），sticker 等事件只存在于
-        // `AgentTurnResult.events` 里。此前完全没读它 ——
-        // 于是模型调 send_sticker 成功也无声无息。
-        applyEvents(result.events, environment: environment)
-        // 兜底：sink 没给出任何文本时，用结果里的最终文本落地
-        if streamingText.isEmpty, !result.finalText.isEmpty {
-            complete(fullText: result.finalText, finishReason: result.finishedReason, environment: environment)
-        }
+        // （已核对生成的绑定 L3733-3755），sticker / bubble 等事件只存在于
+        // `AgentTurnResult.events` 里。此前只读 sticker、完全忽略 bubble ——
+        // 于是模型走 emit_bubble / emit_segmented 协议时**没有任何可见回复**。
+        applyEvents(result, environment: environment)
 
         // ⚠️ 第 160 轮：回合结束后尝试生图。
         // Kotlin 在 `ChatGenerationManager.kt:1419-1456` 用**独立协程**做这件事，
@@ -342,33 +369,191 @@ final class ChatSession: ObservableObject {
     }
 
     // MARK: - 事件落地
-    /// 把回合事件转成界面消息。
+
+    /// 把回合结果（事件 + 最终文本）按顺序落成界面消息。
+    ///
+    /// ## 两条交付通道与去重原则
+    /// 一个回合的可见文本有两条来源：
+    /// 1. **SSE 流**：每轮结束的 `onDone` 已把该轮文本提交为消息
+    ///    （`commitStreamedRound`），`lastRoundCommittedText` 记录最后一次提交；
+    /// 2. **事件**：`AgentEvent.kind == "bubble"`（`emit_bubble` / `emit_segmented` /
+    ///    正常文本收尾）与 `kind == "sticker"`。
+    ///
+    /// ⚠️ 正常文本收尾时 Rust **同时**给出流式增量和最后一条 bubble 事件
+    /// （`agent.rs:1484-1493`，两者同文），因此必须跳过与流式已落地文本重复的
+    /// 那条**收尾气泡**。判定走 `planTurnDelivery` 的结构性条件
+    /// （最后一个事件 + 文本等于 finalText + 流式已提交同文），
+    /// **不是**文本集合去重 —— 文本相同的多个有意气泡仍全部保留
+    /// （emit_bubble 连发同样内容时合法）。
     ///
     /// ## 表情消息的编码约定（**与 Android 全仓统一**）
     /// `AiResponseFinalizer.kt:448-449`：
     /// > 贴纸消息编码约定：**普通 TEXT 消息，内容为 `[stickerId]`**，
     /// > 由渲染层识别为表情包（`MessageType` 无 STICKER 枚举，全仓库统一此约定）。
     ///
-    /// 所以这里 text 存 `[<entryId>]`，渲染层据此判断是不是表情。
-    ///
     /// `AgentEvent.extra` 的格式（agent.rs:441-444）**不是 JSON**，是 KV 串：
     ///     entry_id=123;file_name=custom_1699_1.png
     /// 需要手工解析，不能想当然按 JSON 解。
-    private func applyEvents(_ events: [AgentEvent], environment: AppEnvironment) {
-        for event in events where event.kind == "sticker" {
-            let fields = parseKeyValues(event.extra)
-            let entryId = fields["entry_id"] ?? ""
-            guard !entryId.isEmpty else { continue }
+    private func applyEvents(_ result: AgentTurnResult, environment: AppEnvironment) {
+        // 回合结束仍未落地的流式残文（错误 / 取消路径没有 onDone）。
+        let partial = streamingText
+        streamingText = ""
+        reasoningText = ""
 
-            // 内容 = "[<entryId>]"，与 Android 约定一致
-            messages.append(
-                Message(role: .assistant, text: "[\(entryId)]", isSticker: true))
-            log.info("表情已落地：entry_id=\(entryId, privacy: .public)")
+        let plan = Self.planTurnDelivery(
+            events: result.events.map { (kind: $0.kind, text: $0.text, extra: $0.extra) },
+            finalText: result.finalText,
+            lastRoundCommittedText: lastRoundCommittedText,
+            partialText: partial
+        )
+
+        // 流式已提交的最终文本挪到事件之后：emit_bubble 的气泡产生于更早的轮次
+        // （工具在每轮 HTTP 响应结束后执行），而最终文本是最后一轮的产物。
+        var heldFinal: Message?
+        if plan.moveFinalTextToEnd,
+           let id = lastRoundMessageId,
+           let index = messages.firstIndex(where: { $0.id == id }) {
+            heldFinal = messages.remove(at: index)
+        }
+
+        for item in plan.items {
+            switch item {
+            case .bubble(let text):
+                commitAssistantText(text, environment: environment)
+            case .sticker(let entryId):
+                // 内容 = "[<entryId>]"，与 Android 约定一致。
+                // 表情消息不落库 —— 沿用既有行为，不在本修复中改变持久化范围。
+                messages.append(
+                    Message(role: .assistant, text: "[\(entryId)]", isSticker: true))
+                log.info("表情已落地：entry_id=\(entryId, privacy: .public)")
+            }
+        }
+        if let fallback = plan.fallbackFinalText {
+            commitAssistantText(fallback, environment: environment)
+        }
+        if let partialText = plan.partialText {
+            commitAssistantText(partialText, environment: environment)
+        }
+        if let heldFinal {
+            messages.append(heldFinal)
+        }
+
+        // 回合没有任何可见输出（如 confirm_pending / 被状态机停止）：
+        // 不能让等待指示无声消失 —— 用既有错误展示机制给出可读说明。
+        // 有终态错误时优先保留 result.error（上面已设置）。
+        let producedVisible = heldFinal != nil
+            || plan.hasVisibleOutput
+            || lastRoundCommittedText != nil
+        if !producedVisible, lastError == nil {
+            lastError = lastStreamError
+                ?? Self.emptyTurnMessage(finishedReason: result.finishedReason)
+        }
+    }
+
+    // MARK: - 回合交付计划（纯函数，可单测）
+
+    /// 事件阶段要落地的可见项（保持事件顺序）。
+    enum TurnDeliveryItem: Equatable {
+        case bubble(String)
+        case sticker(entryId: String)
+    }
+
+    /// 一次回合收尾的交付计划。
+    struct TurnDeliveryPlan: Equatable {
+        /// 按事件顺序落地的气泡 / 表情。
+        var items: [TurnDeliveryItem] = []
+        /// 流式已提交的最终文本是否需要移到 `items` 之后。
+        var moveFinalTextToEnd = false
+        /// 流式与事件都没有覆盖 `finalText` 时，末尾补一条。
+        var fallbackFinalText: String?
+        /// 错误 / 取消路径遗留的流式残文，末尾补一条。
+        var partialText: String?
+
+        /// 是否产生了可见输出（用于"无可见回复"的解释判定）。
+        var hasVisibleOutput: Bool {
+            !items.isEmpty || moveFinalTextToEnd
+                || fallbackFinalText != nil || partialText != nil
+        }
+    }
+
+    /// 依据「流式已提交记录 + 事件 + finalText」推导回合收尾要落地的内容。
+    ///
+    /// ## 判定规则
+    /// 1. 事件按原顺序转成 `items`；sticker 仍按 `entry_id` 解析，缺 id 跳过。
+    /// 2. **仅**跳过满足全部三条的收尾气泡：
+    ///    a. 它是**最后一个**事件；b. 文本等于非空 `finalText`；
+    ///    c. `lastRoundCommittedText == finalText`（流式已落地同一文本）。
+    /// 3. 流式已落地最终文本 → 若后面还有事件项则把它重排到末尾（不重复补）。
+    /// 4. 否则若收尾气泡承载了 finalText（规则 2 的 a+b 成立）→ 不补。
+    /// 5. 否则 `finalText` 非空 → 末尾兜底补一条。
+    /// 6. 流式残文只在 `finalText` 为空时补（有 finalText 时它必然包含残文，
+    ///    两者同补会制造重复前缀）。
+    nonisolated static func planTurnDelivery(
+        events: [(kind: String, text: String, extra: String)],
+        finalText: String,
+        lastRoundCommittedText: String?,
+        partialText: String
+    ) -> TurnDeliveryPlan {
+        var plan = TurnDeliveryPlan()
+
+        let streamDeliveredFinal =
+            !finalText.isEmpty && lastRoundCommittedText == finalText
+        // 收尾气泡 = 最后一个事件且文本等于非空 finalText。
+        func isTrailingFinalBubble(_ index: Int) -> Bool {
+            guard index == events.count - 1,
+                  let last = events.last,
+                  last.kind == "bubble",
+                  !finalText.isEmpty,
+                  last.text == finalText
+            else { return false }
+            return true
+        }
+
+        for (index, event) in events.enumerated() {
+            switch event.kind {
+            case "bubble":
+                guard !event.text.isEmpty else { continue }
+                if isTrailingFinalBubble(index), streamDeliveredFinal {
+                    continue
+                }
+                plan.items.append(.bubble(event.text))
+            case "sticker":
+                let entryId = Self.parseKeyValues(event.extra)["entry_id"] ?? ""
+                guard !entryId.isEmpty else { continue }
+                plan.items.append(.sticker(entryId: entryId))
+            default:
+                continue
+            }
+        }
+
+        if streamDeliveredFinal {
+            plan.moveFinalTextToEnd = !plan.items.isEmpty
+        } else if isTrailingFinalBubble(events.count - 1) {
+            // finalText 由事件里的收尾气泡承载（已在 items），不重复补。
+        } else if !finalText.isEmpty {
+            plan.fallbackFinalText = finalText
+        }
+
+        if !partialText.isEmpty, finalText.isEmpty {
+            plan.partialText = partialText
+        }
+        return plan
+    }
+
+    /// 回合结束但没有任何可见输出时的可读说明（不伪造回复内容）。
+    nonisolated static func emptyTurnMessage(finishedReason: String) -> String {
+        switch finishedReason {
+        case "confirm_pending":
+            return "该操作需要确认，但当前端没有确认交互，本轮未执行。"
+        case "state_stop":
+            return "本轮已被停止，没有产生可见回复。"
+        default:
+            return "本轮没有产生可见回复（\(finishedReason)）。"
         }
     }
 
     /// 解析 `k=v;k=v` 形式的 KV 串。
-    private func parseKeyValues(_ raw: String) -> [String: String] {
+    nonisolated static func parseKeyValues(_ raw: String) -> [String: String] {
         var out: [String: String] = [:]
         for part in raw.split(separator: ";") {
             let kv = part.split(separator: "=", maxSplits: 1)
@@ -420,18 +605,31 @@ final class ChatSession: ObservableObject {
 
     // MARK: - 内部
 
-    private func complete(fullText: String, finishReason: String,
-                          environment: AppEnvironment) {
+    /// 一轮流式结束（**一个 HTTP 响应**）：把该轮文本提交为消息。
+    ///
+    /// ⚠️ `onDone` 每轮都会回调，这里**不是**回合结束处理 ——
+    /// 回合收尾由 `send(...)` 在 `runTurnStream` 返回后调用 `applyEvents`。
+    /// 提交后记录文本与消息 id，供收尾去重与重排使用。
+    private func commitStreamedRound(fullText: String, environment: AppEnvironment) {
         let text = fullText.isEmpty ? streamingText : fullText
         streamingText = ""
         reasoningText = ""
         guard !text.isEmpty else { return }
+        commitAssistantText(text, environment: environment)
+        lastRoundCommittedText = text
+        lastRoundMessageId = messages.last?.id
+    }
+
+    /// 落一条 assistant 文本消息：内存数组 + SQLite（与既有规则一致）。
+    ///
+    /// ⚠️ 第 166 轮：AI 回复落库。`searchContent` 与 `content` 同值 ——
+    /// Android 侧图片消息在这里存画面描述（ImageGenTrigger.kt:381），
+    /// 文本消息两者一致（MessageSearchTokenizer 会再切词）。
+    /// 落库失败不阻断对话（同上）。
+    private func commitAssistantText(_ text: String, environment: AppEnvironment) {
+        guard !text.isEmpty else { return }
         messages.append(Message(role: .assistant, text: text))
 
-        // ⚠️ 第 166 轮：AI 回复落库。`searchContent` 与 `content` 同值 ——
-        // Android 侧图片消息在这里存画面描述（ImageGenTrigger.kt:381），
-        // 文本消息两者一致（MessageSearchTokenizer 会再切词）。
-        // 落库失败不阻断对话（同上）。
         if let repo = messageRepository(for: environment) {
             do {
                 _ = try repo.insert(

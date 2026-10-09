@@ -80,20 +80,30 @@ struct YuNianGlassCard<Content: View>: View {
             .scaleEffect(pressed ? 0.985 : 1.0)              // GlassCard.kt:55-59
             .animation(.spring(response: 0.55, dampingFraction: 0.825))
 
+        // ⚠️ 交互修复：这里曾有 `.disabled(onClick == nil)` —— 只要卡片没有
+        // onClick（当前**全部**调用方都如此），Disabled 环境就会下发给
+        // 卡片内的所有子视图，把 `YuNianField`（TextField/SecureField）、
+        // `Picker`、`YuNianGlassButton` 与普通 Button 一并禁用，表现为
+        // 「渠道配置页的字段全都点不动/输不进」。
+        // 卡片没有 onClick 时本就只是普通容器，不构成点击目标，无需 disabled。
+        //
+        // 拖拽手势同理：原先无条件挂在所有卡片上，minimumDistance 0 会在
+        // 任何触摸（含滚动、文本选择）时把 `pressed` 置真并触发整卡缩放。
+        // 现收紧到只有可点击卡片才挂 —— 非点击卡片完全无手势，
+        // 不再干扰输入框焦点、键盘、Picker 与滚动。
         return Group {
             if let onClick {
                 Button(action: onClick) { content }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in pressed = true }
+                            .onEnded { _ in pressed = false }
+                    )
             } else {
                 content
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded { _ in pressed = false }
-        )
-        .disabled(onClick == nil)
     }
 
     /// ⚠️ 第 124 轮：原名 `body`，与 `View` 协议要求的 `body` 重名，

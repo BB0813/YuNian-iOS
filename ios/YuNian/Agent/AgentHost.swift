@@ -50,7 +50,13 @@ final class AgentStreamSinkImpl: StreamSink, @unchecked Sendable {
     private var continuations: [UUID: AsyncStream<Event>.Continuation] = [:]
     private let log = Logger(subsystem: "com.yunian.ai", category: "agent.stream")
 
-    /// 订阅一次流式回合。返回的流在 `on_done` / `on_error` 后自动结束。
+    /// 订阅一次流式回合。
+    ///
+    /// ⚠️ **不会**在 `on_done` / `on_error` 后自动结束。
+    /// Rust 的 `on_done` 代表**一次 HTTP 响应**完成（`native_gateway.rs:1144`），
+    /// 而一个 Agent 回合可有多轮（工具调用后继续请求模型，最多 `max_rounds` 轮）。
+    /// 回合级终止由 `ChatSession.send` 在阻塞的 `runTurnStream` 返回后
+    /// 调用 `closeAll()` 保证 —— 这也是既有的死锁防护。
     func makeStream() -> AsyncStream<Event> {
         let id = UUID()
         return AsyncStream { continuation in
@@ -77,14 +83,24 @@ final class AgentStreamSinkImpl: StreamSink, @unchecked Sendable {
     }
 
     func onDone(fullText: String, finishReason: String) {
+        // ⚠️ 只广播，**不能**在这里 closeAll()。
+        //
+        // 已核对 Rust 契约：`on_done` 只代表**一次 HTTP 响应**收尾
+        // （`native_gateway.rs` 的 `ureq_post_stream` 末尾 / Anthropic 降级分支），
+        // 一个回合里可能被回调多次。收到首次 `on_done` 就关流，会把后续轮次
+        // （工具执行后的第二次请求）的 text / done 回调全部丢掉 ——
+        // 真机症状正是「等待指示结束，但没有回复」。
+        // 回合终止由 ChatSession 在 `runTurnStream` 返回后 `closeAll()` 收束。
         broadcast(.done(fullText: fullText, finishReason: finishReason))
-        closeAll()
     }
 
     func onError(error: String) {
         log.error("流式回合出错：\(error, privacy: .public)")
+        // ⚠️ 同理不关闭订阅：`handle_sse_line` 的 error chunk 会先回调
+        // `on_error` 再返回 Err，而 `send_stream` 在**未交付任何增量**时仍可能
+        // 换 Key / 重试并继续本回合。终态错误由 `AgentTurnResult.error` 上报，
+        // 这里只把传输层错误作为事件透传给消费者。
         broadcast(.error(error))
-        closeAll()
     }
 
     /// 强制结束全部订阅。
