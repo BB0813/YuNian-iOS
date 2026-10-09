@@ -16,7 +16,7 @@ import os
 /// 并让已删除的消息仍能被搜到）。Android 侧对应 `MessageDao.deleteOldMessagesForConversation`。
 ///
 /// ## 归档不触碰 FTS
-/// `archiveOldest(...)` 只是把行从 `messages` 复制到 `archived_messages` 再删热数据。
+/// `archiveOldMessages(...)` 只是把行从 `messages` 复制到 `archived_messages` 再删热数据。
 /// FTS 的 `rowid` 就是 `messageId`，行移动后依然有效 —— 检索归档走同一张 FTS 表。
 final class MessageRepository {
 
@@ -442,20 +442,6 @@ final class MessageRepository {
                 sql: "SELECT DISTINCT conversationId FROM messages WHERE conversationType = ?",
                 arguments: [type.rawValue]
             )
-        }
-    }
-
-    /// 会话内当前的热消息条数（诊断 / 测试用）。
-    func hotMessageCount(conversationId: Int64, type: ConversationType) throws -> Int {
-        try database.pool.read { db in
-            try Int.fetchOne(
-                db,
-                sql: """
-                SELECT COUNT(*) FROM messages
-                WHERE conversationId = ? AND conversationType = ?
-                """,
-                arguments: [conversationId, type.rawValue]
-            ) ?? 0
         }
     }
 

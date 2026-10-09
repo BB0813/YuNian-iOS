@@ -2,7 +2,7 @@
 
 > ## 第 99 轮：阶段性总账（数字由 verify_readme_accounting.py 把关，勿手改后不同步）
 >
-> **交付**：143 文件 / 35,010 行（Swift 94 / Python 37），
+> **交付**：143 文件 / 35,018 行（Swift 94 / Python 37），
 > 14 个测试文件，**33 项本地验证关卡全绿**（`run_all_gates.py` 一键驱动，
 > 计数口径：驱动器里的条目数，不含被 import 的库与被删掉的检查器）。
 >
@@ -1540,9 +1540,9 @@ V1–V10 逐条核对 —— 结论比我之前讲的更冷峻：
 
 | 编号 | 验收项 | 状态 | 证据 / 阻塞原因 |
 |---|---|---|---|
-| V1 | Rust Agent 编到 iOS | ❌ **未验证** | CI job 已配好但从未跑过；`ring` ARMv8 汇编与 bundled C 需真机编译。**这是路线 B 的最大复用点，也最关键的未知** |
-| V2 | UniFFI 生成 Swift 绑定 | ⚠️ **部分** | 绑定**已生成**（`ios/Generated/LianyuAgent.swift`，Windows 上从 DLL 生成成功）；但「在 Xcode 工程 import 并调用」未验证 |
-| V3 | 流式 HTTP 在 iOS 可用 | ❌ **未验证** | Swift 侧链路已写完（ChatSession → turnQueue → SSE → StreamSink），但从未运行 |
+| V1 | Rust Agent 编到 iOS | ✅ **编译已验证**（第 194 轮更新） | CI 的 `Rust Agent → iOS` job **已实际运行并通过**（不再是"从未跑过"）；`ring`/bundled C 在 macOS runner 上编译成功。**仍未验的是真机运行** |
+| V2 | UniFFI 生成 Swift 绑定 | ✅ **已验证 import 与调用**（第 194 轮更新） | 绑定已生成；且 app target **编译时确实链接了它** —— 否则「编译模拟器 App」job 不会通过。单元测试也在跑（259 条） |
+| V3 | 流式 HTTP 在 iOS 可用 | ⚠️ **编译链路已验证，真机流式未验** | Swift 侧链路（ChatSession → turnQueue → SSE → StreamSink）能编译并被测试覆盖；**对着真实端点的流式收包仍只在真机上才能验** |
 | V4 | FTS 可用性探测 | ✅ **完成** | 运行时探测 FTS4→FTS5 回退；Python 装置对两个变体各跑 140 项断言 |
 | V5 | schema 能被 Rust 读写 | ✅ **完成** | `45.json` → 生成 Swift schema（与 Room 逐字节一致）、`user_version=45`；Rust 的两条真实 SELECT 已在真实 SQLite 上验证可用 |
 | V6 | 付费账号可得 APNs | ❌ **阻塞** | 需 $99/年，未购买 |
@@ -1551,7 +1551,13 @@ V1–V10 逐条核对 —— 结论比我之前讲的更冷峻：
 | V9 | 请求签名跨端一致 | ➖ **已消解（不适用）** | 第 192 轮决定：**iOS 不接入 `suflow.cloud`**（那是针对 Android 端做的内置 API）。三处不一致点已定位，其中 CLIENT_ID 与 PATH 的本地半已由关卡闭合；剩余项随"不接入"一并消解 —— **不需要服务端确认了** |
 | V10 | 第三方 UI 库 iOS 产物 | ✅ **因设计选择而消解** | 走路线 B（原生 SwiftUI）而非 Compose Multiplatform，`kyant-*` / `iconsax` / `coil` 本就不用；该项风险不适用于本实现 |
 
-**核对结果：2 项完成（V4/V5）、2 项因设计选择消解（V9/V10）、2 项部分（V1/V2）、4 项未完成（V3/V6/V7/V8）。**
+**核对结果（第 194 轮重核）：4 项完成（V1/V2/V4/V5）、2 项因设计选择消解（V9/V10）、1 项部分（V3）、3 项未完成（V6/V7/V8）。**
+
+> ⚠️ 第 194 轮重核的起因：这份表里 **V1 / V2 写着"从未跑过 / 未验证"，
+> 而 CI 里那两个 job 一直在跑且是绿的**；同页的"待办清单"也有三条已过时
+> （FTS 查询侧、三个 store 的 UI、`archiveOldest` 触发者）。
+> **过时的"未完成"比遗漏更糟**：它会让人去做已经做完的事。
+> 本轮逐条对着代码与 CI 记录核了一遍，改动处都标了"第 194 轮更新"。
 
 > ⚠️ 第 192 轮修正：**V9 从"阻塞"改为"不适用"**。
 > 它原本记的是"需与服务端团队沟通签名口径"，
@@ -1564,12 +1570,12 @@ V1–V10 逐条核对 —— 结论比我之前讲的更冷峻：
 而涉及真实运行的部分全部未验证。**
 
 由此得出下一步的真正排序（按"解除阻塞所需条件"而非工作量）：
-1. **V1/V2/V3** —— 一台 Mac。三条一起解决，是 Route B 成立的前提
+1. **V3 的真机流式收包** + **V6/V7** —— 一台真机（V6 另需 $99/年）
+   —— **V1/V2 已由 CI 覆盖，不再需要 Mac**
 2. ~~**V9** —— 与服务端团队一次沟通~~ **已消解**：iOS 不接入那条通道
-3. **V6/V7** —— $99/年 + 一台真机 + 7 天
-4. **V8** —— 我自己可推进的 M6 工作（逻辑导出/导入）
+3. **V8** —— 我能单方面推进的 M6 工作（逻辑导出/导入）
 
-**换言之：剩余工作中，只有 V8 是我能单方面推进的。**
+**换言之：不依赖真机的剩余工作中，主要是 V8。**
 这解释了为什么我这一路的产出从"写功能"转向"补验证"—— 不是我变保守了，
 是可推进的空间确实在收窄。
 
@@ -2687,17 +2693,33 @@ SQLite 验证，但**没有任何查询消费方**（上面第 6 条说的"补�
 
 准确表述应为：
 - **FTS 写入/维护侧**：✅ 已实现并验证（14 个维护点 + 顺序约定反例）
-- **FTS 查询侧**：⚠️ `searchMessageIds` 已实现但无调用方，因为 iOS 侧**没有消息搜索界面**
-  （Android 的聊天页有搜索框；`ChatView` 目前是极简版）
+- **FTS 查询侧**：✅ **已有消费方**（第 194 轮更新）
+  `MessageSearchView.swift:154` 调用 `database.searchMessageIds(matching:limit:)`，
+  入口在「我 → 搜索消息」。
+
+  > ⚠️ 下面这段写于第 142 轮，当时**确实**无调用方；搜索界面是之后才建的。
+  > 保留原文是为了记住这个教训，但**不要**再据此认为 FTS 只写不读。
+  >
+  > 原表述：⚠️ `searchMessageIds` 已实现但无调用方，因为 iOS 侧**没有消息搜索界面**
+  > （Android 的聊天页有搜索框；`ChatView` 目前是极简版）
 
 这与第 112 轮 README 统计漂移、第 125 轮关卡数虚高是同型：
 **把「已实现」说成「已可用」。** 区别在于这次先说清了两侧的边界。
    子查询会因元数据已消失而返回空集，留下无法清理的脏索引
    （证据：`Tools/verify_schema_sql.py` 的「反例」断言）。
-7. **`embed_text` 之外，记忆/技能/表情三个 store 尚未接 UI**：Rust 回调已实现，
-   但没有设置界面去增删记忆、安装技能、导入表情包（M3 剩余工作）。
-8. **`archiveOldest` 尚无触发者**：Android 侧由 `DataCleanupManager`（WorkManager 每日维护）
-   调用，iOS 侧需在 M5 的 `BGTaskScheduler` 里安排等价任务。
+7. ~~**`embed_text` 之外，记忆/技能/表情三个 store 尚未接 UI**~~ ——
+   ✅ **第 194 轮核实：三个界面都已有**（此条写于 M3 早期，已过时）：
+   `MemoryListView` / `SkillLibraryView` / `StickerLibraryView` + `StickerImportView`，
+   入口均在「我」页菜单。**仍缺的是 `embed_text`**（有意返回 nil，
+   Rust 降级为关键词召回）—— 那是 Rust 侧的事，且 Rust 与 Android 共用源码。
+8. ~~**`archiveOldest` 尚无触发者**~~ —— ✅ **第 194 轮核实：已有触发者**。
+   实际方法名是 **`MessageRepository.archiveOldMessages`**（不是 `archiveOldest` ——
+   旧注释与文档一直写错这个名，本轮一并修正）。
+   `DatabaseMaintenance.runIfNeeded` 在 **App 启动时**被调用
+   （`AppEnvironment.swift:214`），带 24 小时间隔窗口；
+   `perform` 做归档 + `PRAGMA optimize` + `wal_checkpoint(PASSIVE)`。
+   **仍待做的**是在 `BGTaskScheduler` 里加一个等价的周期性任务
+   （Android 侧由 WorkManager 每日触发）—— 那条属 M5，需要真机验证。
 9. **过滤规则的「分级口径」与 DB 违禁词表不同，这是有意的**。
    `content_filter_keywords.json.enc`（实际过滤用）与 `SecurityDataSeeder`
    （DB `keywords` 表）是**两套独立数据**：同一个词在两边可能分属不同等级
