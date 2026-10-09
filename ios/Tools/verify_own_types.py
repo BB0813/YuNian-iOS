@@ -77,6 +77,12 @@ EXTERNAL_ALLOWLIST = {
     # 不包 GlassEffectContainer 的话，每个 glassEffect 是相互隔离的孤岛，
     # 拿不到"相邻玻璃融合"这个 26 代招牌行为。
     "GlassEffectContainer", "Glass",
+    # ⚠️ 第 195 轮：SecRandomCopyBytes 加入白名单。
+    # 它是 **Security 框架的 C 函数**，不是 Swift 类型 —— 本关卡按
+    # `Xxx(` 的调用形态扫描，会把 C 函数也当成"未声明的类型"。
+    # 用途：`BackupCrypto.encrypt` 生成 salt / IV（导出侧）。
+    # 该框架本就已链接（`KeychainStore` 一直在用），没有新增依赖。
+    "SecRandomCopyBytes",
     # ⚠️ 第 175 轮：RadialGradient 加入白名单。
     # 群聊头像兜底要用（GroupListItem 的
     # radialGradient(PinkPrimary@0.6 → PinkPrimary@0.3)，HomeScreen.kt:388-391）。
