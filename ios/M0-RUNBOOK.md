@@ -95,7 +95,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-**预期**：26 个测试文件全部通过。已知覆盖：
+**预期**：27 个测试文件全部通过。已知覆盖：
 
 | 测试文件 | 覆盖 |
 |---|---|
@@ -124,7 +124,8 @@ xcodebuild test \
 | `BackupExportRoundTripTests` | 导出→导入往返（**本地逼近"Android 读得懂"的最强手段**）：明文含全部 9 分区键且无多余键 / 各分区计数（含三处**表名与分区名不一致**：`temp_memory`→`tempMemories`、`token_usage`→`tokenUsages`、`diary_entries`→`diaries`）/ **导出→导入空库后伴侣名、非键字段、单聊与群聊正文、记忆都还原**（查目标库实际行，不看计数字段）/ 密码错必须失败而不是报告成功 / 空库导出仍产出合法容器 |
 | `FeatureRouteTests` | 用途线路（多线路）：**不变式 —— 存在启用行时 `feature_route.chat` 必须指向它**（引擎读前者、旧引擎读后者）/ 绑定非对话线路**不得**动到当前启用渠道 / 绑定行不要求 `isEnabled` / 未绑定回退当前启用且 `isBound=false` / 模型覆盖优先与解绑时一并清除 / 值非数字按"没绑定" / 删行清掉指向它的绑定 / 绑不存在的 id 抛 `RouteError.configNotFound` 且什么都不写 / app_meta 空串=删键 / 四条线路互不干扰 / 键名逐字钉死 |
 | `TtsClientTests` | 朗读纯逻辑：`/audio/speech` 地址规整（裸主机 / `/v1` / `/v1/audio` / 已是 speech / 未知路径拒绝 / 带 query 拒绝）/ http 只允许私网（含 172.16–31 与 169.254 边界）/ 音频魔数嗅探（RIFF / ID3 / MP3 帧同步 / fLaC / OggS / ADTS，json·html 判否，无魔数按长度兜底）/ MiMo 主机白名单与 `/v1` 规整 / 模型归一与不支持的两个模型给出可照做的提示 / `[[生图: …]]` 与闭合标签都被清掉 / 括号默认保留 / 超时预算（30–180s）/ 空文本与缺密钥不发请求 / 设置往返（`skip_parentheses` 关闭时删键） |
-| `EmbeddingClientTests` | 向量纯逻辑：端点拼接（尾斜杠 / GEMINI 多一层 `/openai` / 空地址 nil）/ provider 白名单与推荐模型表逐字对应 Android / 响应解析（数字与数字字符串 / 缺字段·空数组·非数字一律 nil）/ 空文本·缺密钥·空地址提前退出（不发请求）/ 查询缓存（LRU 淘汰、更新不撑爆、容量下限 1） |
+| `EmbeddingClientTests` | 向量纯逻辑：端点拼接（尾斜杠 / GEMINI 多一层 `/openai` / 空地址 nil）/ provider 白名单与推荐模型表逐字对应 Android / 响应解析（数字与数字字符串 / 缺字段·空数组·非数字一律 nil）/ 空文本·缺密钥·空地址提前退出（不发请求）/ 查询缓存（LRU 淘汰、更新不撑爆、容量下限 1）/ 失败退避（静默期边界、成功清除） |
+| `ToolGateTests` | 工具可见性与写入确认（P0 ③）：隐藏工具集后工具**整个消失**（不是 `available=false`）/ 默认全可见 / 多个工具集同时隐藏 / 需确认的工具必须下发成 `ToolCategory.commerce`（否则 Rust 审批门永远不弹）/ 授权后类别回原样 / 改类别时**参数 schema 等字段原样保留** / **每个设备工具都必须归类**（新增工具忘了归类 → 写操作默认不确认）/ 只读与确认两表不重叠 / 默认确认表覆盖已知写操作 / `app_meta` 往返 / **空集持久化为 `[]`**（空串是删键，会让"关掉全部确认"一重启就自己开回来） |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译

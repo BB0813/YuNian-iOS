@@ -135,6 +135,34 @@ final class ChatSession: ObservableObject {
     private var lastRoundFullText = ""
     private var lastRoundFinishReason = ""
 
+    /// 待用户确认的工具调用（P0 ③ 的"写入确认"）。
+    ///
+    /// 非 nil 时界面上要弹确认卡；Rust 已经把回合停在这一步
+    /// （`finished_reason == "confirm_pending"`），等宿主批准/拒绝后重跑。
+    @Published private(set) var pendingConfirmation: ToolConfirmation?
+
+    /// 回合是否停在"等确认"。
+    ///
+    /// 与 `pendingConfirmation != nil` 分开：事件可能只带工具名而参数为空
+    /// （那时确认卡没法回传，仍要如实告诉界面"这一轮在等确认"）。
+    @Published private(set) var isAwaitingConfirmation = false
+
+    /// 一次待确认的工具调用。
+    struct ToolConfirmation: Equatable, Identifiable {
+        var toolName: String
+        /// 参数 JSON **原文**。回传时逐字匹配（Rust 按「名称+参数」精确比对，
+        /// 见 agent.rs:1356），所以这里不做任何规范化。
+        var argumentsJson: String
+        /// 给用户看的一句话（工具名 + 参数摘要）。
+        var summary: String
+
+        var id: String { "\(toolName)|\(argumentsJson)" }
+    }
+
+    /// 上一次装配好的回合请求 —— "确认后重跑"用的是同一个。
+    private var lastTurnRequest: AgentTurnRequest?
+    private var lastTurnText = ""
+
     /// 当前会话绑定的伴侣。
     ///
     /// Rust 的 `load_companion` 按这个 id 读 `companions` 表拿到人设；
@@ -208,14 +236,8 @@ final class ChatSession: ObservableObject {
         }
 
         messages.append(Message(role: .user, text: trimmed))
-        streamingText = ""
-        reasoningText = ""
-        lastError = nil
-        assistantCommittedThisTurn = false
-        lastRoundFullText = ""
-        lastRoundFinishReason = ""
-        isRunning = true
-        defer { isRunning = false }
+        // ⚠️ 缓冲与回合标志的复位已移进 `performTurn` ——
+        // "确认后重跑"也要复位，放在这里会漏掉那条路径。
 
         // 对应 Android `AgentDialogueCoordinator` 在构造请求前的 `syncRuntimeConfig()`：
         // 每回合都重新同步 settings / credentials / stickers。
@@ -262,7 +284,10 @@ final class ChatSession: ObservableObject {
             // 以 `available_tools` 含 `load_skill` 为前提；不加它，模型永远看不到技能目录。
             // 另注意内置工具（send_sticker 等）不受此字段门控、恒注入。
             // 领域工具（ToolRegistry）尚未移植，属已记录缺口。
-            tools: AgentToolCatalog.definitions,
+            // ⚠️ 第 206 轮（P0 ③）：这里是**用户可见性开关的落点** ——
+            // 下发给模型的是 `gatedDefinitions`（按工具集过滤 + 按确认策略改类别），
+            // 不是完整目录 `definitions`。
+            tools: AgentToolCatalog.gatedDefinitions(toolSettings(for: environment)),
             maxRounds: AgentRequestBuilder.defaultMaxRounds,
             toolChoice: "auto",
             stickerProbability: 0,
@@ -271,6 +296,38 @@ final class ChatSession: ObservableObject {
             companionNameMapJson: nil
         )
 
+        // 记住这一回合的请求：确认门批准/拒绝后要**重跑同一个请求**
+        // （Rust 的审批是一次性的，重跑时匹配的调用才直接执行）。
+        lastTurnRequest = request
+        lastTurnText = trimmed
+        await performTurn(request: request, text: trimmed, environment: environment)
+    }
+
+    /// 跑一个**已经装配好**的回合请求。
+    ///
+    /// `send`（新消息）与"确认后重跑"共用这一段 —— 重跑不能再走 `send`：
+    /// 那会重复插入用户消息、重复落库、重复显示。
+    private func performTurn(request: AgentTurnRequest, text: String,
+                             environment: AppEnvironment) async {
+        guard let runtime = environment.runtime else {
+            lastError = "Agent 未就绪"
+            return
+        }
+        let sink = environment.streamSink
+        let toolHost = environment.toolHost
+        let companionId = self.companionId
+
+        // 运行态由这里管：新消息与"确认后重跑"共用同一条路径。
+        guard !isRunning else { return }
+        isRunning = true
+        defer { isRunning = false }
+
+        streamingText = ""
+        reasoningText = ""
+        lastError = nil
+        assistantCommittedThisTurn = false
+        lastRoundFullText = ""
+        lastRoundFinishReason = ""
         // 本轮开始打点：REASONING 行的 durationMs 由它算（见 turnStartedAt）
         turnStartedAt = Date()
 
@@ -339,6 +396,23 @@ final class ChatSession: ObservableObject {
         // `AgentTurnResult.events` 里。此前完全没读它 ——
         // 于是模型调 send_sticker 成功也无声无息。
         applyEvents(result.events, environment: environment)
+
+        // ⚠️ 第 206 轮（P0 ③ 写入确认）：**确认门停下的回合不算完成**。
+        //
+        // Rust 对需要确认的工具会在这里停下：`finished_reason="confirm_pending"`、
+        // `final_text=""`，并把 `confirm_request` 事件交给宿主
+        // （agent.rs:1347-1372）。此时：
+        //   · **不提交**（否则那段引子会先落一条消息，重跑后再落一条 → 重复气泡）
+        //   · **不触发生图**（回合并未结束）
+        //   · 缓冲清掉：重跑时模型会把同一轮重新输出一遍
+        if result.finishedReason == "confirm_pending" {
+            streamingText = ""
+            reasoningText = ""
+            isAwaitingConfirmation = true
+            return
+        }
+        isAwaitingConfirmation = false
+
         // 提交**一次**：整回合的正文 + 整回合的思考过程（第 205 轮）。
         commitTurn(result: result, environment: environment)
 
@@ -347,10 +421,50 @@ final class ChatSession: ObservableObject {
         // 绝不阻塞聊天主流程；这里同样放在 `defer` 之外、`isRunning` 置回 false
         // **之前**调用，保证用户看到的"停止"状态与生图互斥。
         await maybeTriggerImageGen(
-            userText: trimmed,
+            userText: text,
             aiText: result.finalText,
             environment: environment
         )
+    }
+
+    // MARK: - 写入确认（P0 ③）
+
+    /// 放弃待确认（离页 / 取消）：**只登记拒绝，不重跑**。
+    ///
+    /// 与 Android `AgentConfirmGuard` 的 fail-closed 同一条原则：
+    /// 没有确认界面的回合上，写操作不得被放行。
+    /// 不重跑的理由很实际 —— 用户已经离开这一页了，重跑只是白烧一次请求；
+    /// 而"拒绝"是一次性的，将来匹配到同名同参数的调用时会被消费掉。
+    func abandonConfirmation(in environment: AppEnvironment) {
+        guard let pending = pendingConfirmation else { return }
+        environment.runtime?.rejectTool(name: pending.toolName, args: pending.argumentsJson)
+        pendingConfirmation = nil
+        isAwaitingConfirmation = false
+    }
+
+    /// 批准 / 拒绝一次待确认的工具调用，并**重跑同一个回合**。
+    ///
+    /// ## 为什么是"重跑"而不是"继续"
+    /// Rust 的审批是一次性授权：`approveTool(name:args:)` 把
+    /// `(工具名, 参数)` 记进一个集合（agent.rs:819-821），**下次回合**中
+    /// 匹配的调用才直接执行（用完即失效）；`rejectTool` 则让重跑时
+    /// 把「用户拒绝」回灌给模型（agent.rs:825-827 + :1376-1380）。
+    /// 也就是说回合在 `confirm_pending` 时**已经结束**了，宿主必须重跑。
+    ///
+    /// 重跑用的是 `lastTurnRequest`（与首次完全同一个请求）——
+    /// 历史、工具、设置都不变，只有审批状态变了。
+    func resolveConfirmation(approve: Bool, in environment: AppEnvironment) async {
+        guard let pending = pendingConfirmation,
+              let runtime = environment.runtime,
+              let request = lastTurnRequest else { return }
+        if approve {
+            runtime.approveTool(name: pending.toolName, args: pending.argumentsJson)
+        } else {
+            runtime.rejectTool(name: pending.toolName, args: pending.argumentsJson)
+        }
+        pendingConfirmation = nil
+        isAwaitingConfirmation = false
+        await performTurn(request: request, text: lastTurnText, environment: environment)
     }
 
     // MARK: - 生图协调
@@ -464,6 +578,20 @@ final class ChatSession: ObservableObject {
     ///     entry_id=123;file_name=custom_1699_1.png
     /// 需要手工解析，不能想当然按 JSON 解。
     private func applyEvents(_ events: [AgentEvent], environment: AppEnvironment) {
+        // 确认门：Rust 停下回合时，把**待确认的那次调用**交出来
+        // （agent.rs:1360-1364，text = 工具名，extra = 参数 JSON）。
+        // 这里只负责把它变成界面上的一张卡；批准/拒绝与重跑见 `resolveConfirmation`。
+        if let event = events.last(where: { $0.kind == "confirm_request" }) {
+            pendingConfirmation = ToolConfirmation(
+                toolName: event.text,
+                argumentsJson: event.extra,
+                summary: Self.confirmationSummary(toolName: event.text,
+                                                   argumentsJson: event.extra)
+            )
+        } else {
+            pendingConfirmation = nil
+        }
+
         // ⚠️ 第 205 轮：思考过程**也走事件流**，别只认 sink。
         //
         // Rust 在解析响应时会额外推一条 `kind == "reasoning"` 的事件
@@ -551,6 +679,33 @@ final class ChatSession: ObservableObject {
                                    environment: environment)
             log.info("表情已落地：entry_id=\(resolvedId, privacy: .public) file=\(fileName, privacy: .public) bytes=\(imageData?.count ?? -1, privacy: .public)")
         }
+    }
+
+    /// 把待确认的调用翻成**一句人话**（工具名 + 参数摘要）。
+    ///
+    /// 确认卡上只写 `save_memory` 用户看不懂 —— 要把"要做什么"说出来；
+    /// 参数原样带上（截断到 300 字），因为写剪贴板/记记忆的内容本身就是
+    /// 用户要审的东西。
+    private static func confirmationSummary(toolName: String, argumentsJson: String) -> String {
+        let action: String
+        switch toolName {
+        case "save_memory": action = "把一段内容记进长期记忆"
+        case "consolidate_memory": action = "整理长期记忆"
+        case "device_set_clipboard": action = "写入系统剪贴板"
+        case "device_open_url": action = "打开一个链接（会切到浏览器或其它 App）"
+        case "device_notify": action = "发一条系统通知"
+        default: action = "执行工具 \(toolName)"
+        }
+        let args = argumentsJson.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !args.isEmpty, args != "{}" else { return action }
+        let shown = args.count > 300 ? String(args.prefix(300)) + "…" : args
+        return "\(action)：\(shown)"
+    }
+
+    /// 读工具可见性 / 写入确认策略（`app_meta`；没配过就是默认值）。
+    private func toolSettings(for environment: AppEnvironment) -> ToolSettings {
+        guard let repo = environment.apiConfigs else { return ToolSettings() }
+        return ToolSettings.load(from: repo)
     }
 
     /// 解析 `k=v;k=v` 形式的 KV 串。

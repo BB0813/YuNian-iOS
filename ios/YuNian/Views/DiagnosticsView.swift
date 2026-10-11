@@ -79,7 +79,23 @@ struct DiagnosticsView: View {
             LabeledContent("渠道数量", value: "\(channelCount) 条")
             LabeledContent("启用渠道", value: activeChannelSummary)
             LabeledContent("表情标签", value: environment.stickerTagsSummary)
+            // ⚠️ 这一项是"模型可见性"开关的**验收面**：
+            // 关掉某个工具集之后，这里必须跟着少掉那几个工具名。
+            // 拿不到设备日志时，界面就是取证面。
+            LabeledContent("发给模型的工具", value: effectiveToolSummary)
         }
+    }
+
+    /// 本回合实际下发给模型的工具名（已含可见性过滤与确认策略的类别改写）。
+    private var effectiveToolSummary: String {
+        let names = effectiveToolNames()
+        return names.isEmpty ? "无" : names.joined(separator: ", ")
+    }
+
+    /// 过滤后的工具名（`buildUserContext` 的 `availableTools` 也用它）。
+    private func effectiveToolNames() -> [String] {
+        let settings = environment.apiConfigs.map { ToolSettings.load(from: $0) } ?? ToolSettings()
+        return AgentToolCatalog.gatedDefinitions(settings).map(\.name)
     }
 
     private var securitySection: some View {
@@ -227,10 +243,9 @@ struct DiagnosticsView: View {
             skillLimit: 3,
             includeMemorySkill: true,
             includeSafetyNote: true,
-            // 与回合一致：请求侧工具名。内置工具（send_sticker / emit_bubble /
-            // emit_segmented）由引擎注册，Swift 这边枚举不到 —— 而这一项只用于
-            // 技能目录的显示过滤，与本页要看的"时间"无关。
-            availableTools: AgentToolCatalog.definitions.map(\.name),
+            // 与回合一致：请求侧工具名（**用同一套可见性过滤**，
+            // 否则预览里会出现用户已经关掉的工具）。
+            availableTools: effectiveToolNames(),
             deviceId: DeviceIdentity.deviceId,
             timezone: TimeZone.current.identifier,
             sessionId: nil,

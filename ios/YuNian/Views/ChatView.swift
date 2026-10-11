@@ -756,8 +756,49 @@ private struct ChatComposer: View {
 
     @FocusState private var focused: Bool
 
+    /// 写入确认卡（P0 ③）。
+    ///
+    /// ## 这条链路的完整语义（照 Rust 的实现写，不要想当然）
+    /// Rust 对需要确认的工具**停下回合**（`finished_reason = "confirm_pending"`），
+    /// 并交出一个 `confirm_request` 事件；宿主 `approveTool` / `rejectTool`
+    /// 之后必须**重跑同一个回合** —— 审批是"名称+参数"完全匹配的**一次性**授权，
+    /// 重跑时匹配的调用才执行（拒绝则把「用户拒绝」回灌给模型）。
+    ///
+    /// 所以这张卡的两个按钮都不是"关掉弹窗"：它们会真的重跑那一轮。
+    private func confirmationCard(_ pending: ChatSession.ToolConfirmation) -> some View {
+        VStack(alignment: .leading, spacing: YNTheme.Space.sm) {
+            Label("需要你确认", systemImage: "hand.raised.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(colors.textPrimary)
+            Text(pending.summary)
+                .font(.caption)
+                .foregroundStyle(colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: YNTheme.Space.sm) {
+                Button("拒绝") { model.resolveConfirmation(approve: false) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("允许一次") { model.resolveConfirmation(approve: true) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            colors.surface,
+            in: RoundedRectangle(cornerRadius: YNTheme.Radius.composer, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
+    }
+
     var body: some View {
         VStack(spacing: YNTheme.Space.xs) {
+            // ⚠️ 写入确认卡（P0 ③）摆在输入框**上方**：它属于"这一轮还没结束"，
+            // 不是一个可以忽略的提示。有待确认时输入框同时被禁用（见下）。
+            if let pending = model.pendingConfirmation {
+                confirmationCard(pending)
+            }
             HStack(alignment: .bottom, spacing: YNTheme.Space.sm) {
                 TextField("发消息", text: $model.draft, axis: .vertical)
                     .font(.body)
@@ -774,6 +815,9 @@ private struct ChatComposer: View {
                     .onSubmit {
                         if model.canSend { model.sendText() }
                     }
+                    // 有待确认的工具调用时先处理那张卡：批准要**重跑同一个请求**，
+                    // 而请求只保存了最后一份 —— 此时再发新消息会把它覆盖掉。
+                    .disabled(model.pendingConfirmation != nil)
                     .accessibilityLabel("消息")
 
                 if model.isGenerating {

@@ -105,6 +105,16 @@ final class ChatViewModel: ObservableObject {
     }
 
     @Published private(set) var ttsStates: [UUID: TtsState] = [:]
+
+    /// 待确认的工具调用（P0 ③ 的"写入确认"）。
+    ///
+    /// Rust 对需要确认的工具会**停下回合**并把这次调用交出来
+    /// （`finished_reason == "confirm_pending"` + `confirm_request` 事件）。
+    /// 界面据此弹一张卡；用户点允许/拒绝后重跑那一回合。
+    @Published private(set) var pendingConfirmation: ChatSession.ToolConfirmation?
+    /// 回合是否停在"等确认"（用于把状态显示成"等你确认"而不是"正在输入"）。
+    @Published private(set) var isAwaitingConfirmation = false
+    private var confirmTask: Task<Void, Never>?
     @Published var draft: String {
         didSet { UserDefaults.standard.set(draft, forKey: draftKey) }
     }
@@ -144,6 +154,9 @@ final class ChatViewModel: ObservableObject {
     var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && phase == .idle
+            // 有待确认的工具调用时先处理它：批准要重跑"最后那份请求"，
+            // 此时发新消息会把请求覆盖掉（见 ChatComposer 的确认卡注释）。
+            && pendingConfirmation == nil
     }
 
     // MARK: - 离线预览（仅 DEBUG）
@@ -301,6 +314,13 @@ final class ChatViewModel: ObservableObject {
         }
         sendTask?.cancel()
         sendTask = nil
+        // 有待确认的写操作时离页：**登记拒绝**（fail-closed）。
+        // 与 Android `AgentConfirmGuard` 同一条原则 —— 没有确认界面的回合上，
+        // 写操作不得被放行；否则那份一次性批准会悬在集合里，
+        // 将来某个同名同参数的调用会**静默**命中。
+        session.abandonConfirmation(in: environment)
+        confirmTask?.cancel()
+        confirmTask = nil
         // 离开页面就停朗读：后台继续出声而屏幕上没有任何"正在念"的指示，
         // 用户只能靠"声音从哪来"猜，那还不如停掉。
         stopSpeaking()
@@ -448,6 +468,29 @@ final class ChatViewModel: ObservableObject {
                 self?.errorMessage = value
             }
             .store(in: &cancellables)
+
+        // 写入确认（P0 ③）：Rust 停下回合等宿主批准/拒绝，界面据此弹卡。
+        session.$pendingConfirmation
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in self?.pendingConfirmation = $0 }
+            .store(in: &cancellables)
+
+        session.$isAwaitingConfirmation
+            .receive(on: RunLoop.main)
+            .sink { [weak self] value in
+                self?.isAwaitingConfirmation = value
+                self?.updatePhase()
+            }
+            .store(in: &cancellables)
+    }
+
+    /// 批准 / 拒绝待确认的工具调用，然后由 session 重跑那一回合。
+    func resolveConfirmation(approve: Bool) {
+        guard pendingConfirmation != nil else { return }
+        confirmTask = Task { [weak self] in
+            guard let self else { return }
+            await self.session.resolveConfirmation(approve: approve, in: self.environment)
+        }
     }
 
     private func updatePhase() {

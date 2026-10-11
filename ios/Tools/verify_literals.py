@@ -345,7 +345,15 @@ def main() -> int:
     )
     report.check(
         "tools 改为装配结果而非空数组",
-        "AgentToolCatalog.definitions" in chat_src,
+        "AgentToolCatalog.gatedDefinitions" in chat_src,
+        "第 206 轮（P0 ③）起必须走 gatedDefinitions —— 它是用户"
+        "「模型可见性 / 写入确认」两个开关的落点",
+    )
+    report.check(
+        "不直接下发未经门控的完整目录",
+        re.search(r"tools:\s*AgentToolCatalog\.definitions\b", chat_src) is None,
+        "直接传 definitions 会**绕过用户的可见性开关**（工具照旧发给模型，"
+        "而界面上开关看起来是关的）",
     )
 
     # ── 7b. per-session 状态不得在装配期冻结 ────────────────────────

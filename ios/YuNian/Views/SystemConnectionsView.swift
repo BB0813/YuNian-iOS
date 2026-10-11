@@ -28,8 +28,11 @@ struct SystemConnectionsView: View {
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var environment: AppEnvironment
 
     @State private var capabilities: [Capability] = []
+    /// 工具可见性 / 写入确认策略（`app_meta`）。
+    @State private var toolSettings = ToolSettings()
 
     /// 一类系统能力。
     struct Capability: Identifiable {
@@ -91,6 +94,11 @@ struct SystemConnectionsView: View {
                     Label("打开本 App 的系统设置", systemImage: "gear")
                 }
             }
+
+            // ── 后两维：模型可见性 / 写入确认（P0 ③）──
+            // 上面那一节回答"系统让不让"，这两节回答"模型能不能用 / 要不要问过你"。
+            toolVisibilitySection
+            writeConfirmationSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -98,7 +106,165 @@ struct SystemConnectionsView: View {
         .navigationTitle("系统连接")
         .navigationBarTitleDisplayMode(.inline)
         // 每次进入刷新：用户可能刚从系统设置里改完回来。
-        .onAppear { capabilities = Self.read() }
+        .onAppear {
+            capabilities = Self.read()
+            if let repo = environment.apiConfigs {
+                toolSettings = ToolSettings.load(from: repo)
+            }
+        }
+    }
+
+    // MARK: - 模型可见性（P0 ③ 第二维）
+
+    /// 哪些工具集**可以给模型看**。
+    ///
+    /// ## 落点在哪
+    /// 下发给模型的工具列表由 `AgentToolCatalog.gatedDefinitions(_:)` 生成
+    /// （`ChatSession` 每回合现算）。被隐藏工具集里的工具**完全不出现在列表里** ——
+    /// 比 `available = false` 更彻底：后者仍会让模型知道"有这个工具但不可用"。
+    ///
+    /// ## 为什么按工具集而不是按单个工具
+    /// 与 Rust 的 `toolsets` 分组一致（memory / device / skill），也是 Android 的粒度。
+    /// 用户想表达的通常是"别让它碰我的设备"这种成组意图，逐个工具开关噪声太大。
+    private var toolVisibilitySection: some View {
+        let c = YNTheme.palette(scheme)
+        let toolsets = AgentToolCatalog.knownToolsets()
+        return Section {
+            if toolsets.isEmpty {
+                Text("工具目录尚未装配。")
+                    .font(.subheadline)
+                    .foregroundStyle(c.textTertiary)
+            } else {
+                ForEach(toolsets, id: \.self) { toolset in
+                    Toggle(isOn: bindingForToolset(toolset)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Self.toolsetTitle(toolset))
+                            Text(Self.toolNames(inToolset: toolset).joined(separator: " · "))
+                                .font(.caption2)
+                                .foregroundStyle(c.textSecondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    .tint(c.accent)
+                }
+            }
+        } header: {
+            Text("模型可见性")
+        } footer: {
+            Text("关掉的工具集，模型**完全看不到**（不是「看到了但用不了」）。下一回合生效；内置的回复/表情工具不受此项控制。")
+        }
+    }
+
+    // MARK: - 写入确认（P0 ③ 第三维）
+
+    /// 哪些**写操作**必须先问过用户。
+    ///
+    /// ## 为什么默认全开
+    /// 对齐 Android 的既有裁定「默认需确认，授权后自主」—— 关掉某一项 =
+    /// 授予该工具**长期自主权**（不再逐次确认），这也是 Android「工具授权」页的语义。
+    ///
+    /// ## 谁在执行这道门
+    /// Rust：需要确认的工具在**下发副本**里被标成 `ToolCategory.commerce`
+    /// （见 `AgentToolCatalog.gatedDefinitions`）。Rust 对 Commerce 默认要确认 ——
+    /// 停下回合、交出 `confirm_request`，聊天页弹卡，批准/拒绝后重跑那一轮。
+    private var writeConfirmationSection: some View {
+        let c = YNTheme.palette(scheme)
+        let writeTools = AgentToolCatalog.definitions
+            .map(\.name)
+            .filter { !ToolSettings.readOnlyTools.contains($0) }
+            .sorted()
+        return Section {
+            if writeTools.isEmpty {
+                Text("当前没有写操作类工具。")
+                    .font(.subheadline)
+                    .foregroundStyle(c.textTertiary)
+            } else {
+                ForEach(writeTools, id: \.self) { name in
+                    Toggle(isOn: bindingForConfirmation(name)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Self.toolTitle(name))
+                            Text(name)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(c.textSecondary)
+                        }
+                    }
+                    .tint(c.accent)
+                }
+            }
+        } header: {
+            Text("写入确认")
+        } footer: {
+            Text("开 = 每次调用都先问你；关 = 授予该工具长期自主权。只读工具（查时间、电量、读剪贴板、召回记忆、加载技能）不在这一节 —— 它们没有需要确认的动作。")
+        }
+    }
+
+    // MARK: - 工具设置读写
+
+    private func bindingForToolset(_ toolset: String) -> Binding<Bool> {
+        Binding(
+            get: { !toolSettings.hiddenToolsets.contains(toolset) },
+            set: { visible in
+                if visible {
+                    toolSettings.hiddenToolsets.remove(toolset)
+                } else {
+                    toolSettings.hiddenToolsets.insert(toolset)
+                }
+                saveToolSettings()
+            }
+        )
+    }
+
+    private func bindingForConfirmation(_ toolName: String) -> Binding<Bool> {
+        Binding(
+            get: { toolSettings.confirmTools.contains(toolName) },
+            set: { needsConfirm in
+                if needsConfirm {
+                    toolSettings.confirmTools.insert(toolName)
+                } else {
+                    toolSettings.confirmTools.remove(toolName)
+                }
+                saveToolSettings()
+            }
+        )
+    }
+
+    private func saveToolSettings() {
+        guard let repo = environment.apiConfigs else { return }
+        try? toolSettings.save(to: repo)
+    }
+
+    /// 工具集的中文名（未知工具集回退成原名 —— 将来 Rust 加了新的也不会显示空白）。
+    private static func toolsetTitle(_ toolset: String) -> String {
+        switch toolset {
+        case "memory": return "记忆"
+        case "device": return "设备信息与操作"
+        case "skill": return "技能"
+        case "chat": return "聊天输出"
+        default: return toolset
+        }
+    }
+
+    /// 工具名的中文说明（未知工具回退成原名）。
+    private static func toolTitle(_ name: String) -> String {
+        switch name {
+        case "save_memory": return "记住一段内容"
+        case "consolidate_memory": return "整理长期记忆"
+        case "recall_memory": return "召回记忆"
+        case "load_skill": return "加载技能"
+        case "device_set_clipboard": return "写入剪贴板"
+        case "device_get_clipboard": return "读取剪贴板"
+        case "device_open_url": return "打开链接"
+        case "device_notify": return "发通知"
+        case "device_get_time": return "查当前时间"
+        case "device_battery_status": return "查电量"
+        default: return name
+        }
+    }
+
+    private static func toolNames(inToolset toolset: String) -> [String] {
+        AgentToolCatalog.definitions
+            .filter { $0.toolsets.contains(toolset) }
+            .map { toolTitle($0.name) }
     }
 
     // MARK: - 状态徽标
