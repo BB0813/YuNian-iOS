@@ -31,7 +31,12 @@ settings:
     SWIFT_STRICT_CONCURRENCY: minimal
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # 与 Android 的 applicationId com.yunian.ai 保持品牌一致
-    MARKETING_VERSION: "0.1.0"
+    # ⚠️ 第 217 轮（Beta 1）：0.1.0 → 1.0.0。
+    # 之前 44 个 alpha 一直报 0.1.0 —— 用户在「我 → 关于」里看到的版本
+    # 和 Release 标签对不上，报 bug 时说不清装的是哪一版。
+    # 进入 Beta 起，MARKETING_VERSION 必须与 Release 标签的前缀一致
+    # （标签 `v1.0.0-ios-beta.1` ↔ App 内显示 1.0.0 (1)）。
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     # ⚠️ 第 80 轮：CommonCrypto 从 target 级**提升到工程级**。
     # 第 79 轮我只加在 YuNian target 的 OTHER_LDFLAGS 上，
