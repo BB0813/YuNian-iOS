@@ -243,6 +243,16 @@ final class AppEnvironment: ObservableObject {
         return try? companions.fetchDefault()
     }
 
+    /// 当前下发给引擎的角色枚举（`settings.role`）。
+    ///
+    /// 存在的理由与 `defaultCompanion` 一样：宿主侧重算提示词材料时
+    /// （见 `ContextProbe`）必须拿到**与 Rust 同一份** role ——
+    /// Rust 从 `settings_json.role` 读（默认 `GIRLFRIEND`），这里要保持一致，
+    /// 否则收据里的「L1 人设」片段与模型实际收到的不一样。
+    var agentRole: String {
+        settings.role ?? "GIRLFRIEND"
+    }
+
     // MARK: - 播种
 
     /// 首启播种默认伴侣。

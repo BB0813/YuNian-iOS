@@ -96,10 +96,19 @@ final class ChatSession: ObservableObject {
         /// 代价是一张表情常驻内存（几十 KB），换掉的是整条链路上的中间环节。
         var stickerImageData: Data?
 
+        /// 本轮的唯一标识（`messages.turnId` / REASONING 行配对 / `prompt_audit.sessionId`）。
+        ///
+        /// ## 为什么挂到消息上（第 207 轮）
+        /// 「本轮收据」要能按消息找到**那一轮**的装箱清单。收据落在
+        /// `prompt_audit` 表里，而它只带 `sessionId` —— 消息不带 turnId 的话，
+        /// 重启后就再也对不上（只能按时间戳猜，那必然出错）。
+        var turnId: String?
+
         init(role: AgentHistoryRole, text: String, isSticker: Bool = false,
              imageData: Data? = nil, imagePrompt: String? = nil,
              timestamp: Date = Date(), reasoning: String? = nil,
-             stickerFileName: String? = nil, stickerImageData: Data? = nil) {
+             stickerFileName: String? = nil, stickerImageData: Data? = nil,
+             turnId: String? = nil) {
             self.role = role
             self.text = text
             self.isSticker = isSticker
@@ -109,6 +118,7 @@ final class ChatSession: ObservableObject {
             self.reasoning = reasoning
             self.stickerFileName = stickerFileName
             self.stickerImageData = stickerImageData
+            self.turnId = turnId
         }
     }
 
@@ -162,6 +172,17 @@ final class ChatSession: ObservableObject {
     /// 上一次装配好的回合请求 —— "确认后重跑"用的是同一个。
     private var lastTurnRequest: AgentTurnRequest?
     private var lastTurnText = ""
+
+    /// 本轮收据（按 `turnId`）—— 详见 `TurnReceipt`。
+    ///
+    /// 内存里留最近若干条，供聊天页"本轮收据"菜单即时打开；
+    /// 同时落 `prompt_audit`（材料/轮数/工具/指纹）供重启后回读。
+    @Published private(set) var receipts: [String: TurnReceipt] = [:]
+    /// 内存里最多留多少条（够翻最近几轮即可；历史回读走 `prompt_audit`）。
+    private static let receiptsInMemory = 20
+
+    /// 本回合请求前采集的材料清单（见 `TurnManifest`）。
+    private var lastManifest: TurnManifest?
 
     /// 当前会话绑定的伴侣。
     ///
@@ -250,9 +271,27 @@ final class ChatSession: ObservableObject {
             )
         }
 
+        // ⚠️ 第 206 轮（P0 ③）：这里是**用户可见性开关的落点** ——
+        // 下发给模型的是 `gatedDefinitions`（按工具集过滤 + 按确认策略改类别），
+        // 不是完整目录 `definitions`。
+        let toolSettings = self.toolSettings(for: environment)
+        let gatedTools = AgentToolCatalog.gatedDefinitions(toolSettings)
+        let contextSettings = self.contextSettings(for: environment)
+        let history = historyForRequest(limit: contextSettings.historyLimit)
+
+        // ── 本轮收据的材料清单（第 207 轮，P1）──
+        // ⚠️ **必须在请求之前采集**，且用与 Rust `orchestration_options` 同一套参数
+        // （`ContextProbe`）。事后重算会得到"看起来对、其实不是这一轮"的清单。
+        lastManifest = captureManifest(environment: environment,
+                                       contextSettings: contextSettings,
+                                       toolSettings: toolSettings,
+                                       query: trimmed,
+                                       toolNames: gatedTools.map(\.name),
+                                       droppedHistory: history.dropped)
+
         let request = AgentTurnRequest(
             groupId: nil,
-            historyJson: AgentRequestBuilder.encodeHistory(historyForRequest()),
+            historyJson: AgentRequestBuilder.encodeHistory(history.history),
             // ⚠️ **已知功能性缺口：iOS 侧没有任何 session/global 工具。**
             //
             // Android 主对话路径（`AgentDialogueCoordinator.kt`）传的是真实工具列表：
@@ -287,7 +326,7 @@ final class ChatSession: ObservableObject {
             // ⚠️ 第 206 轮（P0 ③）：这里是**用户可见性开关的落点** ——
             // 下发给模型的是 `gatedDefinitions`（按工具集过滤 + 按确认策略改类别），
             // 不是完整目录 `definitions`。
-            tools: AgentToolCatalog.gatedDefinitions(toolSettings(for: environment)),
+            tools: gatedTools,
             maxRounds: AgentRequestBuilder.defaultMaxRounds,
             toolChoice: "auto",
             stickerProbability: 0,
@@ -390,6 +429,13 @@ final class ChatSession: ObservableObject {
             lastError = error
             log.error("回合失败：\(error, privacy: .public)")
         }
+        // 本轮的唯一标识：助手消息、REASONING 行、`prompt_audit.sessionId` 都用它。
+        // ⚠️ 在**提交之前**生成 —— 收据要在提交时一起落库（两处各生成一次会错位）。
+        let turnId = UUID().uuidString
+        // 供应商回执的用量：**只看事件流**（sink 不带它）。
+        // Rust 每轮推一条 `kind == "usage"`（agent.rs:1294）；多轮要相加 ——
+        // 每一轮都把上下文重发了一遍，真实花费就是各轮之和。
+        let usage = TurnReceipt.Usage.parseAll(events: result.events)
         // ⚠️ 第 119 轮：消费回合内产生的 AgentEvent。
         // StreamSink 只有 text/reasoning/done/error 四个回调，**没有事件回调**
         // （已核对生成的绑定 L3733-3755），sticker 等事件只存在于
@@ -414,7 +460,15 @@ final class ChatSession: ObservableObject {
         isAwaitingConfirmation = false
 
         // 提交**一次**：整回合的正文 + 整回合的思考过程（第 205 轮）。
-        commitTurn(result: result, environment: environment)
+        commitTurn(result: result, turnId: turnId, environment: environment)
+
+        // ── 本轮收据（第 207 轮，P1）──
+        // 清单来自请求前采集（`lastManifest`），用量来自事件流，
+        // 合成后**内存留一份**（供菜单即时打开）并**落 `prompt_audit`**（供重启后回读）。
+        finishReceipt(turnId: turnId,
+                      usage: usage,
+                      result: result,
+                      environment: environment)
 
         // ⚠️ 第 160 轮：回合结束后尝试生图。
         // Kotlin 在 `ChatGenerationManager.kt:1419-1456` 用**独立协程**做这件事，
@@ -425,6 +479,56 @@ final class ChatSession: ObservableObject {
             aiText: result.finalText,
             environment: environment
         )
+    }
+
+    /// 组装并留存本轮收据。
+    private func finishReceipt(turnId: String,
+                               usage: TurnReceipt.Usage?,
+                               result: AgentTurnResult,
+                               environment: AppEnvironment) {
+        guard let manifest = lastManifest else { return }
+        let settings = environment.apiConfigs.map { ToolSettings.load(from: $0) } ?? ToolSettings()
+        // 线路/模型名：**走与回合同一套解析**（`resolve(.chat)`），
+        // 而不是读"当前启用渠道"那一行 —— 收据要回答"这一轮到底走的哪条线"。
+        let route = try? environment.apiConfigs?.resolve(purpose: .chat)
+        let receipt = TurnReceipt(
+            turnId: turnId,
+            timestamp: Int64(Date().timeIntervalSince1970 * 1000),
+            companionId: companionId ?? 0,
+            provider: route?.provider ?? "",
+            model: route?.model ?? "",
+            segments: manifest.segments,
+            usage: usage,
+            roundsUsed: result.roundsUsed,
+            finishReason: result.finishedReason,
+            toolNames: manifest.toolNames,
+            systemPromptHash: manifest.systemPromptHash,
+            skipped: manifest.skipped + confirmNote(settings: settings)
+        )
+        receipts[turnId] = receipt
+        // 内存只留最近若干条（其余靠 prompt_audit 回读）
+        if receipts.count > Self.receiptsInMemory {
+            let overflow = receipts.count - Self.receiptsInMemory
+            for key in receipts.keys.prefix(overflow) { receipts.removeValue(forKey: key) }
+        }
+        TurnReceiptStore.saveAudit(receipt, database: environment.database)
+        if let usage {
+            TurnReceiptStore.recordTokenUsage(usage,
+                                              companionId: companionId ?? 0,
+                                              database: environment.database)
+        }
+    }
+
+    /// 确认门相关的"说明"（不写进 skipped 的"跳过"语义里会误导 ——
+    /// 这些工具**送了**，只是要问过用户）。
+    private func confirmNote(settings: ToolSettings) -> [String] {
+        let gated = manifestToolNames().filter { settings.confirmTools.contains($0) }
+        guard !gated.isEmpty else { return [] }
+        return ["需要你确认后才执行的工具：" + gated.joined(separator: " / ")]
+    }
+
+    private func manifestToolNames() -> [String] {
+        lastManifest?.toolNames ?? []
     }
 
     // MARK: - 写入确认（P0 ③）
@@ -708,6 +812,52 @@ final class ChatSession: ObservableObject {
         return ToolSettings.load(from: repo)
     }
 
+    /// 读上下文选项（历史条数上限 / WORKING 记忆上限）。
+    private func contextSettings(for environment: AppEnvironment) -> ContextSettings {
+        guard let repo = environment.apiConfigs else { return ContextSettings() }
+        return ContextSettings.load(from: repo)
+    }
+
+    /// 采集本轮收据的材料清单（请求前调用，见 `TurnManifest` 的说明）。
+    private func captureManifest(environment: AppEnvironment,
+                                 contextSettings: ContextSettings,
+                                 toolSettings: ToolSettings,
+                                 query: String,
+                                 toolNames: [String],
+                                 droppedHistory: Int) -> TurnManifest {
+        let orchestrator = ContextProbe.makeOrchestrator(stores: environment.stores)
+        let options = ContextProbe.makeOptions(
+            ownerName: KeychainStore.string(for: KeychainStore.Key.ownerName),
+            timezone: TimeZone.current.identifier,
+            workingMemoryLimit: contextSettings.workingMemoryLimit,
+            toolNames: toolNames
+        )
+        let profile = ContextProbe.makeProfile(environment.defaultCompanion,
+                                               role: environment.agentRole)
+        return TurnReceipt.captureManifest(
+            orchestrator: orchestrator,
+            companion: profile,
+            companionId: companionId,
+            groupId: nil,
+            query: query,
+            options: options,
+            toolNames: toolNames,
+            toolSettings: toolSettings,
+            contextSettings: contextSettings,
+            droppedHistory: droppedHistory
+        )
+    }
+
+    /// 取某条助手消息的收据。
+    ///
+    /// 两级：**内存**（本轮刚跑完，含供应商回执用量）→ **`prompt_audit`**
+    /// （重启后仍能看清单，但没有 token —— 见 `TurnReceiptStore.loadAudit` 的说明）。
+    func receipt(for message: Message, environment: AppEnvironment) -> TurnReceipt? {
+        guard let turnId = message.turnId, !turnId.isEmpty else { return nil }
+        if let cached = receipts[turnId] { return cached }
+        return TurnReceiptStore.loadAudit(turnId: turnId, database: environment.database)
+    }
+
     /// 解析 `k=v;k=v` 形式的 KV 串。
     private func parseKeyValues(_ raw: String) -> [String: String] {
         var out: [String: String] = [:]
@@ -814,7 +964,8 @@ final class ChatSession: ObservableObject {
     /// `text.isEmpty` 早退，而 `reasoningText` **已经在早退之前被清空** ——
     /// 用户看到的是"想了一下，然后什么都没了"，且重启后也查不到。
     /// 现在即便没有正文，也把思考过程落一行、留一条消息（渲染层不画空气泡）。
-    private func commitTurn(result: AgentTurnResult, environment: AppEnvironment) {
+    private func commitTurn(result: AgentTurnResult, turnId: String,
+                            environment: AppEnvironment) {
         let streamed = streamingText
         var text: String
         if !streamed.isEmpty {
@@ -844,17 +995,18 @@ final class ChatSession: ObservableObject {
         assistantCommittedThisTurn = true
 
         messages.append(Message(role: .assistant, text: text,
-                                reasoning: reasoning.isEmpty ? nil : reasoning))
+                                reasoning: reasoning.isEmpty ? nil : reasoning,
+                                turnId: turnId))
 
         // ⚠️ 第 166 轮：AI 回复落库。`searchContent` 与 `content` 同值 ——
         // Android 侧图片消息在这里存画面描述（ImageGenTrigger.kt:381），
         // 文本消息两者一致（MessageSearchTokenizer 会再切词）。
         // 落库失败不阻断对话（同上）。
         if let repo = messageRepository(for: environment) {
-            // 一轮一个 turnId：**正文行与 REASONING 行共用它配对**。
+            // 一轮一个 turnId：**正文行与 REASONING 行共用它配对**，
+            // 也是"本轮收据"的查找键（`prompt_audit.sessionId`）。
             // 不用"插入顺序/时间戳"配对 —— 两行时间戳会完全相同，
             // 顺序取决于 `history()` 的 ORDER BY，那太脆。
-            let turnId = UUID().uuidString
             do {
                 // ⚠️ 正文为空（思考型模型把预算花在推理上、finish_reason=length）
                 // **也要写这一行**：REASONING 行靠 `turnId` 与正文行配对
@@ -1018,7 +1170,8 @@ final class ChatSession: ObservableObject {
                                           text: r.content, isSticker: false,
                                           imageData: data,
                                           imagePrompt: r.searchContent,
-                                          timestamp: stamp))
+                                          timestamp: stamp,
+                                          turnId: r.turnId))
                     continue
                 }
             }
@@ -1027,7 +1180,9 @@ final class ChatSession: ObservableObject {
                                   text: r.content,
                                   isSticker: stickerId != nil,
                                   timestamp: stamp,
-                                  reasoning: r.turnId.flatMap { reasoningByTurn[$0] } ?? reasoningByRowIndex[index]))
+                                  reasoning: r.turnId.flatMap { reasoningByTurn[$0] } ?? reasoningByRowIndex[index],
+                                  // turnId 也带上：重启后「本轮收据」靠它回查 `prompt_audit`
+                                  turnId: r.turnId))
         }
         guard !loaded.isEmpty else { return }
         messages.insert(contentsOf: loaded, at: 0)
@@ -1115,7 +1270,15 @@ final class ChatSession: ObservableObject {
             + "此注记仅用于你理解图片内容，禁止在回复中输出任何「画面：」或括号包裹的画面描述）"
     }
 
-    private func historyForRequest() -> [AgentHistoryMessage] {
+    /// 送入模型的历史（本机**真截断**）。
+    ///
+    /// ## 这是「历史条数上限」这个选项的落点
+    /// `ContextSettings.historyLimit` 是宿主侧唯一能真控制"送多少上下文"的旋钮 ——
+    /// 引擎收到的是宿主给的 `history_json`，它不会再砍一遍。
+    ///
+    /// - Returns: 截断后的历史 + **被丢掉多少条**（收据里要如实写出来，
+    ///   否则用户看到"上下文里没有那句话"却找不到原因）。
+    func historyForRequest(limit: Int) -> (history: [AgentHistoryMessage], dropped: Int) {
         let raw = messages.map { message in
             // ⚠️ 第 168 轮：图片消息走 contentForModel 附加系统注记。
             let text = Self.contentForModel(message)
@@ -1126,6 +1289,20 @@ final class ChatSession: ObservableObject {
             case .tool: return AgentHistoryMessage.tool(text, toolCallId: "")
             }
         }
-        return DialogueHistoryPolicy.sanitizeForModel(raw)
+        let sanitized = DialogueHistoryPolicy.sanitizeForModel(raw)
+        return Self.truncateHistory(sanitized, limit: limit)
+    }
+
+    /// 截断逻辑本身（`nonisolated static` = 可单测的纯函数）。
+    ///
+    /// ⚠️ 留**最近的** limit 条（`suffix`）而不是最早的那些 ——
+    /// "最近 100 条"这个语义如果方向搞反，模型会拿到最旧的对话、
+    /// 丢掉刚说的话，而那在界面上看起来只是"它变笨了"。
+    nonisolated static func truncateHistory(_ history: [AgentHistoryMessage],
+                                            limit: Int) -> (history: [AgentHistoryMessage], dropped: Int) {
+        let capped = limit > 0 && history.count > limit
+            ? Array(history.suffix(limit))
+            : history
+        return (capped, max(0, history.count - capped.count))
     }
 }

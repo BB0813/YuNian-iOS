@@ -151,6 +151,14 @@ final class ChatViewModel: ObservableObject {
         return active.model
     }
 
+    /// 取某条助手消息对应的「本轮收据」。
+    ///
+    /// 先查内存（刚跑完的那几轮，带供应商回执），再回查 `prompt_audit`
+    /// （重启后仍在，但没有 token —— 由 `TurnReceiptView` 如实说明）。
+    func receipt(for message: ChatSession.Message) -> TurnReceipt? {
+        session.receipt(for: message, environment: environment)
+    }
+
     var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && phase == .idle

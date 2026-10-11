@@ -25,6 +25,9 @@ private struct ChatViewContent: View {
 
     @State private var isNearBottom = true
     @State private var unseenCount = 0
+    /// 要展示收据的那条消息（nil = 不弹）。用 item 形式，避免"先置 true 再取消息"
+    /// 那种两步状态（中间会有一帧拿到 nil）。
+    @State private var receiptTarget: ChatSession.Message?
     /// 历史是否已完成首次灌入。用于把「首次加载」与「新消息到达」区分开 ——
     /// 二者都会让消息数增加，但只有后者才应该计数/滚动。
     @State private var didInitialScroll = false
@@ -75,6 +78,12 @@ private struct ChatViewContent: View {
         // `toolbar(_:for:)` 是 iOS 16+ 的系统做法，返回上一层会自动恢复。
         .toolbar(.hidden, for: .tabBar)
         .toolbar { toolbarContent(colors: c) }
+        // 「本轮收据」（P1）：从消息菜单打开，展示**那一轮**的装箱清单。
+        .sheet(item: $receiptTarget) { message in
+            NavigationStack {
+                TurnReceiptView(receipt: model.receipt(for: message))
+            }
+        }
         .task { await model.appear() }
         .onDisappear { model.disappear() }
     }
@@ -186,7 +195,10 @@ private struct ChatViewContent: View {
                             // 同角色连续消息收紧间距；只有一组的**最后一条**才带小尾巴，
                             // 否则连续气泡会各自带尾，像一串互不相干的方块。
                             isLastOfGroup: next?.role != message.role,
-                            onSpeak: { target in model.speak(target) }
+                            onSpeak: { target in model.speak(target) },
+                            // 「本轮收据」：只有助手消息、且那一轮真的留了 turnId
+                            // 才有得看（`nil` = 菜单里不出现，而不是弹一个空页面）。
+                            onReceipt: { target in receiptTarget = target }
                         )
                         .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
                         .id(message.id)
@@ -564,6 +576,12 @@ private struct MessageBubble: View {
     /// `nil` = 不提供入口（例如预览模式或将来把朗读收进别处）。
     var onSpeak: ((ChatSession.Message) -> Void)?
 
+    /// 长按菜单里的「本轮收据」（P1）。
+    ///
+    /// 与朗读同理：`nil` 或该轮没有 `turnId` 时**不出现这一项**。
+    /// 菜单里出现一个点了没内容的入口，比没有入口更糟。
+    var onReceipt: ((ChatSession.Message) -> Void)?
+
     private var isUser: Bool { message.role == .user }
 
     /// 气泡内容是图片（含表情图）时收紧内边距 —— 图文混排时
@@ -595,6 +613,15 @@ private struct MessageBubble: View {
                             } label: {
                                 Label("朗读", systemImage: "speaker.wave.2")
                             }
+                        }
+                    }
+                    // 收据不看正文是否为空：正文为空的"只有思考过程"那种回合
+                    // 恰恰最需要看收据（模型把预算花在推理上了）。
+                    if !isUser, message.turnId != nil, let onReceipt {
+                        Button {
+                            onReceipt(message)
+                        } label: {
+                            Label("本轮收据", systemImage: "list.bullet.rectangle")
                         }
                     }
                 }

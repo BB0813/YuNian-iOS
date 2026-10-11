@@ -164,6 +164,21 @@ struct MeView: View {
                 )
             }
 
+            // 第 207 轮（P1）：上下文与收据。
+            //
+            // 入口在这里而不是只挂在消息菜单里：收据是"这一句为什么这么答"的取证面，
+            // 而**上下文选项**（历史条数 / 短期记忆上限）需要有个固定的家 ——
+            // 放在能看到它效果的那一页旁边，改完立刻能在材料清单里看到差别。
+            NavigationLink {
+                TurnReceiptView(receipt: nil)
+            } label: {
+                YNSettingsRow(
+                    icon: "list.bullet.rectangle",
+                    title: "上下文与收据",
+                    subtitle: "看模型每一轮实际收到了什么，并调历史条数与记忆注入上限。"
+                )
+            }
+
             // 说明：表情库此前没有入口，是因为导入页没做。
             // 现在 `StickerImportRepository` 有了调用方。
 
