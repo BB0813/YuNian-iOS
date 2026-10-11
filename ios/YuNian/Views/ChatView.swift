@@ -163,25 +163,34 @@ private struct ChatViewContent: View {
                             .padding(.top, YNTheme.Space.md)
                     }
 
-                    MessageBubble(
-                        message: message,
-                        companionName: model.companion?.name ?? "对方",
-                        colors: c,
-                        stickerImage: model.stickerImages[message.id],
-                        // 诊断必须是**完备**的：有图 / 三种失败 / 未解析，五选一。
-                        // 真机上曾出现"气泡在、图不在、且一行原因都没有" ——
-                        // 那说明解析根本没跑到这条消息，而当时我的诊断
-                        // 只有三种"解析过但失败"，漏掉了这一种。
-                        stickerFailure: model.stickerImages[message.id] == nil
-                            ? (model.stickerFailures[message.id] ?? "未解析")
-                            : nil,
-                        // 同角色连续消息收紧间距；只有一组的**最后一条**才带小尾巴，
-                        // 否则连续气泡会各自带尾，像一串互不相干的方块。
-                        isLastOfGroup: next?.role != message.role,
-                        onSpeak: { target in model.speak(target) }
-                    )
-                    .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
-                    .id(message.id)
+                    // ⚠️ 第 205 轮：**正文为空但有思考过程**的消息不画气泡。
+                    //
+                    // 这种情况真实存在：思考型模型把 max_tokens 预算全花在推理上
+                    // （Rust 会以 `finish_reason=length` 明确报 error）。此前那种回合
+                    // 连思考过程都不留；现在会留一条"只有思考过程"的消息，
+                    // 而它的正文是空串 —— 画出来就是一个空气泡。
+                    // 上面那段已经把思考过程显示了，所以这里直接跳过气泡。
+                    if !(message.text.isEmpty && message.reasoning?.isEmpty == false) {
+                        MessageBubble(
+                            message: message,
+                            companionName: model.companion?.name ?? "对方",
+                            colors: c,
+                            stickerImage: model.stickerImages[message.id],
+                            // 诊断必须是**完备**的：有图 / 三种失败 / 未解析，五选一。
+                            // 真机上曾出现"气泡在、图不在、且一行原因都没有" ——
+                            // 那说明解析根本没跑到这条消息，而当时我的诊断
+                            // 只有三种"解析过但失败"，漏掉了这一种。
+                            stickerFailure: model.stickerImages[message.id] == nil
+                                ? (model.stickerFailures[message.id] ?? "未解析")
+                                : nil,
+                            // 同角色连续消息收紧间距；只有一组的**最后一条**才带小尾巴，
+                            // 否则连续气泡会各自带尾，像一串互不相干的方块。
+                            isLastOfGroup: next?.role != message.role,
+                            onSpeak: { target in model.speak(target) }
+                        )
+                        .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
+                        .id(message.id)
+                    }
 
                     // 朗读状态只挂在该条消息下方（合成中 / 朗读中 / 失败原因）。
                     // 与表情失败原因同一条原则：拿不到设备日志时，界面就是取证面。

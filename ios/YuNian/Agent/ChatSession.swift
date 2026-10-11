@@ -121,10 +121,19 @@ final class ChatSession: ObservableObject {
 
     /// 本轮是否已经把助手正文追加到 UI 并落库。
     ///
-    /// 不能用 `streamingText.isEmpty` 推断：`complete()` 自己会清空它，
-    /// 因而正常 `.done` 完成后，回合返回处的 finalText 兜底会再次命中，
-    /// 造成同一回复重复追加、重复落库。
+    /// ⚠️ 第 205 轮：现在**一回合只提交一次**（`commitTurn`），
+    /// 所以它实际拦住的是"同一回合被提交两次"，而不是"每个 `.done` 提交一次"。
+    /// （`.done` 是**每轮**一次的 —— 见 `consumer` 里的说明。）
     private var assistantCommittedThisTurn = false
+
+    /// 最后一轮 `.done` 带回来的正文与结束原因。
+    ///
+    /// 用途只有一个：**流式累计与 `result.finalText` 都为空时的最后兜底**
+    /// （例如 Anthropic 降级路径只回调一次 `on_done`）。
+    /// ⚠️ 不要用它当"回合最终文本"——多轮时那只是**最后一轮**的内容，
+    /// 会丢掉前面几轮（这正是"回复被截断"的旧病根）。
+    private var lastRoundFullText = ""
+    private var lastRoundFinishReason = ""
 
     /// 当前会话绑定的伴侣。
     ///
@@ -203,6 +212,8 @@ final class ChatSession: ObservableObject {
         reasoningText = ""
         lastError = nil
         assistantCommittedThisTurn = false
+        lastRoundFullText = ""
+        lastRoundFinishReason = ""
         isRunning = true
         defer { isRunning = false }
 
@@ -274,10 +285,28 @@ final class ChatSession: ObservableObject {
                 case let .reasoningDelta(delta):
                     self.reasoningText += delta
                 case let .done(fullText, finishReason):
-                    self.complete(fullText: fullText, finishReason: finishReason, environment: environment)
+                    // ⚠️ 第 205 轮：**`onDone` 不是回合结束信号，它是"每一轮"的信号。**
+                    //
+                    // Rust 的 `run_turn_inner` 在**轮次循环里**每轮调一次
+                    // `native.send_stream(...)`（agent.rs:1251-1252），而
+                    // `send_stream` 每被调一次就 `sink.on_done(...)`
+                    // （native_gateway.rs:926 / :1222）。
+                    // 于是工具轮 / 多轮叙述的回合会来**多次** `.done`。
+                    //
+                    // 之前在这里直接 `complete()` → 第一次 `.done` 就把
+                    // `assistantCommittedThisTurn` 置真，**后续轮次的正文整段丢掉**
+                    // （这就是"回复被截断"的真身：留下的往往是第一轮的引子）。
+                    // 现在这里只记录本轮结果，提交统一放在回合末（见 `commitTurn`）。
+                    self.lastRoundFullText = fullText
+                    self.lastRoundFinishReason = finishReason
+                    // 轮次边界补一个空行：多轮叙述（"边调边说"）的各轮文本
+                    // 会累积进同一个气泡，不加分隔就会粘成一段。
+                    // 末尾多出来的空行在 `commitTurn` 里会被 trim 掉。
+                    if !self.streamingText.isEmpty, !self.streamingText.hasSuffix("\n\n") {
+                        self.streamingText += "\n\n"
+                    }
                 case let .error(message):
                     self.lastError = message
-                    self.complete(fullText: self.streamingText, finishReason: "error", environment: environment)
                 }
             }
         }
@@ -310,15 +339,8 @@ final class ChatSession: ObservableObject {
         // `AgentTurnResult.events` 里。此前完全没读它 ——
         // 于是模型调 send_sticker 成功也无声无息。
         applyEvents(result.events, environment: environment)
-        // 兜底：sink 没有提交助手正文时，才使用结果里的 finalText。
-        // `streamingText.isEmpty` 不能承担这个真值（complete 会清空它）。
-        if !assistantCommittedThisTurn, !result.finalText.isEmpty {
-            complete(
-                fullText: result.finalText,
-                finishReason: result.finishedReason,
-                environment: environment
-            )
-        }
+        // 提交**一次**：整回合的正文 + 整回合的思考过程（第 205 轮）。
+        commitTurn(result: result, environment: environment)
 
         // ⚠️ 第 160 轮：回合结束后尝试生图。
         // Kotlin 在 `ChatGenerationManager.kt:1419-1456` 用**独立协程**做这件事，
@@ -442,6 +464,23 @@ final class ChatSession: ObservableObject {
     ///     entry_id=123;file_name=custom_1699_1.png
     /// 需要手工解析，不能想当然按 JSON 解。
     private func applyEvents(_ events: [AgentEvent], environment: AppEnvironment) {
+        // ⚠️ 第 205 轮：思考过程**也走事件流**，别只认 sink。
+        //
+        // Rust 在解析响应时会额外推一条 `kind == "reasoning"` 的事件
+        // （agent.rs:1303-1311），它与 `sink.on_reasoning_delta` 是**两条路**：
+        //   · 流式请求：装配好的响应体里也带 reasoning_content → 事件是重复的
+        //   · 非流式请求（`stream_sink.is_none()`，如 Anthropic 降级路径）
+        //     或任何 sink 没交付增量的情况 → **事件是唯一来源**
+        // 此前这里只处理 `kind == "sticker"`，那条事件被静默丢掉 ——
+        // 于是"有时候有思考过程、有时候没有"多了一个成因。
+        //
+        // 只在 sink 什么都没给时才用事件，避免与增量拼成两遍。
+        if reasoningText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let last = events.last(where: { $0.kind == "reasoning" }),
+           !last.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            reasoningText = last.text
+        }
+
         for event in events where event.kind == "sticker" {
             let fields = parseKeyValues(event.extra)
             let entryId = fields["entry_id"] ?? ""
@@ -600,15 +639,55 @@ final class ChatSession: ObservableObject {
 
     // MARK: - 内部
 
-    private func complete(fullText: String, finishReason: String,
-                          environment: AppEnvironment) {
-        let text = fullText.isEmpty ? streamingText : fullText
-        // 先接住思考过程再清 buffer —— 否则回复一完成它就没了（见 Message.reasoning 注释）。
+    /// 提交本回合的助手正文与思考过程（**一回合只调一次**）。
+    ///
+    /// ## 为什么从 `complete(fullText:finishReason:)` 改成这样（第 205 轮）
+    /// 旧版把提交挂在 StreamSink 的 `.done` 上，而 **`.done` 是每轮一次的**
+    /// （见 `consumer` 里的说明）—— 多轮工具回合因此只有第一轮的正文被留下。
+    ///
+    /// ## 正文取哪一个
+    /// 1. **流式累计**（`streamingText`）优先：那是用户**已经逐字看到**的内容，
+    ///    多轮里每一轮的增量都在里面。落库与所见一致，不会再出现
+    ///    "屏幕上有一句、切窗回来少一截"。
+    /// 2. 累计为空（例如 Anthropic 降级路径只回调一次 `on_done` 而没走增量）→
+    ///    用 `result.finalText`（引擎给的回合最终文本）。
+    /// 3. 仍为空 → 用最后一轮 `.done` 带回来的文本。
+    ///
+    /// ## 正文为空但**有思考过程**时不再丢弃
+    /// Rust 对"思考型模型把 max_tokens 花在推理上"的情形会明确报 error
+    /// （agent.rs:1516-1531 的 `finish_reason=length` 分支）。此前这里因为
+    /// `text.isEmpty` 早退，而 `reasoningText` **已经在早退之前被清空** ——
+    /// 用户看到的是"想了一下，然后什么都没了"，且重启后也查不到。
+    /// 现在即便没有正文，也把思考过程落一行、留一条消息（渲染层不画空气泡）。
+    private func commitTurn(result: AgentTurnResult, environment: AppEnvironment) {
+        let streamed = streamingText
+        var text: String
+        if !streamed.isEmpty {
+            text = streamed
+        } else if !result.finalText.isEmpty {
+            text = result.finalText
+        } else {
+            text = lastRoundFullText
+        }
+        // 去掉轮次分隔（以及模型输出）留下的**尾部**空行 —— 只动尾部，
+        // 不碰正文内部的换行（模型自己排的段落要保留）。
+        while text.hasSuffix("\n") { text.removeLast() }
         let reasoning = reasoningText.trimmingCharacters(in: .whitespacesAndNewlines)
+
         streamingText = ""
         reasoningText = ""
-        guard !text.isEmpty, !assistantCommittedThisTurn else { return }
+
+        guard !assistantCommittedThisTurn else { return }
+        guard !text.isEmpty || !reasoning.isEmpty else {
+            // 空回合：**把结束原因写进日志**。
+            // 否则"发了消息什么反应都没有"在日志里是一片空白，
+            // 而 `finish_reason=length` 与"模型真的返回空"要修的地方完全不同。
+            // ⚠️ guard 的 else 是闭包上下文，属性访问必须显式 `self.`。
+            self.log.error("回合无任何可见输出：finish=\(self.lastRoundFinishReason, privacy: .public) rounds=\(result.roundsUsed) err=\(result.error ?? "无", privacy: .public)")
+            return
+        }
         assistantCommittedThisTurn = true
+
         messages.append(Message(role: .assistant, text: text,
                                 reasoning: reasoning.isEmpty ? nil : reasoning))
 
@@ -622,6 +701,11 @@ final class ChatSession: ObservableObject {
             // 顺序取决于 `history()` 的 ORDER BY，那太脆。
             let turnId = UUID().uuidString
             do {
+                // ⚠️ 正文为空（思考型模型把预算花在推理上、finish_reason=length）
+                // **也要写这一行**：REASONING 行靠 `turnId` 与正文行配对
+                // （`loadHistory` 的 pairing），没有正文行的话那一行会被
+                // "行序兜底"挂到**下一轮**的助手消息上 —— 思考过程就跑错轮了。
+                // 渲染层对"正文为空但有思考过程"的消息不画气泡（见 ChatView）。
                 _ = try repo.insert(
                     conversationId: companionId ?? 0,
                     conversationType: .chat,
