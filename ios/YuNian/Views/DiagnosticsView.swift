@@ -15,6 +15,9 @@ struct DiagnosticsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.colorScheme) private var scheme
 
+    /// `buildUserContext` 的产物（模型每回合看到的用户上下文前缀）。
+    @State private var modelContextPreview: String?
+
     var body: some View {
         let c = YNTheme.palette(scheme)
 
@@ -25,6 +28,7 @@ struct DiagnosticsView: View {
             securitySection
             channelSection
             personaSection
+            modelContextSection
             if environment.startupError != nil { startupSection }
         }
         .listStyle(.insetGrouped)
@@ -33,6 +37,8 @@ struct DiagnosticsView: View {
         .navigationTitle("诊断")
         .navigationBarTitleDisplayMode(.inline)
         .tint(c.accent)
+        // 组装一次用户上下文预览（含一次记忆召回，故放在 task 里而不是 body 里）
+        .task { loadModelContextPreview() }
     }
 
     // MARK: - 构建标记
@@ -155,6 +161,96 @@ struct DiagnosticsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    /// **模型看到的**时间与环境上下文（第 205 轮）。
+    ///
+    /// ## 为什么值得摆在界面上
+    /// 用户报过「模型说凌晨三点半，而状态栏 05:09」。要判断这是模型的幻觉
+    /// 还是我们注入错了，唯一的办法是**看注入的那一行到底是什么** ——
+    /// 拿不到设备日志时，界面就是取证面。
+    ///
+    /// 这里直接向编排器要 `buildUserContext` 的产物：就是每回合拼给模型的
+    /// 那一段（`[当前时间]` / `[对话轮数]` / `[近期记忆]`）。
+    ///
+    /// 两个实现细节可以当场核对：
+    ///   · 时间来自 **`chrono::Local`（进程本地时间）**，而**不是**下发下去的
+    ///     `timezone` 设置 —— 后者只作为文本标签出现在 system prompt 里
+    ///     （`prompt_orchestrator.rs:482`）。两者不一致时，"标签"与"钟"就会打架。
+    ///   · **时段是按小时粗分的**（`5..=7 → 清晨`，`3 点 → 深夜/凌晨`），
+    ///     模型很容易照着它**编一个具体钟点**出来。
+    ///
+    /// ⚠️ 这是**预览**：`history_rounds` 传 0（真实回合传历史条数），
+    /// 所以只看时间 / 星期 / 时段这三项。
+    @ViewBuilder
+    private var modelContextSection: some View {
+        let c = YNTheme.palette(scheme)
+        return Section {
+            LabeledContent("下发时区", value: TimeZone.current.identifier)
+            LabeledContent("系统当前时间", value: Self.clockFormatter.string(from: Date()))
+            if let preview = modelContextPreview {
+                Text(preview)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(preview.isEmpty ? c.warning : c.textPrimary)
+                    .textSelection(.enabled)
+            } else {
+                Text("正在组装…")
+                    .font(.caption)
+                    .foregroundStyle(c.textTertiary)
+            }
+        } header: {
+            Text("模型看到的时间与环境")
+        } footer: {
+            Text("""
+            第一行是每回合拼给模型的用户上下文（预览：对话轮数按 0 计）。
+            把它和上面的「系统当前时间」对一下就能判断：一致 → 模型自己编的钟点；不一致 → 是注入的问题。
+            注意时段是粗分的（3 点与 7 点都可能是「凌晨/清晨」），模型常在时段上补一个具体时间。
+            """)
+        }
+    }
+
+    /// 组装一次用户上下文预览。
+    ///
+    /// 用与回合相同的编排器构造方式（memory / skill 两个选择器都基于 stores），
+    /// 选项也按 `agent.rs::orchestration_options` 的取法填 ——
+    /// **不另造一套**，否则预览与真实回合会悄悄分叉，那就成了假证据。
+    private func loadModelContextPreview() {
+        guard let stores = environment.stores else {
+            modelContextPreview = "（运行环境未就绪）"
+            return
+        }
+        let orchestrator = PromptOrchestrator(
+            memory: MemorySelector(store: stores),
+            skill: SkillSelector(store: stores)
+        )
+        let options = PromptOrchestratorOptions(
+            memoryLimit: 5,
+            skillLimit: 3,
+            includeMemorySkill: true,
+            includeSafetyNote: true,
+            // 与回合一致：请求侧工具名。内置工具（send_sticker / emit_bubble /
+            // emit_segmented）由引擎注册，Swift 这边枚举不到 —— 而这一项只用于
+            // 技能目录的显示过滤，与本页要看的"时间"无关。
+            availableTools: AgentToolCatalog.definitions.map(\.name),
+            deviceId: DeviceIdentity.deviceId,
+            timezone: TimeZone.current.identifier,
+            sessionId: nil,
+            ownerName: KeychainStore.string(for: KeychainStore.Key.ownerName),
+            companionNameMapJson: nil,
+            workingMemoryLimit: 200
+        )
+        modelContextPreview = orchestrator.buildUserContext(
+            companionId: environment.defaultCompanion?.id,
+            groupId: nil,
+            historyRounds: 0,
+            options: options
+        )
+    }
+
+    private static let clockFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
 
     private var startupSection: some View {
         let c = YNTheme.palette(scheme)
