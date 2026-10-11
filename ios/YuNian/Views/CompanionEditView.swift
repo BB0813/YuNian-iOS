@@ -1,4 +1,24 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// 角色卡 JSON 的文件容器（走系统 `.fileExporter`，与 `BackupDocument` 同一套做法：
+/// 让用户自己决定存到"文件"App 的哪里，而不是我们替他决定路径）。
+struct CharacterCardDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var text: String
+
+    init(text: String) { self.text = text }
+
+    init(configuration: ReadConfiguration) throws {
+        let data = configuration.file.regularFileContents ?? Data()
+        text = String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
 
 /// 角色编辑（新建 / 修改人设）。
 ///
@@ -39,6 +59,11 @@ struct CompanionEditView: View {
     @State private var systemPrompt = ""
     @State private var tags = ""
     @State private var notice: String?
+
+    // 导出（第 214 轮）：与备份导出同一条系统路径
+    @State private var exportDocument: CharacterCardDocument?
+    @State private var showExporter = false
+    @State private var exportNotice: String?
 
     private var isNew: Bool { companion == nil }
 
@@ -112,6 +137,12 @@ struct CompanionEditView: View {
             if let notice {
                 Section { Text(notice).font(.caption).foregroundStyle(c.textSecondary) }
             }
+
+            // 导出只在"已存在的角色"上出现：新建还没落库，导出的是一份没保存的草稿，
+            // 那种"点了会得到什么"说不清楚，不如不给。
+            if !isNew {
+                exportSection(c)
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -126,7 +157,78 @@ struct CompanionEditView: View {
             }
         }
         .onAppear(perform: load)
+        // 导出到「文件」：与备份导出同一条路径（FileDocument + fileExporter）
+        .fileExporter(
+            isPresented: $showExporter,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: exportFileName
+        ) { result in
+            if case .failure = result {
+                exportNotice = "导出失败（系统文件选择器返回错误）"
+            } else {
+                exportNotice = "已导出 \(exportFileName).json —— 可直接导入 SillyTavern 或本 App 的「导入角色卡」。"
+            }
+        }
     }
+
+    // MARK: - 导出（与「导入角色卡」对称）
+
+    /// 导出这一份角色卡。
+    ///
+    /// ## 三处**已知损失**都写在页脚里
+    /// 开场白（表里没有这一列）／只带第一本专属世界书／只出 JSON 不出 PNG
+    /// （生成合法 PNG 要做 CRC32 + IDAT + zlib 包装，没把握产出"别人一定能导入"
+    /// 的文件之前不放按钮）。宁可少一个按钮，也不生成坏文件。
+    @ViewBuilder
+    private func exportSection(_ c: YNTheme.Palette) -> some View {
+        let result = exportResult
+        Section {
+            LabeledContent("将嵌入世界书",
+                           value: result.embeddedBookName.map { "\($0)（\(result.embeddedEntryCount) 条）" }
+                               ?? "无")
+            Button {
+                UIPasteboard.general.string = result.json
+                exportNotice = "已复制角色卡 JSON 到剪贴板"
+            } label: {
+                Label("复制 JSON", systemImage: "doc.on.doc")
+            }
+            Button {
+                exportDocument = CharacterCardDocument(text: result.json)
+                showExporter = true
+            } label: {
+                Label("导出 .json 文件", systemImage: "square.and.arrow.up")
+            }
+            if let exportNotice {
+                Text(exportNotice).font(.caption).foregroundStyle(c.textSecondary)
+            }
+        } header: {
+            Text("导出角色卡")
+        } footer: {
+            Text("""
+            导出的是 Tavern V2 JSON —— 能被 SillyTavern 直接导入，也能被本 App 的
+            「导入角色卡」原样吃回来（往返有测试）。
+            ⚠️ 四处已知损失：① **开场白为空**（`companions` 表没有这一列，导入时就没存下来）；
+            ② 只嵌入**第一本启用的专属世界书**\(result.ownedBookCount > 1 ? "（这个角色有 \(result.ownedBookCount) 本）" : "")；
+            ③ 「说话风格」没有对应的卡片字段 → 会并入 description，**再导入时会落在「背景」里**
+            （不会回到「说话风格」）；
+            ④ 只出 JSON，不出 PNG 内嵌（生成合法 PNG 需要自己实现 CRC32 + IDAT + zlib 包装，
+            没把握产出"别人一定能导入"的文件之前不放那个按钮）。
+            """)
+        }
+    }
+
+    /// 导出内容（每次都按当前库里的人设重算 —— 页面上正在编辑但未保存的改动**不算**）。
+    private var exportResult: CharacterCardExporter.ExportResult {
+        guard let companion, let database = environment.database else {
+            return CharacterCardExporter.ExportResult(json: "{}", fileName: "character-card",
+                                                      embeddedBookName: nil,
+                                                      embeddedEntryCount: 0, ownedBookCount: 0)
+        }
+        return CharacterCardExporter.export(companion: companion, database: database)
+    }
+
+    private var exportFileName: String { exportResult.fileName }
 
     // MARK: - 字段
 
