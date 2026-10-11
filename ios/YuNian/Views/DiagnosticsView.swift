@@ -1,267 +1,136 @@
 import SwiftUI
 
-/// 诊断页 —— 把原先堆在首屏的开发者自检项集中到这里。
+/// 诊断聚合页（只读）。
 ///
-/// ## 为什么拆出来（第 109 轮）
-/// 上一版 `RootView` 首屏就是一张 `List`,把 Rust Agent 状态、deviceId、keyId、
-/// 中文分词的索引串、settings/credentials JSON 全摆在用户眼前。
-/// 用户要找的「进入对话」被埋在八个 Section 之下。
+/// ## 为什么要页面化，而不是"出问题让用户截图发开发者"
+/// 用户能自查的越多，来回问的成本越低。这一页把**本机当前的事实**摊开：
+/// 构建标记、数据状态、安全基线、渠道状态、启动错误。
 ///
-/// 自检本身是有价值的(V1–V9 的可见证据、可截图),但它属于**开发者视角**,不该占首屏。
-/// 这里原样保留那些内容,只换位置。
-///
-/// ⚠️ 第 109 轮第一版我引用了 `environment.ftsImplementation` /
-/// `objectCountSummary` / `databasePath` / `schemaSummary` —— **全都不存在**,
-/// 这正是第 87、93 轮栽过的坑(引用自己没写的符号)。现在改用面板原有的
-/// 真实字段:`resolvedFTSVersion` / `YuNianSchema.*` / `AppPaths.databaseURL()`。
+/// ## 一条硬约束：**只读**
+/// 这里不做任何"清理/修复/重置"动作。诊断页上的写操作是危险动作，
+/// 应该由用户明确知道后果时再单独触发（如备份页）。
+/// 一个看起来像"一键修复"的按钮，代价往往是不可逆的数据损失。
 struct DiagnosticsView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
-    /// 第 129 轮：语义色。诊断页是给开发者看的，仍保留 List/Section 的
-    /// 高信息密度结构，但配色/字号接进设计系统，不再用系统默认灰。
     @Environment(\.colorScheme) private var scheme
 
-    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
-
-    // MARK: - 渠道自检（第 189 轮）
-    //
-    // 为什么放在诊断页：第 186/188 轮修的两个 bug 都是**看不见**的 ——
-    //   · key 存在一个全局槽 → 多配置切换时切不动 key
-    //   · 绑定可用性读了恒空的行内 apiKey → 非 PARTNER 恒判不可用
-    // 两者都只在"用户发现行为不对"时才暴露。
-    // 这一节把它们的状态摊开：当前生效的是哪条、key 从哪来、每条配置有没有 key。
-    @State private var diagActiveConfig: ApiConfigRepository.ApiConfig?
-    @State private var diagSavedConfigs: [ApiConfigRepository.ApiConfig] = []
-
     var body: some View {
+        let c = YNTheme.palette(scheme)
+
         List {
-            if let error = environment.startupError {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                        .textSelection(.enabled)
-                }
-            }
-
-            Section("Rust Agent") {
-                statusRow("运行时", ok: environment.runtime != nil,
-                          detail: environment.runtime != nil ? "已构造" : "未就绪")
-                statusRow("Swift 绑定", ok: environment.runtime != nil,
-                          detail: environment.runtime != nil ? "UniFFI 生成物可调用" : "不可用")
-                statusRow("工具宿主", ok: !environment.toolHost.registeredToolNames.isEmpty,
-                          detail: environment.toolHost.registeredToolNames.isEmpty
-                             ? "未注册工具（M3 接入）"
-                             : "\(environment.toolHost.registeredToolNames.count) 个："
-                              + environment.toolHost.registeredToolNames.joined(separator: ", "))
-            }
-
-            Section("数据层") {
-                statusRow(
-                    "schema 版本",
-                    ok: true,
-                    detail: "v\(YuNianSchema.version)（Rust 契约 "
-                          + "\(YuNianSchema.rustSupportedVersionRange.lowerBound)–"
-                          + "\(YuNianSchema.rustSupportedVersionRange.upperBound)）")
-                statusRow("FTS 实现", ok: environment.resolvedFTSVersion != "unknown",
-                          detail: environment.resolvedFTSVersion)
-                statusRow("表 / 索引 / 外键", ok: true,
-                          detail: "\(YuNianSchema.tableCount) / \(YuNianSchema.indexCount)"
-                                + " / \(YuNianSchema.foreignKeyCount)")
-
-                if let path = try? AppPaths.databaseURL().path {
-                    Text(path)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                }
-            }
-
-            Section("伴侣（Rust 人设来源）") {
-                if let companion = environment.defaultCompanion {
-                    statusRow("默认伴侣", ok: true,
-                              detail: "#\(companion.id) \(companion.name) · 亲密度 \(companion.intimacy)")
-                    if !companion.personality.isEmpty {
-                        Text(companion.personality)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    statusRow("Rust 直读列", ok: true,
-                              detail: CompanionRepository.rustReadColumns.joined(separator: " / "))
-                } else {
-                    statusRow("默认伴侣", ok: false,
-                              detail: "缺失 —— Rust 的 load_companion 会失败，人设不会注入")
-                }
-            }
-
-            Section("表情标签（builtin_send_sticker 校验用）") {
-                if !environment.stickerTagsSummary.isEmpty {
-                    statusRow("可用标签", ok: !environment.stickerTagList.isEmpty,
-                              detail: environment.stickerTagsSummary)
-                } else {
-                    Text("（空）全新安装下为空是正常的：只有导入的表情才会进表。")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Text("经 settings.stickers 下发给 Rust；内置工具不受 tools 门控，故这是活需求。")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("设备签名（PARTNER 需要）") {
-                statusRow("Secure Enclave", ok: SecureEnclaveSigner.isHardwareBacked,
-                          detail: SecureEnclaveSigner.isHardwareBacked
-                                 ? "硬件密钥" : "软件回退（模拟器正常）")
-                statusRow("deviceId", ok: true, detail: abbreviated(DeviceIdentity.deviceId))
-                statusRow("keyId（sha256(SPKI)[:32]）", ok: (try? SecureEnclaveSigner.keyId()) != nil,
-                          detail: ((try? SecureEnclaveSigner.keyId()).map(abbreviated)) ?? "不可用")
-            }
-
-            Section("数据库维护（启动时静默执行）") {
-                // ⚠️ 第 201 轮：把维护状态摊开。
-                //
-                // `DatabaseMaintenance.runIfNeeded` 在 boot 时被调用
-                // （`AppEnvironment.swift:214`），带 24 小时窗口 ——
-                // **跑没跑、什么时候跑的，用户与我都看不到**。
-                // 归档把热消息移进 archived_messages，界面表现是
-                // "翻历史时消息还在，但不在热表里"，出问题时无从判断。
-                //
-                // 这里只读 `DatabaseMaintenance` 的公开状态，不触发维护 ——
-                // 诊断页不该有副作用。
-                let lastMs = DatabaseMaintenance.lastRunMilliseconds
-                statusRow(
-                    "上次维护",
-                    ok: lastMs > 0,
-                    detail: lastMs > 0 ? Self.formatMs(lastMs) : "从未跑过（下次启动会跑）"
-                )
-                statusRow(
-                    "是否到期",
-                    ok: true,
-                    detail: DatabaseMaintenance.isDue()
-                        ? "已到期（下次启动会执行）"
-                        : "未到期（间隔 \(Int(DatabaseMaintenance.intervalHours)) 小时）"
-                )
-                statusRow(
-                    "热表上限 / 会话",
-                    ok: true,
-                    detail: "\(DatabaseMaintenance.hotMessagesPerConversation) 条，超出归档"
-                )
-            }
-
-            Section("渠道（生效配置与 Key 来源）") {
-                // ⚠️ 这里显示的"生效配置"就是 **Rust 每回合读的那一行**：
-                //   native_gateway.rs:281-286
-                //   `SELECT ... FROM api_configs WHERE isEnabled = 1
-                //    ORDER BY id DESC LIMIT 1`
-                //
-                // 它**不看** `companions.apiConfigId` —— Rust 的
-                // `AgentTurnRequest`（agent.rs:88-106）没有配置覆盖字段，
-                // 所以「角色级 API 隔离」在 Agent 路径上不生效。
-                // （Android 的 `AiService.resolveConfig`（:183-204）是它
-                //   **Kotlin HTTP 路径**的逻辑，那条路 iOS 不用。）
-                // 因此渠道页没有放"绑定到伴侣"的入口 —— 放了也不生效。
-                if let cfg = diagActiveConfig {
-                    statusRow("生效配置", ok: true,
-                              detail: "#\(cfg.id) \(cfg.provider) · \(cfg.model)")
-                    let perConfig = KeychainStore.string(
-                        for: KeychainStore.Key.apiKeyFor(cfg.id)) ?? ""
-                    let legacy = KeychainStore.string(for: KeychainStore.Key.apiKey) ?? ""
-                    let source = !perConfig.isEmpty
-                        ? "按配置槽（api_key_\(cfg.id)）"
-                        : (!legacy.isEmpty ? "回退旧单槽（迁移态）" : "无")
-                    statusRow("Key 来源",
-                              ok: !perConfig.isEmpty || !legacy.isEmpty || cfg.provider == "PARTNER",
-                              detail: cfg.provider == "PARTNER" ? "PARTNER（免 Key）" : source)
-                } else {
-                    statusRow("生效配置", ok: false,
-                              detail: "没有任何 isEnabled = 1 的行（Rust 会报「无可用 API 配置」）")
-                }
-
-                if diagSavedConfigs.isEmpty {
-                    statusRow("已保存渠道", ok: false, detail: "无")
-                } else {
-                    // ⚠️ 第 190 轮：显式给 `id:`。
-                    // `ApiConfig` 没遵循 `Identifiable`（它有 `id` 字段但没声明
-                    // 一致性），CI 报 "requires that
-                    // 'ApiConfigRepository.ApiConfig' conform to 'Identifiable'"。
-                    //
-                    // 我选择在**调用点**给 id 而不是给该类型加一致性：
-                    // 那个 struct 被仓库/探针/UI 多处使用，加协议一致性是
-                    // 全局影响；这里只是一处渲染需求。改动面小的那个更稳。
-                    ForEach(diagSavedConfigs, id: \.id) { c in
-                        let hasKey = !(KeychainStore.string(
-                            for: KeychainStore.Key.apiKeyFor(c.id)) ?? "").isEmpty
-                        let isPartner = c.provider == "PARTNER"
-                        statusRow(
-                            "#\(c.id) \(c.provider)\(c.isEnabled ? "（使用中）" : "")",
-                            ok: hasKey || isPartner,
-                            detail: hasKey ? "有 Key"
-                                  : (isPartner ? "PARTNER 免 Key" : "无 Key → 切到它会 401")
-                        )
-                    }
-                }
-            }
-
-            Section("下发给 Rust 的配置") {
-                LabeledContent("settings", value: environment.settingsSummary)
-                    .font(.caption)
-                LabeledContent("credentials", value: environment.credentialsSummary)
-                    .font(.caption)
-            }
-
-            Section("中文分词（逐字复刻自 Android）") {
-                let sample = "今天天气不错"
-                Text("索引：\(MessageSearchTokenizer.indexTokens(sample))")
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                Text("查询：\(MessageSearchTokenizer.matchQuery(sample) ?? "nil")")
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                Text("与 Android 侧不一致会导致「搜不到」且不报错，故有回归测试兜住。")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            buildSection
+            runtimeSection
+            dataSection
+            securitySection
+            channelSection
+            if environment.startupError != nil { startupSection }
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(YNCanvas())
         .navigationTitle("诊断")
         .navigationBarTitleDisplayMode(.inline)
-        .task { reloadChannelState() }
+        .tint(c.accent)
     }
 
-    /// 读渠道自检所需的数据（第 189 轮）。
-    private func reloadChannelState() {
-        diagActiveConfig = try? environment.apiConfigs?.activeConfig()
-        diagSavedConfigs = (try? environment.apiConfigs?.allConfigs()) ?? []
-    }
+    // MARK: - 构建标记
 
-    /// 把毫秒时间戳格式化成可读时间（第 201 轮，数据库维护自检用）。
-    private static func formatMs(_ ms: Int64) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
-    }
-
-    private func statusRow(_ title: String, ok: Bool, detail: String) -> some View {
-        HStack(alignment: .top, spacing: YuNianTheme.Space.standard) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(ok ? colors.success : colors.danger)
-                .font(.caption)
-            VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
-                Text(title)
-                    .font(YuNianTheme.TextStyle.settingsRowTitle)
-                    .foregroundStyle(colors.textPrimary)
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(colors.textSecondary)
-                    .textSelection(.enabled)
-            }
-            Spacer(minLength: 0)
+    /// 这些是**判断"系统新外观到底有没有生效"的关键**。
+    ///
+    /// 之前排查「Liquid Glass 不见了」花了很久，根因就是 Mach-O 被标成
+    /// `sdk 17.0`：编译、链接、安装全部成功，**只有外观是旧的**，完全静默。
+    /// 把这几项摆在界面上，下次一眼就能排除这一层。
+    private var buildSection: some View {
+        Section {
+            LabeledContent("构建 SDK", value: Self.string(info["DTSDKName"]))
+            LabeledContent("平台版本", value: Self.string(info["DTPlatformVersion"]))
+            LabeledContent("最低系统", value: Self.string(info["MinimumOSVersion"]))
+            LabeledContent("设计兼容模式",
+                           value: (info["UIDesignRequiresCompatibility"] as? Bool) == true
+                                  ? "已开启（不启用新外观）" : "关闭（启用新外观）")
+            LabeledContent("版本", value: "\(Self.string(info["CFBundleShortVersionString"])) (\(Self.string(info["CFBundleVersion"])))")
+        } header: {
+            Text("构建标记")
+        } footer: {
+            Text("「构建 SDK」必须等于本机系统所在的大版本，否则系统会按旧 SDK 渲染界面（新外观不生效，且不会有任何报错）。")
         }
     }
 
-    private func abbreviated(_ value: String) -> String {
-        value.count <= 16 ? value : String(value.prefix(16)) + "…"
+    /// 运行时的外部依赖状态。
+    private var runtimeSection: some View {
+        let c = YNTheme.palette(scheme)
+        return Section("运行环境") {
+            LabeledContent("全文检索", value: environment.resolvedFTSVersion)
+            LabeledContent("内容过滤", value: environment.contentFilterReady ? "已就绪" : "未就绪")
+            LabeledContent("安全种子", value: environment.securitySeedSummary)
+        }
+    }
+
+    private var dataSection: some View {
+        Section("数据") {
+            LabeledContent("渠道数量", value: "\(channelCount) 条")
+            LabeledContent("启用渠道", value: activeChannelSummary)
+            LabeledContent("表情标签", value: environment.stickerTagsSummary)
+        }
+    }
+
+    private var securitySection: some View {
+        Section("安全") {
+            LabeledContent("密钥存放", value: "系统钥匙串（不落库明文）")
+            LabeledContent("数据库位置", value: "App 沙盒内")
+        }
+    }
+
+    private var channelSection: some View {
+        Section("渠道") {
+            if let active = try? environment.apiConfigs?.activeConfig() {
+                LabeledContent("服务商", value: active.provider)
+                LabeledContent("模型", value: active.model.isEmpty ? "未填" : active.model)
+                LabeledContent("接口地址", value: active.baseUrl)
+                 LabeledContent("协议格式", value: active.formatHint)
+                LabeledContent("主密钥",
+                               value: environment.resolvedAPIKey(configId: active.id).isEmpty ? "缺失" : "已保存")
+                LabeledContent("额外密钥", value: "\(environment.extraAPIKeyCount(configId: active.id)) 个")
+            } else {
+                Text("没有启用的渠道。")
+                    .foregroundStyle(YNTheme.palette(scheme).textTertiary)
+            }
+        }
+    }
+
+    private var startupSection: some View {
+        let c = YNTheme.palette(scheme)
+        return Section("启动") {
+            // T6：图标 + 文字共同传达，不只靠颜色
+            Label {
+                Text(environment.startupError ?? "")
+                    .font(.subheadline)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(c.danger)
+            }
+        }
+    }
+
+    // MARK: - 数据源
+
+    private var info: [String: Any] {
+        Bundle.main.infoDictionary ?? [:]
+    }
+
+    /// `infoDictionary` 是 `[String: Any]`，值不能直接当 `String?` 用。
+    private static func string(_ value: Any?) -> String {
+        (value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "—"
+    }
+
+    private var channelCount: Int {
+        ((try? environment.apiConfigs?.allConfigs()) ?? []).count
+    }
+
+    private var activeChannelSummary: String {
+        guard let active = try? environment.apiConfigs?.activeConfig() else { return "无" }
+        let hasKey = !environment.resolvedAPIKey(configId: active.id).isEmpty
+        return hasKey ? "\(active.provider)（密钥已保存）" : "\(active.provider)（缺密钥）"
     }
 }

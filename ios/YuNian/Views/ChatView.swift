@@ -1,603 +1,816 @@
 import SwiftUI
+import UIKit
 
-/// 对话界面 —— M2 的「最小可用对话」。
+/// iOS 原生单聊页（V1 文本闭环）。
 ///
-/// 数据流：输入 → `ChatSession.send` → `AgentHostThreading.turnQueue`（阻塞）
-///        → Rust 决策 + 直连 LLM 的 SSE → `StreamSink` 增量 → 打字机效果。
+/// 规格：`ios/CHAT-SPEC.md`
+/// Apple 约束：`ios/APPLE-DESIGN-CONSTRAINTS.md`
 struct ChatView: View {
-
-    /// 要对话的伴侣。第 141 轮加 —— 通讯录页点好友行进入时带上。
-    /// 为 nil 时沿用启动时播种的默认伴侣（原行为不变）。
-    let companion: CompanionRepository.Companion?
+    let companionId: Int64
 
     @EnvironmentObject private var environment: AppEnvironment
-    /// ⚠️ 第 128 轮：语义色跟随系统明暗。气泡/输入栏/输入框都从这儿取色。
-    @Environment(\.colorScheme) private var scheme
-    /// 第 135 轮：自绘顶栏的返回按钮用。
-    /// ChatView 由 RootView 的 NavigationLink push 进来。
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var session = ChatSession()
-    @State private var draft: String = ""
-    /// 表情选择面板。⚠️ 第 120 轮加 —— 让用户能主动发表情，
-    /// 不必等模型 send_sticker。
-    @State private var showStickerPicker = false
-    @State private var companionName: String = "对话"
-    /// 伴侣绑定失败时的可见提示。
-    ///
-    /// ⚠️ 不能静默降级：Rust 的 `load_companion(None)` 会让回合**没有人设**地跑下去，
-    /// 模型仍能回答，用户看到的是一个「没有角色的机器人」，且不报错。
-    /// 这种失败必须在界面上说出来，而不是靠用户自己察觉。
-    @State private var companionWarning: String?
-
-    /// ⚠️ 第 128 轮：语义色跟随系统明暗，气泡/输入栏都从这儿取。
-    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let companionWarning {
-                Label(companionWarning, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.12))
-            }
-            transcript
-            Divider()
-            composer
-        }
-        // ⚠️ 第 135 轮：改用自绘玻璃顶栏，替换系统 NavigationBar。
-        // 规格来自 ChatTopBerRegion.kt:63-124 + GlassTopBar.kt。
-        .safeAreaInset(edge: .top) {
-            chatTopBar
-        }
-        .task {
-            // 绑定伴侣：Rust 的 load_companion 依赖它才能拿到人设。
-            // 失败时给出可见提示，而不是静默继续（否则用户得到无设定的对话）。
-            // ⚠️ 第 141 轮：优先用**外部传入**的伴侣（通讯录点进来的），
-            // 没有才回落到启动时播种的默认伴侣。
-            if session.companionId == nil {
-                let target = companion ?? environment.defaultCompanion
-                if let target {
-                    session.companionId = target.id
-                    companionName = target.name
-                    companionWarning = nil
-                } else {
-                    companionWarning = "未能绑定默认伴侣：本轮对话没有人设（Rust 的 load_companion 取不到角色）。"
-                }
-            }
+        ChatViewContent(companionId: companionId, environment: environment)
+    }
+}
 
-            // ⚠️ 第 166 轮：装载历史。放在绑定之后 ——
-            // `loadHistory` 依赖 companionId 才知道查哪个会话。
-            session.loadHistory(from: environment)
+/// 单独一层承载 `StateObject`，防止 `AppEnvironment` 发布更新时重建会话状态。
+private struct ChatViewContent: View {
+    @StateObject private var model: ChatViewModel
 
-            // ⚠️ 第 174 轮：标记已读。
-            // Kotlin 的落点是 ChatScreen 的 `ChatViewModel.markAsRead()`
-            // （ChatViewModel.kt:243-247 → ChatRepository.markReadThroughLatest），
-            // **不是点列表 item 时** —— 进到对话页才算看过。
-            //
-            // 之前 iOS 侧完全没有这个调用，于是未读小圆点"聊过就恒亮"。
-            if let db = environment.database, let cid = session.companionId {
-                try? ConversationRepository(database: db)
-                    .markReadThroughLatest(companionId: cid)
-            }
-        }
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @State private var isNearBottom = true
+    @State private var unseenCount = 0
+    /// 历史是否已完成首次灌入。用于把「首次加载」与「新消息到达」区分开 ——
+    /// 二者都会让消息数增加，但只有后者才应该计数/滚动。
+    @State private var didInitialScroll = false
+    @State private var reasoningExpanded = false
+    /// 已落地思考过程的展开状态（按消息 id 记 ——
+    /// 用一个 Bool 会让"展开一条"把所有条都撑开）。
+    @State private var expandedReasoning: Set<UUID> = []
+
+    init(companionId: Int64, environment: AppEnvironment) {
+        _model = StateObject(wrappedValue: ChatViewModel(
+            companionId: companionId,
+            environment: environment
+        ))
     }
 
-    /// companion 为 nil 时仍可无参构造（首屏入口等原有调用点不变）。
-    init(companion: CompanionRepository.Companion? = nil) {
-        self.companion = companion
+    var body: some View {
+        let c = YNTheme.palette(scheme)
+
+        GeometryReader { viewport in
+            ScrollViewReader { reader in
+                messageScroll(colors: c, viewportHeight: viewport.size.height)
+                    .onChange(of: model.displayMessages.count) { old, new in
+                        handleMessageCountChange(old: old, new: new, reader: reader)
+                    }
+                    .onChange(of: model.displayStreaming) { _, _ in
+                        if isNearBottom { scrollToBottom(reader) }
+                    }
+                    .onChange(of: model.displayPhase) { _, phase in
+                        if phase == .typing { scrollToBottom(reader) }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if unseenCount > 0 && !isNearBottom {
+                            newMessagesButton(reader: reader, colors: c)
+                                .padding(.bottom, 10)
+                        }
+                    }
+            }
+        }
+        .modifier(ChatComposerInset(
+            model: model,
+            colors: c,
+            reduceTransparency: reduceTransparency
+        ))
+        .navigationBarTitleDisplayMode(.inline)
+        // 进到聊天页就**收起底部标签栏**：已经在这一层了，
+        // 底栏继续戳在那儿既是多余的视觉噪音，也白占一截纵向空间
+        // （聊天页最缺的就是纵向空间）。
+        // `toolbar(_:for:)` 是 iOS 16+ 的系统做法，返回上一层会自动恢复。
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar { toolbarContent(colors: c) }
+        .task { await model.appear() }
+        .onDisappear { model.disappear() }
     }
 
-    // MARK: - 消息区
+    // MARK: - Toolbar
 
-    private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(session.messages) { message in
-                        bubble(message)
-                            .id(message.id)
-                    }
+    @ToolbarContentBuilder
+    private func toolbarContent(colors c: YNTheme.Palette) -> some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            HStack(spacing: YNTheme.Space.sm) {
+                CompanionAvatar(
+                    avatarURL: model.companion?.avatarUrl,
+                    name: model.companion?.name ?? "对话",
+                    size: 34
+                )
 
-                    if !session.reasoningText.isEmpty {
-                        disclosure("思考过程", text: session.reasoningText)
-                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.companion?.name ?? "对话")
+                        .font(.headline)
+                        .foregroundStyle(c.textPrimary)
+                        .lineLimit(1)
 
-                    if !session.streamingText.isEmpty {
-                        bubble(.init(role: .assistant, text: session.streamingText))
-                            .id("streaming")
-                    }
-
-                    if let error = session.lastError {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                    if let subtitle = model.subtitle {
+                        Text(subtitle)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(c.textSecondary)
+                            .transition(.opacity)
                     }
                 }
-                .padding()
             }
-            .onChange(of: session.messages.count) {
-                scrollToBottom(proxy)
-            }
-            .onChange(of: session.streamingText) {
-                scrollToBottom(proxy)
-            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(toolbarAccessibilityLabel)
         }
+
+        #if DEBUG
+        // 仅 DEBUG：无 API Key 时也能验收完整视觉状态（AI 气泡 / typing /
+        // 流式 / 思考过程 / 停止按钮 / 消息分组）。
+        // release 构建里这段不存在，因此不会变成对用户的伪能力。
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                ForEach(ChatViewModel.PreviewMode.allCases) { mode in
+                    Button(mode.rawValue) { model.startPreview(mode) }
+                }
+                if model.previewMode != nil {
+                    Button("退出预览", role: .destructive) { model.stopPreview() }
+                }
+            } label: {
+                Image(systemName: model.previewMode == nil ? "eye" : "eye.fill")
+            }
+            .accessibilityLabel("预览界面（示例数据）")
+        }
+        #endif
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.15)) {
-            if !session.streamingText.isEmpty {
-                proxy.scrollTo("streaming", anchor: .bottom)
-            } else if let last = session.messages.last {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
-        }
+    private var toolbarAccessibilityLabel: String {
+        let name = model.companion?.name ?? "对话"
+        if let subtitle = model.subtitle { return "\(name)，\(subtitle)" }
+        return name
     }
 
-    /// 气泡。
-    ///
-    /// ## 第 128 轮：套设计系统 + 补气泡小尾巴
-    /// Android 的气泡是 `AppBubbleShape`（AppBubbleShape.kt:34-159）：
-    /// **箭头只开在一侧** —— 对方在左（`BubbleSide.Start`）、自己在右（`End`），
-    /// 箭头宽 5dp / 高 8dp / Y 偏移 14dp（ChatMessageFrame.kt:56,73,74）。
-    ///
-    /// SwiftUI 没有等价的自定义 Shape，这里用 `tail` 画三角小尾巴，
-    /// 尺寸照 Kotlin 的 5/8 换算。
-    ///
-    /// 颜色来自语义 token：自己 = `selfBubbleBackground`、
-    /// 对方 = `aiBubbleBackground`，描边 `aiBubbleBorer` 0.6dp
-    /// （ChatMessageFrame.kt:88-89,96-97）。
-    private func bubble(_ message: ChatSession.Message) -> some View {
-        let mine = message.role == .user
-        return HStack(alignment: .bottom, spacing: YuNianTheme.Space.minUnit) {
-            if mine { Spacer(minLength: 40) }
+    // MARK: - Messages
 
-            HStack(alignment: .bottom, spacing: 0) {
-                if !mine { tail(isMine: false, colors: colors) }
-
-                if let sticker = sticker(for: message) {
-                    stickerBubble(sticker)
-                } else if let data = message.imageData,
-                          let ui = UIImage(data: data) {
-                    imageBubble(ui, prompt: message.imagePrompt, mine: mine)
-                } else {
-                    Text(sanitizedDisplay(message))
-                        .textSelection(.enabled)
-                        .padding(.horizontal, YuNianTheme.Space.cardPadding)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: YuNianTheme.Radius.glassDefault,
-                                             style: .continuous)
-                                .fill(mine ? colors.selfBubbleBackground
-                                           : colors.aiBubbleBackground)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: YuNianTheme.Radius.glassDefault,
-                                             style: .continuous)
-                                .strokeBorder(colors.aiBubbleBorder, lineWidth: 0.6)
-                        )
-                        .foregroundStyle(mine ? colors.selfBubbleContent
-                                              : colors.aiBubbleContent)
+    private func messageScroll(colors c: YNTheme.Palette, viewportHeight: CGFloat) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if model.displayPhase == .booting && model.displayMessages.isEmpty {
+                    loadingRows(colors: c)
+                } else if model.displayMessages.isEmpty && model.displayStreaming.isEmpty {
+                    // Android 没有欢迎空态；这里同样不放大插画或 CTA，
+                    // 只保留输入区，让角色和对话自然开始。
+                    Color.clear.frame(minHeight: max(viewportHeight * 0.55, 240))
                 }
 
-                if mine { tail(isMine: true, colors: colors) }
-            }
+                ForEach(Array(model.displayMessages.enumerated()), id: \.element.id) { index, message in
+                    let previous = index > 0 ? model.displayMessages[index - 1] : nil
+                    let next = index + 1 < model.displayMessages.count ? model.displayMessages[index + 1] : nil
+                    let divider = showsDivider(previous: previous, current: message)
 
-            if !mine { Spacer(minLength: 40) }
+                    if divider {
+                        timeDivider(message.timestamp, colors: c)
+                    }
+
+                    // 已落地的思考过程：回复完成后仍可展开回看（Android 语义）
+                    if let reasoning = message.reasoning, !reasoning.isEmpty {
+                        persistedReasoning(reasoning, messageID: message.id, colors: c)
+                            .padding(.top, YNTheme.Space.md)
+                    }
+
+                    MessageBubble(
+                        message: message,
+                        companionName: model.companion?.name ?? "对方",
+                        colors: c,
+                        stickerImage: model.stickerImages[message.id],
+                        // 诊断必须是**完备**的：有图 / 三种失败 / 未解析，五选一。
+                        // 真机上曾出现"气泡在、图不在、且一行原因都没有" ——
+                        // 那说明解析根本没跑到这条消息，而当时我的诊断
+                        // 只有三种"解析过但失败"，漏掉了这一种。
+                        stickerFailure: model.stickerImages[message.id] == nil
+                            ? (model.stickerFailures[message.id] ?? "未解析")
+                            : nil,
+                        // 同角色连续消息收紧间距；只有一组的**最后一条**才带小尾巴，
+                        // 否则连续气泡会各自带尾，像一串互不相干的方块。
+                        isLastOfGroup: next?.role != message.role
+                    )
+                    .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
+                    .id(message.id)
+                }
+
+                if !model.displayReasoning.isEmpty {
+                    // ⚠️ 这些"非消息行"原先没有任何间距：为做消息分组把
+                    // LazyVStack 改成 spacing 0 之后，只有 ForEach 里的消息
+                    // 自己带上边距，思考过程/typing/流式/错误条被漏掉了，
+                    // 于是"思考过程"和回复正文几乎贴在一起（真机截图确认）。
+                    reasoningItem(colors: c)
+                        .padding(.top, YNTheme.Space.md)
+                        .id("reasoning")
+                }
+
+                if model.displayPhase == .typing {
+                    typingItem(colors: c)
+                        .padding(.top, YNTheme.Space.md)
+                        .id("typing")
+                }
+
+                if !model.displayStreaming.isEmpty {
+                    streamingBubble(colors: c)
+                        .padding(.top, YNTheme.Space.md)
+                        .id("streaming")
+                }
+
+                if let message = model.errorMessage {
+                    errorNotice(message, colors: c)
+                        .padding(.top, YNTheme.Space.md)
+                        .id("error")
+                }
+
+                Color.clear
+                    .frame(height: 1)
+                    .id("bottom")
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: ChatBottomPositionKey.self,
+                                value: proxy.frame(in: .named("chat-scroll")).maxY
+                            )
+                        }
+                    }
+            }
+            .padding(.horizontal, YNTheme.Space.lg)
+            .padding(.vertical, YNTheme.Space.md)
+        }
+        .coordinateSpace(name: "chat-scroll")
+        // iOS 17+ 原生「聊天式初始锚点」：首次布局即停在底部。
+        //
+        // 不能靠手写 scrollTo 解决：历史是**一次性灌入**的（0 → N），
+        // 那一刻测量到的「是否在底部」必然是 false，于是既不滚动、
+        // 还会把 N 条历史误记成「N 条新消息」。
+        .defaultScrollAnchor(.bottom)
+        .scrollDismissesKeyboard(.interactively)
+        .background(Color.clear)
+        .onTapGesture { dismissKeyboard() }
+        .onPreferenceChange(ChatBottomPositionKey.self) { bottomY in
+            let wasNearBottom = isNearBottom
+            isNearBottom = bottomY <= viewportHeight + 100
+            if isNearBottom && !wasNearBottom { unseenCount = 0 }
+        }
+        .accessibilityLabel("与\(model.companion?.name ?? "对方")的聊天记录")
+    }
+
+    /// 是否在这一条之前插入时间分隔线。
+    ///
+    /// 依据 Android 规格 §5：`TimeDivider（UI 派生）| 相邻可见消息间隔 >=5 分钟时插入`。
+    /// 首条消息之前始终显示（与 Apple Messages 一致）。
+    /// 注意这与**分组间距**是两件事：时间分隔线管"跨时段"，分组管"同一段里换人"。
+    private func showsDivider(previous: ChatSession.Message?, current: ChatSession.Message) -> Bool {
+        guard let previous else { return true }
+        return current.timestamp.timeIntervalSince(previous.timestamp) >= 5 * 60
+    }
+
+    private func timeDivider(_ date: Date, colors c: YNTheme.Palette) -> some View {
+        Text(Self.dividerFormatter.string(from: date))
+            .font(.caption2)
+            .foregroundStyle(c.textTertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, YNTheme.Space.md)
+            .accessibilityLabel("时间：\(Self.dividerFormatter.string(from: date))")
+    }
+
+    /// `doesRelativeDateFormatting` 让今天显示「今天 14:30」、昨天显示「昨天 …」，
+    /// 更早显示日期 —— 与系统邮件/信息的时间文案一致。
+    private static let dividerFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    /// 一屏内 LazyVStack 用 0 间距，改由每条自己带上边距 ——
+    /// 这样才能按「是否同一组」给出不同的呼吸感。
+    private func groupSpacing(
+        index: Int,
+        previous: ChatSession.Message?,
+        current: ChatSession.Message
+    ) -> CGFloat {
+        guard let previous else { return 0 }
+        if previous.role == current.role { return 3 }   // 同组：紧凑
+        return 12                                        // 换人：明显断开
+    }
+
+    /// 内联错误提示。
+    ///
+    /// 刻意**不用 modal alert**：iMessage 的发送失败也是内联的（"Not Delivered"），
+    /// 弹窗会打断整个对话，而这条错误往往只是一句「还没配 API」。
+    /// 设计规范明确把「首选用模态」列为反模式，要求先考虑内联方案。
+    ///
+    /// 因此这里：不遮内容、不抢焦点、可关闭、位置就在对话末尾
+    /// —— 用户看到"卡在哪一步"，而不是被拦在一个对话框前。
+    private func errorNotice(_ text: String, colors c: YNTheme.Palette) -> some View {
+        HStack(alignment: .top, spacing: YNTheme.Space.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundStyle(c.warning)
+                .accessibilityHidden(true)
+
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(c.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                model.clearError()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(c.textSecondary)
+                    .frame(width: 44, height: 44)   // 命中区下限，见约束文档 C4
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭提示")
+        }
+        .padding(.leading, YNTheme.Space.md)
+        .padding(.vertical, YNTheme.Space.xs)
+        .background(c.surfaceElevated, in: RoundedRectangle(cornerRadius: YNTheme.Radius.notice, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("提示：\(text)")
+    }
+
+    private func loadingRows(colors c: YNTheme.Palette) -> some View {
+        VStack(spacing: YNTheme.Space.sm) {
+            ForEach(0..<3, id: \.self) { index in
+                HStack {
+                    if index == 1 { Spacer(minLength: 72) }
+                    RoundedRectangle(cornerRadius: YNTheme.Radius.bubbleImage, style: .continuous)
+                        .fill(c.surfaceElevated)
+                        .frame(width: index == 0 ? 210 : 150, height: index == 2 ? 64 : 48)
+                    if index != 1 { Spacer(minLength: 72) }
+                }
+            }
+        }
+        .redacted(reason: .placeholder)
+        .accessibilityHidden(true)
+    }
+
+    private func typingItem(colors c: YNTheme.Palette) -> some View {
+        HStack {
+            HStack(spacing: YNTheme.Space.sm) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在输入…")
+                    .font(.subheadline)
+            }
+            .foregroundStyle(c.textSecondary)
+            .padding(.horizontal, YNTheme.Space.md)
+            .padding(.vertical, 10)
+            .background(c.surface, in: RoundedRectangle(cornerRadius: YNTheme.Radius.container, style: .continuous))
+
+            Spacer(minLength: 72)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(model.companion?.name ?? "对方")正在输入")
+    }
+
+    private func streamingBubble(colors c: YNTheme.Palette) -> some View {
+        HStack(alignment: .bottom) {
+            Text(model.displayStreaming)
+                .font(.body)
+                .foregroundStyle(c.textPrimary)
+                .textSelection(.enabled)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(c.surface, in: assistantBubbleShape)
+                .accessibilityLabel("\(model.companion?.name ?? "对方")：\(model.displayStreaming)")
+
+            Spacer(minLength: 72)
         }
     }
 
-    /// 气泡小尾巴 —— 对应 `AppBubbleShape` 的单侧箭头
-    /// （ChatMessageFrame.kt:73-74：宽 5dp / 高 8dp / Y 偏移 14dp）。
-    private func tail(isMine: Bool, colors: YuNianTheme.Colors) -> some View {
-        Canvas { ctx, _ in
-            var path = Path()
-            if isMine {
-                path.move(to: CGPoint(x: 0, y: 0))
-                path.addLine(to: CGPoint(x: 5, y: 4))
-                path.addLine(to: CGPoint(x: 0, y: 8))
-            } else {
-                path.move(to: CGPoint(x: 5, y: 0))
-                path.addLine(to: CGPoint(x: 0, y: 4))
-                path.addLine(to: CGPoint(x: 5, y: 8))
-            }
-            path.closeSubpath()
-            ctx.fill(path, with: .color(isMine ? colors.selfBubbleBackground
-                                                : colors.aiBubbleBackground))
+    /// 思考过程（过程态）。
+    ///
+    /// ## 层级原则：过程必须比内容**安静**
+    /// 上一版用 `surfaceElevated` —— 而它比助手气泡的 `surface` **更亮**，
+    /// 于是"过程"成了整屏最响的元素（真机截图确认）。层级是反的。
+    ///
+    /// 现在：底色改用 `surface` 的 **40% 半透明**（向画布方向退半步，
+    /// 比任何气泡都弱），字号降到 `.caption`，图标与箭头统一 tertiary。
+    /// 目标是让它读起来像**附注**，而不是一条消息。
+    private func reasoningItem(colors c: YNTheme.Palette) -> some View {
+        DisclosureGroup(isExpanded: $reasoningExpanded) {
+            Text(model.displayReasoning)
+                .font(.caption)
+                .foregroundStyle(c.textTertiary)
+                .textSelection(.enabled)
+                .padding(.top, YNTheme.Space.sm)
+        } label: {
+            Label("思考过程", systemImage: "brain")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(c.textTertiary)
         }
-        .frame(width: 5, height: 8)
-        .padding(.bottom, 14)
-    }
-
-    // MARK: - 生图消息
-
-    /// 生图气泡（第 165 轮）。
-    ///
-    /// Android 侧图片消息是 `type=IMAGE` + `linkString=<路径>`
-    /// （ImageGenTrigger.kt:370-381）；iOS 侧消息是内存数组、
-    /// 字节直接带在 `Message.imageData` 上，这里解码渲染。
-    ///
-    /// 尺寸上限与气泡圆角/边框沿用文本气泡的 token，
-    /// 保证同一会话里视觉一致。prompt 作为可选说明显示在下方 ——
-    /// 对应 Kotlin 的 searchContent（对 UI 可见的那一半）；
-    /// Kotlin 只在 `contentForModel()` 里把它喂回模型
-    /// （ChatTypeConverters.kt:37-43），iOS 侧历史不带它。
-    private func imageBubble(_ image: UIImage, prompt: String?, mine: Bool) -> some View {
-        VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 220)
-                .clipShape(RoundedRectangle(cornerRadius: YuNianTheme.Radius.glassDefault,
-                                            style: .continuous))
-            if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(prompt)
-                    .font(.system(size: 11))
-                    .foregroundStyle(colors.textSecondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.horizontal, YuNianTheme.Space.minUnit)
-        .padding(.vertical, YuNianTheme.Space.minUnit)
-    }
-
-    // MARK: - 表情消息
-
-    /// 从消息文本解析表情。
-    ///
-    /// ⚠️ 第 120 轮改为按**显式字段**判断，不再"文本是 [数字] 就当成表情"。
-    /// 反推的问题：用户手动打 `[123]` 会被渲染成表情，而模型真发的表情
-    /// 反而不一定带得上格式。展示层要有自己的真值。
-    private func sticker(for message: ChatSession.Message) -> StickerBubbleModel? {
-        guard message.isSticker,
-              message.text.hasPrefix("["), message.text.hasSuffix("]"),
-              message.text.count > 2,
-              let id = Int64(message.text.dropFirst().dropLast()),
-              id > 0
-        else { return nil }
-        return StickerBubbleModel(entryId: id, database: environment.database)
-    }
-
-    /// 表情气泡。图片从 stickers 目录按 fileName 读。
-    ///
-    /// 读不到文件时显示占位（消息仍可见），
-    /// 与 Android"资源缺失时显示描述"的处理一致。
-    private func stickerBubble(_ sticker: StickerBubbleModel) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // ⚠️ 第 120 轮：改用 StickerThumbnail，不再自己读文件。
-            // 气泡和选择器都要"按 fileName 读图 + 占位"，两份各写会分叉。
-            StickerThumbnail(fileName: sticker.fileName)
-                .frame(maxWidth: 160, maxHeight: 160)
-                .cornerRadius(10)
-            if let label = sticker.label {
-                Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .tint(c.textTertiary)
+        .padding(.horizontal, YNTheme.Space.md)
+        .padding(.vertical, YNTheme.Space.sm)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
+            RoundedRectangle(cornerRadius: YNTheme.Radius.notice, style: .continuous)
+                .fill(c.surface.opacity(0.40))
+        )
+        .accessibilityLabel(reasoningExpanded ? "收起思考过程" : "展开思考过程")
+    }
+
+    /// 已落地的思考过程。
+    ///
+    /// Android 规格 §5：`REASONING` 是**与该轮助手消息关联的正式消息**
+    /// （含 duration），只有负 ID 那条是临时流态 —— 即**持久保留**。
+    /// 因此这里不再"回复一完就消失"，而是跟着那轮消息一起回看。
+    private func persistedReasoning(_ text: String, messageID: UUID, colors c: YNTheme.Palette) -> some View {
+        let isExpanded = expandedReasoning.contains(messageID)
+        return DisclosureGroup(
+            isExpanded: Binding(
+                get: { expandedReasoning.contains(messageID) },
+                set: { expanded in
+                    if expanded { expandedReasoning.insert(messageID) }
+                    else { expandedReasoning.remove(messageID) }
+                }
+            )
+        ) {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(c.textTertiary)
+                .textSelection(.enabled)
+                .padding(.top, YNTheme.Space.sm)
+        } label: {
+            Label("思考过程", systemImage: "brain")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(c.textTertiary)
+        }
+        .tint(c.textTertiary)
+        .padding(.horizontal, YNTheme.Space.md)
+        .padding(.vertical, YNTheme.Space.sm)
+        .background(
+            RoundedRectangle(cornerRadius: YNTheme.Radius.notice, style: .continuous)
+                .fill(c.surface.opacity(0.40))
+        )
+        .accessibilityLabel(isExpanded ? "收起思考过程" : "展开思考过程")
+    }
+
+    private var assistantBubbleShape: some Shape {
+        UnevenRoundedRectangle(
+            topLeadingRadius: YNTheme.Radius.bubble,
+            bottomLeadingRadius: YNTheme.Radius.bubbleTail,
+            bottomTrailingRadius: YNTheme.Radius.bubble,
+            topTrailingRadius: YNTheme.Radius.bubble,
+            style: .continuous
         )
     }
 
-    /// 显示前的清洗。
-    ///
-    /// 用户消息原样返回（它不是模型输出，不会带标记）；
-    /// 模型消息走 ImageGenProtocol/sanitizeForDisplay；
-    /// 若整条只有画面描述则显示占位文案。
-    private func sanitizedDisplay(_ message: ChatSession.Message) -> String {
-        guard message.role != .user else { return message.text }
-        if ImageGenProtocol.isPromptOnly(message.text) {
-            return "\u{1F3A8} 已生成画面"
+    // MARK: - Scroll behavior
+
+    private func handleMessageCountChange(
+        old: Int,
+        new: Int,
+        reader: ScrollViewProxy
+    ) {
+        guard new > old else { return }
+
+        // 首次灌入历史：不是「新消息」，不计数、不动画。
+        // 位置已由 `.defaultScrollAnchor(.bottom)` 保证。
+        if !didInitialScroll {
+            didInitialScroll = true
+            unseenCount = 0
+            return
         }
-        return ImageGenProtocol.sanitizeForDisplay(message.text)
-    }
-    private func disclosure(_ title: String, text: String) -> some View {
-        DisclosureGroup(title) {
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+
+        let newestIsUser = model.displayMessages.last?.role == .user
+        if isNearBottom || newestIsUser {
+            scrollToBottom(reader)
+            unseenCount = 0
+        } else {
+            unseenCount += new - old
         }
-        .font(.caption)
     }
 
-    // MARK: - 输入区
-
-    /// 输入栏。
-    ///
-    /// ## 第 128 轮：套设计系统
-    /// 对照 `WeChatChatInputBar.kt:122,126`：输入框圆角 **21dp**
-    /// （不是别处的 12/16/24，聊天专用），外框是玻璃胶囊。
-    // MARK: - 顶栏
-
-    /// 对话页玻璃顶栏。
-    ///
-    /// ## 权威来源（第 135 轮，来自源码勘察）
-    /// `feature/chat/.../ChatTopBarRegion.kt` + `glass/GlassTopBar.kt`：
-    ///
-    /// | 项 | Kotlin 值 | 行号 |
-    /// |---|---|---|
-    /// | 外层内边距 | `padding(top=48, start/end=listHorizontalPadding)` | ChatTopBarRegion.kt:63 |
-    /// | 胶囊圆角 | `RoundedCornerShape(28.dp)` | :111 |
-    /// | 胶囊内边距 | `padding(horizontal=12, vertical=8)` | :124 |
-    /// | 标题字号 | `titleMedium.copy(SemiBold, 15sp)` | :216-219 |
-    /// | "正在输入" | `titleMedium.copy(Normal, 14sp)` | :192-196 |
-    /// | 动作位尺寸 | `ActionSize = 32.dp` | :44 |
-    /// | 返回钮 | `IconButton.size(32)` + 图标 20dp | :86-97 |
-    ///
-    /// ⚠️ 与 Kotlin 的差异：Kotlin 用 drawGlass 真折射；SwiftUI 无跨层采样，
-    /// 这里用 yuNianGlass 三层叠加 —— 视觉近似，非实现等同。
-    private var chatTopBar: some View {
-        HStack(spacing: YuNianTheme.Space.cardPadding) {
-            // 返回钮（Kotlin: ActionSize=32 + 图标 20dp）
-            Button {
-                // 由外层 NavigationStack 处理 pop；这里给出可见返回。
-                dismissFromChat()
-            } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(colors.textPrimary)
-                    .frame(width: 24, height: 24)
+    private func scrollToBottom(_ reader: ScrollViewProxy) {
+        if reduceMotion {
+            reader.scrollTo("bottom", anchor: .bottom)
+        } else {
+            withAnimation(.easeOut(duration: 0.2)) {
+                reader.scrollTo("bottom", anchor: .bottom)
             }
-            .buttonStyle(.plain)
+        }
+    }
 
-            // 头像（第 144 轮接上 AvatarResolver）
-            avatar
+    private func newMessagesButton(reader: ScrollViewProxy, colors c: YNTheme.Palette) -> some View {
+        Button {
+            scrollToBottom(reader)
+            unseenCount = 0
+        } label: {
+            Label("\(unseenCount) 条新消息", systemImage: "arrow.down")
+                .font(.footnote.weight(.semibold))
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(c.accent)
+        .controlSize(.small)
+        .accessibilityHint("回到最新消息")
+    }
 
-            // 角色名 / 正在输入（Kotlin: 两行互换，isRunning 时显示 typing）
-            VStack(alignment: .leading, spacing: YuNianTheme.Space.micro) {
-                Text(companionName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(colors.textPrimary)
-                    .lineLimit(1)
-                if session.isRunning {
-                    Text("对方正在输入…")
-                        .font(.system(size: 14))
-                        .foregroundStyle(colors.textSecondary)
-                        .lineLimit(1)
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+}
+
+// MARK: - Bubble
+
+private struct MessageBubble: View {
+    let message: ChatSession.Message
+    let companionName: String
+    let colors: YNTheme.Palette
+    /// 已在 ViewModel 解析好的表情图（查不到为 nil → 退化为占位）。
+    let stickerImage: UIImage?
+    /// 解析失败的原因（显示在占位符下方）。
+    /// 界面上如实说明原因，比一个沉默的占位符有用得多 —— 见 ChatViewModel 的注释。
+    let stickerFailure: String?
+    /// 是否是一组同角色消息的最后一条 —— 只有它带「小尾巴」。
+    let isLastOfGroup: Bool
+
+    private var isUser: Bool { message.role == .user }
+
+    /// 气泡内容是图片（含表情图）时收紧内边距 —— 图文混排时
+    /// 14pt 的文本内边距会让图片四周出现一圈多余的白边。
+    private var hasVisualContent: Bool {
+        message.imageData != nil || stickerImage != nil
+    }
+
+    var body: some View {
+        HStack(alignment: .bottom) {
+            if isUser { Spacer(minLength: 72) }
+
+            bubbleContent
+                .padding(.horizontal, hasVisualContent ? 4 : 14)
+                .padding(.vertical, hasVisualContent ? 4 : 10)
+                .background(bubbleColor, in: bubbleShape)
+                .contextMenu {
+                    if !message.text.isEmpty, message.imageData == nil, !message.isSticker {
+                        Button {
+                            UIPasteboard.general.string = message.text
+                        } label: {
+                            Label("复制", systemImage: "doc.on.doc")
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(accessibilityLabel)
+
+            if !isUser { Spacer(minLength: 72) }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var bubbleContent: some View {
+        if let data = message.imageData, let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 320)
+                .clipShape(RoundedRectangle(cornerRadius: YNTheme.Radius.bubbleImage, style: .continuous))
+        } else if message.isSticker {
+            // 🔴 第 202 轮：**这里此前一直是原始占位符**。
+            //
+            // `stickerImage` / `stickerFailure` 在结构体里声明了、调用点也传了，
+            // 但这个分支**从来没读过它们** —— 所以表情**永远**渲染成占位符，
+            // 与 id 空间、文件名、文件是否读得到**全都无关**。
+            //
+            // 前几轮我在 id 映射、`file_name` 兜底、异步解析上绕了三圈，
+            // 每次都是"改完就装机"，却始终没先确认这个分支到底读了什么。
+            // 这是本会话最贵的一次绕路。
+            if let data = message.stickerImageData, let image = UIImage(data: data) {
+                stickerImageView(image)
+            } else if let stickerImage {
+                stickerImageView(stickerImage)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("表情", systemImage: "face.smiling")
+                        .font(.body)
+                        .foregroundStyle(isUser ? colors.onAccent : colors.textPrimary)
+                    // 把**具体原因**写出来：一个沉默的占位符会把
+                    // "没导入 / 文件丢了 / id 对不上"三种情况混成一件事。
+                    if let stickerFailure {
+                        Text(stickerFailure)
+                            .font(.caption2)
+                            .foregroundStyle(colors.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // 动作位（Kotlin: ActionSize = 32dp）
-            if session.isRunning {
-                Button("停止") { session.cancel(in: environment) }
-                    .font(YuNianTheme.TextStyle.settingsRowSubtitle)
-                    .foregroundStyle(colors.danger)
-                    .frame(minWidth: 32, minHeight: 32)
-            } else {
-                Color.clear.frame(width: 32, height: 32)
-            }
+        } else {
+            Text(message.text)
+                .font(.body)
+                .foregroundStyle(isUser ? colors.onAccent : colors.textPrimary)
+                .textSelection(.enabled)
         }
-        .padding(.horizontal, YuNianTheme.Space.cardPadding)   // :124 horizontal=12
-        .padding(.vertical, YuNianTheme.Space.standard)        // :124 vertical=8
-        .padding(.top, 4)
-        .background(colors.background.opacity(0.001))
-        .yuNianGlass(colors, radius: YuNianTheme.Radius.topBarCapsule,
-                     surfaceColor: colors.card, isDark: scheme == .dark)
-        .padding(.horizontal, YuNianTheme.Space.page)
-        .padding(.top, 4)
     }
 
-    /// 伴侣头像。`avatarUrl` 是 Android 资源 URI，需经 AvatarResolver 翻译
-    /// 成本地 asset 名 —— 不翻译就永远加载不出图（第 144 轮的发现）。
-    private var avatar: some View {
+    /// 表情图的统一渲染。表情**不套气泡底** ——
+    /// 贴纸自带背景与轮廓，再包一层圆角矩形就成了"卡片套卡片"。
+    private func stickerImageView(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: 132, maxHeight: 132)
+            .accessibilityHidden(true)
+    }
+
+    private var bubbleColor: Color {
+        isUser ? colors.accent : colors.surface
+    }
+
+    private var bubbleShape: some Shape {
+        let normal = YNTheme.Radius.bubble
+        let tail = YNTheme.Radius.bubbleTail
+        // 同组中间的气泡四角统一；只有最后一条朝说话人一侧收出尾巴。
+        let bottomLeading = isUser ? normal : (isLastOfGroup ? tail : normal)
+        let bottomTrailing = isUser ? (isLastOfGroup ? tail : normal) : normal
+        return UnevenRoundedRectangle(
+            topLeadingRadius: normal,
+            bottomLeadingRadius: bottomLeading,
+            bottomTrailingRadius: bottomTrailing,
+            topTrailingRadius: normal,
+            style: .continuous
+        )
+    }
+
+    private var accessibilityLabel: String {
+        let sender = isUser ? "我" : companionName
+        if message.imageData != nil { return "\(sender)发送了一张图片" }
+        if message.isSticker { return "\(sender)发送了一个表情" }
+        return "\(sender)：\(message.text)"
+    }
+}
+
+// MARK: - Avatar
+
+struct CompanionAvatar: View {
+    let avatarURL: String?
+    let name: String
+    var size: CGFloat = 40
+
+    var body: some View {
         Group {
-            if let url = environment.defaultCompanion?.avatarUrl,
-               let asset = AvatarResolver.assetName(for: url) {
+            if let asset = AvatarResolver.assetName(for: avatarURL) {
                 Image(asset)
                     .resizable()
                     .scaledToFill()
-            } else {
-                Image(systemName: "person.circle.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(colors.textTertiary)
-            }
-        }
-        .frame(width: 32, height: 32)
-        .clipShape(Circle())
-    }
-
-    /// 顶栏返回。ChatView 由 NavigationLink push 进来，
-    /// 这里显式 dismiss 以给出可见返回路径。
-    private func dismissFromChat() {
-        // ChatView 自己持有一个 NavigationStack 之外的环境，
-        // 故用 presentationMode 兼容两种进入方式。
-        dismiss()
-    }
-
-    private var composer: some View {
-        HStack(spacing: YuNianTheme.Space.standard) {
-            // ⚠️ 第 120 轮：表情按钮。
-            // 在此之前表情只能由模型 send_sticker 发出，用户被绑在
-            // "等模型心情好"上。库为空时按钮仍显示，点进去给出导入引导 ——
-            // 比藏起来更好，否则用户不知道"没有"还是"没这个功能"。
-            Button {
-                showStickerPicker = true
-            } label: {
-                Image(systemName: "face.smiling")
-                    .font(.system(size: 22))
-                    .foregroundStyle(colors.textSecondary)
-            }
-            .disabled(session.isRunning || environment.runtime == nil)
-
-            TextField("说点什么…", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, YuNianTheme.Space.cardPadding)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: YuNianTheme.Radius.chatInput,
-                                     style: .continuous)
-                        .fill(colors.card.opacity(0.62))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: YuNianTheme.Radius.chatInput,
-                                     style: .continuous)
-                        .strokeBorder(colors.divider, lineWidth: 0.6)
-                )
-                .foregroundStyle(colors.textPrimary)
-                .disabled(session.isRunning || environment.runtime == nil)
-
-            Button {
-                let text = draft
-                draft = ""
-                Task { await session.send(text, in: environment) }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(colors.primary)
-            }
-            .disabled(
-                draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || session.isRunning
-                || environment.runtime == nil
-            )
-        }
-        .padding(.horizontal, YuNianTheme.Space.page)
-        .padding(.vertical, YuNianTheme.Space.standard)
-        .background(colors.surface)
-        .sheet(isPresented: $showStickerPicker) {
-            StickerPickerSheet { entryId in
-                session.sendSticker(entryId: entryId, in: environment)
-            }
-        }
-    }
-
-    // MARK: - 表情选择器
-
-    /// 快速选表情面板。
-    ///
-    /// 只读 sticker_entries（与表情库同一数据源），不做额外缓存 ——
-    /// 打开时取一次即可，选完即发。
-    private struct StickerPickerSheet: View {
-        let onPick: (Int64) -> Void
-
-        @Environment(\.dismiss) private var dismiss
-        @EnvironmentObject private var environment: AppEnvironment
-
-        @State private var stickers: [StickerLibraryRepository.Entry] = []
-        @State private var loadError: String?
-
-        private let columns = [GridItem(.adaptive(minimum: 84), spacing: 12)]
-
-        var body: some View {
-            NavigationStack {
-                Group {
-                    if let loadError {
-                        errorState(loadError)
-                    } else if stickers.isEmpty {
-                        emptyState
+            } else if let remote = AvatarResolver.remoteURL(for: avatarURL) {
+                AsyncImage(url: remote) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
                     } else {
-                        grid
+                        placeholder
                     }
                 }
-                .navigationTitle("选表情")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("关闭") { dismiss() }
-                    }
-                    // 顺手：面板里直接能跳去导表情，不用退出再找
-                    ToolbarItem(placement: .primaryAction) {
-                        NavigationLink {
-                            StickerImportView()
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                    }
-                }
-            }
-            .task { reload() }
-            // 从导入页回来时刷新（sheet dismiss 即重取）
-            .onDisappear { reload() }
-        }
-
-        private var grid: some View {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(stickers) { sticker in
-                        Button {
-                            if let id = Int64(stickerId(sticker)) {
-                                onPick(id)
-                                dismiss()
-                            }
-                        } label: {
-                            stickerCell(sticker)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding()
+            } else {
+                placeholder
             }
         }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
 
-        private func stickerCell(_ sticker: StickerLibraryRepository.Entry) -> some View {
-            VStack(spacing: 4) {
-                StickerThumbnail(fileName: sticker.fileName)
-                    .frame(width: 64, height: 64)
-                    .cornerRadius(8)
-                Text(sticker.displayName)
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .foregroundStyle(.secondary)
-            }
-        }
-
-        private var emptyState: some View {
-            VStack(spacing: 14) {
-                Image(systemName: "face.smiling")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-                Text("还没有可发的表情")
+    private var placeholder: some View {
+        Circle()
+            .fill(.secondary.opacity(0.16))
+            .overlay {
+                Text(String(name.prefix(1)))
                     .font(.headline)
-                Text("先导入几个，模型和你都能用。")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
-                NavigationLink("去导入表情") { StickerImportView() }
-                    .buttonStyle(.borderedProminent)
             }
-        }
+    }
+}
 
-        private func errorState(_ message: String) -> some View {
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.largeTitle)
-                    .foregroundStyle(.red)
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                Button("重试") { reload() }
-            }
-        }
+// MARK: - Composer
 
-        private func reload() {
-            guard let database = environment.database else {
-                loadError = "数据库未就绪"
-                return
-            }
-            do {
-                stickers = try StickerLibraryRepository(database: database).entries()
-                loadError = nil
-            } catch {
-                stickers = []
-                loadError = String(describing: error)
-            }
-        }
+private struct ChatComposerInset: ViewModifier {
+    @ObservedObject var model: ChatViewModel
+    let colors: YNTheme.Palette
+    let reduceTransparency: Bool
 
-        private func stickerId(_ sticker: StickerLibraryRepository.Entry) -> String {
-            String(sticker.id)
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.safeAreaBar(edge: .bottom, spacing: 0) {
+                ChatComposer(model: model, colors: colors, reduceTransparency: reduceTransparency)
+            }
+        } else {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                ChatComposer(model: model, colors: colors, reduceTransparency: reduceTransparency)
+            }
         }
+    }
+}
+
+private struct ChatComposer: View {
+    @ObservedObject var model: ChatViewModel
+    let colors: YNTheme.Palette
+    let reduceTransparency: Bool
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(spacing: YNTheme.Space.xs) {
+            HStack(alignment: .bottom, spacing: YNTheme.Space.sm) {
+                TextField("发消息", text: $model.draft, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        reduceTransparency ? colors.surface : colors.surface.opacity(0.92),
+                        in: RoundedRectangle(cornerRadius: YNTheme.Radius.composer, style: .continuous)
+                    )
+                    .focused($focused)
+                    .submitLabel(.send)
+                    .onSubmit {
+                        if model.canSend { model.sendText() }
+                    }
+                    .accessibilityLabel("消息")
+
+                if model.isGenerating {
+                    stopButton
+                } else {
+                    sendButton
+                }
+            }
+
+            // 当前模型：把"正在用的是哪个"直接摊出来，不用去设置里翻。
+            //
+            // ⚠️ 这里**只有模型名，没有 token 用量** ——
+            // iOS 这条链路上拿不到 per-turn 用量：生成绑定里
+            // `AgentTurnResult` 没有用量字段，`token_usage` 表也**只有备份恢复会写**，
+            // 运行时无人写。所以不做那个数字，而不是显示一个恒为 0 的假值。
+            if let modelName = model.activeModelName {
+                Text(modelName)
+                    .font(.caption2)
+                    .foregroundStyle(colors.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .lineLimit(1)
+                    .accessibilityLabel("当前模型：\(modelName)")
+            }
+        }
+        .padding(.horizontal, YNTheme.Space.lg)
+        .padding(.vertical, YNTheme.Space.sm)
+    }
+
+    @ViewBuilder
+    private var sendButton: some View {
+        if #available(iOS 26.0, *) {
+            Button(action: model.sendText) {
+                Image(systemName: "arrow.up")
+                    .font(.body.weight(.bold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(colors.accent)
+            .disabled(!model.canSend)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("发送")
+        } else {
+            Button(action: model.sendText) {
+                Image(systemName: "arrow.up")
+                    .font(.body.weight(.bold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(colors.accent)
+            .disabled(!model.canSend)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("发送")
+        }
+    }
+
+    @ViewBuilder
+    private var stopButton: some View {
+        if #available(iOS 26.0, *) {
+            Button(action: model.stopGenerating) {
+                Image(systemName: "stop.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.glass)
+            .tint(colors.danger)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("停止生成")
+        } else {
+            Button(action: model.stopGenerating) {
+                Image(systemName: "stop.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.bordered)
+            .tint(colors.danger)
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("停止生成")
+        }
+    }
+}
+
+private struct ChatBottomPositionKey: PreferenceKey {
+    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

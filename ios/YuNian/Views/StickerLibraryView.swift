@@ -1,178 +1,215 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
-/// 表情库 —— 让用户看得见表情与标签的现状。
+/// 表情库。
 ///
-/// ## 为什么需要（第 115 轮）
-/// `sticker_entries` / `sticker_tags` 两张表从 v45 起就在 schema 里，
-/// `StickerTagProvider` 也读后者给 Rust 兜底，但用户侧一直没有界面。
-/// 全新安装下这两张表是空的 —— 用户无从判断"没有"还是"没显示"。
+/// ## 为什么"名称"必须让用户填
+/// `StickerImportRepository` 用 `description` 派生 **tags**，而 tags 正是
+/// Rust 侧 `send_sticker` 挑表情的依据（模型按标签选，不是按文件名）。
+/// 所以名称不是装饰 —— **填错了模型就永远挑不中它**。
+/// 也因此这里一次只导一张并要求填名，而不是批量导入一串无名文件。
 ///
-/// ## 第 129 轮：套上设计系统
-/// 上一版是 `List` + 系统样式。改用 `YuNianGlassCard` 列表 +
-/// `StickerThumbnail` 缩略图网格，走语义色。
+/// ## 为什么这一页很重要
+/// 在此之前 `StickerImportRepository` **没有任何调用方** ——
+/// 也就是说数据库里 `sticker_entries` 恒为空，
+/// 模型看得见 `send_sticker` 工具却**无表情可选**，
+/// 聊天页那条"表情气泡"路径**永远走不到**。
 struct StickerLibraryView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
-    /// ⚠️ 第 129 轮：语义色跟随系统明暗。
     @Environment(\.colorScheme) private var scheme
-    /// 第 133 轮：玻璃顶栏的返回按钮用。
-    /// 这些页面由 RootView 的 NavigationLink push 进来，
-    /// 系统不自动给可见返回钮，故自绘顶栏需要它。
-    @Environment(\.dismiss) private var dismiss
 
     @State private var entries: [StickerLibraryRepository.Entry] = []
-    @State private var tags: [StickerLibraryRepository.TagStat] = []
-    @State private var loadError: String?
-    /// 导入面板。⚠️ 第 115 轮加 —— 此前空态只能引导去备份导入。
-    @State private var showImport = false
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var draftName = ""
+    @State private var draftTags = ""
+    @State private var status: Status?
+    @State private var busy = false
 
-    private var colors: YuNianTheme.Colors { YuNianTheme.colors(scheme) }
+    private enum Status: Equatable {
+        case ok(String)
+        case failure(String)
+    }
 
     var body: some View {
-        // 第 133 轮：改用 YuNianGlassPage（对照 Android GlassTopBar），
-        // 不再用系统 NavigationBar。
-        YuNianGlassPage(title: "表情库", onBack: { dismiss() }) {
-            VStack(alignment: .leading, spacing: YuNianTheme.Space.standard) {
+        let c = YNTheme.palette(scheme)
 
-                if let loadError {
-                    Text(loadError)
-                        .font(.caption)
-                        .foregroundStyle(colors.danger)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, YuNianTheme.Space.minUnit)
-                } else if entries.isEmpty {
-                    emptyState
-                } else {
-                    YuNianSectionTitle(title: "已导入 \(entries.count) 个")
-
-                    // 缩略图网格：一眼看全，点一下直接发
-                    LazyVGrid(columns: [
-                        GridItem(.adaptive(minimum: 88), spacing: YuNianTheme.Space.cardPadding)
-                    ], spacing: YuNianTheme.Space.cardPadding) {
-                        ForEach(entries) { entry in
-                            YuNianGlassCard {
-                                VStack(spacing: YuNianTheme.Space.half) {
-                                    StickerThumbnail(fileName: entry.fileName)
-                                        .frame(width: 64, height: 64)
-                                        .cornerRadius(8)
-                                    Text(entry.displayName)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(colors.textPrimary)
-                                        .lineLimit(1)
-                                    HStack(spacing: YuNianTheme.Space.standard) {
-                                        Label("\(entry.userUsageCount)",
-                                              systemImage: "person")
-                                        Label("\(entry.modelUsageCount)",
-                                              systemImage: "cpu")
-                                    }
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(colors.textTertiary)
-                                }
-                            }
-                        }
-                    }
-
-                    // 标签统计：与 Android 排序一致（stickerCount DESC, tag ASC）
-                    if !tags.isEmpty {
-                        YuNianSectionTitle(title: "标签统计（按图片数降序）")
-                        YuNianGlassCard {
-                            VStack(alignment: .leading, spacing: YuNianTheme.Space.half) {
-                                ForEach(tags) { stat in
-                                    HStack {
-                                        Text(stat.tag)
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(colors.textPrimary)
-                                        Spacer()
-                                        Text("\(stat.stickerCount)")
-                                            .font(.system(size: 12).monospacedDigit())
-                                            .foregroundStyle(colors.textSecondary)
-                                    }
-                                    .padding(.vertical, YuNianTheme.Space.tight)
-                                }
-                            }
-                        }
-                        Text("这些标签经 settings.stickers 下发给 Rust，供 builtin_send_sticker 做精确匹配。")
-                            .font(.system(size: 11))
-                            .foregroundStyle(colors.textTertiary)
-                            .padding(.horizontal, YuNianTheme.Space.minUnit)
-                    }
-                }
-
-                Spacer(minLength: YuNianTheme.Space.pageTop)
-            }
-            .padding(.horizontal, YuNianTheme.Space.page)
-            .padding(.top, YuNianTheme.Space.standard)
+        List {
+            importSection
+            librarySection
+            if let status { statusSection(status, colors: c) }
         }
-        .toolbar {
-            // 第 115 轮：列表顶部也放一个导入按钮。
-            // 只在空态放的话，导入了第一批之后用户就找不到入口了。
-            if environment.database != nil {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showImport = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .foregroundStyle(colors.primary)
-                }
-            }
-        }
-        .task { reload() }
-        .sheet(isPresented: $showImport) {
-            StickerImportView()
-        }
-        // 导入完成后重新读取（sheet dismiss 时刷新）
-        .onChange(of: showImport) { _, shown in
-            if !shown { reload() }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(YNCanvas())
+        .navigationTitle("表情库")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { reload() }
+        .onChange(of: pickerItem) { _, item in
+            guard let item else { return }
+            Task { await importPicked(item) }
         }
     }
 
-    // MARK: - 空态
+    // MARK: - 导入
 
-    private var emptyState: some View {
-        VStack(spacing: YuNianTheme.Space.cardPadding) {
-            Image(systemName: "face.smiling")
-                .font(.system(size: 40))
-                .foregroundStyle(colors.textTertiary)
-            Text("还没有表情")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(colors.textPrimary)
-            Text("全新安装下为空是正常的：目前只能通过相册导入或备份导入获得，导入后这里会列出。")
-                .font(.system(size: 12))
-                .foregroundStyle(colors.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, YuNianTheme.Space.page)
-
-            YuNianGlassButton(onClick: { showImport = true }, height: 44) {
-                Label("从相册导入表情", systemImage: "plus.circle")
+    private var importSection: some View {
+        Section {
+            LabeledContent("名称") {
+                TextField("例如：开心", text: $draftName)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
             }
-            .padding(.horizontal, YuNianTheme.Space.page)
-
-            if environment.database != nil {
-                NavigationLink("或从备份导入") { BackupImportView() }
-                    .font(YuNianTheme.TextStyle.settingsRowSubtitle)
-                    .foregroundStyle(colors.primary)
+            LabeledContent("标签") {
+                TextField("可选，逗号分隔", text: $draftTags)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
             }
+
+            PhotosPicker(selection: $pickerItem, matching: .images) {
+                HStack {
+                    if busy {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text("选择图片导入")
+                    Spacer()
+                }
+            }
+            .disabled(busy || draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            // 一张张选太慢，而用户手上的表情包资料是「名称 + 直链」清单。
+            NavigationLink {
+                StickerBulkImportView()
+            } label: {
+                Label("从清单批量导入", systemImage: "doc.text")
+            }
+        } header: {
+            Text("导入")
+        } footer: {
+            Text("名称决定标签，而模型是**按标签**挑表情的 —— 名称填得越具体，它越容易挑中。留空标签时用名称自动拆分。")
         }
-        .padding(.top, YuNianTheme.Space.pageTop)
     }
 
-    // MARK: - 数据
+    // MARK: - 已有
+
+    private var librarySection: some View {
+        let c = YNTheme.palette(scheme)
+        return Section {
+            if entries.isEmpty {
+                Text("还没有表情。导入之后，模型才能在对话里发表情。")
+                    .foregroundStyle(c.textTertiary)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 72), spacing: YNTheme.Space.sm)],
+                    spacing: YNTheme.Space.sm
+                ) {
+                    ForEach(entries) { entry in
+                        VStack(spacing: 4) {
+                            stickerImage(entry)
+                                .frame(width: 64, height: 64)
+                                .background(c.surface,
+                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            Text(entry.displayName)
+                                .font(.caption2)
+                                .foregroundStyle(c.textTertiary)
+                                .lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("表情 \(entry.displayName)")
+                    }
+                }
+                .padding(.vertical, YNTheme.Space.xs)
+            }
+        } header: {
+            Text("已有表情（\(entries.count)）")
+        }
+    }
+
+    /// 表情文件在 `AppPaths.stickersDirectory()/fileName`。
+    ///
+    /// 读不到就显示占位 —— 消息仍可见，与 Android「资源缺失时显示描述」一致。
+    @ViewBuilder
+    private func stickerImage(_ entry: StickerLibraryRepository.Entry) -> some View {
+        if let url = try? AppPaths.stickersDirectory().appendingPathComponent(entry.fileName),
+           let image = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: "photo")
+                .foregroundStyle(YNTheme.palette(scheme).textTertiary)
+        }
+    }
+
+    @ViewBuilder
+    private func statusSection(_ status: Status, colors c: YNTheme.Palette) -> some View {
+        Section {
+            // T6：图标 + 文字，不只靠颜色
+            switch status {
+            case let .ok(text):
+                Label(text, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(c.success)
+                    .font(.subheadline)
+            case let .failure(text):
+                Label(text, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(c.warning)
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    // MARK: - 逻辑
 
     private func reload() {
+        guard let database = environment.database else { entries = []; return }
+        entries = (try? StickerLibraryRepository(database: database).entries()) ?? []
+    }
+
+    private func importPicked(_ item: PhotosPickerItem) async {
         guard let database = environment.database else {
-            loadError = "数据库未就绪"
+            status = .failure("数据库尚未就绪。")
             return
         }
-        do {
-            let snapshot = try StickerLibraryRepository(database: database).snapshot()
-            entries = snapshot.entries
-            tags = snapshot.tags
-            loadError = nil
-        } catch {
-            entries = []
-            tags = []
-            loadError = String(describing: error)
+        busy = true
+        defer { busy = false; pickerItem = nil }
+
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            status = .failure("读不到所选图片，请换一张再试。")
+            return
         }
+
+        // 文件名格式与 Android 一致：`custom_<ms>_<0..999>.<ext>`
+        let ext = Self.fileExtension(for: data)
+        let fileName = "custom_\(Int(Date().timeIntervalSince1970 * 1000))_\(Int.random(in: 0..<1000)).\(ext)"
+
+        do {
+            _ = try StickerImportRepository(database: database).importSticker(
+                data: data,
+                fileName: fileName,
+                description: draftName,
+                userTags: draftTags
+                    .split(whereSeparator: { $0 == "," || $0 == "，" })
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            )
+            let name = draftName
+            draftName = ""
+            draftTags = ""
+            reload()
+            status = .ok("已导入「\(name)」。回聊天页发条消息，模型就有表情可挑了。")
+        } catch let error as StickerImportRepository.ImportError {
+            status = .failure(error.description)
+        } catch {
+            status = .failure("导入失败，请重试。")
+        }
+    }
+
+    /// 按魔数判扩展名，不信任 PhotosPicker 给的 UTType 字符串。
+    private static func fileExtension(for data: Data) -> String {
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return "png" }
+        if data.starts(with: [0x47, 0x49, 0x46]) { return "gif" }
+        if data.starts(with: [0x52, 0x49, 0x46, 0x46]) { return "webp" }
+        return "jpg"
     }
 }

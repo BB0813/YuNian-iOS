@@ -264,10 +264,20 @@ struct AgentCredentials: Codable, Sendable, Equatable {
     ///     **按配置**存放的（`api_key_<configId>`），只有调用方知道当前
     ///     生效的是哪条配置。让这里自己读，就会退回到那个"所有配置共用
     ///     一个槽"的旧行为 —— 也就是本次要修的那个 bug。
-    static func fromKeychain(isPartner: Bool, apiKey: String) -> AgentCredentials {
-        AgentCredentials(
+    ///   - extraApiKeys: 逗号分隔的额外 Key（多密钥轮换）。
+    ///
+    ///     ⚠️ 第 202 轮：这个参数**是新加的**。此前本方法把该字段
+    ///     写死为 `nil`，于是「多密钥」在 iOS 上名存实亡 ——
+    ///     Kotlin 侧会下发（见 `buildCredentialsJson` 的
+    ///     `if (!extraApiKeys.isNullOrBlank())`），Rust 的 `all_api_keys()`
+    ///     也会 split(',') 使用，只有 Swift 宿主恒不发。
+    ///     调用方同样必须传：槽名是按 configId 的
+    ///     （`KeychainStore.Key.extraApiKeysFor`）。
+    static func fromKeychain(isPartner: Bool, apiKey: String, extraApiKeys: String? = nil) -> AgentCredentials {
+        let extras = extraApiKeys?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return AgentCredentials(
             apiKey: apiKey.isEmpty ? nil : apiKey,
-            extraApiKeys: nil,
+            extraApiKeys: (extras?.isEmpty ?? true) ? nil : extras,
             session: isPartner ? KeychainStore.string(for: KeychainStore.Key.partnerToken) : nil,
             clientId: isPartner ? KeychainStore.string(for: KeychainStore.Key.partnerClientId) : nil
         )

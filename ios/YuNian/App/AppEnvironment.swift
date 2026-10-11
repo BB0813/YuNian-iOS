@@ -282,6 +282,100 @@ final class AppEnvironment: ObservableObject {
         pushCredentials()
     }
 
+    /// 写入某条配置的**额外** API Key（多密钥轮换）。
+    ///
+    /// 与主 key 同样只进 Keychain，不落库明文
+    /// （`api_configs.extraApiKeys` 列在 iOS 上恒为空串，理由同 `apiKey`）。
+    /// 多个 key 用**逗号或换行**分隔；Rust 侧按逗号 split 并 trim，
+    /// 所以这里统一转成逗号分隔再存。
+    func setExtraAPIKeys(_ keys: String, configId: Int64) {
+        let slot = KeychainStore.Key.extraApiKeysFor(configId)
+        let normalized = keys
+            .split(whereSeparator: { $0 == "," || $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ",")
+
+        if normalized.isEmpty {
+            KeychainStore.remove(slot)
+        } else {
+            try? KeychainStore.set(normalized, for: slot)
+        }
+        pushCredentials()
+    }
+
+    /// 某条配置额外密钥的**数量**（不回显内容）。
+    ///
+    /// 刻意只给数量：界面没有必要把密钥再显示出来，
+    /// 而"配了几个"是需要让用户知道的（轮换是否真的生效）。
+    func extraAPIKeyCount(configId: Int64) -> Int {
+        let raw = KeychainStore.string(for: KeychainStore.Key.extraApiKeysFor(configId)) ?? ""
+        return raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .count
+    }
+
+    // MARK: - 服务商预设（读库）
+
+    /// 界面上应该出现的服务商列表。
+    ///
+    /// 优先读库（尊重 `isVisible` / `sortOrder`），库为空或读失败时回退到
+    /// 编译期种子 —— 保证界面在任何情况下都不是空白。
+    func visibleApiPresets() -> [YuNianSeed.ApiProviderPreset] {
+        if let fromDatabase = try? apiConfigs?.visiblePresets(), !fromDatabase.isEmpty {
+            return fromDatabase
+        }
+        return YuNianSeed.apiProviderPresets
+    }
+
+    // MARK: - 余额
+
+    /// 余额查询结果。服务端大多不返回结构化余额，此时只看 `rawSubscription`。
+    @Published private(set) var balance: BalanceInfo?
+    @Published private(set) var balanceMessage: String?
+    @Published private(set) var balanceLoading = false
+
+    /// 查询当前启用渠道的余额。
+    ///
+    /// 与 `testConnection` 同一条线程约束：`ApiProbeService.queryBalance`
+    /// 是同步阻塞调用（内部要循环打四个端点），**必须离开主线程**，
+    /// 否则界面冻结 —— 那正是「测试连接卡几秒」的同款 bug。
+    func queryBalance() async {
+        balanceLoading = true
+        balanceMessage = nil
+        defer { balanceLoading = false }
+
+        guard let config = try? apiConfigs?.activeConfig() else {
+            balance = nil
+            balanceMessage = "尚未选择供应商（或未填密钥）"
+            return
+        }
+        let extraHeaders = ApiProbeService.authHeaders(
+            provider: config.provider,
+            apiKey: resolvedAPIKey(configId: config.id),
+            partnerSession: KeychainStore.string(for: KeychainStore.Key.partnerToken),
+            partnerClientId: KeychainStore.string(for: KeychainStore.Key.partnerClientId)
+        )
+
+        let result: Result<BalanceInfo, ApiProbeService.ProbeError> = await withCheckedContinuation { continuation in
+            AgentHostThreading.turnQueue.async {
+                continuation.resume(
+                    returning: ApiProbeService.queryBalance(config: config, extraHeaders: extraHeaders)
+                )
+            }
+        }
+
+        switch result {
+        case let .success(info):
+            balance = info
+            balanceMessage = info.rawSubscription ?? info.rawUsage
+        case let .failure(error):
+            balance = nil
+            balanceMessage = error.description
+        }
+    }
+
     /// 读取某条配置的 API Key。
     ///
     /// ⚠️ 第 186 轮：实现**已下沉到 `KeychainStore.resolvedAPIKey`** ——
@@ -370,7 +464,12 @@ final class AppEnvironment: ObservableObject {
         let isPartner = config?.provider == "PARTNER"
         let credentials = AgentCredentials.fromKeychain(
             isPartner: isPartner,
-            apiKey: resolvedAPIKey(configId: config?.id)
+            apiKey: resolvedAPIKey(configId: config?.id),
+            // 第 202 轮：多密钥此前恒不下发（fromKeychain 里写死 nil）。
+            // 与主 key 同一套按配置寻址的规则。
+            extraApiKeys: config.flatMap {
+                KeychainStore.string(for: KeychainStore.Key.extraApiKeysFor($0.id))
+            }
         )
         runtime.updateCredentials(credentialsJson: credentials.jsonString())
         refreshCredentialsSummary(credentials: credentials)
@@ -399,6 +498,14 @@ final class AppEnvironment: ObservableObject {
     }
 
     /// 测试连接：发一个最小请求验证 key / baseUrl / 协议。
+    ///
+    /// ## ⚠️ 为什么必须离开主线程（第 202 轮修）
+    /// `ApiProbeService.testConnection` 是**同步阻塞**调用（内部是阻塞 HTTP + Rust FFI）。
+    /// 本类是 `@MainActor`，直接在方法体里调用它 = **在主线程上阻塞到网络返回或超时**。
+    /// 用户可见症状：点「测试连接」后**界面冻住几秒**。
+    ///
+    /// 这与 `run_turn` 是同一条线程约束（见 `AgentHostThreading` 的注释），
+    /// 所以走同一个后台队列，并用 continuation 桥回 async。
     func testConnection() async {
         modelsLoading = true
         modelsMessage = nil
@@ -415,7 +522,16 @@ final class AppEnvironment: ObservableObject {
             partnerClientId: KeychainStore.string(for: KeychainStore.Key.partnerClientId)
         )
 
-        switch ApiProbeService.testConnection(config: config, extraHeaders: extraHeaders) {
+        // 阻塞调用丢到后台队列；主线程只等结果，不参与等待。
+        let outcome: Result<String, ApiProbeService.ProbeError> = await withCheckedContinuation { continuation in
+            AgentHostThreading.turnQueue.async {
+                continuation.resume(
+                    returning: ApiProbeService.testConnection(config: config, extraHeaders: extraHeaders)
+                )
+            }
+        }
+
+        switch outcome {
         case let .success(reply):
             let brief = reply.trimmingCharacters(in: .whitespacesAndNewlines)
             modelsMessage = "连接成功" + (brief.isEmpty ? "" : "：\(brief)")
@@ -449,7 +565,15 @@ final class AppEnvironment: ObservableObject {
             partnerClientId: KeychainStore.string(for: KeychainStore.Key.partnerClientId)
         )
 
-        let result = ApiProbeService.fetchModels(config: config, extraHeaders: extraHeaders)
+        // 同 testConnection：`ApiProbeService.fetchModels` 也是阻塞调用，
+        // 在 @MainActor 上直接调会冻住界面。
+        let result: Result<[String], ApiProbeService.ProbeError> = await withCheckedContinuation { continuation in
+            AgentHostThreading.turnQueue.async {
+                continuation.resume(
+                    returning: ApiProbeService.fetchModels(config: config, extraHeaders: extraHeaders)
+                )
+            }
+        }
         switch result {
         case let .success(models):
             serverModels = models

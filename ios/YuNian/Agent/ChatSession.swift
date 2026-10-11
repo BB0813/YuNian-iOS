@@ -40,14 +40,75 @@ final class ChatSession: ObservableObject {
         /// 画面描述（对应 Android 的 `searchContent`）。
         /// 供将来回喂模型与 UI 说明，当前不进历史。
         var imagePrompt: String?
+        /// 消息时间。
+        ///
+        /// ## 为什么现在才加（第 202 轮）
+        /// 审计已记过这个缺口：`Message` 原先只有 `UUID id`，**没有任何时间信息**，
+        /// 因此聊天页无法插入时间分隔线 —— 而 Android 规格 §5 明确要求
+        /// 「相邻可见消息间隔 ≥5 分钟时插入 `TimeDivider`」。
+        /// 这与 Apple Messages 的行为也一致。
+        ///
+        /// 加它是**加法式改动**：带默认值，所有既有构造点不受影响；
+        /// 从数据库装载时用真实时间戳，实时追加时用当前时间。
+        var timestamp: Date
+
+        /// 本轮思考过程（REASONING）。
+        ///
+        /// ## 为什么挂到消息上，而不是只留一个实时 buffer（第 202 轮）
+        /// Android 规格 §5 明确：`REASONING` 是**与助手 turn 关联的正式消息**
+        /// （含 duration），只有「**负 ID** 表示临时流态」。
+        /// 也就是说思考过程在 Android 上是**持久保留**的。
+        ///
+        /// iOS 上一版在 `complete()` 里直接把 `reasoningText` 清空，
+        /// 回复一结束思考过程就消失 —— 那是保真度缺口，不是设计选择。
+        /// 现在把它附到该轮产出的助手消息上，回复完成后仍可展开回看。
+        ///
+        /// 注意：它**不进模型上下文**（与 Android 一致：REASONING 不参与
+        /// 上下文/摘要/未读），`historyForRequest()` 只取 `text`。
+        var reasoning: String?
+
+        /// 表情消息对应的**文件名**。
+        ///
+        /// ## 为什么要有它（第 202 轮）
+        /// `send_sticker` 的事件里本来就同时带着 `entry_id` 和 `file_name`：
+        /// ```
+        /// entry_id=123;file_name=custom_1699_1.png
+        /// ```
+        /// 而 `updateStickers(stickers: [String])` 下发的**只是标签名**，
+        /// 生成绑定原文写明它「供 builtin_send_sticker 精确匹配校验与
+        /// 无匹配报告展示」—— 它不负责产出本地 id，所以事件里的 `entry_id`
+        /// 不保证落在本地 `sticker_entries.id` 空间里。
+        ///
+        /// 真机症状：表情库里 25 张都正常显示，模型发出来后聊天页**只有占位符**。
+        /// 因此这里把 `file_name` 一并带上：**文件名是物理标识**，
+        /// 渲染时直接按它读文件，不再依赖任何一侧的 id 分配。
+        var stickerFileName: String?
+
+        /// 表情图片的**原始字节**。
+        ///
+        /// ## 为什么让消息自己带图（第 202 轮）
+        /// 前三次修的都是「ViewModel 事后按 id / 文件名解析」那条路 ——
+        /// 结果**连诊断字都没出现过**，说明那条路根本没跑到这条消息上。
+        /// 在同一条路上继续试是浪费轮次。
+        ///
+        /// 改成**在源头带上**：`applyEvents` 拿到事件时就直接把文件读进来，
+        /// 渲染层只用它，不再依赖任何异步解析、sink 触发或 id 映射。
+        /// 代价是一张表情常驻内存（几十 KB），换掉的是整条链路上的中间环节。
+        var stickerImageData: Data?
 
         init(role: AgentHistoryRole, text: String, isSticker: Bool = false,
-             imageData: Data? = nil, imagePrompt: String? = nil) {
+             imageData: Data? = nil, imagePrompt: String? = nil,
+             timestamp: Date = Date(), reasoning: String? = nil,
+             stickerFileName: String? = nil, stickerImageData: Data? = nil) {
             self.role = role
             self.text = text
             self.isSticker = isSticker
             self.imageData = imageData
             self.imagePrompt = imagePrompt
+            self.timestamp = timestamp
+            self.reasoning = reasoning
+            self.stickerFileName = stickerFileName
+            self.stickerImageData = stickerImageData
         }
     }
 
@@ -57,6 +118,13 @@ final class ChatSession: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var lastError: String?
     @Published private(set) var lastRoundsUsed: UInt32 = 0
+
+    /// 本轮是否已经把助手正文追加到 UI 并落库。
+    ///
+    /// 不能用 `streamingText.isEmpty` 推断：`complete()` 自己会清空它，
+    /// 因而正常 `.done` 完成后，回合返回处的 finalText 兜底会再次命中，
+    /// 造成同一回复重复追加、重复落库。
+    private var assistantCommittedThisTurn = false
 
     /// 当前会话绑定的伴侣。
     ///
@@ -134,6 +202,7 @@ final class ChatSession: ObservableObject {
         streamingText = ""
         reasoningText = ""
         lastError = nil
+        assistantCommittedThisTurn = false
         isRunning = true
         defer { isRunning = false }
 
@@ -191,6 +260,9 @@ final class ChatSession: ObservableObject {
             companionNameMapJson: nil
         )
 
+        // 本轮开始打点：REASONING 行的 durationMs 由它算（见 turnStartedAt）
+        turnStartedAt = Date()
+
         let stream = sink.makeStream()
 
         let consumer = Task { @MainActor [weak self] in
@@ -238,9 +310,14 @@ final class ChatSession: ObservableObject {
         // `AgentTurnResult.events` 里。此前完全没读它 ——
         // 于是模型调 send_sticker 成功也无声无息。
         applyEvents(result.events, environment: environment)
-        // 兜底：sink 没给出任何文本时，用结果里的最终文本落地
-        if streamingText.isEmpty, !result.finalText.isEmpty {
-            complete(fullText: result.finalText, finishReason: result.finishedReason, environment: environment)
+        // 兜底：sink 没有提交助手正文时，才使用结果里的 finalText。
+        // `streamingText.isEmpty` 不能承担这个真值（complete 会清空它）。
+        if !assistantCommittedThisTurn, !result.finalText.isEmpty {
+            complete(
+                fullText: result.finalText,
+                finishReason: result.finishedReason,
+                environment: environment
+            )
         }
 
         // ⚠️ 第 160 轮：回合结束后尝试生图。
@@ -360,10 +437,59 @@ final class ChatSession: ObservableObject {
             let entryId = fields["entry_id"] ?? ""
             guard !entryId.isEmpty else { continue }
 
-            // 内容 = "[<entryId>]"，与 Android 约定一致
+            // ⚠️ 第 202 轮：**不能只信 entry_id**。
+            //
+            // 真机症状：表情库里 25 张都正常显示（说明行在、文件也在），
+            // 但模型发出来的表情在聊天页**只能渲染成占位符**，甚至什么都没有。
+            //
+            // 成因：`updateStickers(stickers: [String])` 下发的**只是标签名**，
+            // 生成绑定的原文写明它「供 builtin_send_sticker 精确匹配校验与
+            // 无匹配报告展示」—— 它**本来就不负责产出本地 entry_id**。
+            // 因此事件里的 `entry_id` 来自 Rust 侧存储实现，其 id 空间
+            // 不保证与本地 `sticker_entries.id` 一致。
+            //
+            // 而事件同时带着 `file_name`（agent.rs 的 KV 串格式：
+            // `entry_id=123;file_name=custom_1699_1.png`）。**文件名是物理标识**，
+            // 不依赖任何一侧的 id 分配 —— 所以拿它兜底反查本地行。
+            let database = environment.database
+            let eventFileName = fields["file_name"] ?? ""
+
+            var resolvedId: Int64?
+            if let numericId = Int64(entryId), let database,
+               StickerBubbleModel(entryId: numericId, database: database) != nil {
+                resolvedId = numericId
+            } else if !eventFileName.isEmpty, let database {
+                resolvedId = (try? database.pool.read { db in
+                    try Int64.fetchOne(
+                        db,
+                        sql: "SELECT id FROM sticker_entries WHERE fileName = ? LIMIT 1",
+                        arguments: [eventFileName])
+                }) ?? nil
+            }
+
+            guard let resolvedId else {
+                log.error("表情事件落不到本地条目，已丢弃：entry_id=\(entryId, privacy: .public) file_name=\(eventFileName, privacy: .public)")
+                continue
+            }
+
+            // 内容 = "[<entryId>]"，与 Android 约定一致；
+            // 同时带上 file_name 与**图片字节**供渲染层直接使用
+            // （不依赖任何一侧的 id 空间，也不依赖事后异步解析）。
+            var fileName = eventFileName
+            if fileName.isEmpty, let database,
+               let model = StickerBubbleModel(entryId: resolvedId, database: database) {
+                fileName = model.fileName
+            }
+            var imageData: Data?
+            if !fileName.isEmpty, let dir = try? AppPaths.stickersDirectory() {
+                imageData = try? Data(contentsOf: dir.appendingPathComponent(fileName))
+            }
+
             messages.append(
-                Message(role: .assistant, text: "[\(entryId)]", isSticker: true))
-            log.info("表情已落地：entry_id=\(entryId, privacy: .public)")
+                Message(role: .assistant, text: "[\(resolvedId)]", isSticker: true,
+                        stickerFileName: fileName.isEmpty ? nil : fileName,
+                        stickerImageData: imageData))
+            log.info("表情已落地：entry_id=\(resolvedId, privacy: .public) file=\(fileName, privacy: .public) bytes=\(imageData?.count ?? -1, privacy: .public)")
         }
     }
 
@@ -423,16 +549,24 @@ final class ChatSession: ObservableObject {
     private func complete(fullText: String, finishReason: String,
                           environment: AppEnvironment) {
         let text = fullText.isEmpty ? streamingText : fullText
+        // 先接住思考过程再清 buffer —— 否则回复一完成它就没了（见 Message.reasoning 注释）。
+        let reasoning = reasoningText.trimmingCharacters(in: .whitespacesAndNewlines)
         streamingText = ""
         reasoningText = ""
-        guard !text.isEmpty else { return }
-        messages.append(Message(role: .assistant, text: text))
+        guard !text.isEmpty, !assistantCommittedThisTurn else { return }
+        assistantCommittedThisTurn = true
+        messages.append(Message(role: .assistant, text: text,
+                                reasoning: reasoning.isEmpty ? nil : reasoning))
 
         // ⚠️ 第 166 轮：AI 回复落库。`searchContent` 与 `content` 同值 ——
         // Android 侧图片消息在这里存画面描述（ImageGenTrigger.kt:381），
         // 文本消息两者一致（MessageSearchTokenizer 会再切词）。
         // 落库失败不阻断对话（同上）。
         if let repo = messageRepository(for: environment) {
+            // 一轮一个 turnId：**正文行与 REASONING 行共用它配对**。
+            // 不用"插入顺序/时间戳"配对 —— 两行时间戳会完全相同，
+            // 顺序取决于 `history()` 的 ORDER BY，那太脆。
+            let turnId = UUID().uuidString
             do {
                 _ = try repo.insert(
                     conversationId: companionId ?? 0,
@@ -441,12 +575,65 @@ final class ChatSession: ObservableObject {
                     senderId: 0,
                     type: "text",
                     content: text,
-                    searchContent: text
+                    searchContent: text,
+                    turnId: turnId
                 )
+
+                // ⚠️ 第 202 轮：思考过程**必须落库**。
+                //
+                // 此前它只挂在内存里的 `Message.reasoning` 上 ——
+                // 真机症状：能展开看到完整推理，但**一切窗再回来就没了**。
+                //
+                // Android 规格 §5 写得很明确：`REASONING` 是「与助手 turn 关联、
+                // **含 duration**」的正式消息，**只有负 ID 那条是临时流态**
+                // —— 也就是说它本来就该持久保留。而 `messages` 表
+                // 恰好有 `type` / `turnId` / `durationMs` 三列，结构上早就支持。
+                //
+                // 它**不进上下文/摘要/未读**：`historyForRequest()` 只取 `text`，
+                // 这里只是多存一行供回看。
+                if !reasoning.isEmpty {
+                    _ = try repo.insert(
+                        conversationId: companionId ?? 0,
+                        conversationType: .chat,
+                        isFromUser: false,
+                        senderId: 0,
+                        type: Self.reasoningType,
+                        content: reasoning,
+                        searchContent: "",
+                        turnId: turnId,
+                        durationMs: lastTurnDurationMs
+                    )
+                }
             } catch {
                 log.error("AI 回复落库失败：\(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    /// 落库用的 REASONING 类型标记。
+    ///
+    /// 小写：与既有的 `"text"` / `"image"` 一致（iOS 侧存 MessageType 序列名），
+    /// 而 `loadHistory` 会按它把这一行排除出「可见消息」。
+    static let reasoningType = "reasoning"
+
+    /// 正文形如 `[123]`（纯数字）时返回 id，否则 nil。
+    ///
+    /// 只在**重载**路径用：库里没有 `isSticker` 列，而正文 `[<id>]`
+    /// 是全仓统一约定（Android 的 Sticker 同样是 TEXT 投影，靠正文判定）。
+    /// 这不与 live 路径「不要靠文本反推」的告诫冲突 ——
+    /// 那条说的是建模时有条件就该带显式字段；重载路径没有别的持久信号。
+    private static func stickerId(fromContent content: String) -> Int64? {
+        guard content.hasPrefix("["), content.hasSuffix("]"), content.count > 2 else { return nil }
+        return Int64(content.dropFirst().dropLast())
+    }
+
+    /// 本轮开始时刻 —— 用于 REASONING 行的 `durationMs`。
+    /// Android 规格 §5：REASONING「与助手 turn 关联，**含 duration**」。
+    private var turnStartedAt = Date()
+
+    /// 本轮已耗时（毫秒）。
+    private var lastTurnDurationMs: Int {
+        max(0, Int(Date().timeIntervalSince(turnStartedAt) * 1000))
     }
 
     /// 构造消息 repository（第 166 轮）。
@@ -477,10 +664,51 @@ final class ChatSession: ObservableObject {
             seen.insert("\(m.role.rawValue)|\(m.text)|\(m.isSticker)|\(m.imageData?.count ?? -1)")
         }
 
+        // ⚠️ 第 202 轮：先把 REASONING 行按 turnId 收起来。
+        //
+        // 它们是**正式消息**（Android 规格 §5：与助手 turn 关联、含 duration，
+        // 只有负 ID 那条是临时流态），但**不是可见气泡** ——
+        // 必须挂到同 turn 的助手消息上，而**不能**作为普通消息渲染。
+        // 漏掉这一步的后果：思考过程会以一条文字气泡出现在对话里，比丢更糟。
+        //
+        // 用 turnId 配对而不是行顺序：两行时间戳完全相同，
+        // 顺序取决于 `history()` 的 ORDER BY，太脆。
+        var reasoningByTurn: [String: String] = [:]
+        for r in rows where r.type == Self.reasoningType {
+            guard let turnId = r.turnId, !turnId.isEmpty else { continue }
+            reasoningByTurn[turnId] = r.content
+        }
+
+        // 兜底：turnId 没落上（旧行、或写入路径漏了）时，按**行顺序**配对 ——
+        // REASONING 行紧邻它所属的助手行。两者都试，尽量不让思考过程丢。
+        var reasoningByRowIndex: [Int: String] = [:]
+        var pendingReasoning: String?
+        for (index, r) in rows.enumerated() {
+            if r.type == Self.reasoningType {
+                pendingReasoning = r.content.isEmpty ? nil : r.content
+                continue
+            }
+            if r.isFromUser {
+                // 用户消息是轮次边界：跨轮的思考过程不该挂到下一轮
+                pendingReasoning = nil
+                continue
+            }
+            if let pending = pendingReasoning {
+                reasoningByRowIndex[index] = pending
+                pendingReasoning = nil
+            }
+        }
+
         var loaded: [Message] = []
-        for r in rows {
+        for (index, r) in rows.enumerated() {
+            // REASONING 行不进可见消息（它已按 turnId / 行序收进上面两张表）
+            if r.type == Self.reasoningType { continue }
+
             let key = "\(r.isFromUser ? "user" : "assistant")|\(r.content)|false|-1"
             if seen.contains(key) { continue }
+
+            // 数据库存的是毫秒时间戳；转成 Date 供聊天页插入时间分隔线。
+            let stamp = Date(timeIntervalSince1970: TimeInterval(r.timestamp) / 1000)
 
             // ⚠️ 第 167 轮：图片消息从 linkString 读文件回来。
             // 上一版读到 "[图片]" 就只是个文本占位 —— 重启后图没了。
@@ -492,11 +720,17 @@ final class ChatSession: ObservableObject {
                     loaded.append(Message(role: r.isFromUser ? .user : .assistant,
                                           text: r.content, isSticker: false,
                                           imageData: data,
-                                          imagePrompt: r.searchContent))
+                                          imagePrompt: r.searchContent,
+                                          timestamp: stamp))
                     continue
                 }
             }
-            loaded.append(Message(role: r.isFromUser ? .user : .assistant, text: r.content))
+            let stickerId = Self.stickerId(fromContent: r.content)
+            loaded.append(Message(role: r.isFromUser ? .user : .assistant,
+                                  text: r.content,
+                                  isSticker: stickerId != nil,
+                                  timestamp: stamp,
+                                  reasoning: r.turnId.flatMap { reasoningByTurn[$0] } ?? reasoningByRowIndex[index]))
         }
         guard !loaded.isEmpty else { return }
         messages.insert(contentsOf: loaded, at: 0)

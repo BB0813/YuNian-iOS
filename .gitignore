@@ -142,3 +142,17 @@ ios/Generated/
 
 # gen_regex_probe.py 的本机产物（有 JDK 时会生成）
 _regex_probe/
+
+# ── Apple 文档取证材料（第 202 轮）──────────────────────────────
+# `ios/_apple-docs/` 下这些是从 developer.apple.com 抓取的**原文**与抓取脚本，
+# 属本地取证材料，不是发布物料 —— 仓库是公开的，不做整份复制。
+# 自己的整理（hig.md / liquid-glass.md）与 ios/_research/ 仍会提交。
+ios/_apple-docs/_raw/
+ios/_apple-docs/raw/
+ios/_apple-docs/raw2/
+ios/_apple-docs/raw3/
+ios/_apple-docs/text/
+ios/_apple-docs/text2/
+ios/_apple-docs/text3/
+ios/_apple-docs/_fetch*.py
+ios/_apple-docs/extract*.py

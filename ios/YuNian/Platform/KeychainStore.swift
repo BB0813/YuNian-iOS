@@ -143,6 +143,23 @@ enum KeychainStore {
         static func apiKeyFor(_ configId: Int64) -> String {
             "\(apiKeyPrefix)\(configId)"
         }
+
+        /// 某条配置的**额外** API Key（多密钥轮换）槽名。
+        ///
+        /// ## 为什么需要（第 202 轮）
+        /// Rust 的 `all_api_keys()` 会把凭证里的 `extra_api_keys`
+        /// **按逗号 split 并 trim** 后一起纳入轮换/重试 ——
+        /// `AgentCredentials.extraApiKeys` 这个字段也一直在契约里。
+        ///
+        /// 但 Swift 侧 `pushCredentials()` 只下发了主 key，
+        /// 这个字段**永远是 nil**，于是「多密钥」在 iOS 上名存实亡：
+        /// 契约有、Rust 支持、宿主不发。
+        ///
+        /// 槽位与 `apiKeyFor` 同一套规则（按 configId，不按 provider），
+        /// 理由相同：同一个 provider 可以有多行。
+        static func extraApiKeysFor(_ configId: Int64) -> String {
+            "extra_api_keys_\(configId)"
+        }
         // ── PARTNER 会话：iOS 不接入，但这两槽保留（第 193 轮）──────────
         //
         // 它们的**写入路径已删**（原 `AppEnvironment.setPartnerSession`），

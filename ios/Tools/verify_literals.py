@@ -445,8 +445,15 @@ def main() -> int:
     # 不是"签名永远只有这一个参数"。
     report.check("Swift fromKeychain 接受 isPartner 参数",
                  "fromKeychain(isPartner: Bool" in dto2)
+    # ⚠️ 第 202 轮：断言**再次**放宽 —— 从 `apiKey: String)` 到 `apiKey: String`。
+    # 该函数本轮又新增了 `extraApiKeys:` 参数（多密钥此前在 iOS 恒不下发：
+    # `fromKeychain` 里写死 nil，而 Kotlin 会下发、Rust 的 `all_api_keys()`
+    # 也会 split(',') 使用），于是 `apiKey: String)` 这一整串同样命不中。
+    # **意图没变**：保证 key 由调用方显式传入（按配置解析，
+    # 本方法不得自己读 Keychain，否则退回"所有配置共用一个槽"的旧 bug），
+    # 而不是"签名永远只有这两个参数"。
     report.check("Swift fromKeychain 接受调用方传入的 apiKey（第 186 轮）",
-                 "apiKey: String)" in dto2)
+                 "apiKey: String" in dto2)
     report.check("Swift 非 PARTNER 时不下发 session/client_id",
                  "isPartner ? KeychainStore.string(for: KeychainStore.Key.partnerToken) : nil"
                  in dto2)

@@ -283,4 +283,36 @@ final class ApiConfigRepository {
             return db.lastInsertedRowID
         }
     }
+
+    // MARK: - 服务商预设（读库）
+
+    /// 库里**可见**的服务商预设，按 `sortOrder` 升序。
+    ///
+    /// ## 为什么需要（第 202 轮）
+    /// 界面一直用硬编码的 `YuNianSeed.apiProviderPresets`，
+    /// 于是 `api_provider_presets.isVisible` 这一列**从来没有被读过** ——
+    /// 也就是说"某个服务商在界面上不该出现"这件事**无法表达**。
+    ///
+    /// 两者关系：种子只是**建库时的初始内容**（`seedApiProviderPresets`），
+    /// 建完之后库才是运行时真源。读种子等于冻结在初始状态。
+    func visiblePresets() throws -> [YuNianSeed.ApiProviderPreset] {
+        try database.pool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT provider, displayName, baseUrl, model, formatHint, sortOrder
+                FROM api_provider_presets
+                WHERE isVisible = 1
+                ORDER BY sortOrder ASC
+                """)
+            return rows.map { row in
+                YuNianSeed.ApiProviderPreset(
+                    provider: row["provider"] as String? ?? "",
+                    displayName: row["displayName"] as String? ?? "",
+                    baseUrl: row["baseUrl"] as String? ?? "",
+                    model: row["model"] as String? ?? "",
+                    formatHint: row["formatHint"] as String? ?? "",
+                    sortOrder: row["sortOrder"] as Int? ?? 0
+                )
+            }
+        }
+    }
 }

@@ -65,6 +65,33 @@ EXTERNAL_ALLOWLIST = {
     # UIKit（图片数据 → 导入前的本地预览）
     # ⚠️ 第 115 轮：UIImage 加入白名单。
     "UIImage",
+    # ⚠️ 第 202 轮：视觉层整体重写（原生 iOS 优先）后新引入的类型。
+    #   - AsyncImage / UnevenRoundedRectangle：SwiftUI。
+    #     前者用于会话头像的远程加载（AvatarResolver.remoteURL 的输出）；
+    #     后者用于聊天气泡的不对称圆角 —— 只有「一组同角色消息的最后一条」
+    #     才朝说话人一侧收出尾巴，同组中间的气泡四角统一。
+    #   - UIResponder：点击消息区收起键盘（UIKit 标准做法，
+    #     因为输入框的焦点在子视图里，父视图无法直接改 FocusState）。
+    #   - TimeInterval：Foundation。会话列表把毫秒时间戳换算成 Date。
+    "AsyncImage", "UnevenRoundedRectangle", "UIResponder", "TimeInterval",
+    # ⚠️ 第 202 轮：备份导出/导入的界面层。
+    #   - FileDocument / FileWrapper：SwiftUI / Foundation。
+    #     备份导出走系统 `.fileExporter`，让用户自己选存到「文件」App 的哪里，
+    #     而不是由 App 替他决定路径；`FileDocument` 必须实现
+    #     `fileWrapper(configuration:)`，返回类型就是 `FileWrapper`。
+    #   - UTType：UniformTypeIdentifiers。上面那个导出/导入的
+    #     `contentType` / `allowedContentTypes` 用它声明文件类型。
+    "FileDocument", "FileWrapper", "UTType",
+    #   - PhotosPicker / PhotosPickerItem：PhotosUI（SwiftUI 风格入口）。
+    #     表情库导入用系统相册选择器，而不是自己写一个图片浏览页。
+    "PhotosPicker", "PhotosPickerItem",
+    #   - 系统连接页（第 202 轮）：逐项读真实授权状态。
+    #     AVFoundation：相机与麦克风；Photos：相册读写；Speech：语音识别；
+    #     LocalAuthentication：Face ID 能力探测。
+    "AVCaptureDevice", "AVAuthorizationStatus", "AVAudioSession",
+    "PHPhotoLibrary", "PHAuthorizationStatus",
+    "SFSpeechRecognizer", "SFSpeechRecognizerAuthorizationStatus",
+    "LAContext",
     # Foundation（URL 组件解析）
     # ⚠️ 第 89 轮：URLComponents 加入白名单。
     # RequestSigner.path(from:) 原先用了 URL 上并不存在的

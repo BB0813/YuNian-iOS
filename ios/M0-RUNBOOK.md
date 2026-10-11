@@ -113,12 +113,10 @@ xcodebuild test \
 | `SecuritySeedLoaderTests` | 种子装载与诊断 |
 | `RequestSignerTests` | path 编码 / clientId / nonce |
 | `LiteralContractTests` | 字面量取值钉死 |
-| `YuNianLiquidTabsTests` | 底部 Tab 的 Kotlin 几何规格：64dp 容器 / 4dp 内边距 / 2dp 图文字距 / 24-10-14 lens 半径 / tab 宽度与选中块高公式 |
 | `ImageGenClientTests` | 生图纯逻辑：4 级参数回退序列与 distinct / 参数类错误判定 / 生图模型启发式（hint 命中且 exclude 不命中）/ base 候选规范化 |
 | `ImageGenTriggerTests` | 生图触发判定：判定顺序（总开关→配置→关键词→概率→冷却）/ 概率严格 `<` 边界（roll 29 中 30 不中）/ 冷却三条边界（含"正好等于"不冷却）/ override 成对覆盖且无权动冷却 / parseKeywords 三分隔符保序去重 / buildPrompt 四级优先级与 800 截断 |
 | `ContentForModelTests` | 图片消息回喂模型的系统注记：**逐字**对齐 Kotlin 措辞（BUG-1 教训）/ 无 prompt 或纯空白时原样 / 非图片消息不变 |
 | `ReadCursorTests` | 已读游标：无游标时全未读 / 用户消息与 TOOL_ACTIVITY、REASONING 不计 / **同一毫秒内用 (timestamp, id) 二元组判界** / markRead 后新消息重新计未读 / 最新是 TOOL_ACTIVITY 不推进游标 |
-| `YuNianGlassStyleTests` | 毛玻璃分水岭：显式覆盖优先于 OS / 垃圾值与 nil 回落自动 / autoDetected 在 iOS 26+ 返回 liquidGlass、26 以下返回 legacy / rawValue 往返 / current() 读写 UserDefaults / 文案点明"原生"与 OS 范围 |
 | `ApiConfigSwitchTests` | 多渠道单活语义：列出全部（按创建序）/ 保存第二家自动停用第一家 / **activate 后仍须只有一条启用**（否则 Rust 取 id 最大者、与 UI 不一致）/ 激活失败 id 不影响当前 / 删启用中的那条**不自动顶上** |
 | `PerConfigAPIKeyTests` | 按配置存放 API Key：槽名按 id 分立且不撞旧槽 / 纯规则 `pickAPIKey` —— **按配置优先**、缺失与空串都回退旧单槽、都没有给空串 / 不 trim（防将来"顺手 trim"改行为）。**不碰 Keychain**（测试宿主 entitlement 不可靠，规则与 I/O 已分离） |
 | `BoundConfigUsabilityTests` | 伴侣绑定配置的可用性：配置不存在（provider nil）不可用 / **有 key 的非 PARTNER 可用**（第 188 轮修的 bug —— 旧实现读行内恒空 apiKey 而恒 false）/ 无 key 的非 PARTNER 不可用 / PARTNER 无 key 也可用 / 空格 key 算存在（把"是否 trim"记成被测试的决策） |

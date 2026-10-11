@@ -109,7 +109,7 @@ struct ConversationRepository {
                     LEFT JOIN message_bodies b ON b.messageId = m.id
                     WHERE m.conversationType = 'chat'
                       AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
-                ) last ON last.companionId = c.id AND last.rn = 1
+                ) last ON last.conversationId = c.id AND last.rn = 1
                 ORDER BY c.updatedAt DESC
                 LIMIT ?
                 """
