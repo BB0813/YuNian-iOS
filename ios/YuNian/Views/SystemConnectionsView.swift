@@ -54,27 +54,32 @@ struct SystemConnectionsView: View {
         List {
             Section {
                 ForEach(capabilities) { item in
-                    HStack(spacing: YNTheme.Space.md) {
-                        Image(systemName: item.symbol)
-                            .foregroundStyle(c.accent)
-                            .frame(width: 26)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name)
-                            Text(item.detail)
-                                .font(.caption)
-                                .foregroundStyle(c.textSecondary)
+                    // 「未申请」的项目给一个**申请**入口（第 204 轮）。
+                    // 其余状态只报告，不做开关。
+                    if item.state == .notDetermined, Self.isRequestable(item.id) {
+                        Button {
+                            request(item)
+                        } label: {
+                            row(item, colors: c) {
+                                Label("申请", systemImage: "hand.raised")
+                                    .font(.caption)
+                                    .foregroundStyle(c.accent)
+                            }
                         }
-                        Spacer(minLength: YNTheme.Space.sm)
-                        stateBadge(item.state, colors: c)
+                        .buttonStyle(.plain)
+                    } else {
+                        row(item, colors: c) {
+                            stateBadge(item.state, colors: c)
+                        }
                     }
-                    .padding(.vertical, 2)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(item.name)，\(stateText(item.state))")
                 }
             } header: {
                 Text("已声明的系统能力")
             } footer: {
-                Text("授权状态由系统管理。本页只报告真实状态，不代为开关；改动请去系统设置。")
+                Text("""
+                点「申请」会弹出**系统自己的**询问框，由你决定；已拒绝的项目不再给申请入口（iOS 不允许二次询问），请去系统设置改。
+                ⚠️ 系统的「设置 → 予念」里**只有在本 App 请求过之后**才会出现对应的开关 —— 这不是权限没配上，是它还没被问过一次。
+                """)
             }
 
             Section {
@@ -97,6 +102,73 @@ struct SystemConnectionsView: View {
     }
 
     // MARK: - 状态徽标
+
+    /// 一行：图标 + 名称/说明 + 右侧内容。
+    ///
+    /// 抽出来的理由：可申请的那几行右侧是「申请」按钮，其余是状态徽标 ——
+    /// 不抽的话这段布局要写两遍，而两遍必然慢慢走样。
+    @ViewBuilder
+    private func row<T: View>(_ item: Capability, colors c: YNTheme.Palette,
+                              @ViewBuilder trailing: () -> T) -> some View {
+        HStack(spacing: YNTheme.Space.md) {
+            Image(systemName: item.symbol)
+                .foregroundStyle(c.accent)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(c.textSecondary)
+            }
+            Spacer(minLength: YNTheme.Space.sm)
+            trailing()
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.name)，\(stateText(item.state))")
+    }
+
+    /// 该项能不能**主动申请**。
+    ///
+    /// Face ID 不在其中：它没有"授权状态"这一说，系统只在每次评估时决定要不要弹窗
+    /// （所以上面也只报告"本机有没有"）。
+    private static func isRequestable(_ id: String) -> Bool {
+        ["camera", "microphone", "photosRead", "photosAdd", "speech"].contains(id)
+    }
+
+    /// 发起授权请求。
+    ///
+    /// ## 为什么这一页必须能"申请"（第 204 轮，用户实测撞上的死局）
+    /// 这一版之前是**只读**的（页脚原话："不代为开关"）。只读 + 一个 iOS 行为
+    /// 就构成了死局：
+    ///   · iOS 的「设置 → 本 App」里**只有在本 App 请求过之后**才出现对应开关；
+    ///   · 而这一页是唯一的入口，却只显示"未申请"、不给操作。
+    /// 于是用户在两处都找不到办法授权，只能永远看着「未申请」
+    /// （用户截图：设置页里只有 Siri / 搜索 / 无线数据）。
+    ///
+    /// **申请 ≠ 偷偷改开关**：前者是请系统弹出它自己的询问框，决定权仍在用户；
+    /// 已拒绝的项目**不给**申请入口（iOS 也不允许二次询问），只指向系统设置。
+    private func request(_ item: Capability) {
+        switch item.id {
+        case "camera":
+            AVCaptureDevice.requestAccess(for: .video) { _ in refresh() }
+        case "microphone":
+            AVAudioSession.sharedInstance().requestRecordPermission { _ in refresh() }
+        case "photosRead":
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in refresh() }
+        case "photosAdd":
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { _ in refresh() }
+        case "speech":
+            SFSpeechRecognizer.requestAuthorization { _ in refresh() }
+        default:
+            break
+        }
+    }
+
+    /// 回调在任意线程 → 回主线程刷新状态。
+    private func refresh() {
+        Task { @MainActor in capabilities = Self.read() }
+    }
 
     @ViewBuilder
     private func stateBadge(_ state: Capability.State, colors c: YNTheme.Palette) -> some View {
