@@ -142,14 +142,15 @@ final class ChatViewModel: ObservableObject {
 
     /// 当前生效的模型名（输入栏下方显示）。
     ///
-    /// ## 刻意只给模型名，不给 token 用量
-    /// 竞品会在输入栏下摊出「模型 + tokens + 用时」。iOS 这条链路只能做到第一项：
-    ///   · 生成绑定的 `AgentTurnResult` 只有 `roundsUsed` / `finishedReason`，
-    ///     **没有用量字段**；
-    ///   · `token_usage` 表虽在 schema 里，但全仓**只有备份恢复会写它**，
-    ///     运行时无人写 → 查出来恒为 0。
+    /// ## 为什么这里只有模型名
+    /// 输入栏下方回答的是"现在用什么"；"这一轮花了多少"属于**那一轮** ——
+    /// 它在「本轮收据」里按供应商回执口径显示。
     ///
-    /// 所以这里不摆一个永远显示 0 的数字。要做得先让 Rust 侧回传用量。
+    /// ⚠️ 这段注释此前写着"`AgentTurnResult` 没有用量字段 / `token_usage`
+    /// 运行时无人写 → 所以不做这个数字"。第 207 轮起：用量**一直在事件流里**
+    /// （`AgentEvent.kind == "usage"`，Rust agent.rs:1294），
+    /// 收据会读它，并每回合写 `token_usage` + `prompt_audit`。
+    /// 刻意不在这里放数字，是**位置**的选择，不是能力的限制（已按现状更正）。
     var activeModelName: String? {
         guard let active = try? environment.apiConfigs?.activeConfig(),
               !active.model.isEmpty else { return nil }

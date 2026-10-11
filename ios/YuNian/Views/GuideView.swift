@@ -180,17 +180,17 @@ struct GuideView: View {
 
     private func quickStartSection(_ c: YNTheme.Palette) -> some View {
         Section {
-            step(1, "配一条渠道", "填服务商、API Key 与模型。Key 只进系统钥匙串，不写数据库、不进备份。", c)
+            step(1, "配一条渠道", "填服务商、API Key 与模型。Key 只进系统钥匙串，不写数据库、不进备份（备份导出的是表数据，不含钥匙串）。", c)
             NavigationLink { ChannelListView() } label: { linkRow("去「渠道配置」", c) }
 
             step(2, "决定四条用途线路", "对话 / 生图 / 朗读 / 向量嵌入可以各走一条渠道与模型；不确定就都跟随当前渠道。", c)
             NavigationLink { FeatureRouteView() } label: { linkRow("去「用途线路」", c) }
 
-            step(3, "选一位角色开聊", "到「通讯录」选角色；聊天页左上角可以看到当前用的是哪个模型。", c)
+            step(3, "选一位角色开聊", "到「通讯录」选角色；聊天页输入框下方会显示当前用的是哪个模型。", c)
         } header: {
             Text("第一次用：三步")
         } footer: {
-            Text("没有配好 Key 时，发消息会直接提示「请先配置API」，不会静默失败。")
+            Text("没有可用渠道时，发消息会直接提示「请先配置API」，不会静默失败。")
         }
     }
 

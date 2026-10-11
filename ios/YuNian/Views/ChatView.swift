@@ -856,10 +856,13 @@ private struct ChatComposer: View {
 
             // 当前模型：把"正在用的是哪个"直接摊出来，不用去设置里翻。
             //
-            // ⚠️ 这里**只有模型名，没有 token 用量** ——
-            // iOS 这条链路上拿不到 per-turn 用量：生成绑定里
-            // `AgentTurnResult` 没有用量字段，`token_usage` 表也**只有备份恢复会写**，
-            // 运行时无人写。所以不做那个数字，而不是显示一个恒为 0 的假值。
+            // ⚠️ 这里**只放模型名**，不放 token 数字：输入框上方是"现在用什么"，
+            // 而"这一轮花了多少"属于那一轮 —— 它在**「本轮收据」**里
+            // （供应商回执口径，第 207 轮起每回合写入 `token_usage`
+            //  + `prompt_audit`）。
+            //
+            // 这段注释此前写着"iOS 拿不到 per-turn 用量 / `token_usage` 运行时无人写"，
+            // 那是第 207 轮之前的情况 —— 已按现状更正（同一类"注释撒谎"）。
             if let modelName = model.activeModelName {
                 Text(modelName)
                     .font(.caption2)
