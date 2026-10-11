@@ -90,12 +90,15 @@ struct CharacterCardExporter {
 
     /// 世界书那列的原文 → 对象（卡片里 `character_book` 要放对象，不是字符串）。
     ///
-    /// 解析不了就返回 nil → 导出时不带世界书（而不是塞一段坏 JSON 进去 ——
-    /// 那会让别人的导入器整张卡都解析失败）。
+    /// ⚠️ `entries` **必须是容器**（对象或数组），只判"这个键在不在"是不够的：
+    /// `{"entries":"x"}` 这种形状塞进卡片会让对方的导入器整张卡解析失败，
+    /// 而我们的引擎解码器也只认 map / array 两种（`decodeEntries`）。
+    /// （这条是 CI 用一条 `XCTAssertNil` 教我的 —— 我第一版只判了存在性。）
     static func worldbookObject(from raw: String) -> [String: Any]? {
         guard let data = raw.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["entries"] != nil
+              let entries = object["entries"],
+              entries is [String: Any] || entries is [[String: Any]]
         else { return nil }
         return object
     }

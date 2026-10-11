@@ -91,6 +91,10 @@ final class WorldbookLibraryTests: XCTestCase {
         XCTAssertFalse(WorldbookRuntimeSync.looksLikeWorldbook(#"{"foo": 1}"#))
         XCTAssertFalse(WorldbookRuntimeSync.looksLikeWorldbook("不是 JSON"))
         XCTAssertFalse(WorldbookRuntimeSync.looksLikeWorldbook(""))
+        // `entries` 必须是容器：只判"键在不在"会让这种形状落库成一本 0 条目的空书
+        XCTAssertFalse(WorldbookRuntimeSync.looksLikeWorldbook(#"{"entries": 3}"#))
+        XCTAssertFalse(WorldbookRuntimeSync.looksLikeWorldbook(#"{"entries": "x"}"#))
+        XCTAssertFalse(WorldbookRuntimeSync.looksLikeWorldbook(#"{"entries": null}"#))
     }
 
     func testEntriesOfGarbageJSONIsEmpty() {

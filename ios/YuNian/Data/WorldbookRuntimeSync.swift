@@ -257,11 +257,16 @@ enum WorldbookRuntimeSync {
     }
 
     /// 这个 JSON 是否"看起来像一本世界书"（导入时要给出可读的失败原因）。
+    ///
+    /// ⚠️ `entries` **必须是容器**（对象或数组）—— 与 `decodeEntries` 认的两种形态一致。
+    /// 只判"键在不在"会让 `{"entries": 3}` 通过，然后落库成一本 0 条目的空书
+    /// （第 214 轮由 `CharacterCardExportTests` 的 CI 失败暴露出来，一并收紧）。
     static func looksLikeWorldbook(_ raw: String) -> Bool {
         guard let data = raw.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = root["entries"]
         else { return false }
-        return root["entries"] != nil
+        return entries is [String: Any] || entries is [[String: Any]]
     }
 
     /// `Any?` 转成可显示的字符串（位置/角色既可能是字符串也可能是数字/对象）。
