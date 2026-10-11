@@ -410,6 +410,15 @@ struct MeView: View {
 
     private var aboutSection: some View {
         Section("关于") {
+            // 第 211 轮：使用指南。
+            //
+            // 放在「关于」旁边而不是塞进 AI 能力：它回答的是"这个 App 怎么用起来"，
+            // 覆盖第一次配置、记忆/技能/世界书、权限、以及"遇到问题先看哪儿"。
+            NavigationLink {
+                GuideView()
+            } label: {
+                Label("使用指南", systemImage: "questionmark.circle")
+            }
             LabeledContent("版本", value: Self.appVersion)
             LabeledContent("引擎", value: "Rust Agent + SwiftUI")
         }

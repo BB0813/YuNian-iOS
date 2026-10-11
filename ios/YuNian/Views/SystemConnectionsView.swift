@@ -369,7 +369,11 @@ struct SystemConnectionsView: View {
     /// ⚠️ 这些都是**同步且极轻**的查询，不会弹窗、不会阻塞 ——
     /// 与 `ApiProbeService` 那种阻塞网络调用是两回事，
     /// 所以可以直接在主线程调用，不需要 off-main 队列。
-    private static func read() -> [Capability] {
+    /// 读取真实权限状态。
+    ///
+    /// ⚠️ 第 211 轮起改成**内部可见**：使用指南页的「开机自检」要用同一份读数。
+    /// 各写一份的话，两页会对同一个权限给出不同结论（而权限正是最容易出问题的地方）。
+    static func read() -> [Capability] {
         [
             Capability(
                 id: "camera", name: "相机", detail: "拍照与扫码", symbol: "camera",

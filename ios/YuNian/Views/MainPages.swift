@@ -29,7 +29,9 @@ struct ConversationsView: View {
                     ContentUnavailableView {
                         Label("还没有对话", systemImage: "bubble.left.and.bubble.right")
                     } description: {
-                        Text("到通讯录选择一位角色开始聊天")
+                        // 空状态是第一次打开时唯一的引导面：这里必须回答"下一步做什么"。
+                        // 指路到通讯录（选角色）+ 使用指南（怎么配 Key）。
+                        Text("到「通讯录」选择一位角色开始聊天。\n第一次用？「我 → 关于 → 使用指南」有三步配置说明。")
                     }
                 } else {
                     List(rows) { row in
