@@ -148,7 +148,11 @@ final class CompanionEditingTests: XCTestCase {
 
     /// 删除内置默认角色会置 `deleted_by_user`，之后不再自动重建
     /// （对应 Android 的同名机制）—— 界面据此给出额外警告。
-    func testDeletingDefaultCompanionMarksDeletedByUser() throws {
+    ///
+    /// ⚠️ 识别是**两条路**：先按标签，再按**名字兜底**（`isDefaultExperienceCompanion`）。
+    /// 我第一版只清标签就断言"不再识别"，CI 直接判错 —— 因为名字还在。
+    /// 这条测试现在把两条路都锁住（这也解释了界面上那句警告为什么改名字才算真的躲开）。
+    func testDefaultCompanionDetectionUsesTagsThenName() throws {
         let (repo, _, dir) = try makeRepo()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -158,12 +162,17 @@ final class CompanionEditingTests: XCTestCase {
         XCTAssertTrue(DefaultCompanionSeeder.isDefaultExperienceCompanion(companion),
                       "内置角色的标签要被识别出来（界面据此加警告）")
 
+        // 路径二：清掉标签，**名字还在** → 仍然被识别
+        companion.tags = nil
+        XCTAssertTrue(DefaultCompanionSeeder.isDefaultExperienceCompanion(companion),
+                      "名字兜底：清标签不足以绕开识别")
+
+        // 两条路都断开 → 不再识别
+        companion.name = "完全自定义的名字"
+        XCTAssertFalse(DefaultCompanionSeeder.isDefaultExperienceCompanion(companion))
+
         try repo.delete(id: id)
         XCTAssertNil(try repo.fetch(id: id))
-
-        companion.tags = nil
-        XCTAssertFalse(DefaultCompanionSeeder.isDefaultExperienceCompanion(companion),
-                       "清掉标签后不再被识别为默认角色")
     }
 
     // MARK: - 辅助
