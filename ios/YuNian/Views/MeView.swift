@@ -267,6 +267,18 @@ struct MeView: View {
                     subtitle: "导出加密备份、从备份恢复；数据始终能带走。"
                 )
             }
+
+            // 第 207 轮：用量页终于有数据可看 ——
+            // `token_usage` 在此之前 iOS 侧只有备份恢复会写，运行时无人写。
+            NavigationLink {
+                UsageStatsView()
+            } label: {
+                YNSettingsRow(
+                    icon: "chart.bar",
+                    title: "用量",
+                    subtitle: "输入/输出 token 与请求次数（供应商回执口径）。"
+                )
+            }
         } header: {
             Text("数据")
         } footer: {
