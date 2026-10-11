@@ -20,21 +20,21 @@ final class VoiceProfileTests: XCTestCase {
     // MARK: - 优先级（纯函数）
 
     func testOverrideWinsOverGlobal() {
-        XCTAssertEqual(VoiceProfileStore.effectiveVoice(override: "冰糖", global: "alloy"), "冰糖")
+        XCTAssertEqual(VoiceProfileStore.effectiveVoice(voiceOverride: "冰糖", global: "alloy"), "冰糖")
     }
 
     func testNilOverrideFallsBackToGlobal() {
-        XCTAssertEqual(VoiceProfileStore.effectiveVoice(override: nil, global: "alloy"), "alloy")
+        XCTAssertEqual(VoiceProfileStore.effectiveVoice(voiceOverride: nil, global: "alloy"), "alloy")
     }
 
     /// 空串/空白 = 没有覆盖（界面上"清空输入框"就是这个语义）。
     func testBlankOverrideFallsBackToGlobal() {
-        XCTAssertEqual(VoiceProfileStore.effectiveVoice(override: "", global: "alloy"), "alloy")
-        XCTAssertEqual(VoiceProfileStore.effectiveVoice(override: "   ", global: "alloy"), "alloy")
+        XCTAssertEqual(VoiceProfileStore.effectiveVoice(voiceOverride: "", global: "alloy"), "alloy")
+        XCTAssertEqual(VoiceProfileStore.effectiveVoice(voiceOverride: "   ", global: "alloy"), "alloy")
     }
 
     func testGlobalMayBeEmptyMeaningProtocolDefault() {
-        XCTAssertEqual(VoiceProfileStore.effectiveVoice(override: nil, global: ""), "")
+        XCTAssertEqual(VoiceProfileStore.effectiveVoice(voiceOverride: nil, global: ""), "")
     }
 
     // MARK: - 存储
@@ -43,10 +43,10 @@ final class VoiceProfileTests: XCTestCase {
         let (_, repo, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        XCTAssertNil(VoiceProfileStore.override(companionId: 7, repository: repo))
-        try VoiceProfileStore.setOverride("茉莉", companionId: 7, repository: repo)
-        XCTAssertEqual(VoiceProfileStore.override(companionId: 7, repository: repo), "茉莉")
-        XCTAssertNil(VoiceProfileStore.override(companionId: 8, repository: repo),
+        XCTAssertNil(VoiceProfileStore.voiceOverride(companionId: 7, repository: repo))
+        try VoiceProfileStore.setVoiceOverride("茉莉", companionId: 7, repository: repo)
+        XCTAssertEqual(VoiceProfileStore.voiceOverride(companionId: 7, repository: repo), "茉莉")
+        XCTAssertNil(VoiceProfileStore.voiceOverride(companionId: 8, repository: repo),
                      "不同角色互不影响")
     }
 
@@ -55,9 +55,9 @@ final class VoiceProfileTests: XCTestCase {
         let (_, repo, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        try VoiceProfileStore.setOverride("苏打", companionId: 3, repository: repo)
-        try VoiceProfileStore.setOverride("", companionId: 3, repository: repo)
-        XCTAssertNil(VoiceProfileStore.override(companionId: 3, repository: repo),
+        try VoiceProfileStore.setVoiceOverride("苏打", companionId: 3, repository: repo)
+        try VoiceProfileStore.setVoiceOverride("", companionId: 3, repository: repo)
+        XCTAssertNil(VoiceProfileStore.voiceOverride(companionId: 3, repository: repo),
                      "空串必须等于「没有覆盖」")
         XCTAssertEqual(VoiceProfileStore.effectiveVoice(companionId: 3, global: "alloy",
                                                         repository: repo), "alloy")
@@ -66,14 +66,14 @@ final class VoiceProfileTests: XCTestCase {
     func testWhitespaceOverrideIsTreatedAsAbsent() throws {
         let (_, repo, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try VoiceProfileStore.setOverride("   ", companionId: 3, repository: repo)
-        XCTAssertNil(VoiceProfileStore.override(companionId: 3, repository: repo))
+        try VoiceProfileStore.setVoiceOverride("   ", companionId: 3, repository: repo)
+        XCTAssertNil(VoiceProfileStore.voiceOverride(companionId: 3, repository: repo))
     }
 
     func testEffectiveVoiceUsesCompanionOverride() throws {
         let (_, repo, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try VoiceProfileStore.setOverride("白桦", companionId: 11, repository: repo)
+        try VoiceProfileStore.setVoiceOverride("白桦", companionId: 11, repository: repo)
 
         XCTAssertEqual(VoiceProfileStore.effectiveVoice(companionId: 11, global: "alloy",
                                                         repository: repo), "白桦")
@@ -88,16 +88,16 @@ final class VoiceProfileTests: XCTestCase {
     func testInvalidCompanionIdIsIgnored() throws {
         let (_, repo, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try VoiceProfileStore.setOverride("冰糖", companionId: 0, repository: repo)
+        try VoiceProfileStore.setVoiceOverride("冰糖", companionId: 0, repository: repo)
         XCTAssertNil(try repo.metaValue(forKey: VoiceProfileStore.overrideKey(companionId: 0)))
-        XCTAssertNil(VoiceProfileStore.override(companionId: 0, repository: repo))
+        XCTAssertNil(VoiceProfileStore.voiceOverride(companionId: 0, repository: repo))
     }
 
     func testOverriddenCompanionIds() throws {
         let (_, repo, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try VoiceProfileStore.setOverride("冰糖", companionId: 1, repository: repo)
-        try VoiceProfileStore.setOverride("", companionId: 2, repository: repo)
+        try VoiceProfileStore.setVoiceOverride("冰糖", companionId: 1, repository: repo)
+        try VoiceProfileStore.setVoiceOverride("", companionId: 2, repository: repo)
 
         XCTAssertEqual(VoiceProfileStore.overriddenCompanionIds([1, 2, 3], repository: repo), [1])
     }
@@ -133,7 +133,7 @@ final class VoiceProfileTests: XCTestCase {
         settings.skipParentheses = true
         try settings.save(to: repo)
 
-        try VoiceProfileStore.setOverride("茉莉", companionId: 5, repository: repo)
+        try VoiceProfileStore.setVoiceOverride("茉莉", companionId: 5, repository: repo)
 
         let reloaded = TtsSettings.load(from: repo)
         XCTAssertEqual(reloaded.voice, "alloy")

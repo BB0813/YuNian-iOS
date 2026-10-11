@@ -372,10 +372,10 @@ private struct PurposeRouteDetailView: View {
     /// 某个角色的音色覆盖绑定（空串 = 清除覆盖）。
     private func bindingForVoice(_ companionId: Int64) -> Binding<String> {
         Binding(
-            get: { VoiceProfileStore.override(companionId: companionId,
+            get: { VoiceProfileStore.voiceOverride(companionId: companionId,
                                               repository: environment.apiConfigs) ?? "" },
             set: { newValue in
-                try? VoiceProfileStore.setOverride(newValue, companionId: companionId,
+                try? VoiceProfileStore.setVoiceOverride(newValue, companionId: companionId,
                                                    repository: environment.apiConfigs)
             }
         )

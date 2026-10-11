@@ -21,7 +21,14 @@ enum VoiceProfileStore {
     }
 
     /// 该角色的音色覆盖（nil = 没有覆盖，用全局）。
-    static func override(companionId: Int64, repository: ApiConfigRepository?) -> String? {
+    ///
+    /// ⚠️ **不要把这个方法叫 `override`**：`override` 是 Swift 的声明修饰符关键字，
+    /// 拿它当方法名/参数名/局部变量名会让 macOS 的 Swift 在
+    /// `let x = companionId.flatMap { override(...) }` 这种位置**编译器崩溃**
+    /// （`failed to produce diagnostic for expression`）——
+    /// 本地 WSL 的 Swift 6.4 能过，CI 的 Xcode 工具链不能。
+    /// 第 208 轮在这里连撞两次（53 行、65 行），改名后两边都过。
+    static func voiceOverride(companionId: Int64, repository: ApiConfigRepository?) -> String? {
         guard let repository, companionId > 0 else { return nil }
         // ⚠️ 第 208 轮：这里**必须拆成两句**。
         //
@@ -42,8 +49,8 @@ enum VoiceProfileStore {
     }
 
     /// 写该角色的音色覆盖。空串 = 清除覆盖（`setMetaValue` 对空值是**删键**）。
-    static func setOverride(_ voice: String, companionId: Int64,
-                            repository: ApiConfigRepository?) throws {
+    static func setVoiceOverride(_ voice: String, companionId: Int64,
+                                 repository: ApiConfigRepository?) throws {
         guard let repository, companionId > 0 else { return }
         try repository.setMetaValue(voice.trimmingCharacters(in: .whitespaces),
                                     forKey: overrideKey(companionId: companionId))
@@ -53,17 +60,18 @@ enum VoiceProfileStore {
     ///
     /// 写成纯函数是为了可单测（存储读写在调用方）；
     /// 这条优先级一旦写反，表现是"给角色单独配的音色没生效"。
-    static func effectiveVoice(override: String?, global: String) -> String {
-        guard let override else { return global }
-        let trimmed = override.trimmingCharacters(in: .whitespaces)
+    static func effectiveVoice(voiceOverride: String?, global: String) -> String {
+        guard let voiceOverride else { return global }
+        let trimmed = voiceOverride.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? global : trimmed
     }
 
     /// 组合入口：从库里取该角色的有效音色。
     static func effectiveVoice(companionId: Int64?, global: String,
                                repository: ApiConfigRepository?) -> String {
-        let override = companionId.flatMap { override(companionId: $0, repository: repository) }
-        return effectiveVoice(override: override, global: global)
+        // 局部变量也别叫 `override`（同上：关键字，会让 CI 的编译器崩）
+        let resolved = companionId.flatMap { voiceOverride(companionId: $0, repository: repository) }
+        return effectiveVoice(voiceOverride: resolved, global: global)
     }
 
     /// 哪些角色**配了**独立音色（界面用来显示角标 / 概览）。
@@ -71,7 +79,7 @@ enum VoiceProfileStore {
                                        repository: ApiConfigRepository?) -> Set<Int64> {
         guard let repository else { return [] }
         var result: Set<Int64> = []
-        for id in ids where override(companionId: id, repository: repository) != nil {
+        for id in ids where voiceOverride(companionId: id, repository: repository) != nil {
             result.insert(id)
         }
         return result
