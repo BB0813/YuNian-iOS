@@ -496,6 +496,17 @@ final class ChatSession: ObservableObject {
                 Message(role: .assistant, text: "[\(resolvedId)]", isSticker: true,
                         stickerFileName: fileName.isEmpty ? nil : fileName,
                         stickerImageData: imageData))
+            // ⚠️ 第 204 轮：**必须落库**。
+            //
+            // 在此之前只 append 到内存数组 —— 于是"重启后表情整条消失"，
+            // 与上一轮修的"思考过程离开聊天页就丢"是**同一类缺口**：
+            // 界面上看得见、库里没有，重载路径自然拿不回来。
+            //
+            // Android 侧一直是这样做的：`AiResponseFinalizer.flushPendingSticker`
+            // 把表情当**普通 ChatMessage** 落库（`content = "[$stickerId]"`、
+            // `isFromUser = false`），靠全仓统一的正文约定在渲染层还原。
+            persistProtocolMessage(text: "[\(resolvedId)]", isFromUser: false,
+                                   environment: environment)
             log.info("表情已落地：entry_id=\(resolvedId, privacy: .public) file=\(fileName, privacy: .public) bytes=\(imageData?.count ?? -1, privacy: .public)")
         }
     }
@@ -543,7 +554,40 @@ final class ChatSession: ObservableObject {
         }
 
         messages.append(Message(role: .user, text: "[\(entryId)]", isSticker: true))
+        // 用户发的表情同样要落库（第 204 轮）—— 否则重启后自己发的那张也消失。
+        persistProtocolMessage(text: "[\(entryId)]", isFromUser: true, environment: environment)
         lastError = nil
+    }
+
+    /// 把一条**协议文本消息**（表情的 `[<id>]`）落库。
+    ///
+    /// ## 为什么与用户文本消息共用一个 insert
+    /// 表情在全仓的约定就是"普通 TEXT 消息，正文 `[id]`"
+    /// （`AiResponseFinalizer.kt:448-449`），所以它落库时 `type` 也是 `"text"`，
+    /// 重载时由 `stickerId(fromContent:)` 反推回 `isSticker`。
+    ///
+    /// ## `searchContent` 留空
+    /// `[12]` 进 FTS 索引只会变成搜索噪声（用户搜不到任何有意义的东西），
+    /// Android 的贴纸消息同样没有可搜内容。这与"用户文本消息
+    /// searchContent = 正文"的参数不同，是**有意**的。
+    private func persistProtocolMessage(text: String, isFromUser: Bool,
+                                        environment: AppEnvironment) {
+        guard let repo = messageRepository(for: environment) else { return }
+        do {
+            _ = try repo.insert(
+                conversationId: companionId ?? 0,
+                conversationType: .chat,
+                isFromUser: isFromUser,
+                senderId: 0,
+                type: "text",
+                content: text,
+                searchContent: ""
+            )
+        } catch {
+            // 落库失败不阻断渲染：表情已经在屏幕上了，
+            // 重启后少这一条比"这条挡住下一个表情"好（与图片落库同一条取舍）。
+            log.error("表情落库失败：\(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// 取消当前回合（Rust 侧的 `turn_cancel` 标志会让重试循环中断）。
@@ -711,7 +755,11 @@ final class ChatSession: ObservableObject {
             // REASONING 行不进可见消息（它已按 turnId / 行序收进上面两张表）
             if r.type == Self.reasoningType { continue }
 
-            let key = "\(r.isFromUser ? "user" : "assistant")|\(r.content)|false|-1"
+            // ⚠️ 第 204 轮：键里的 `isSticker` 必须**按正文约定算**，不能写死 false。
+            // 内存里的表情消息 `isSticker == true`，而库行反推出来的也是 true ——
+            // 写死 false 会让同一条消息在两边的键不同，重载时就**重复插入一条**。
+            let key = "\(r.isFromUser ? "user" : "assistant")|\(r.content)"
+                + "|\(Self.stickerId(fromContent: r.content) != nil)|-1"
             if seen.contains(key) { continue }
 
             // 数据库存的是毫秒时间戳；转成 Date 供聊天页插入时间分隔线。

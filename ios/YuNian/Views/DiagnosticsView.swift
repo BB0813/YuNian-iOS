@@ -24,6 +24,7 @@ struct DiagnosticsView: View {
             dataSection
             securitySection
             channelSection
+            personaSection
             if environment.startupError != nil { startupSection }
         }
         .listStyle(.insetGrouped)
@@ -96,6 +97,62 @@ struct DiagnosticsView: View {
                 Text("没有启用的渠道。")
                     .foregroundStyle(YNTheme.palette(scheme).textTertiary)
             }
+        }
+    }
+
+    /// 角色人设 —— **引擎读的同一行**。
+    ///
+    /// ## 为什么摆在界面上（第 204 轮）
+    /// 用户问「回复为什么是英文不是中文」。这类问题的可能原因有三类：
+    ///   1. 渠道/模型自身的倾向（换一家就知道）
+    ///   2. **人设是空的或是英文的** —— 引擎组装 system prompt 时，
+    ///      persona 片段就取自这一行的 `personality / speakingStyle /
+    ///      backstory / rawPrompt / systemPrompt`
+    ///   3. 历史惯性（模型会模仿自己上文里的语言）
+    ///
+    /// 第 2 类在这里一眼可见：`load_companion` 的 SELECT 列
+    /// 与 `CompanionRepository.rustReadColumns` 逐字相同，
+    /// 所以这几行就是引擎看到的东西。
+    ///
+    /// ## ⚠️ 这里显示的是**输入**，不是"模拟出来的提示词"
+    /// 模拟提示词要复刻 Rust 的编排逻辑（L0–L5 片段、工具集合、时区…），
+    /// 一旦有一处对不上，就会给出**看起来精确的假证据** ——
+    /// 那比没有证据更糟（本会话记录过多次"观测手段骗人"）。
+    /// 所以只摊输入，把结论留给判断。
+    @ViewBuilder
+    private var personaSection: some View {
+        let c = YNTheme.palette(scheme)
+        return Section {
+            if let companion = environment.defaultCompanion {
+                LabeledContent("名称", value: companion.name)
+                LabeledContent("年龄", value: companion.age.map(String.init) ?? "未填")
+                personaRow("人设", companion.personality, colors: c)
+                personaRow("说话风格", companion.speakingStyle, colors: c)
+                personaRow("背景", companion.backstory, colors: c)
+                personaRow("补充设定", companion.rawPrompt, colors: c)
+                personaRow("角色指令", companion.systemPrompt, colors: c)
+            } else {
+                Text("没有伴侣行 —— 引擎读不到人设，会以空人设组装提示词。")
+                    .font(.subheadline)
+                    .foregroundStyle(c.warning)
+            }
+        } header: {
+            Text("角色人设（引擎读的那一行）")
+        } footer: {
+            Text("这几段是模型看到的「人设」来源。全为「（空）」时，模型没有任何人物设定与语言倾向，回复风格会完全取决于所选模型。")
+        }
+    }
+
+    /// 人设字段一行：空值明确写「（空）」，不让空白看起来像"没数据"。
+    private func personaRow(_ title: String, _ value: String?,
+                            colors c: YNTheme.Palette) -> some View {
+        let text = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(c.textSecondary)
+            Text(text.isEmpty ? "（空）" : text)
+                .font(.subheadline)
+                .foregroundStyle(text.isEmpty ? c.warning : c.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
