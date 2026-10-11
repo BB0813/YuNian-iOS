@@ -179,6 +179,22 @@ struct MeView: View {
                 )
             }
 
+            // 第 207 轮（P1）：记忆。
+            //
+            // 与「上下文与收据」是一对：那边说**这一轮带了什么**，
+            // 这边说**库里还有什么、哪些不再注入**（"它怎么忘了"的另一半答案）。
+            NavigationLink {
+                MemoryView()
+            } label: {
+                YNSettingsRow(
+                    icon: "brain",
+                    title: "记忆",
+                    subtitle: "短期（每回合注入）与长期（按相关度召回）分别看，可逐条软删除。",
+                    badge: environment.memoryRepo.flatMap { $0.counts().active }
+                        .map { "\($0) 条" }
+                )
+            }
+
             // 说明：表情库此前没有入口，是因为导入页没做。
             // 现在 `StickerImportRepository` 有了调用方。
 
