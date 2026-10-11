@@ -40,16 +40,16 @@ struct BackupView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var importingPassword = ""
-    @State private var status: Status?
+    @State private var report: BackupReport.Report?
     @State private var exportDocument: BackupDocument?
     @State private var showExporter = false
     @State private var showImporter = false
     @State private var busy = false
-
-    private enum Status: Equatable {
-        case ok(String)
-        case failure(String)
-    }
+    /// 进行中的阶段文字（**只报阶段，不报百分比** —— 后端不提供进度，
+    /// 编一个百分比出来就是假数据）。
+    @State private var stage: String?
+    /// 上一次选的文件：失败后可以直接重试，不用再挑一次文件。
+    @State private var lastImportURL: URL?
 
     var body: some View {
         let c = YNTheme.palette(scheme)
@@ -72,9 +72,7 @@ struct BackupView: View {
             defaultFilename: "yinian-backup"
         ) { result in
             if case let .failure(error) = result {
-                status = .failure(Self.friendly(error))
-            } else {
-                status = .ok("已导出。请妥善保管文件与口令 —— 口令丢失将无法恢复。")
+                report = BackupReport.failure(Self.friendly(error))
             }
         }
         // 从「文件」导入
@@ -138,6 +136,16 @@ struct BackupView: View {
                 }
             }
             .disabled(busy || importingPassword.isEmpty)
+
+            // 失败后不必重新挑文件 —— 上一次选的那个还在（安全作用域会重新取一次）。
+            if lastImportURL != nil {
+                Button {
+                    if let url = lastImportURL { runImport(from: url) }
+                } label: {
+                    Label("重试上一次选的文件", systemImage: "arrow.clockwise")
+                }
+                .disabled(busy || importingPassword.isEmpty)
+            }
         } header: {
             Text("导入")
         } footer: {
@@ -150,65 +158,118 @@ struct BackupView: View {
     @ViewBuilder
     private var statusSection: some View {
         let c = YNTheme.palette(scheme)
-        if let status {
+        if let stage {
             Section {
-                switch status {
-                case let .ok(text):
-                    Label(text, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(c.success)
-                        .font(.subheadline)
-                case let .failure(text):
-                    // T6：图标 + 文字，不只靠颜色
-                    Label(text, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(c.warning)
-                        .font(.subheadline)
+                HStack(spacing: YNTheme.Space.sm) {
+                    ProgressView().controlSize(.small)
+                    Text(stage).font(.subheadline).foregroundStyle(c.textSecondary)
                 }
+            } footer: {
+                Text("这一步在后台线程跑（PBKDF2 + AES + 全表读写都是 CPU 活），界面不会卡住。")
+            }
+        }
+        if let report {
+            Section {
+                // T6：图标 + 文字，不只靠颜色
+                Label(report.title,
+                      systemImage: report.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(report.ok ? c.success : c.warning)
+                    .font(.subheadline)
+                ForEach(report.lines) { line in
+                    LabeledContent(line.label, value: line.value)
+                }
+                if let hint = report.hint {
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundStyle(c.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                Text(report.ok ? "结果" : "未能完成")
             }
         }
     }
 
     // MARK: - 逻辑
 
+    /// 导出。
+    ///
+    /// ⚠️ 第 215 轮：**移到后台线程**。此前整个导出（全表序列化 + PBKDF2 + AES）
+    /// 在主线程同步跑 —— 数据一多界面就冻住，而且冻住期间用户看不到任何反馈。
+    /// 现在：主线程只切状态，重活丢给全局队列，回来再切结果。
     private func export() {
         guard let database = environment.database else {
-            status = .failure("数据库尚未就绪。")
+            report = BackupReport.failure("数据库尚未就绪。")
             return
         }
+        let password = self.password
         busy = true
-        defer { busy = false }
+        report = nil
+        stage = "正在收集数据并加密…"
 
-        do {
-            let result = try BackupExporter.exportFile(database: database, password: password)
-            exportDocument = BackupDocument(data: result.data)
-            password = ""
-            confirmPassword = ""
-            showExporter = true
-        } catch {
-            status = .failure(Self.friendly(error))
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = try? BackupExporter.exportFile(database: database, password: password)
+            DispatchQueue.main.async {
+                busy = false
+                stage = nil
+                guard let result else {
+                    report = BackupReport.failure("导出失败：序列化或加密出错（口令不变，可重试）")
+                    return
+                }
+                exportDocument = BackupDocument(data: result.data)
+                self.password = ""
+                confirmPassword = ""
+                report = BackupReport.export(result.outcome)
+                showExporter = true
+            }
         }
     }
 
     private func handleImport(_ result: Result<URL, Error>) {
-        guard let database = environment.database else {
-            status = .failure("数据库尚未就绪。")
-            return
-        }
         switch result {
         case let .failure(error):
-            status = .failure(Self.friendly(error))
+            report = BackupReport.failure(Self.friendly(error))
         case let .success(url):
-            // 安全作用域资源：从「文件」拿到的 URL 必须先取访问权才能读
+            lastImportURL = url
+            runImport(from: url)
+        }
+    }
+
+    /// 跑一次导入（**后台线程**）。
+    ///
+    /// ⚠️ 第 215 轮修掉一处**会撒谎的 UI**：此前结束后写的是
+    /// `status = .ok(outcome.summary)` —— 从不看 `outcome.ok`，
+    /// 于是"解密失败：密码错误"会带**绿色对勾**显示。
+    /// 现在成功与失败都过 `BackupReport.imported(_:)`，并且有测试锁住这条映射。
+    private func runImport(from url: URL) {
+        guard let database = environment.database else {
+            report = BackupReport.failure("数据库尚未就绪。")
+            return
+        }
+        let password = importingPassword
+        busy = true
+        report = nil
+        stage = "正在读取并解密备份…"
+
+        // 安全作用域资源：从「文件」拿到的 URL 必须先取访问权才能读。
+        // ⚠️ 取/放必须在**同一个线程**上配对，所以整段放进后台任务里。
+        DispatchQueue.global(qos: .userInitiated).async {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-            do {
-                let data = try Data(contentsOf: url)
-                let outcome = BackupImportService.importFile(
-                    data: data, password: importingPassword, database: database)
-                importingPassword = ""
-                status = .ok(outcome.summary)
-            } catch {
-                status = .failure(Self.friendly(error))
+            let data = try? Data(contentsOf: url)
+            let outcome = data.map {
+                BackupImportService.importFile(data: $0, password: password, database: database)
+            }
+            DispatchQueue.main.async {
+                busy = false
+                stage = nil
+                guard let outcome else {
+                    report = BackupReport.failure("读不到这个文件（可能是 iCloud 未下载或权限不足）")
+                    return
+                }
+                if outcome.ok { importingPassword = "" }
+                report = BackupReport.imported(outcome)
             }
         }
     }

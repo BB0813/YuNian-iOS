@@ -95,7 +95,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-**预期**：36 个测试文件全部通过。已知覆盖：
+**预期**：37 个测试文件全部通过。已知覆盖：
 
 | 测试文件 | 覆盖 |
 |---|---|
@@ -134,6 +134,7 @@ xcodebuild test \
 | `CompanionEditingTests` | 角色编辑（第 212 轮）：新建后**逐字段到达引擎**（用 `ContextProbe.makeProfile` 按 `to_profile` 重建再断言，覆盖 `systemPrompt → customPrompt`）/ 编辑后未动字段不被清掉 / **编辑不动 `updatedAt`**（否则改人设会让列表跳到最前）/ 显式 `touch` 才置顶 / 空可选字段保持 nil（不写空串）/ **`rustReadColumns` 契约**（这份清单变了说明表单要跟着改）/ **只删角色保留聊天记录** / **连记录一起删要先清消息** / **默认角色识别是「标签 + 名字兜底」两条路**（清标签不足以绕开 —— CI 教的一条事实） |
 | `CharacterCardImportTests` | 角色卡导入（第 213 轮）：V1 扁平 / V2 嵌套（`character_book.entries` 为 map）解析 / **PNG 的 `tEXt/chara` 路径**（测试里手搓最小 PNG，与 Rust 单测同构；大端字节手写以避开复杂表达式）/ `preview(bytes:)` 自动识别 PNG 与 JSON / 失败一律 nil（非 JSON、空串、签名对但无 chara chunk）/ **字段落位到引擎会读的列**（personality→人设、description→背景、system_prompt→自定义指令，其余为 nil 而非空串）/ **开场白不落库也不许塞进任何别的列** / 空名字回落可读名（NOT NULL 列不能写空串）/ **导入的内嵌世界书真的会被该角色合成带上**（`synthForCompanion` 端到端：条目出现 + 结果本身可解析且条目数对得上）/ 关掉开关不写书 / 卡片无世界书时开关为真也不造空书 / 无仓储时抛错 |
 | `CharacterCardExportTests` | 角色卡导出（第 214 轮）：**导出的 JSON 能被引擎的导入器原样吃回来**（名字/人设/背景/系统提示词逐项对得上；开场白必然为空）/ **专属世界书往返条目数一致**（只断言"有 character_book 键"不算）/ 输出是标准 V2 结构（spec/spec_version/data，空字段也留键）/ 没有专属书就不带 `character_book` 键 / **别人的书不会被带出去** / 停用的专属书不导出 / 多本只嵌一本且**如实回报总数**（不断言具体哪一本 —— `updatedAt` 并列时顺序不稳，断它会变成偶发失败）/ **说话风格并入 description 的有损行为被固定下来** / 空说话风格不加噪音 / 文件名清洗（非法字符/换行/空白/超长/空 → 可读兜底）/ `worldbookObject` 只认含 `entries` 的对象（塞坏 JSON 会让对方整张卡解析失败）/ 无数据库也能产出合法卡 |
+| `BackupReportTests` | 备份/恢复的结果展示（第 215 轮）：**导入失败必须报失败**（此前 UI 无条件写成功 → 错误信息配绿色对勾）/ 失败无文案也可读 / 成功列出九个分区的新增与匹配数逐项核对 / 成功但无明细仍算成功 / 导出报表（总条数 = 各分区之和、分区数、明文与加密后体积、**0 条的分区也要显示**、口令提醒）/ **分节顺序稳定**（已知分区按 `sectionKeys`、未知分区按名字补在后面 —— 字典顺序会让每次渲染都不同）/ `sectionKeys` 每个分区都有中文名（新增分区必须补）/ 体积格式化（B/KB/MB/GB 边界）/ 抛异常那条路的通用失败报告 |
 | `TurnReceiptTests` | 本轮收据（P1 上下文装箱清单）：用量解析（标准键 / 缺 `total_tokens` 用和兜底 / 缺关键字段或非数字一律 nil / **多轮相加** / 坏事件跳过而好事件仍算 / 无事件 nil）/ 片段 JSON 往返（空集、非 JSON、缺 id 项丢弃）/ 层名与来源名**未知值回退** / 本机估算字数求和 / **`prompt_audit` 真写入并回读**（材料、轮数、工具、指纹；回读**没有** token）/ **`token_usage` 写两行并按 (companionId,date,deviceId) 累加**（伴侣行 + `-1` 全局行，输入/输出/合计/请求次数逐项核对）/ 日期串 `yyyy-MM-dd` / **历史截断留最近而非最早** / limit≤0 = 不限制 / 上下文选项往返与越界回退 |
 
 **失败说明什么**：
