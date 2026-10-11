@@ -115,7 +115,7 @@ struct ConversationRepository {
                     FROM messages m
                     LEFT JOIN message_bodies b ON b.messageId = m.id
                     WHERE m.conversationType = 'chat'
-                      AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                      AND LOWER(m.type) NOT IN ('reasoning', 'tool_activity')
                 ) last ON last.conversationId = c.id AND last.rn = 1
                 -- 第 216 轮：每条会话的**可见消息条数**（与上面的可见口径逐字一致：
                 -- 排除 REASONING / TOOL_ACTIVITY）。用一次分组查询，不做 N+1。
@@ -123,7 +123,7 @@ struct ConversationRepository {
                     SELECT m.conversationId AS conversationId, COUNT(*) AS n
                     FROM messages m
                     WHERE m.conversationType = 'chat'
-                      AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                      AND LOWER(m.type) NOT IN ('reasoning', 'tool_activity')
                     GROUP BY m.conversationId
                 ) cnt ON cnt.conversationId = c.id
                 ORDER BY c.updatedAt DESC
@@ -211,7 +211,7 @@ struct ConversationRepository {
                     FROM messages
                     WHERE conversationId = ? AND conversationType = 'chat'
                       AND isFromUser = 0
-                      AND type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                      AND LOWER(type) NOT IN ('reasoning', 'tool_activity')
                       AND (timestamp > ?
                            OR (timestamp = ? AND id > ?))
                     """, arguments: [companionId, ts, ts, mid]) ?? 0
@@ -222,7 +222,7 @@ struct ConversationRepository {
                 FROM messages
                 WHERE conversationId = ? AND conversationType = 'chat'
                   AND isFromUser = 0
-                  AND type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                  AND LOWER(type) NOT IN ('reasoning', 'tool_activity')
                 """, arguments: [companionId]) ?? 0
         }
     }
@@ -270,7 +270,7 @@ struct ConversationRepository {
                 SELECT m.id AS id, m.timestamp AS ts
                 FROM messages m
                 WHERE m.conversationId = ? AND m.conversationType = 'chat'
-                  AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                  AND LOWER(m.type) NOT IN ('reasoning', 'tool_activity')
                 ORDER BY m.timestamp DESC, m.id DESC
                 LIMIT 1
                 """, arguments: [companionId]) else {

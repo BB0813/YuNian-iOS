@@ -144,6 +144,7 @@ final class ChatSession: ObservableObject {
     /// 会丢掉前面几轮（这正是"回复被截断"的旧病根）。
     private var lastRoundFullText = ""
     private var lastRoundFinishReason = ""
+    private var lastStreamError: String?
 
     /// 待用户确认的工具调用（P0 ③ 的"写入确认"）。
     ///
@@ -367,6 +368,7 @@ final class ChatSession: ObservableObject {
         assistantCommittedThisTurn = false
         lastRoundFullText = ""
         lastRoundFinishReason = ""
+        lastStreamError = nil
         // 本轮开始打点：REASONING 行的 durationMs 由它算（见 turnStartedAt）
         turnStartedAt = Date()
 
@@ -402,7 +404,8 @@ final class ChatSession: ObservableObject {
                         self.streamingText += "\n\n"
                     }
                 case let .error(message):
-                    self.lastError = message
+                    // 传输层异常仍可能重试成功；稍后由回合结果决定是否展示错误。
+                    self.lastStreamError = message
                 }
             }
         }
@@ -441,7 +444,7 @@ final class ChatSession: ObservableObject {
         // （已核对生成的绑定 L3733-3755），sticker 等事件只存在于
         // `AgentTurnResult.events` 里。此前完全没读它 ——
         // 于是模型调 send_sticker 成功也无声无息。
-        applyEvents(result.events, environment: environment)
+        let deliveredEventOutput = applyEvents(result, turnId: turnId, environment: environment)
 
         // ⚠️ 第 206 轮（P0 ③ 写入确认）：**确认门停下的回合不算完成**。
         //
@@ -460,7 +463,9 @@ final class ChatSession: ObservableObject {
         isAwaitingConfirmation = false
 
         // 提交**一次**：整回合的正文 + 整回合的思考过程（第 205 轮）。
-        commitTurn(result: result, turnId: turnId, environment: environment)
+        commitTurn(result: result, turnId: turnId,
+                   deliveredEventOutput: deliveredEventOutput,
+                   environment: environment)
 
         // ── 本轮收据（第 207 轮，P1）──
         // 清单来自请求前采集（`lastManifest`），用量来自事件流，
@@ -681,7 +686,9 @@ final class ChatSession: ObservableObject {
     /// `AgentEvent.extra` 的格式（agent.rs:441-444）**不是 JSON**，是 KV 串：
     ///     entry_id=123;file_name=custom_1699_1.png
     /// 需要手工解析，不能想当然按 JSON 解。
-    private func applyEvents(_ events: [AgentEvent], environment: AppEnvironment) {
+    private func applyEvents(_ result: AgentTurnResult, turnId: String,
+                             environment: AppEnvironment) -> Bool {
+        let events = result.events
         // 确认门：Rust 停下回合时，把**待确认的那次调用**交出来
         // （agent.rs:1360-1364，text = 工具名，extra = 参数 JSON）。
         // 这里只负责把它变成界面上的一张卡；批准/拒绝与重跑见 `resolveConfirmation`。
@@ -695,6 +702,9 @@ final class ChatSession: ObservableObject {
         } else {
             pendingConfirmation = nil
         }
+
+        // Rust 暂停等待确认时不能交付未完成的回复。
+        if result.finishedReason == "confirm_pending" { return false }
 
         // ⚠️ 第 205 轮：思考过程**也走事件流**，别只认 sink。
         //
@@ -713,7 +723,30 @@ final class ChatSession: ObservableObject {
             reasoningText = last.text
         }
 
-        for event in events where event.kind == "sticker" {
+        // emit_bubble / emit_segmented 的文字只出现在 bubble 事件里。
+        // 跳过与 finalText 重复的最后一个规范收尾 bubble。
+        let bubbleIndices = Set(Self.visibleBubbleEventIndices(
+            events: events.map { (kind: $0.kind, text: $0.text) },
+            finalText: result.finalText))
+        let lastBubbleIndex = bubbleIndices.max()
+        let reasoningWithoutText = streamingText.isEmpty && result.finalText.isEmpty
+            && lastRoundFullText.isEmpty
+            && !reasoningText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        var deliveredOutput = false
+
+        for (index, event) in events.enumerated() {
+            if event.kind == "bubble" {
+                guard bubbleIndices.contains(index) else { continue }
+                let reason = reasoningWithoutText && index == lastBubbleIndex
+                    ? reasoningText.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+                appendAssistantBubble(event.text, reasoning: reason,
+                                      turnId: reason == nil ? nil : turnId,
+                                      environment: environment)
+                if reason != nil { reasoningText = "" }
+                deliveredOutput = true
+                continue
+            }
+            guard event.kind == "sticker" else { continue }
             let fields = parseKeyValues(event.extra)
             let entryId = fields["entry_id"] ?? ""
             guard !entryId.isEmpty else { continue }
@@ -782,6 +815,40 @@ final class ChatSession: ObservableObject {
             persistProtocolMessage(text: "[\(resolvedId)]", isFromUser: false,
                                    environment: environment)
             log.info("表情已落地：entry_id=\(resolvedId, privacy: .public) file=\(fileName, privacy: .public) bytes=\(imageData?.count ?? -1, privacy: .public)")
+            deliveredOutput = true
+        }
+        return deliveredOutput
+    }
+
+    /// 只去掉与最终正文重复的末尾 bubble；保留重复的独立工具气泡。
+    nonisolated static func visibleBubbleEventIndices(
+        events: [(kind: String, text: String)], finalText: String
+    ) -> [Int] {
+        events.indices.filter { index in
+            let event = events[index]
+            guard event.kind == "bubble", !event.text.isEmpty else { return false }
+            return !(index == events.count - 1 && !finalText.isEmpty && event.text == finalText)
+        }
+    }
+
+    /// 工具气泡单独存储，离开会话后仍能重新加载。
+    private func appendAssistantBubble(_ text: String, reasoning: String?,
+                                       turnId: String?, environment: AppEnvironment) {
+        messages.append(Message(role: .assistant, text: text, reasoning: reasoning, turnId: turnId))
+        guard let repo = messageRepository(for: environment) else { return }
+        do {
+            _ = try repo.insert(conversationId: companionId ?? 0,
+                                conversationType: .chat, isFromUser: false, senderId: 0,
+                                type: "text", content: text, searchContent: text, turnId: turnId)
+            if let reasoning, !reasoning.isEmpty {
+                _ = try repo.insert(conversationId: companionId ?? 0,
+                                    conversationType: .chat, isFromUser: false, senderId: 0,
+                                    type: Self.reasoningType, content: reasoning,
+                                    searchContent: "", turnId: turnId,
+                                    durationMs: lastTurnDurationMs)
+            }
+        } catch {
+            log.error("工具气泡落库失败：\(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -965,6 +1032,7 @@ final class ChatSession: ObservableObject {
     /// 用户看到的是"想了一下，然后什么都没了"，且重启后也查不到。
     /// 现在即便没有正文，也把思考过程落一行、留一条消息（渲染层不画空气泡）。
     private func commitTurn(result: AgentTurnResult, turnId: String,
+                            deliveredEventOutput: Bool,
                             environment: AppEnvironment) {
         let streamed = streamingText
         var text: String
@@ -990,7 +1058,13 @@ final class ChatSession: ObservableObject {
             // 而 `finish_reason=length` 与"模型真的返回空"要修的地方完全不同。
             // ⚠️ guard 的 else 是闭包上下文，属性访问必须显式 `self.`。
             self.log.error("回合无任何可见输出：finish=\(self.lastRoundFinishReason, privacy: .public) rounds=\(result.roundsUsed) err=\(result.error ?? "无", privacy: .public)")
+            if !deliveredEventOutput, lastError == nil {
+                lastError = lastStreamError ?? "本轮没有产生可见回复（\(result.finishedReason)），请重试。"
+            }
             return
+        }
+        if text.isEmpty, !reasoning.isEmpty, !deliveredEventOutput, lastError == nil {
+            lastError = "本轮仅生成思考过程，未产生回复正文。请检查最大输出长度后重试。"
         }
         assistantCommittedThisTurn = true
 
