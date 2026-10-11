@@ -148,6 +148,7 @@ struct ContactsView: View {
     @State private var companions: [CompanionRepository.Companion] = []
     @State private var loadError: String?
     @State private var showCreator = false
+    @State private var showCardImport = false
     @State private var editTarget: CompanionRepository.Companion?
     /// 待删除的角色 + 是否连聊天记录一起删（两选项，见删除对话框）。
     @State private var deleteTarget: CompanionRepository.Companion?
@@ -220,14 +221,28 @@ struct ContactsView: View {
             // 点行 = 去聊天（主操作），改人设走左滑 —— 与记忆/技能页的手势语言一致
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showCreator = true } label: {
-                        Label("新建角色", systemImage: "plus")
+                    // 一个「+」菜单放两种建角色的方式：新建（自己写人设）/
+                    // 导入角色卡（PNG 或 JSON —— 引擎早就能解析，之前两端都没有入口）
+                    Menu {
+                        Button { showCreator = true } label: {
+                            Label("新建角色", systemImage: "person.badge.plus")
+                        }
+                        Button { showCardImport = true } label: {
+                            Label("导入角色卡", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Label("添加", systemImage: "plus")
                     }
                 }
             }
             .sheet(isPresented: $showCreator) {
                 NavigationStack {
                     CompanionEditView(companion: nil, onSaved: reload)
+                }
+            }
+            .sheet(isPresented: $showCardImport) {
+                NavigationStack {
+                    CharacterCardImportView(onImported: reload)
                 }
             }
             .sheet(item: $editTarget) { target in
