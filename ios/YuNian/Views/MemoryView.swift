@@ -162,6 +162,18 @@ struct MemoryView: View {
                 }
             }
         }
+        // 左滑 = 恢复（只对已删除的出现）。与右滑删除方向相反，
+        // 避免"同一个方向既是删又是恢复"而误触。
+        .swipeActions(edge: .leading) {
+            if memory.isDeleted {
+                Button {
+                    restore(memory)
+                } label: {
+                    Label("恢复", systemImage: "arrow.uturn.backward")
+                }
+                .tint(YNTheme.palette(scheme).accent)
+            }
+        }
     }
 
     // MARK: - 选项
@@ -181,7 +193,8 @@ struct MemoryView: View {
         } footer: {
             Text("""
             排序只影响**这一页**的显示，不影响引擎的召回顺序（那是按重要度与时间算的）。
-            删除是**软删除**：记录留在库里，可被备份带走，但不再注入、不再召回。
+            删除是**软删除**：记录留在库里，可被备份带走，但不再注入、不再召回；
+            已删除的条目**左滑可恢复**（恢复后若已过期，仍不会进提示词）。
             """)
         }
     }
@@ -199,8 +212,25 @@ struct MemoryView: View {
     private func softDelete(_ memory: MemoryRepository.Memory) {
         guard let repo = environment.memoryRepo else { return }
         let ok = repo.softDelete(id: memory.id)
-        notice = ok ? "已删除一条记忆（软删除，可从备份恢复）"
+        notice = ok ? "已删除一条记忆（软删除，左滑可恢复）"
                     : "删除失败：这条记录可能已经不在了"
+        reload()
+    }
+
+    /// 恢复（撤销软删除）。
+    ///
+    /// ⚠️ 恢复**不等于**一定被注入：已过期的记忆恢复后仍不进提示词
+    /// （有效期是另一个维度）。所以提示语要把这两种结果分开说。
+    private func restore(_ memory: MemoryRepository.Memory) {
+        guard let repo = environment.memoryRepo else { return }
+        let ok = repo.restore(id: memory.id)
+        if !ok {
+            notice = "恢复失败：这条记录可能已经不在了"
+        } else if let expires = memory.expiresAt, expires <= Self.nowMs() {
+            notice = "已恢复，但它已过期 —— 仍不会进提示词（有效期不因恢复而延长）"
+        } else {
+            notice = "已恢复（下一回合起重新参与注入/召回）"
+        }
         reload()
     }
 

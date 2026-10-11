@@ -184,4 +184,44 @@ final class MemoryBrowseTests: XCTestCase {
         XCTAssertTrue(repo.listActive(now: now).isEmpty, "软删除后不再进提示词")
         XCTAssertEqual(repo.listAll().count, 1, "记录本身仍在库里（可被备份带走）")
     }
+
+    /// 恢复（第 209 轮补）：撤销软删除后重新进提示词。
+    func testRestoreBringsMemoryBack() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let now: Int64 = 1_700_000_100_000
+
+        try insert(database, id: 9, content: "误删的", type: "WORKING",
+                   observedAt: 100, expiresAt: nil, isDeleted: 0)
+        let repo = MemoryRepository(database: database)
+
+        XCTAssertTrue(repo.softDelete(id: 9))
+        XCTAssertTrue(repo.listActive(now: now).isEmpty)
+
+        XCTAssertTrue(repo.restore(id: 9))
+        XCTAssertEqual(repo.listActive(now: now).map(\.id), [9], "恢复后应重新参与注入")
+        XCTAssertFalse(repo.listAll().first?.isDeleted ?? true)
+    }
+
+    /// ⚠️ 恢复**不改变**有效期：已过期的记忆恢复后仍不进提示词。
+    /// 界面文案据此分成两种说法（不然用户会以为"恢复了就一定用上"）。
+    func testRestoreDoesNotReviveExpiredMemory() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let now: Int64 = 1_700_000_100_000
+
+        try insert(database, id: 11, content: "过期又删过", type: "SEMANTIC",
+                   observedAt: 100, expiresAt: now - 1, isDeleted: 1)
+        let repo = MemoryRepository(database: database)
+
+        XCTAssertTrue(repo.restore(id: 11))
+        XCTAssertEqual(repo.listActive(now: now).count, 0, "有效期是另一个维度")
+        XCTAssertEqual(MemoryView.bucket(of: repo.listAll()[0], now: now), .inactive)
+    }
+
+    func testRestoreMissingRowReturnsFalse() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertFalse(MemoryRepository(database: database).restore(id: 404))
+    }
 }

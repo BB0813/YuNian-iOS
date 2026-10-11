@@ -94,17 +94,37 @@ final class MemoryRepository {
     /// 软删除一条记忆（对应 Android `softDelete(id, now)`）。
     @discardableResult
     func softDelete(id: Int64) -> Bool {
+        setDeleted(true, id: id)
+    }
+
+    /// 撤销软删除（第 209 轮补）。
+    ///
+    /// ## 为什么必须有
+    /// 记忆页写着"软删除：记录仍在库里、可被备份带走"，但**没有恢复入口** ——
+    /// 用户误删一条就只能靠导入备份，而备份是整库覆盖。
+    /// 恢复是这条链的最后一段：`isDeleted = 0` 之后引擎下次就会重新注入/召回。
+    ///
+    /// ⚠️ 恢复**不等于**一定会被注入：已过期的记忆恢复后仍不进提示词
+    /// （有效期是另一个维度）。界面要如实说明，不能让用户以为"恢复了就一定会用上"。
+    @discardableResult
+    func restore(id: Int64) -> Bool {
+        setDeleted(false, id: id)
+    }
+
+    @discardableResult
+    private func setDeleted(_ deleted: Bool, id: Int64) -> Bool {
         do {
             let changed = try database.pool.write { db -> Int in
                 try db.execute(
-                    sql: "UPDATE unified_memories SET isDeleted = 1, updatedAt = ? WHERE id = ?",
-                    arguments: [Int64(Date().timeIntervalSince1970 * 1000), id]
+                    sql: "UPDATE unified_memories SET isDeleted = ?, updatedAt = ? WHERE id = ?",
+                    arguments: [deleted ? 1 : 0,
+                                Int64(Date().timeIntervalSince1970 * 1000), id]
                 )
                 return db.changesCount
             }
             return changed > 0
         } catch {
-            log.error("softDelete 失败：\(String(describing: error), privacy: .public)")
+            log.error("setDeleted(\(deleted)) 失败：\(String(describing: error), privacy: .public)")
             return false
         }
     }
