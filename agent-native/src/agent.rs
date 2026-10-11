@@ -995,6 +995,9 @@ impl AgentRuntime {
             // 汇合点：技能索引按 available_tools 过滤显示——本轮实际注入模型的
             // 工具名集合（builtin 聊天工具 + 全局工具 + 会话工具），与 tool_defs 过滤逻辑一致
             available_tools: self.available_tool_names(request),
+            // 回复语言（第 218 轮）：宿主下发语言名才注入；缺键 = 不注入，
+            // 与 Android（不下发该键）行为一致。
+            reply_language: str_opt("reply_language"),
             ..PromptOrchestratorOptions::default()
         }
     }

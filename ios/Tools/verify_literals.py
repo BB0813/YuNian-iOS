@@ -272,10 +272,32 @@ def main() -> int:
         report.check("能找到 Swift AgentSettings", sw is not None)
         if sw:
             swift_keys = set(re.findall(r'case \w+ = "(\w+)"', sw.group(1)))
+            # ⚠️ 第 218 轮：原来的写法是"多出的键必须恰好等于 {owner_name}"，
+            # 每加一个 iOS 专有键就得改这个字面量 —— 真正的判据不是数量，
+            # 而是**"多出来的键会不会让 Android 的行为变化"**。所以改为：
+            # 多出的键必须**登记**在下面这张表里，且每个都要有可核对的理由。
+            #
+            # 登记的含义：这个键 Android 不下发，且**引擎缺键时的行为与之前逐字一致**。
+            #   · owner_name      —— iOS 的用户昵称功能（Android 无此功能）
+            #   · reply_language  —— 回复语言的显式指令（用户反馈"回复有时是英文"）
+            #     引擎侧 `reply_language_absent_injects_nothing` 用例钉住"缺键不注入"，
+            #     所以 Android（不下发）的提示词**逐字不变**；
+            #     若 Android 将来也要这个开关，直接下发同一个键即可（引擎侧已就绪）。
+            allowed_extra = {"owner_name", "reply_language"}
+            extra = swift_keys - android_settings_keys
             report.check(
-                "Swift settings 键是 Android 的子集（允许多 owner_name）",
-                swift_keys - android_settings_keys == {"owner_name"} or swift_keys <= android_settings_keys,
-                f"Swift 多出 {sorted(swift_keys - android_settings_keys)}",
+                "Swift settings 多出的键都已登记（且已证明 Android 不受影响）",
+                extra <= allowed_extra,
+                f"未登记的键：{sorted(extra - allowed_extra)}"
+                "（新增前先证明 Android 不受影响，再登记进 allowed_extra）",
+            )
+            # 登记了 reply_language，就必须存在引擎侧"缺键不注入"的证据 ——
+            # 否则 Android 的提示词可能被悄悄改变，而这在两端各自的测试里都看不出来。
+            rust_orch = read(REPO_ROOT / "agent-native/src/prompt_orchestrator.rs")
+            report.check(
+                "已登记 reply_language 且有「缺键不注入」的引擎用例",
+                "reply_language_absent_injects_nothing" in rust_orch,
+                "prompt_orchestrator.rs 缺该用例：Android 的提示词可能被改动",
             )
             report.check("Swift 不含 session_id", "session_id" not in swift_keys,
                          "session_id 曾误加：Android 无此键，多发会改 system prompt")

@@ -509,10 +509,16 @@ final class AppEnvironment: ObservableObject {
         // **role = "GIRLFRIEND"** 与 **timezone = 系统当前时区**（AgentDTOs.swift:202-208），
         // 丢掉 timezone 会让 Rust 时间感知退化为 UTC（注释明写「不能省」）。
         //
-        // 用 var 局部变量，把 withSystemTimezone() 的三个键原样继承，再补第四、第五个。
+        // 用 var 局部变量，把 withSystemTimezone() 的三个键原样继承，再补后面的。
         var s = AgentSettings.withSystemTimezone()
         s.workingMemoryLimit = 200
         s.imageGenRules = ImageGenProtocol.defaultPrompt
+        // 第 218 轮：回复语言。
+        // ⚠️ **跟随模型时保持 nil**（不下发这个键）—— 下发空串会多一个空片段，
+        // 而且会让"宿主没配"与"宿主配了空"这两种情况在引擎侧无法区分。
+        if let repo = apiConfigs {
+            s.replyLanguage = ReplyLanguage.load(from: repo).languageName
+        }
         return s
     }
 

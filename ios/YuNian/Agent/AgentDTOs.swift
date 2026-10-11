@@ -169,6 +169,12 @@ struct AgentSettings: Codable, Sendable, Equatable {
     var workingMemoryLimit: Int?
     /// 生图协议文本（Rust 侧 `setting_str("image_gen_rules")` 读取）。M3 接入。
     var imageGenRules: String?
+    /// 回复语言（第 218 轮，Rust 侧 `settings_json.reply_language`）。
+    ///
+    /// 值是**语言名**（`简体中文` / `繁體中文` / `English` / `日本語`）。
+    /// ⚠️ `nil` = **不下发这个键** —— 「跟随模型」必须走这条路，
+    /// 下发空串会让"宿主没配"与"配了空"在引擎侧无法区分。
+    var replyLanguage: String?
 
     enum CodingKeys: String, CodingKey {
         case role
@@ -176,6 +182,10 @@ struct AgentSettings: Codable, Sendable, Equatable {
         case ownerName = "owner_name"
         case workingMemoryLimit = "working_memory_limit"
         case imageGenRules = "image_gen_rules"
+        /// 回复语言（第 218 轮）：**语言名**（如 `简体中文`）。
+        /// Rust 侧 `orchestration_options` 读它并在【角色设定】之后注入【回复语言】。
+        /// 缺键 = 不注入 = 与 Android 行为一致。
+        case replyLanguage = "reply_language"
     }
 
     init(
@@ -183,13 +193,15 @@ struct AgentSettings: Codable, Sendable, Equatable {
         timezone: String? = nil,
         ownerName: String? = nil,
         workingMemoryLimit: Int? = nil,
-        imageGenRules: String? = nil
+        imageGenRules: String? = nil,
+        replyLanguage: String? = nil
     ) {
         self.role = role
         self.timezone = timezone
         self.ownerName = ownerName
         self.workingMemoryLimit = workingMemoryLimit
         self.imageGenRules = imageGenRules
+        self.replyLanguage = replyLanguage
     }
 
     /// 用系统当前时区填充 `timezone`。

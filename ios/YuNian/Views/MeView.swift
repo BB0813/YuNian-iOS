@@ -153,6 +153,22 @@ struct MeView: View {
                 )
             }
 
+            // 第 218 轮：回复语言。
+            //
+            // 起因是一条用户反馈「回复有时是英文」。查下来引擎里**根本没有语言指令**，
+            // 用什么语言回答全靠模型自己从人设与历史里猜 —— 这一项把它变成显式下发。
+            // 默认「跟随模型」= 不下发，行为与 Android 一致。
+            NavigationLink {
+                ReplyLanguageView()
+            } label: {
+                YNSettingsRow(
+                    icon: "character.bubble",
+                    title: "回复语言",
+                    subtitle: "要求它固定用哪种语言回复（含思考过程与工具参数）。",
+                    badge: replyLanguageBadge
+                )
+            }
+
             NavigationLink {
                 StickerLibraryView()
             } label: {
@@ -264,6 +280,14 @@ struct MeView: View {
     private var routesBadge: String {
         let count = routesBoundCount
         return count == 0 ? "跟随当前渠道" : "已单独指定 \(count) 条"
+    }
+
+    /// 回复语言徽标：显示**实际下发的内容**（跟随模型时明说"跟随模型"）。
+    ///
+    /// 不用"已设置/未设置"这种含糊说法 —— 这一项的意义全在"到底有没有下发指令"。
+    private var replyLanguageBadge: String {
+        guard let repo = environment.apiConfigs else { return "—" }
+        return ReplyLanguage.load(from: repo).title
     }
 
     /// 技能徽标：已启用 / 全部。

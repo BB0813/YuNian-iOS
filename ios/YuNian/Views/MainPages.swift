@@ -213,15 +213,14 @@ private struct ConversationRow: View {
                         .foregroundStyle(row.hasUnread ? c.textSecondary : c.textTertiary)
                         .lineLimit(1)
 
-                    // 共 N 条：清空记录前用户能看到"会删掉多少"，
-                    // 也让"这个会话到底聊过没有"一眼可判（0 条时不显示，不加噪音）。
-                    if row.messageCount > 0 {
-                        Text("共 \(row.messageCount) 条")
-                            .font(.caption2)
-                            .foregroundStyle(c.textTertiary)
-                            .layoutPriority(-1)
-                            .accessibilityLabel("共 \(row.messageCount) 条消息")
-                    }
+                    // ⚠️ 第 218 轮：这里**曾经**显示「共 N 条」，现已移除。
+                    // 实测反馈（苏晚瑄截图）：它被挤成**竖排三行**「共 / 8 / 条」，
+                    // 而且抢走了预览消息的宽度（预览被截得更早）。
+                    // 根因是它和预览文字挤在同一个 HStack，且被显式设为
+                    // `.layoutPriority(-1)` —— 拿不到宽度时 SwiftUI 会**逐字换行**。
+                    // 这个数字真正的用处是「删之前知道会删多少条」，
+                    // 所以它只保留在「清空记录」的确认框里（那里宽度不受挤）。
+                    // 想再放回行里的话：挪到右侧时间下方做成 VStack，别和预览抢宽度。
                 }
             }
         }
