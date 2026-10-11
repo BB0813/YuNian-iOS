@@ -195,6 +195,22 @@ struct MeView: View {
                 )
             }
 
+            // 第 209 轮：技能。
+            //
+            // 这一页补的是一条**死链**：模型一直看得到 `load_skill` 工具，
+            // 但 iOS 既没有界面也没有导入路径 → 技能表恒为空，
+            // 模型永远只能得到「未找到技能」。现在能看、能导、能开关。
+            NavigationLink {
+                SkillLibraryView()
+            } label: {
+                YNSettingsRow(
+                    icon: "wrench.and.screwdriver",
+                    title: "技能",
+                    subtitle: "按需加载的操作说明：导入、启用/禁用、看正文。",
+                    badge: skillBadge
+                )
+            }
+
             // 说明：表情库此前没有入口，是因为导入页没做。
             // 现在 `StickerImportRepository` 有了调用方。
 
@@ -233,6 +249,16 @@ struct MeView: View {
     private var routesBadge: String {
         let count = routesBoundCount
         return count == 0 ? "跟随当前渠道" : "已单独指定 \(count) 条"
+    }
+
+    /// 技能徽标：已启用 / 全部。
+    ///
+    /// 用"已启用"而不是总数：技能页的主开关语义就是"模型能看到几个"。
+    private var skillBadge: String? {
+        guard let database = environment.database else { return nil }
+        let counts = SkillRepository(database: database).counts()
+        guard counts.all > 0 else { return "还没导入" }
+        return "\(counts.enabled)/\(counts.all) 启用"
     }
 
     /// 徽标只回答一个问题：「现在能不能用」。
