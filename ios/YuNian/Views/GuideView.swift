@@ -29,6 +29,7 @@ struct GuideView: View {
         return List {
             selfCheckSection(c)
             quickStartSection(c)
+            companionSection(c)
             contextSection(c)
             memorySection(c)
             skillSection(c)
@@ -191,6 +192,21 @@ struct GuideView: View {
             Text("第一次用：三步")
         } footer: {
             Text("没有可用渠道时，发消息会直接提示「请先配置API」，不会静默失败。")
+        }
+    }
+
+    // MARK: - 角色与角色卡
+
+    private func companionSection(_ c: YNTheme.Palette) -> some View {
+        Section {
+            bullet("建角色有两条路", "通讯录右上「+」→ 自己写人设，或者**导入角色卡**（PNG 内嵌 `chara` / Tavern V1–V3 JSON——引擎早就能解析，这是它第一次被用起来）。", c)
+            bullet("导入前先预览", "卡片字段会逐条摊开并写明落位；卡片自带的**世界书**可以一并导入，导入后归这个角色所有。", c)
+            bullet("开场白不会被保存", "`companions` 表没有开场白列（两端都没有）——导入页会显示它并给你一键复制，你得自己贴成第一条消息。", c)
+            bullet("改人设 / 导出", "通讯录左滑编辑；编辑页底部可**导出 Tavern V2 JSON**（复制或存成文件），页脚写明了四处已知损失。", c)
+        } header: {
+            Text("角色与角色卡")
+        } footer: {
+            Text("只有**引擎真的会读**的字段才摆在编辑页里（名字/年龄/人设/说话风格/背景/原始提示词/自定义指令），页脚逐条写清每条会变成什么。")
         }
     }
 
