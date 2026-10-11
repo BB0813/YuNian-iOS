@@ -18,10 +18,16 @@ struct ConversationsView: View {
 
     @State private var rows: [ConversationRepository.ConvRow] = []
     @State private var loadError: String?
+    @State private var query = ""
+    /// 待清空记录的那个会话（危险操作要二次确认，并显示会删掉多少条）。
+    @State private var clearTarget: ConversationRepository.ConvRow?
+    @State private var notice: String?
 
     var body: some View {
         let c = YNTheme.palette(scheme)
-        NavigationStack {
+        let filtered = ConversationRepository.filter(rows, query: query)
+
+        return NavigationStack {
             ZStack {
                 YNCanvas()
 
@@ -34,17 +40,45 @@ struct ConversationsView: View {
                         Text("到「通讯录」选择一位角色开始聊天。\n第一次用？「我 → 关于 → 使用指南」有三步配置说明。")
                     }
                 } else {
-                    List(rows) { row in
+                    List(filtered) { row in
                         NavigationLink {
                             ChatView(companionId: row.companionId)
                         } label: {
                             ConversationRow(row: row)
+                        }
+                        // 只清理**这个会话**的记录，不动角色 ——
+                        // 与「通讯录」里删角色是两件事，菜单文案要分清。
+                        .swipeActions(edge: .trailing) {
+                            if row.messageCount > 0 {
+                                Button(role: .destructive) {
+                                    clearTarget = row
+                                } label: {
+                                    Label("清空记录", systemImage: "eraser")
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .leading) {
+                            if row.hasUnread {
+                                Button {
+                                    markRead(row)
+                                } label: {
+                                    Label("已读", systemImage: "checkmark.circle")
+                                }
+                                .tint(c.accent)
+                            }
                         }
                         .listRowBackground(Color.clear)
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                     .refreshable { reload() }
+                    // 搜索：名字或最后一条消息（纯函数过滤，有测试）
+                    .searchable(text: $query, prompt: "搜索名字或消息")
+                    .overlay {
+                        if filtered.isEmpty, !query.isEmpty {
+                            ContentUnavailableView.search(text: query)
+                        }
+                    }
                 }
             }
             .navigationTitle("予念")
@@ -54,8 +88,39 @@ struct ConversationsView: View {
             } message: {
                 Text(loadError ?? "发生未知错误")
             }
+            .confirmationDialog("清空与「\(clearTarget?.name ?? "")」的聊天记录？",
+                                isPresented: Binding(get: { clearTarget != nil },
+                                                     set: { if !$0 { clearTarget = nil } }),
+                                titleVisibility: .visible) {
+                Button("清空 \(clearTarget?.messageCount ?? 0) 条消息", role: .destructive) {
+                    if let target = clearTarget { clear(target) }
+                    clearTarget = nil
+                }
+                Button("取消", role: .cancel) { clearTarget = nil }
+            } message: {
+                Text("只清空这一个会话的聊天记录，**角色本身保留**（人设、记忆、世界书都不动）。不可恢复。")
+            }
             .task { reload() }
             .onAppear { reload() }
+            // 操作结果（清空/已读）用一条会自己消失的横幅 ——
+            // 不弹窗打断，也不静默（"点了没反应"与"点了但没生效"看起来是一样的）。
+            .overlay(alignment: .bottom) {
+                if let notice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(c.textPrimary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(c.surface, in: Capsule())
+                        .padding(.bottom, 24)
+                        .transition(.opacity)
+                        .id(notice)
+                        .task {
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            self.notice = nil
+                        }
+                }
+            }
         }
         .tint(c.accent)
     }
@@ -81,6 +146,31 @@ struct ConversationsView: View {
         } catch {
             // 不把 GRDB SQL / schema / 路径暴露到 UI。完整错误留给系统日志与诊断页。
             loadError = "会话列表暂时无法读取，请稍后重试。"
+        }
+    }
+
+    /// 标为已读（把已读游标推到最新一条）。
+    private func markRead(_ row: ConversationRepository.ConvRow) {
+        guard let database = environment.database else { return }
+        _ = try? ConversationRepository(database: database)
+            .markReadThroughLatest(companionId: row.companionId)
+        reload()
+    }
+
+    /// 清空这一个会话的聊天记录（**保留角色**）。
+    ///
+    /// ⚠️ 顺序由仓储保证：先删消息、再删 `conversation_summary` ——
+    /// 否则记录清空了、未读标记还留在列表上。
+    private func clear(_ row: ConversationRepository.ConvRow) {
+        guard let database = environment.database else { return }
+        do {
+            let removed = try ConversationRepository(database: database)
+                .clearConversation(companionId: row.companionId,
+                                   messages: environment.messages)
+            notice = "已清空 \(row.name) 的 \(removed) 条记录行（角色保留）"
+            reload()
+        } catch {
+            notice = "清空失败，请稍后重试"
         }
     }
 }
@@ -122,6 +212,16 @@ private struct ConversationRow: View {
                         .font(.subheadline)
                         .foregroundStyle(row.hasUnread ? c.textSecondary : c.textTertiary)
                         .lineLimit(1)
+
+                    // 共 N 条：清空记录前用户能看到"会删掉多少"，
+                    // 也让"这个会话到底聊过没有"一眼可判（0 条时不显示，不加噪音）。
+                    if row.messageCount > 0 {
+                        Text("共 \(row.messageCount) 条")
+                            .font(.caption2)
+                            .foregroundStyle(c.textTertiary)
+                            .layoutPriority(-1)
+                            .accessibilityLabel("共 \(row.messageCount) 条消息")
+                    }
                 }
             }
         }

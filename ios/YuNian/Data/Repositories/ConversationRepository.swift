@@ -57,6 +57,12 @@ struct ConversationRepository {
         var hasUnread: Bool = false
         /// 亲密度（Android 侧 companions 表有该字段，列表 UI 未用，此处保留备用）。
         var intimacy: Int = 0
+        /// **可见消息条数**（第 216 轮）。
+        ///
+        /// 口径与"最后一条消息"和未读统计**逐字一致**：`type NOT IN
+        /// ('REASONING','TOOL_ACTIVITY')` —— 三条口径若不一致，用户会看到
+        /// "共 12 条"却只数得出 9 条，然后开始怀疑数据。
+        var messageCount: Int = 0
 
         var id: Int64 { companionId }
 
@@ -96,7 +102,8 @@ struct ConversationRepository {
                     c.intimacy      AS intimacy,
                     last.content    AS lastContent,
                     last.ts         AS lastTs,
-                    last.fromUser   AS lastFromUser
+                    last.fromUser   AS lastFromUser,
+                    cnt.n           AS messageCount
                 FROM companions c
                 LEFT JOIN (
                     SELECT m.conversationId, m.timestamp AS ts, m.isFromUser AS fromUser,
@@ -110,6 +117,15 @@ struct ConversationRepository {
                     WHERE m.conversationType = 'chat'
                       AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
                 ) last ON last.conversationId = c.id AND last.rn = 1
+                -- 第 216 轮：每条会话的**可见消息条数**（与上面的可见口径逐字一致：
+                -- 排除 REASONING / TOOL_ACTIVITY）。用一次分组查询，不做 N+1。
+                LEFT JOIN (
+                    SELECT m.conversationId AS conversationId, COUNT(*) AS n
+                    FROM messages m
+                    WHERE m.conversationType = 'chat'
+                      AND m.type NOT IN ('REASONING', 'TOOL_ACTIVITY')
+                    GROUP BY m.conversationId
+                ) cnt ON cnt.conversationId = c.id
                 ORDER BY c.updatedAt DESC
                 LIMIT ?
                 """
@@ -128,10 +144,49 @@ struct ConversationRepository {
                     lastMessageAt: r["lastTs"] as Int64?,
                     lastMessageFromUser: (r["lastFromUser"] as Int? ?? 0) != 0,
                     hasUnread: false,
-                    intimacy: r["intimacy"] as Int? ?? 0
+                    intimacy: r["intimacy"] as Int? ?? 0,
+                    messageCount: r["messageCount"] as Int? ?? 0
                 )
                 return row
             }
+        }
+    }
+
+    // MARK: - 搜索（纯函数，便于单测）
+
+    /// 会话列表的搜索过滤（第 216 轮）。
+    ///
+    /// 匹配**名字或最后一条消息**，不区分大小写；空白查询 = 不过滤。
+    /// 写成纯函数是为了能单测 —— 搜索写错的表现是"明明有的会话搜不到"，
+    /// 而那在界面上看不出任何异常，只会让人以为会话丢了。
+    static func filter(_ rows: [ConvRow], query: String) -> [ConvRow] {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !keyword.isEmpty else { return rows }
+        return rows.filter { row in
+            row.name.lowercased().contains(keyword)
+                || (row.lastMessage?.lowercased().contains(keyword) ?? false)
+        }
+    }
+
+    /// 清空某个会话的聊天记录（**保留角色**）。
+    ///
+    /// ## 顺序与边界
+    /// 1. 先删消息（`MessageRepository.deleteForConversation` 连 FTS 一起清）
+    /// 2. 再删 `conversation_summary` 那一行 —— 否则已读游标/未读数会**留在原地**，
+    ///    表现为"记录清空了，但会话列表还标着未读"。
+    ///
+    /// 与"删除角色"是两件事：这条路径不动 `companions`。
+    @discardableResult
+    func clearConversation(companionId: Int64,
+                           messages: MessageRepository?) throws -> Int {
+        if let messages {
+            try messages.deleteForConversation(conversationId: companionId, type: .chat)
+        }
+        return try database.pool.write { db in
+            try db.execute(sql: """
+                DELETE FROM conversation_summary WHERE sessionId = ? AND sessionType = 'chat'
+                """, arguments: [companionId])
+            return db.changesCount
         }
     }
 
