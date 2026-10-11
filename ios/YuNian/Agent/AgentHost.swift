@@ -50,7 +50,8 @@ final class AgentStreamSinkImpl: StreamSink, @unchecked Sendable {
     private var continuations: [UUID: AsyncStream<Event>.Continuation] = [:]
     private let log = Logger(subsystem: "com.yunian.ai", category: "agent.stream")
 
-    /// 订阅一次流式回合。返回的流在 `on_done` / `on_error` 后自动结束。
+    /// 订阅一次完整 Agent 回合：收到每个 HTTP 轮的 on_done/on_error 后仍继续监听。
+    /// 仅由 ChatSession 在 runTurnStream 返回后 closeAll()。
     func makeStream() -> AsyncStream<Event> {
         let id = UUID()
         return AsyncStream { continuation in
@@ -78,13 +79,11 @@ final class AgentStreamSinkImpl: StreamSink, @unchecked Sendable {
 
     func onDone(fullText: String, finishReason: String) {
         broadcast(.done(fullText: fullText, finishReason: finishReason))
-        closeAll()
     }
 
     func onError(error: String) {
         log.error("流式回合出错：\(error, privacy: .public)")
         broadcast(.error(error))
-        closeAll()
     }
 
     /// 强制结束全部订阅。

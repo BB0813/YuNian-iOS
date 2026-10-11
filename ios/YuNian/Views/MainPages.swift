@@ -219,7 +219,9 @@ private struct ConversationRow: View {
                         Text("共 \(row.messageCount) 条")
                             .font(.caption2)
                             .foregroundStyle(c.textTertiary)
-                            .layoutPriority(-1)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .layoutPriority(1)
                             .accessibilityLabel("共 \(row.messageCount) 条消息")
                     }
                 }

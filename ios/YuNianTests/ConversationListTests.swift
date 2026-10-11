@@ -49,6 +49,25 @@ final class ConversationListTests: XCTestCase {
         XCTAssertEqual(row.lastMessage, "你也好", "最后一条也不该是 REASONING")
     }
 
+    /// iOS ChatSession 真机保存的是小写 reasoning；旧测试只覆盖了大写。
+    func testLowercaseReasoningIsExcludedFromPreviewCountAndUnread() throws {
+        let (conv, companions, messages, _, dir) = try makeEnv()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let id = try companions.create(name: "回归角色", personality: "x")
+        try insert(messages, companion: id, text: "你好", fromUser: true)
+        try insert(messages, companion: id, text: "你好呀")
+        XCTAssertTrue(try conv.markReadThroughLatest(companionId: id))
+        try insert(messages, companion: id, text: "内部推理", type: "reasoning")
+        try insert(messages, companion: id, text: "内部工具事件", type: "tool_activity")
+
+        let row = try XCTUnwrap(try conv.rows().first)
+        XCTAssertEqual(row.lastMessage, "你好呀")
+        XCTAssertEqual(row.messageCount, 2)
+        XCTAssertEqual(try conv.unreadCount(companionId: id), 0)
+        XCTAssertTrue(try conv.markReadThroughLatest(companionId: id))
+    }
+
     func testConversationWithoutMessagesHasZeroCountAndFallbackPreview() throws {
         let (conv, companions, _, _, dir) = try makeEnv()
         defer { try? FileManager.default.removeItem(at: dir) }
