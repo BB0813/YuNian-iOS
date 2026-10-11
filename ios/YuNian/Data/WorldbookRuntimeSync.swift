@@ -10,21 +10,22 @@ import os
 /// 而 iOS 侧此前从未调用 —— 也就是说用户配的世界书完全没有进入提示词。
 /// 这与 `orchestrator: nil`（第 24 轮）是同一类「该接没接」的缺口。
 ///
-/// ## ⚠️ 当前实现的范围：只覆盖 Android 的「全局」路径
+/// ## 覆盖范围（第 209 轮复核：**两支都已实现**）
 /// Android 的分支是：
 /// ```kotlin
 /// val payload = if (companionId > 0L) synthForCompanion(companionId)   // 按伴侣合成
 ///               else dao.active()?.json ?: ""                          // 全局启用书原文
 /// AgentFacade.setWorldbook(context, payload)   // blank → null
 /// ```
-/// iOS 目前实现了 `companionId <= 0` 的那一支（取启用书的 `json` 原文，
-/// 对应 `WorldbookDao.active()`：`SELECT json FROM worldbooks WHERE enabled = 1 LIMIT 1`）。
+/// iOS 两支都在：`companionId <= 0` 取启用书原文（对应 `WorldbookDao.active()`：
+/// `SELECT json FROM worldbooks WHERE enabled = 1 LIMIT 1`）；
+/// `companionId > 0` 走下面的 `synthForCompanion`（绑定规则 / 按 content 去重 /
+/// 排序 / `insertion_order` 重编号 / 顶层 assemble 全按契约实现）。
+/// `ChatSession.send` 在每回合前调用 `syncActiveToRuntime`。
 ///
-/// **`companionId > 0` 的合成尚未移植。** 该分支的行为是「宁可不注入，也不注入错的内容」：
-/// 传 `nil` 并打日志 —— 因为 `effectiveRows` 的绑定规则
-/// （专属书 ∪ boundIds 命中的全局书）、`entryToJson` 的 13 个字段映射、
-/// `assemble` 的顶层结构都与直接传某本书不同，硬塞一本全局书会**静默注入错误内容**。
-/// 契约已从 `WorldbookJsonCodec.kt` 提取完毕（见本文件末尾的清单）。
+/// ⚠️ **这段注释此前写着「`companionId > 0` 的合成尚未移植」—— 那是过期的。**
+/// 函数早已写好、也真的被调用；注释没跟着改，会让后来人以为世界书根本没进提示词。
+/// "代码已改、注释没改"比没有注释更糟（第 209 轮修正）。
 enum WorldbookRuntimeSync {
 
     private static let log = Logger(subsystem: "com.yunian.ai", category: "worldbook.sync")
@@ -186,6 +187,91 @@ enum WorldbookRuntimeSync {
             log.warning("世界书合成条目数异常：期望 \(entriesJson.count) 实际 \(actual)")
         }
         return text
+    }
+
+    // MARK: - 界面预览用的条目摘要
+
+    /// 一条世界书条目的摘要（**仅供界面预览**）。
+    ///
+    /// 与引擎合成走的是**同一个解码器**（`decodeEntries`）——
+    /// 这正是它存在的理由：界面若自己再写一份解析，两边迟早分叉，
+    /// 表现是"界面说有 12 条、实际只注入了 9 条"，而且查不出来。
+    struct EntrySummary: Equatable, Identifiable {
+        /// ForEach 用的唯一键。
+        ///
+        /// ⚠️ 不能直接用 ST 的条目 id：array 形态里条目常常**没有 id**（回落 0），
+        /// 多个条目会共用同一个 id，`ForEach` 会错行/丢行。
+        var id: String
+        /// 显示序号（1 起，按 `insertion_order` 排序后的位置）。
+        var order: Int
+        /// ST 条目 id（0 = 源 JSON 里没有）。
+        var entryId: Int64
+        var keys: [String]
+        var content: String
+        var enabled: Bool
+        /// `constant` 条目是"常驻注入"，不受关键词触发（界面上要能看出来）。
+        var constant: Bool
+        var caseSensitive: Bool
+        var useRegex: Bool
+        /// 注入位置 / 角色（原样保留的字符串，见 `synthForCompanion` 的说明）。
+        var position: String
+        var role: String
+        var scanDepth: Int64
+        var depth: Int64?
+        var priority: Int
+        /// 引擎合成时参与去重与排序的关键：同一 `content` 只留 priority 最高的。
+        var insertionOrder: Int64
+    }
+
+    /// 把存库的世界书 JSON 解析成条目摘要（解析不了时返回空数组）。
+    static func entrySummaries(_ raw: String) -> [EntrySummary] {
+        guard let entries = decodeEntries(raw) else { return [] }
+        return entries.enumerated().map { offset, entry in
+            EntrySummary(
+                id: "\(offset)-\(entry.id)",
+                order: offset + 1,
+                entryId: entry.id,
+                keys: entry.keys,
+                content: entry.content ?? "",
+                enabled: entry.enabled,
+                constant: entry.constant,
+                caseSensitive: entry.caseSensitive,
+                useRegex: entry.useRegex,
+                position: Self.describe(entry.position),
+                role: Self.describe(entry.role),
+                scanDepth: entry.scanDepth,
+                depth: entry.depth,
+                priority: entry.priority,
+                insertionOrder: entry.insertionOrder
+            )
+        }
+    }
+
+    /// 顶层 `name`（世界书名；缺失时给空串，界面自己决定回退文案）。
+    static func bookName(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = root["name"] as? String
+        else { return "" }
+        return name
+    }
+
+    /// 这个 JSON 是否"看起来像一本世界书"（导入时要给出可读的失败原因）。
+    static func looksLikeWorldbook(_ raw: String) -> Bool {
+        guard let data = raw.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return root["entries"] != nil
+    }
+
+    /// `Any?` 转成可显示的字符串（位置/角色既可能是字符串也可能是数字/对象）。
+    private static func describe(_ value: Any?) -> String {
+        switch value {
+        case nil: return ""
+        case let text as String: return text
+        case let number as NSNumber: return number.stringValue
+        default: return String(describing: value!)
+        }
     }
 
     // MARK: - 解码辅助

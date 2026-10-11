@@ -211,6 +211,21 @@ struct MeView: View {
                 )
             }
 
+            // 第 209 轮：世界书。
+            //
+            // 与技能同一种病、但更隐蔽：表在、每回合也会推给引擎，
+            // 却没有任何界面与写入路径 → 恒为空，而界面上看不出异常。
+            NavigationLink {
+                WorldbookLibraryView()
+            } label: {
+                YNSettingsRow(
+                    icon: "book.closed",
+                    title: "世界书",
+                    subtitle: "按关键词注入设定：导入、启用/停用、看条目与生效状态。",
+                    badge: worldbookBadge
+                )
+            }
+
             // 说明：表情库此前没有入口，是因为导入页没做。
             // 现在 `StickerImportRepository` 有了调用方。
 
@@ -259,6 +274,16 @@ struct MeView: View {
         let counts = SkillRepository(database: database).counts()
         guard counts.all > 0 else { return "还没导入" }
         return "\(counts.enabled)/\(counts.all) 启用"
+    }
+
+    /// 世界书徽标：**回答"现在到底注不注入"**，而不是"有几本"。
+    ///
+    /// 引擎只取第一本启用的（`LIMIT 1`），所以"有 3 本"完全可能等于"没注入"。
+    private var worldbookBadge: String? {
+        guard let database = environment.database else { return nil }
+        let repo = WorldbookRepository(database: database)
+        guard let active = repo.activeGlobalBook() else { return "未注入" }
+        return "生效：\(active.name)"
     }
 
     /// 徽标只回答一个问题：「现在能不能用」。
