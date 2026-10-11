@@ -23,10 +23,22 @@ enum VoiceProfileStore {
     /// 该角色的音色覆盖（nil = 没有覆盖，用全局）。
     static func override(companionId: Int64, repository: ApiConfigRepository?) -> String? {
         guard let repository, companionId > 0 else { return nil }
-        guard let raw = try? repository.metaValue(forKey: overrideKey(companionId: companionId))
-        else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? nil : trimmed
+        // ⚠️ 第 208 轮：这里**必须拆成两句**。
+        //
+        // 原来写成 `guard let raw = try? repository.metaValue(forKey:
+        // overrideKey(companionId: companionId))` —— 一行里套了自动闭包
+        // （`try?`）与嵌套调用，macOS 的 Swift 报
+        // `failed to produce diagnostic for expression`（**编译器崩溃**，
+        // 不是普通类型错误）：本地 WSL 的 Swift 能过、CI 的 Xcode 工具链不能。
+        // 拆开之后两边都过，且更清楚。
+        let key = overrideKey(companionId: companionId)
+        // ⚠️ 写成与 `TtsSettings.load` **逐字同形**的 `if let raw = try? f(key)`：
+        // 那是 CI 一直在编的写法。别在这里造新形状。
+        if let raw = try? repository.metaValue(forKey: key) {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
     }
 
     /// 写该角色的音色覆盖。空串 = 清除覆盖（`setMetaValue` 对空值是**删键**）。

@@ -307,7 +307,10 @@ private struct PurposeRouteDetailView: View {
     @ViewBuilder
     private var voiceProfileSection: some View {
         let c = YNTheme.palette(scheme)
-        let companions = (try? environment.companions?.fetchAll()) ?? []
+        // ⚠️ 取列表放在**普通计算属性**里（`companionList`），不在这里 `if let`：
+        // ViewBuilder 里的 `if` 会被当成"产出某个 View"，只做赋值会报
+        // `type '()' cannot conform to 'View'`。
+        let companions = companionList
         Section {
             if companions.isEmpty {
                 Text("还没有角色。")
@@ -352,6 +355,18 @@ private struct PurposeRouteDetailView: View {
             """)
         }
         .onAppear { resetPreviewer() }
+    }
+
+    /// 角色列表（供「按角色音色」一节）。
+    ///
+    /// 放在普通计算属性里而不是 ViewBuilder 内联：
+    /// ① ViewBuilder 里的 `if` 只做赋值会报 `type '()' cannot conform to 'View'`；
+    /// ② `(try? x?.f()) ?? []` 这种「可选链 + 自动闭包」的组合在 macOS 的 Swift 上
+    ///    会撞编译器崩溃（`failed to produce diagnostic for expression`）——
+    ///    本地 WSL 的 Swift 6.4 能过而 CI 不能。拆开后两边都过。
+    private var companionList: [CompanionRepository.Companion] {
+        guard let repo = environment.companions else { return [] }
+        return (try? repo.fetchAll()) ?? []
     }
 
     /// 某个角色的音色覆盖绑定（空串 = 清除覆盖）。
