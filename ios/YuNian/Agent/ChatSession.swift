@@ -844,6 +844,10 @@ final class ChatSession: ObservableObject {
             toolNames: toolNames,
             toolSettings: toolSettings,
             contextSettings: contextSettings,
+            // 回复语言：读的是**与回合同一处**的存储（app_meta），
+            // 否则收据会显示一条与实际下发不一致的指令。
+            replyLanguage: environment.apiConfigs
+                .flatMap { ReplyLanguage.load(from: $0).languageName },
             droppedHistory: droppedHistory
         )
     }

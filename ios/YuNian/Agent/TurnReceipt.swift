@@ -136,6 +136,30 @@ struct TurnReceipt: Equatable {
 
     // MARK: - 采集
 
+    /// 把「回复语言」合成片段插到 `persona.identity` 之后 —— **纯函数，可单测**。
+    ///
+    /// 抽出来是因为"插到哪个位置"是最容易悄悄坏掉的一环：
+    /// 位置错了，收据显示的顺序就与引擎实际拼进提示词的顺序不一致，
+    /// 而两边各自看都"有这一条"，谁也不会发现。
+    ///
+    /// 规则与引擎 `reply_language_suffix` 逐字一致：
+    /// **nil / 空 / 纯空白 = 不插入**（宿主没配就不该多出一条）。
+    /// 找不到 persona 片段时追加到末尾（而不是丢掉）—— 收据宁可多显示。
+    static func insertingLanguageSegment(_ segments: [Segment],
+                                         language: String?) -> [Segment] {
+        let trimmed = (language ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return segments }
+        var result = segments
+        let synthesized = Segment(id: "persona.reply_language", source: "settings",
+                                  layer: 1, lifetime: "stable", chars: 0)
+        if let index = result.firstIndex(where: { $0.id == "persona.identity" }) {
+            result.insert(synthesized, at: result.index(after: index))
+        } else {
+            result.append(synthesized)
+        }
+        return result
+    }
+
     /// 采集本轮的材料清单。
     ///
     /// ⚠️ **必须在请求之前调用**，且用与回合**同一套** options ——
@@ -155,6 +179,11 @@ struct TurnReceipt: Equatable {
                                 toolNames: [String],
                                 toolSettings: ToolSettings,
                                 contextSettings: ContextSettings,
+                                /// 回复语言（第 218 轮）：引擎在【角色设定】之后**追加**一段
+                                /// 【回复语言】，它不在编排器的片段表里 —— 若这里不补一条，
+                                /// 收据就会漏掉"模型这轮确实被要求用某种语言"这一事实。
+                                /// 传 nil / 空 = 没配（不追加，与引擎侧 `reply_language_suffix` 同规则）。
+                                replyLanguage: String? = nil,
                                 droppedHistory: Int) -> TurnManifest {
         // ── 被跳过的部分：**逐条写明白**（这一节才是"它怎么忘了"的答案）──
         var skipped: [String] = []
@@ -185,15 +214,28 @@ struct TurnReceipt: Equatable {
             return Segment(id: fragment.id, source: fragment.source, layer: fragment.layer,
                            lifetime: fragment.lifetime, chars: content.count)
         }
+        // 回复语言：补一条**与引擎位置一致**的合成片段。
+        //
+        // ⚠️ 为什么是"合成"：引擎在 `agent.rs` 里把它追加在编排器产出之后
+        //（与 image_gen_rules 同一条路），所以它**不在** `buildFragments` 的结果里。
+        // 收据的职责是"模型这一轮到底收到了什么"，漏掉它就等于取证面缺一块 ——
+        // 用户设了中文、却看不出这条指令到底有没有下发。
+        let language = (replyLanguage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let withLanguage = Self.insertingLanguageSegment(segments, language: language)
         // 指纹按**片段顺序 + 内容**算：内容变了指纹就要变
         // （与 Android 的 systemPromptHash 同用途：变更检测/去重）。
-        let joined = fragments
+        // 回复语言不在片段正文里，所以这里显式补进指纹输入 ——
+        // 否则"从中文改成英文"这种变更指纹不变，去重会把它当同一份提示词。
+        var hashInput = fragments
             .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .map { "\($0.id)\u{1}\($0.content)" }
-            .joined(separator: "\u{2}")
+        if !language.isEmpty {
+            hashInput.append("persona.reply_language\u{1}\(language)")
+        }
+        let joined = hashInput.joined(separator: "\u{2}")
         let digest = SHA256.hash(data: Data(joined.utf8))
         let hash = digest.compactMap { String(format: "%02x", $0) }.joined()
-        return TurnManifest(segments: segments,
+        return TurnManifest(segments: withLanguage,
                             systemPromptHash: String(hash.prefix(16)),
                             toolNames: toolNames,
                             skipped: skipped)

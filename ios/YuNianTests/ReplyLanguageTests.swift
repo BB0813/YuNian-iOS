@@ -94,4 +94,41 @@ final class ReplyLanguageTests: XCTestCase {
         XCTAssertTrue(ReplyLanguage.storageKey.hasPrefix("chat."),
                       "与 feature_route.* / context.* 同级命名，避免和别的键撞")
     }
+
+    // MARK: - 收据里的那一条（界面即取证面）
+
+    private func segments() -> [TurnReceipt.Segment] {
+        [TurnReceipt.Segment(id: "env.info", source: "env", layer: 0,
+                              lifetime: "dynamic", chars: 10),
+         TurnReceipt.Segment(id: "persona.identity", source: "persona", layer: 1,
+                              lifetime: "stable", chars: 100),
+         TurnReceipt.Segment(id: "safety.injection_note", source: "safety", layer: 2,
+                              lifetime: "stable", chars: 20)]
+    }
+
+    /// 引擎把【回复语言】追加在【角色设定】之后 —— 收据里的顺序必须一致。
+    func testLanguageSegmentIsInsertedRightAfterPersona() {
+        let result = TurnReceipt.insertingLanguageSegment(segments(), language: "简体中文")
+        XCTAssertEqual(result.map(\.id),
+                       ["env.info", "persona.identity", "persona.reply_language",
+                        "safety.injection_note"])
+    }
+
+    /// 没配就**不许**多出一条（与引擎 `reply_language_suffix` 同规则）。
+    func testNoLanguageSegmentWhenUnsetOrBlank() {
+        for value in [nil, "", "   ", "\n"] as [String?] {
+            let result = TurnReceipt.insertingLanguageSegment(segments(), language: value)
+            XCTAssertEqual(result.map(\.id), segments().map(\.id),
+                           "value=\(value ?? "nil") 不该插入片段")
+        }
+    }
+
+    /// 找不到 persona 片段时追加到末尾，而不是直接丢掉 ——
+    /// 收据宁可多显示一条，也不能漏掉"确实下发了语言指令"。
+    func testLanguageSegmentFallsBackToAppend() {
+        let only = [TurnReceipt.Segment(id: "env.info", source: "env", layer: 0,
+                                        lifetime: "dynamic", chars: 5)]
+        let result = TurnReceipt.insertingLanguageSegment(only, language: "English")
+        XCTAssertEqual(result.map(\.id), ["env.info", "persona.reply_language"])
+    }
 }

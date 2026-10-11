@@ -995,9 +995,6 @@ impl AgentRuntime {
             // 汇合点：技能索引按 available_tools 过滤显示——本轮实际注入模型的
             // 工具名集合（builtin 聊天工具 + 全局工具 + 会话工具），与 tool_defs 过滤逻辑一致
             available_tools: self.available_tool_names(request),
-            // 回复语言（第 218 轮）：宿主下发语言名才注入；缺键 = 不注入，
-            // 与 Android（不下发该键）行为一致。
-            reply_language: str_opt("reply_language"),
             ..PromptOrchestratorOptions::default()
         }
     }
@@ -1204,6 +1201,24 @@ impl AgentRuntime {
                         last_user,
                         options,
                     );
+                    // 回复语言（第 218 轮，用户反馈"回复有时是英文"）：宿主经 settings 下发。
+                    //
+                    // **位置是刻意的**：紧跟编排器产出的【角色设定】之后、插件片段与生图协议之前 ——
+                    // 语言要求属于"这一轮请你怎么说话"，贴着人设读起来才连贯；
+                    // 排到后面会被插件/生图协议（可能很长）压远，模型更容易忽略。
+                    //
+                    // ⚠️ 为什么是这里而不是 `PromptOrchestratorOptions` 的新字段：
+                    // 那个 Record 是跨端共享的，加字段会让 Android 的手写构造编译不过
+                    // （详见 `reply_language_suffix` 的注释）。
+                    // 空/None 一律不追加 —— 与"宿主没配"完全等价，不改变任何既有行为。
+                    if let Some(suffix) =
+                        crate::prompt_orchestrator::reply_language_suffix(
+                            self.setting_str("reply_language").as_deref(),
+                        )
+                    {
+                        sys.push_str("\n\n");
+                        sys.push_str(&suffix);
+                    }
                     // 核心插件提示词片段（cordis：core-prompt-fragments 插件注入）
                     for fragment in self.core_plugin_prompt_fragments() {
                         if fragment.content.trim().is_empty() {

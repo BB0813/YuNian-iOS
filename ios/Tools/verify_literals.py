@@ -296,8 +296,17 @@ def main() -> int:
             rust_orch = read(REPO_ROOT / "agent-native/src/prompt_orchestrator.rs")
             report.check(
                 "已登记 reply_language 且有「缺键不注入」的引擎用例",
-                "reply_language_absent_injects_nothing" in rust_orch,
+                "reply_language_absent_produces_no_suffix" in rust_orch,
                 "prompt_orchestrator.rs 缺该用例：Android 的提示词可能被改动",
+            )
+            # ⚠️ 第 218 轮追加：这个键**不能**变成 `PromptOrchestratorOptions` 的字段 ——
+            # 那是 UniFFI Record（跨端共享），加字段会让 Android 两处手写构造
+            # （ChatGenerationManager.kt:721 / GroupChatViewModel.kt:908）编译不过。
+            report.check(
+                "reply_language 未污染跨端共享的 Record",
+                "reply_language" not in rust_orch.split("pub struct PromptOrchestratorOptions")[1]
+                    .split('}')[0],
+                "PromptOrchestratorOptions 里出现了 reply_language：Android 会编译不过",
             )
             report.check("Swift 不含 session_id", "session_id" not in swift_keys,
                          "session_id 曾误加：Android 无此键，多发会改 system prompt")
