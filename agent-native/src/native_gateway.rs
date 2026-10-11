@@ -22,6 +22,17 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 
+/// 用途标识（多线路）—— 与 Swift 侧 `app_meta` 的 `feature_route.<purpose>` 后缀逐字对应。
+///
+/// ⚠️ 四条**都是真实用途**，不是占位：
+/// 朗读可外接语音模型渠道（MiMo / MiniMax 等），向量嵌入同样有模型渠道可接。
+/// iOS 侧消费者可能尚未落地 —— 那时线路会先于消费者存在，
+/// 这与"假开关"不同（用途是真的），但验收时要知道此刻它还没被读取。
+pub const PURPOSE_CHAT: &str = "chat";
+pub const PURPOSE_IMAGE: &str = "image";
+pub const PURPOSE_TTS: &str = "tts";
+pub const PURPOSE_EMBEDDING: &str = "embedding";
+
 use crate::agent::{AgentTurnRequest, StreamSink};
 use crate::prompt_orchestrator::{CompanionProfile, PromptOrchestrator};
 use crate::retry::{self, AttemptFailure, RetryPolicy};
@@ -278,7 +289,34 @@ impl NativeGateway {
     }
 
     /// 读取激活的 API 配置（isEnabled=1，优先最新）
+    ///
+    /// 等价于 `load_api_config_for("chat")` —— 保留此入口以免动到既有调用点。
     fn load_api_config(&self) -> Result<ApiConfigRow, String> {
+        self.load_api_config_for(PURPOSE_CHAT)
+    }
+
+    /// 按**用途**读取 API 配置（多线路）。
+    ///
+    /// ## 为什么需要
+    /// 原先只有「读唯一一条 `isEnabled = 1`」这一种取法 —— 于是
+    /// 对话、生图、朗读、向量嵌入**只能共用同一个渠道与模型**。
+    /// 而朗读（MiMo / MiniMax 等语音模型）与向量嵌入往往需要**各自的渠道**。
+    ///
+    /// ## 取法（顺序即语义）
+    /// 1. 查 `app_meta` 的 `feature_route.<purpose>`，值是 `api_configs.id`
+    /// 2. 取到 → 按该 id 读那一行（**不要求 isEnabled**：用途绑定是显式指定）
+    /// 3. 取不到、或绑定的行已被删 → **回退到 `isEnabled = 1`**
+    ///
+    /// 第 3 步是**向后兼容的关键**：没配过多线路的库，行为与改动前**完全一致**。
+    /// 绑定行被删时也回落而不是报错 —— 用户删了一条渠道，不该让某个用途直接不可用。
+    fn load_api_config_for(&self, purpose: &str) -> Result<ApiConfigRow, String> {
+        if let Some(id) = self.route_config_id(purpose) {
+            if let Ok(row) = self.load_api_config_by_id(id) {
+                return Ok(row);
+            }
+            // 落到回退分支（绑定的行不存在了）
+        }
+
         self.with_db(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -287,23 +325,63 @@ impl NativeGateway {
                 )
                 .map_err(|e| self.db_error("查询 api_configs 失败", &e))?;
             let row = stmt
-                .query_row([], |r| {
-                    Ok(ApiConfigRow {
-                        provider: r.get(0)?,
-                        api_key: r.get(1)?,
-                        extra_api_keys: r.get(2)?,
-                        base_url: r.get(3)?,
-                        model: r.get(4)?,
-                        temperature: r.get::<_, f64>(5)?,
-                        max_tokens: r.get(6)?,
-                        format_hint: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                    })
-                })
+                .query_row([], |r| Self::map_api_config_row(r))
                 .map_err(|e| match e {
                     rusqlite::Error::QueryReturnedNoRows => "无可用 API 配置".to_string(),
                     _ => self.db_error("读取 api_configs 失败", &e),
                 })?;
             Ok(row)
+        })
+    }
+
+    /// 按 id 读一行配置（**不要求 isEnabled**）。
+    fn load_api_config_by_id(&self, id: i64) -> Result<ApiConfigRow, String> {
+        self.with_db(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT provider, apiKey, extraApiKeys, baseUrl, model, temperature, maxTokens, formatHint \
+                     FROM api_configs WHERE id = ?1 LIMIT 1",
+                )
+                .map_err(|e| self.db_error("查询 api_configs 失败", &e))?;
+            stmt.query_row([id], |r| Self::map_api_config_row(r))
+                .map_err(|e| self.db_error("按 id 读取 api_configs 失败", &e))
+        })
+    }
+
+    /// 读 `app_meta` 里的用途绑定：`feature_route.<purpose>` → `api_configs.id`。
+    ///
+    /// `app_meta` 是现成的 KV 表（`key` 主键 / `value` / `updatedAt`），
+    /// **因此不需要动 `api_configs` 或任何 schema** ——
+    /// 那张表与 Android Room 共享、且有闸门逐字比对。
+    ///
+    /// 取不到、值非数字、或读库失败一律返回 `None`（交给调用方回退），
+    /// **不把"没配过"当成错误**。
+    fn route_config_id(&self, purpose: &str) -> Option<i64> {
+        let key = format!("feature_route.{purpose}");
+        let value = self
+            .with_db(|conn| {
+                conn.query_row(
+                    "SELECT value FROM app_meta WHERE key = ?1",
+                    [&key],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(|e| self.db_error("读取 app_meta 失败", &e))
+            })
+            .ok()?;
+        value.trim().parse::<i64>().ok()
+    }
+
+    /// 八个列的行映射 —— 两处查询共用，避免各自维护一份。
+    fn map_api_config_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ApiConfigRow> {
+        Ok(ApiConfigRow {
+            provider: r.get(0)?,
+            api_key: r.get(1)?,
+            extra_api_keys: r.get(2)?,
+            base_url: r.get(3)?,
+            model: r.get(4)?,
+            temperature: r.get::<_, f64>(5)?,
+            max_tokens: r.get(6)?,
+            format_hint: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
         })
     }
 
