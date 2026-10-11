@@ -131,6 +131,11 @@ final class ChatViewModel: ObservableObject {
     /// 朗读播放器（持有 `AVAudioPlayer` —— 见 TtsSpeaker 的注释：
     /// 播放器一旦被释放声音立刻停）。
     private let speaker = TtsSpeaker()
+
+    /// 历史是否已灌完（自动朗读的前置条件之一，见 `autoReadIfNeeded`）。
+    private var didFinishInitialLoad = false
+    /// 上一次看到的助手消息数（用来识别"刚刚新增了一条"）。
+    private var lastSeenMessageCount = 0
     private var ttsTask: Task<Void, Never>?
 
     private var draftKey: String { "chat.draft.\(companionId)" }
@@ -310,6 +315,10 @@ final class ChatViewModel: ObservableObject {
 
         companion = try? environment.companions?.fetch(id: companionId)
         session.loadHistory(from: environment, limit: 100)
+        // ⚠️ 第 208 轮：灌完历史才允许自动朗读 ——
+        // 否则"进聊天页"这个动作本身会让最后一条历史被念一遍。
+        didFinishInitialLoad = true
+        lastSeenMessageCount = session.messages.count
         markRead()
         updatePhase()
     }
@@ -368,6 +377,14 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        // ⚠️ 第 208 轮：音色**按角色解析**（角色覆盖 > 全局）。
+        // 直接用 `settings.voice` 会让"给这个角色单独配的音色"永远不生效。
+        let voice = VoiceProfileStore.effectiveVoice(
+            companionId: session.companionId,
+            global: settings.voice,
+            repository: repo
+        )
+
         ttsStates[message.id] = .synthesizing
         let plan = TtsClient.Plan(
             baseUrl: route.baseUrl,
@@ -375,7 +392,7 @@ final class ChatViewModel: ObservableObject {
             model: route.model,
             provider: route.provider,
             proto: settings.proto,
-            voice: settings.voice,
+            voice: voice,
             format: settings.format,
             text: text
         )
@@ -389,9 +406,33 @@ final class ChatViewModel: ObservableObject {
                 self.ttsStates[message.id] = .speaking
             } catch {
                 guard !Task.isCancelled else { return }
-                self.ttsStates[message.id] = .failed(Self.describeTtsError(error))
+                self.ttsStates[message.id] = .failed(TtsClient.describe(error))
             }
         }
+    }
+
+    // MARK: - 自动朗读新回复（第 208 轮）
+
+    /// 新回复落地后自动朗读。
+    ///
+    /// ## 触发条件（每一条都必须满足，否则"突然出声"）
+    /// 1. 总开关 `feature_route.tts.auto_read` 开着（**默认关**）
+    /// 2. **历史已灌完**（`didFinishInitialLoad`）——
+    ///    否则一进聊天页会把最后一条历史也念一遍
+    /// 3. 消息数**增加**且新增的最后一条是**助手的文本消息**
+    ///    （表情/图片/自己的消息都不念）
+    /// 4. 用户没有正在听另一条（`ttsStates` 里没有进行中的状态）
+    private func autoReadIfNeeded(_ messages: [ChatSession.Message]) {
+        defer { lastSeenMessageCount = messages.count }
+        guard didFinishInitialLoad else { return }
+        guard messages.count == lastSeenMessageCount + 1 else { return }
+        guard let last = messages.last, last.role == .assistant else { return }
+        guard !last.isSticker, last.imageData == nil else { return }
+        guard !last.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard ttsStates.values.allSatisfy({ $0.isFailure }) else { return }
+        guard let repo = environment.apiConfigs,
+              TtsSettings.load(from: repo).autoRead else { return }
+        speak(last)
     }
 
     /// 停止朗读并清掉过程状态（失败提示保留）。
@@ -407,10 +448,8 @@ final class ChatViewModel: ObservableObject {
         ttsStates = ttsStates.filter { $0.value.isFailure }
     }
 
-    private static func describeTtsError(_ error: Error) -> String {
-        if let tts = error as? TtsClient.TtsError { return tts.message }
-        return error.localizedDescription
-    }
+    /// 错误文案统一走 `TtsClient.describe` ——
+    /// 聊天页与设置页试听共用一份，避免"同一句话两处说法不同"。
 
     func sendText() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -448,6 +487,7 @@ final class ChatViewModel: ObservableObject {
             .sink { [weak self] in
                 self?.messages = $0
                 self?.resolveStickerImages($0)
+                self?.autoReadIfNeeded($0)
             }
             .store(in: &cancellables)
 

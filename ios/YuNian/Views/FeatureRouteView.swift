@@ -144,6 +144,8 @@ private struct PurposeRouteDetailView: View {
     @State private var tts = TtsSettings()
     @State private var ttsLoaded = false
     @State private var status: String?
+    /// 试听（第 208 轮）：必须由被持有的对象拿住播放器（见 `VoicePreviewer`）。
+    @StateObject private var previewer = VoicePreviewer()
 
     var body: some View {
         let c = YNTheme.palette(scheme)
@@ -195,6 +197,8 @@ private struct PurposeRouteDetailView: View {
 
             if purpose == .tts, resolved?.isBound == true {
                 ttsSection
+                autoReadSection
+                voiceProfileSection
             }
 
             if let status {
@@ -211,7 +215,12 @@ private struct PurposeRouteDetailView: View {
         .navigationTitle(purpose.title)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
-        .onDisappear { applyModel(silentlyWhenUnchanged: true) }
+        .onDisappear {
+            // 离开这一页就停试听：声音继续响而屏幕上没有任何指示，
+            // 用户只能靠"声音从哪来"猜。
+            previewer.reset()
+            applyModel(silentlyWhenUnchanged: true)
+        }
         .onChange(of: tts) { _, value in saveTTS(value) }
     }
 
@@ -219,6 +228,9 @@ private struct PurposeRouteDetailView: View {
 
     @ViewBuilder
     private var ttsSection: some View {
+        // ⚠️ `body` 里的 `c` 在这些 `some View` 计算属性里**不在作用域**，
+        // 每个都要自己取一份（与 DiagnosticsView 的分节写法一致）。
+        let c = YNTheme.palette(scheme)
         Section {
             LabeledContent("音色") {
                 TextField(tts.proto == .mimo ? "mimo_default" : "alloy", text: $tts.voice)
@@ -240,6 +252,19 @@ private struct PurposeRouteDetailView: View {
             }
 
             Toggle("跳过括号内容", isOn: $tts.skipParentheses)
+
+            // 试听（第 208 轮）：改完音色/协议/格式**当场听**。
+            // 没有它就只能回聊天页长按一条回复去试，改一次音色要跑一趟。
+            Button {
+                previewVoice(voice: tts.voice)
+            } label: {
+                Label(previewer.state.isBusy ? "停止试听" : "试听这一条", systemImage: "play.circle")
+            }
+            if let title = previewer.state.title {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(previewer.state.isFailed ? c.warning : c.textSecondary)
+            }
         } header: {
             Text("朗读参数")
         } footer: {
@@ -250,6 +275,120 @@ private struct PurposeRouteDetailView: View {
             跳过括号内容 = Android 的同名开关，关闭时括号里的动作描写也会被念出来。
             """)
         }
+    }
+
+    // MARK: - 自动朗读（第 208 轮）
+
+    /// **自动朗读新回复**是全局开关（不是按角色），因为它回答的是
+    /// "这台设备要不要出声"，而音色回答的是"这个角色什么声音"。
+    @ViewBuilder
+    private var autoReadSection: some View {
+        Section {
+            Toggle("自动朗读新回复", isOn: $tts.autoRead)
+        } header: {
+            Text("自动朗读")
+        } footer: {
+            Text("""
+            默认关 —— 默认开等于"刚装上就突然出声"。
+            它用播放类别（`.playback`），**不受静音开关影响**：尊重静音会变成
+            "看起来在念、其实没声音"，那比出声更让人困惑。不想听就关掉这个开关。
+            只念**助手的新文本回复**：表情、图片、历史消息都不会被念。
+            """)
+        }
+    }
+
+    // MARK: - 按角色音色（第 208 轮）
+
+    /// 每个角色一套音色（留空 = 用上面的全局音色）。
+    ///
+    /// ## 为什么放在这里而不是角色编辑页
+    /// 音色是"这条语音线路怎么念"，与线路设置强相关；
+    /// 而且用户配音色时正看着这条线路的模型/协议，不该被拆到两个页面。
+    @ViewBuilder
+    private var voiceProfileSection: some View {
+        let c = YNTheme.palette(scheme)
+        let companions = (try? environment.companions?.fetchAll()) ?? []
+        Section {
+            if companions.isEmpty {
+                Text("还没有角色。")
+                    .font(.subheadline)
+                    .foregroundStyle(c.textTertiary)
+            } else {
+                ForEach(companions, id: \.id) { companion in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(companion.name)
+                                .font(.subheadline)
+                            Spacer()
+                            TextField(tts.voice.isEmpty ? "用全局音色" : "用全局（\(tts.voice)）",
+                                      text: bindingForVoice(companion.id))
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .font(.subheadline)
+                        }
+                        Button {
+                            previewVoice(voice: VoiceProfileStore.effectiveVoice(
+                                companionId: companion.id,
+                                global: tts.voice,
+                                repository: environment.apiConfigs))
+                        } label: {
+                            Label("试听这个角色", systemImage: "play.circle")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(c.accent)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } header: {
+            Text("按角色音色")
+        } footer: {
+            Text("""
+            留空 = 用上面的全局音色。填了则**该角色优先**（这条语音线路不变，只换声音）。
+            存 `app_meta`（`voice.voice.<角色 id>`），不新增表。
+            试听按**这个角色最终会用的音色**发一次请求 —— 听到什么，聊天里就是什么。
+            """)
+        }
+        .onAppear { resetPreviewer() }
+    }
+
+    /// 某个角色的音色覆盖绑定（空串 = 清除覆盖）。
+    private func bindingForVoice(_ companionId: Int64) -> Binding<String> {
+        Binding(
+            get: { VoiceProfileStore.override(companionId: companionId,
+                                              repository: environment.apiConfigs) ?? "" },
+            set: { newValue in
+                try? VoiceProfileStore.setOverride(newValue, companionId: companionId,
+                                                   repository: environment.apiConfigs)
+            }
+        )
+    }
+
+    /// 试听当前设置（先停掉上一次；缺 Key 等前置条件直接给出可读原因）。
+    private func previewVoice(voice: String) {
+        guard let repo = environment.apiConfigs else { return }
+        if previewer.state.isBusy {
+            previewer.stop()
+            return
+        }
+        guard let route = resolved else { return }
+        let apiKey = environment.resolvedAPIKey(configId: route.configId)
+        guard !apiKey.isEmpty else {
+            status = "「\(environment.displayName(forProvider: route.provider))」缺少 API Key"
+            return
+        }
+        previewer.preview(baseUrl: route.baseUrl,
+                          apiKey: apiKey,
+                          model: route.model,
+                          provider: route.provider,
+                          settings: tts,
+                          voice: voice)
+    }
+
+    private func resetPreviewer() {
+        previewer.reset()
     }
 
     // MARK: - 组件

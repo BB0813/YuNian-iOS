@@ -80,6 +80,15 @@ struct TtsClient {
 
     // MARK: - 一次合成的输入
 
+    /// 面向界面的一句话。
+    ///
+    /// 聊天页朗读与设置页试听**共用这一份** —— 两处各写一套说法，
+    /// 用户会以为遇到的是两个不同的毛病。
+    static func describe(_ error: Error) -> String {
+        if let tts = error as? TtsError { return tts.message }
+        return error.localizedDescription
+    }
+
     struct Plan {
         var baseUrl: String
         var apiKey: String
@@ -463,10 +472,22 @@ struct TtsSettings: Equatable {
     /// 与 Android `ChatTtsConfig.skipParentheses` 的默认值一致：**false**。
     var skipParentheses = false
 
+    /// **自动朗读新回复**（第 208 轮）。
+    ///
+    /// ## 为什么默认关
+    /// 默认开等于"第一次装上就会突然出声" —— 那是最容易被投诉的一类默认值。
+    /// Aru 那侧对应的是 `voice.enabled`「显示回答朗读按钮」，同样是显式开启。
+    ///
+    /// ## ⚠️ 它用的是播放类别（`.playback`），**不受静音开关影响**
+    /// 这是有意的：尊重静音开关的话，静音状态下会"看起来在念、其实没声音"，
+    /// 那比出声更让人困惑。所以开关的说明里写清了"不想听就关掉它"。
+    var autoRead = false
+
     static let voiceKey = "feature_route.tts.voice"
     static let protocolKey = "feature_route.tts.protocol"
     static let formatKey = "feature_route.tts.format"
     static let skipParenthesesKey = "feature_route.tts.skip_parentheses"
+    static let autoReadKey = "feature_route.tts.auto_read"
 
     static func load(from repo: ApiConfigRepository) -> TtsSettings {
         var settings = TtsSettings()
@@ -484,6 +505,7 @@ struct TtsSettings: Equatable {
         }
         // 缺键 = 没配过 = 用默认值 false（不要用"键存在即为真"那种读法）
         settings.skipParentheses = (try? repo.metaValue(forKey: skipParenthesesKey)) == "1"
+        settings.autoRead = (try? repo.metaValue(forKey: autoReadKey)) == "1"
         return settings
     }
 
@@ -492,6 +514,7 @@ struct TtsSettings: Equatable {
         try repo.setMetaValue(proto.rawValue, forKey: Self.protocolKey)
         try repo.setMetaValue(format.rawValue, forKey: Self.formatKey)
         try repo.setMetaValue(skipParentheses ? "1" : "", forKey: Self.skipParenthesesKey)
+        try repo.setMetaValue(autoRead ? "1" : "", forKey: Self.autoReadKey)
     }
 }
 
