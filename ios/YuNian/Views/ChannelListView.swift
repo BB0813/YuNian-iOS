@@ -43,7 +43,10 @@ struct ChannelListView: View {
             } header: {
                 Text("已配置渠道")
             } footer: {
-                Text("同一时刻只有一条渠道生效。左滑可删除；保存某条即把它设为当前。")
+                // 第 203 轮：把「当前」与「对话线路」的关系说清楚 ——
+                // 引擎读的是 app_meta.feature_route.chat，而它就是这里这条
+                // 「当前启用渠道」（不变式见 ApiConfigRepository.activate）。
+                Text("同一时刻只有一条渠道生效，它就是「对话」线路使用的渠道（见「用途线路」）。左滑可删除；保存某条即把它设为当前。")
             }
 
             Section {

@@ -177,10 +177,18 @@ private struct ChatViewContent: View {
                             : nil,
                         // 同角色连续消息收紧间距；只有一组的**最后一条**才带小尾巴，
                         // 否则连续气泡会各自带尾，像一串互不相干的方块。
-                        isLastOfGroup: next?.role != message.role
+                        isLastOfGroup: next?.role != message.role,
+                        onSpeak: { target in model.speak(target) }
                     )
                     .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
                     .id(message.id)
+
+                    // 朗读状态只挂在该条消息下方（合成中 / 朗读中 / 失败原因）。
+                    // 与表情失败原因同一条原则：拿不到设备日志时，界面就是取证面。
+                    if let tts = model.ttsStates[message.id] {
+                        ttsNotice(tts, colors: c)
+                            .padding(.top, YNTheme.Space.xs)
+                    }
                 }
 
                 if !model.displayReasoning.isEmpty {
@@ -293,6 +301,24 @@ private struct ChatViewContent: View {
     ///
     /// 因此这里：不遮内容、不抢焦点、可关闭、位置就在对话末尾
     /// —— 用户看到"卡在哪一步"，而不是被拦在一个对话框前。
+    /// 朗读状态提示（合成中 / 朗读中 / 失败原因）。
+    ///
+    /// 贴在对应气泡下方、靠助手一侧；与表情的失败原因同样是"界面自报原因"，
+    /// 因为拿不到设备日志时这是唯一的取证面。
+    private func ttsNotice(_ state: ChatViewModel.TtsState, colors c: YNTheme.Palette) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: state.symbol)
+                .accessibilityHidden(true)
+            Text(state.label)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .font(.caption2)
+        .foregroundStyle(state.isFailure ? c.warning : c.textSecondary)
+        .padding(.leading, YNTheme.Space.lg)
+        .accessibilityElement(children: .combine)
+    }
+
     private func errorNotice(_ text: String, colors c: YNTheme.Palette) -> some View {
         HStack(alignment: .top, spacing: YNTheme.Space.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -525,6 +551,9 @@ private struct MessageBubble: View {
     let stickerFailure: String?
     /// 是否是一组同角色消息的最后一条 —— 只有它带「小尾巴」。
     let isLastOfGroup: Bool
+    /// 长按菜单里的「朗读」（走 `feature_route.tts` 的语音渠道）。
+    /// `nil` = 不提供入口（例如预览模式或将来把朗读收进别处）。
+    var onSpeak: ((ChatSession.Message) -> Void)?
 
     private var isUser: Bool { message.role == .user }
 
@@ -548,6 +577,15 @@ private struct MessageBubble: View {
                             UIPasteboard.general.string = message.text
                         } label: {
                             Label("复制", systemImage: "doc.on.doc")
+                        }
+                        // 朗读只给**助手**的文本消息：用户自己的消息没有朗读的意义，
+                        // 表情与图片也没有可念的文字（菜单里那两项本就不该出现）。
+                        if !isUser, let onSpeak {
+                            Button {
+                                onSpeak(message)
+                            } label: {
+                                Label("朗读", systemImage: "speaker.wave.2")
+                            }
                         }
                     }
                 }

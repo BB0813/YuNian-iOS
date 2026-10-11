@@ -138,6 +138,21 @@ struct MeView: View {
                 )
             }
 
+            // 第 203 轮（P0 ②）：四条用途线路。
+            // 单独一层入口而不是塞进渠道页 —— 渠道页回答"我配了哪些渠道"，
+            // 这里回答"哪个用途用哪条"，是两件事。
+            NavigationLink {
+                FeatureRouteView()
+            } label: {
+                YNSettingsRow(
+                    icon: "arrow.triangle.branch",
+                    title: "用途线路",
+                    subtitle: "对话 / 生图 / 朗读 / 向量嵌入各自用哪条渠道与模型。",
+                    badge: routesBadge,
+                    badgeTint: routesBoundCount == 0 ? nil : c.accent
+                )
+            }
+
             NavigationLink {
                 StickerLibraryView()
             } label: {
@@ -164,6 +179,29 @@ struct MeView: View {
 
     private var channelReady: Bool {
         (try? environment.apiConfigs?.activeConfig()) != nil
+    }
+
+    /// 用户**显式指定**过渠道的线路条数。
+    ///
+    /// ⚠️ 刻意**不数「对话」**：对话线路由 `upsertActiveConfig` / `activate`
+    /// 自动与「当前启用渠道」保持同步（见 `ApiConfigRepository.activate` 的不变式），
+    /// 所以它几乎恒为已绑定 —— 数进去的话，一个刚装好、从没进过线路页的用户
+    /// 也会看到「已指定 1 条」，那是在描述实现细节，不是在描述用户做过什么。
+    private var routesBoundCount: Int {
+        guard let repo = environment.apiConfigs else { return 0 }
+        return FeaturePurpose.allCases
+            .filter { $0 != .chat }
+            .filter { purpose in
+                let bound = (try? repo.routeConfigId(purpose: purpose)) ?? nil
+                return bound != nil
+            }
+            .count
+    }
+
+    /// 徽标回答两个问题：另外三条线路有没有单独指定；没有就是全部跟随当前。
+    private var routesBadge: String {
+        let count = routesBoundCount
+        return count == 0 ? "跟随当前渠道" : "已单独指定 \(count) 条"
     }
 
     /// 徽标只回答一个问题：「现在能不能用」。

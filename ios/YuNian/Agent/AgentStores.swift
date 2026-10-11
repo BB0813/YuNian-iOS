@@ -19,12 +19,18 @@ import os
 ///    两端都是小端（初查时曾误判为「编码大端、解码小端」，实为 grep 漏了续行）。
 ///
 /// ## 关于 `embed_text`
-/// 需要调用嵌入服务（Android 侧走 `EmbeddingService`）。M1 阶段返回 nil，
-/// Rust 侧会把 None 当作「本机无嵌入能力」正常降级（不做向量召回，回退关键词召回）。
-/// 这是**有意的降级**，不是占位；接入时机见里程碑 M3。
+/// Rust 的 `MemorySelector.select` 用它算语义相似度。第 203 轮（多线路 P0 ②）
+/// **已接通**：走 `feature_route.embedding` 指向的渠道（见 `embedText` 的注释）。
+/// 失败时仍然返回 nil —— Rust 会把 None 当作「本机无嵌入能力」正常降级
+/// （不做向量召回，回退关键词召回），不会让回合失败。
 final class AgentStores {
     private let database: YuNianDatabase
     private let log = Logger(subsystem: "com.yunian.ai", category: "agent.store")
+
+    /// query → 向量的小缓存（自带锁，见 `EmbeddingQueryCache`）。
+    private let embedCache = EmbeddingQueryCache(capacity: 64)
+    /// 嵌入失败退避（自带锁）：一条坏掉的向量渠道不该让**每回合**都卡一个超时。
+    private let embedBackoff = EmbeddingFailureBackoff()
 
     init(database: YuNianDatabase) {
         self.database = database
@@ -348,10 +354,84 @@ extension AgentStores: MemoryStore {
         return true
     }
 
-    /// M1 阶段有意返回 nil（无嵌入能力）——Rust 会降级为关键词召回。
-    /// 接入时机见里程碑 M3（Android 侧走 `EmbeddingProvider.embed`）。
+    /// 生成文本嵌入 —— Rust `MemorySelector.select` 用它算语义相似度。
+    ///
+    /// ## 契约（`memory_selector.rs:65`）
+    /// 返回 FloatArray 的 JSON（如 `[0.1,0.2]`）；**失败 / 不支持一律返回 nil**，
+    /// Rust 侧把 None 当作「本机无嵌入能力」正常降级
+    /// （不做向量召回，回退关键词召回）。所以这里不抛错、不打断回合。
+    ///
+    /// ## 走哪条渠道（多线路 P0 ②）
+    /// `feature_route.embedding` 显式绑定优先；没绑定就回退「当前启用渠道」，
+    /// 并按 Android 的 provider 白名单判定是否支持 —— 与 Rust 的取法同构。
+    ///
+    /// ## 为什么是同步阻塞
+    /// UniFFI 的 foreign trait 方法签名就是同步的，Rust 在 `select()` 里直接调它。
+    /// Android 的 `MemoryStoreImpl.embedText` 同样是
+    /// `runBlockingOnIo { provider.embed(text) }` 同步等待。
+    /// **但绝不能在主线程上做** —— 下面第一行就挡住了这种调用。
     func embedText(text: String) -> String? {
-        nil
+        // 回合在 AgentHostThreading.turnQueue 上跑，不在主线程。
+        // 万一将来有主线程路径调到它，直接返回 nil 也比冻住界面好。
+        guard !Thread.isMainThread else { return nil }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        // ⚠️ 每次现建一个仓储、**不存成属性**：它只是把 database 包一层，
+        // 构造成本可忽略；而存成属性会给这个 `Sendable` 类多加一个
+        // "non-Sendable stored property" 警告（Swift 6 模式下是错误）。
+        let repo = ApiConfigRepository(database: database)
+        // ⚠️ `try?` 自己就会拍平成一层可选（Swift 5+），不要再写第二个 `let`。
+        guard let resolved = try? repo.resolve(purpose: .embedding) else { return nil }
+
+        // 未显式绑定 → 与 Android 一致：只有"支持嵌入的 provider"才尝试。
+        // 显式绑定 → 用户已经明确指定了这条渠道，不再用白名单替他否决。
+        if !resolved.isBound, !EmbeddingClient.isSupported(provider: resolved.provider) {
+            return nil
+        }
+
+        let model = resolved.model.isEmpty
+            ? EmbeddingClient.recommendedModel(provider: resolved.provider)
+            : resolved.model
+        let apiKey = KeychainStore.resolvedAPIKey(configId: resolved.configId)
+        guard !apiKey.isEmpty else { return nil }
+
+        let cacheKey = "\(resolved.configId)|\(model)|\(text)"
+        if let cached = embedCache.value(for: cacheKey) {
+            return Self.jsonString(from: cached)
+        }
+        // 刚失败过 → 静默期内直接放弃。`embedText` 是同步阻塞的，
+        // 一条坏掉的向量渠道不该让**每一回合**都卡满一个读超时。
+        if embedBackoff.shouldSkip() { return nil }
+
+        let request = EmbeddingClient.Request(
+            baseUrl: resolved.baseUrl,
+            apiKey: apiKey,
+            model: model,
+            provider: resolved.provider,
+            text: text
+        )
+        do {
+            let floats = try EmbeddingClient().embedSync(request)
+            embedCache.insert(floats, for: cacheKey)
+            embedBackoff.recordSuccess()
+            return Self.jsonString(from: floats)
+        } catch {
+            // 面向日志；不打断回合（Rust 会按"无嵌入能力"降级）
+            embedBackoff.recordFailure()
+            log.warning("嵌入失败（\(resolved.provider, privacy: .public)/\(model, privacy: .public)）：\(String(describing: error), privacy: .public)；\(Int(EmbeddingFailureBackoff.cooldown)) 秒内不再重试")
+            return nil
+        }
+    }
+
+    /// 向量 → Rust 期望的 JSON 数组文本。
+    ///
+    /// 用 `Double` 而不是直接序列化 `Float`：`JSONSerialization` 接受的
+    /// 是 `NSNumber`，多绕一层不如显式转一次清楚。Rust 侧反序列化成 `f32`，
+    /// 值不变。
+    private static func jsonString(from floats: [Float]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: floats.map { Double($0) }),
+              let text = String(data: data, encoding: .utf8) else { return "[]" }
+        return text
     }
 
     // MARK: 内部

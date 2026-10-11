@@ -68,6 +68,43 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var reasoningText = ""
     @Published private(set) var phase: Phase = .booting
     @Published private(set) var errorMessage: String?
+
+    /// 朗读状态（按消息 id）。
+    ///
+    /// ## 为什么要显示到界面上，而不是只写日志
+    /// 与表情失败原因同一条原则：**拿不到设备日志时，界面就是唯一的取证面**。
+    /// 一个沉默的"点了没反应"会把三种完全不同的原因混成一件事：
+    ///   · 这条消息没有可朗读的文字（表情 / 图片 / 只剩括号内容）
+    ///   · 朗读线路没配，或渠道没密钥
+    ///   · 接口返回的不是音频（这时要给出状态码与正文开头）
+    enum TtsState: Equatable {
+        case synthesizing
+        case speaking
+        case failed(String)
+
+        var label: String {
+            switch self {
+            case .synthesizing: return "正在合成语音…"
+            case .speaking: return "朗读中…"
+            case .failed(let reason): return "朗读失败：\(reason)"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .synthesizing: return "waveform"
+            case .speaking: return "speaker.wave.2.fill"
+            case .failed: return "exclamationmark.triangle.fill"
+            }
+        }
+
+        var isFailure: Bool {
+            if case .failed = self { return true }
+            return false
+        }
+    }
+
+    @Published private(set) var ttsStates: [UUID: TtsState] = [:]
     @Published var draft: String {
         didSet { UserDefaults.standard.set(draft, forKey: draftKey) }
     }
@@ -80,6 +117,11 @@ final class ChatViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var sendTask: Task<Void, Never>?
     private var didAppear = false
+
+    /// 朗读播放器（持有 `AVAudioPlayer` —— 见 TtsSpeaker 的注释：
+    /// 播放器一旦被释放声音立刻停）。
+    private let speaker = TtsSpeaker()
+    private var ttsTask: Task<Void, Never>?
 
     private var draftKey: String { "chat.draft.\(companionId)" }
 
@@ -233,6 +275,8 @@ final class ChatViewModel: ObservableObject {
         self.session = ChatSession(companionId: companionId)
         self.draft = UserDefaults.standard.string(forKey: "chat.draft.\(companionId)") ?? ""
         bindSession()
+        // 播完（或被停）清掉过程状态；失败提示保留 —— 那是用户要看的。
+        speaker.onFinish = { [weak self] _ in self?.clearTtsProgress() }
     }
 
     func appear() async {
@@ -257,6 +301,87 @@ final class ChatViewModel: ObservableObject {
         }
         sendTask?.cancel()
         sendTask = nil
+        // 离开页面就停朗读：后台继续出声而屏幕上没有任何"正在念"的指示，
+        // 用户只能靠"声音从哪来"猜，那还不如停掉。
+        stopSpeaking()
+    }
+
+    // MARK: - 朗读
+
+    /// 朗读一条消息（长按气泡 → 朗读）。
+    ///
+    /// 走 `feature_route.tts` 指向的语音渠道（多线路 P0 ②）。
+    /// 再点同一条 = 停止。
+    func speak(_ message: ChatSession.Message) {
+        if ttsStates[message.id] != nil {
+            stopSpeaking()
+            return
+        }
+        stopSpeaking()
+
+        guard let repo = environment.apiConfigs else { return }
+        let settings = TtsSettings.load(from: repo)
+
+        // 与 Android `ChatTtsController` 同一条清理链（`TtsTextCleaner`）：
+        // 表情 id、`[图片]`、`[[生图: …]]`、Markdown 标记都不该被念出来。
+        let text = TtsClient.cleanText(message.text, skipParentheses: settings.skipParentheses)
+        guard !text.isEmpty else {
+            ttsStates[message.id] = .failed("这条没有可朗读的文字")
+            return
+        }
+        guard let route = (try? repo.resolve(purpose: .tts)) ?? nil else {
+            ttsStates[message.id] = .failed("还没有可用的渠道")
+            return
+        }
+        let apiKey = environment.resolvedAPIKey(configId: route.configId)
+        guard !apiKey.isEmpty else {
+            let name = environment.displayName(forProvider: route.provider)
+            ttsStates[message.id] = .failed("「\(name)」缺少 API Key")
+            return
+        }
+
+        ttsStates[message.id] = .synthesizing
+        let plan = TtsClient.Plan(
+            baseUrl: route.baseUrl,
+            apiKey: apiKey,
+            model: route.model,
+            provider: route.provider,
+            proto: settings.proto,
+            voice: settings.voice,
+            format: settings.format,
+            text: text
+        )
+
+        ttsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let audio = try await TtsClient().synthesize(plan)
+                guard !Task.isCancelled else { return }
+                try self.speaker.play(audio, format: settings.format)
+                self.ttsStates[message.id] = .speaking
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.ttsStates[message.id] = .failed(Self.describeTtsError(error))
+            }
+        }
+    }
+
+    /// 停止朗读并清掉过程状态（失败提示保留）。
+    func stopSpeaking() {
+        ttsTask?.cancel()
+        ttsTask = nil
+        speaker.stop()
+        clearTtsProgress()
+    }
+
+    /// 清掉"合成中 / 朗读中"，保留失败提示 —— 用户需要看到失败原因。
+    private func clearTtsProgress() {
+        ttsStates = ttsStates.filter { $0.value.isFailure }
+    }
+
+    private static func describeTtsError(_ error: Error) -> String {
+        if let tts = error as? TtsClient.TtsError { return tts.message }
+        return error.localizedDescription
     }
 
     func sendText() {

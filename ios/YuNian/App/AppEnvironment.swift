@@ -329,6 +329,15 @@ final class AppEnvironment: ObservableObject {
         return YuNianSeed.apiProviderPresets
     }
 
+    /// 服务商的中文显示名（预设里没有这个 provider 时回退到原值）。
+    ///
+    /// 界面上多处要它，此前每处各写一遍 `first { $0.provider == … }?.displayName ?? …`。
+    /// 抽一处的直接理由：新增的「用途线路」页要显示四条线路各自的渠道名，
+    /// 再抄第五遍就一定会有一处漏掉兜底分支。
+    func displayName(forProvider provider: String) -> String {
+        visibleApiPresets().first { $0.provider == provider }?.displayName ?? provider
+    }
+
     // MARK: - 余额
 
     /// 余额查询结果。服务端大多不返回结构化余额，此时只看 `rawSubscription`。

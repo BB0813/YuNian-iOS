@@ -95,7 +95,7 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-**预期**：10 个测试文件全部通过。已知覆盖：
+**预期**：26 个测试文件全部通过。已知覆盖：
 
 | 测试文件 | 覆盖 |
 |---|---|
@@ -122,6 +122,9 @@ xcodebuild test \
 | `BoundConfigUsabilityTests` | 伴侣绑定配置的可用性：配置不存在（provider nil）不可用 / **有 key 的非 PARTNER 可用**（第 188 轮修的 bug —— 旧实现读行内恒空 apiKey 而恒 false）/ 无 key 的非 PARTNER 不可用 / PARTNER 无 key 也可用 / 空格 key 算存在（把"是否 trim"记成被测试的决策） |
 | `BackupCryptoEncryptTests` | `.lybk` 容器**加密**侧：往返（ASCII / 中日文+emoji 密码 / 空 / 10KB）/ **产物必须通过 `parse`**（只测"自己加自己解"会漏掉 salt-IV 顺序写反，而 Android 会解不开）/ 前 4 字节 `LYBK` / 空明文容器恰 48 字节不算 tooShort / 随机 salt 使两次产物不同 / 固定 salt 确实落在偏移 4 / 密码错→decryptionFailed / salt 长度错→badSaltLength / 篡改密文与篡改 tag 都失败 |
 | `BackupExportRoundTripTests` | 导出→导入往返（**本地逼近"Android 读得懂"的最强手段**）：明文含全部 9 分区键且无多余键 / 各分区计数（含三处**表名与分区名不一致**：`temp_memory`→`tempMemories`、`token_usage`→`tokenUsages`、`diary_entries`→`diaries`）/ **导出→导入空库后伴侣名、非键字段、单聊与群聊正文、记忆都还原**（查目标库实际行，不看计数字段）/ 密码错必须失败而不是报告成功 / 空库导出仍产出合法容器 |
+| `FeatureRouteTests` | 用途线路（多线路）：**不变式 —— 存在启用行时 `feature_route.chat` 必须指向它**（引擎读前者、旧引擎读后者）/ 绑定非对话线路**不得**动到当前启用渠道 / 绑定行不要求 `isEnabled` / 未绑定回退当前启用且 `isBound=false` / 模型覆盖优先与解绑时一并清除 / 值非数字按"没绑定" / 删行清掉指向它的绑定 / 绑不存在的 id 抛 `RouteError.configNotFound` 且什么都不写 / app_meta 空串=删键 / 四条线路互不干扰 / 键名逐字钉死 |
+| `TtsClientTests` | 朗读纯逻辑：`/audio/speech` 地址规整（裸主机 / `/v1` / `/v1/audio` / 已是 speech / 未知路径拒绝 / 带 query 拒绝）/ http 只允许私网（含 172.16–31 与 169.254 边界）/ 音频魔数嗅探（RIFF / ID3 / MP3 帧同步 / fLaC / OggS / ADTS，json·html 判否，无魔数按长度兜底）/ MiMo 主机白名单与 `/v1` 规整 / 模型归一与不支持的两个模型给出可照做的提示 / `[[生图: …]]` 与闭合标签都被清掉 / 括号默认保留 / 超时预算（30–180s）/ 空文本与缺密钥不发请求 / 设置往返（`skip_parentheses` 关闭时删键） |
+| `EmbeddingClientTests` | 向量纯逻辑：端点拼接（尾斜杠 / GEMINI 多一层 `/openai` / 空地址 nil）/ provider 白名单与推荐模型表逐字对应 Android / 响应解析（数字与数字字符串 / 缺字段·空数组·非数字一律 nil）/ 空文本·缺密钥·空地址提前退出（不发请求）/ 查询缓存（LRU 淘汰、更新不撑爆、容量下限 1） |
 
 **失败说明什么**：
 - 大量 `Cannot find 'X' in scope` → 第 3 步其实没成功，先修编译

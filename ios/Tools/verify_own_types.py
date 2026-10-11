@@ -88,7 +88,9 @@ EXTERNAL_ALLOWLIST = {
     #   - 系统连接页（第 202 轮）：逐项读真实授权状态。
     #     AVFoundation：相机与麦克风；Photos：相册读写；Speech：语音识别；
     #     LocalAuthentication：Face ID 能力探测。
-    "AVCaptureDevice", "AVAuthorizationStatus", "AVAudioSession",
+    #   - 朗读（第 203 轮）：`AVAudioPlayer` 播放语音渠道合成出来的音频。
+    #     它是本仓第一个「播放」用途的 AVFoundation 类型（此前只有授权查询）。
+    "AVCaptureDevice", "AVAuthorizationStatus", "AVAudioSession", "AVAudioPlayer",
     "PHPhotoLibrary", "PHAuthorizationStatus",
     "SFSpeechRecognizer", "SFSpeechRecognizerAuthorizationStatus",
     "LAContext",

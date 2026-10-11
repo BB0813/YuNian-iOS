@@ -356,19 +356,26 @@ final class ChatSession: ObservableObject {
     ) async {
         // ⚠️ 第 161 轮：`var` 而非 `let` —— saveLastGenAt 闭包要改它。
         guard let loaded = ImageGenStore.load() else { return }   // 未配置 → 不触发
+
+        // ⚠️ 第 203 轮（P0 ②）：改用**「生图」线路**指向的渠道，而不是
+        // 「当前启用渠道」。理由很直接：当前启用渠道是**对话**用的那家，
+        // 它多半只提供对话模型；拿它去打 /images/generations 是注定的 404。
+        // 取法由 `ApiConfigRepository.resolve` 统一给出（绑定 → 行；无绑定 → 当前启用），
+        // 所以**没配过多线路的库行为与改动前完全一致**。
+        guard let repo = environment.apiConfigs,
+              let route = (try? repo.resolve(purpose: .image)) ?? nil else { return }
         var prefs = loaded
-        guard let cfg = try? environment.apiConfigs?.activeConfig() else { return }
 
         // apiKey 取一次，避免闭包里重复读 Keychain
         // 第 186 轮：按**该条配置**解析 key（不再是全局单槽）
-        let apiKey = KeychainStore.resolvedAPIKey(configId: cfg.id)
+        let apiKey = KeychainStore.resolvedAPIKey(configId: route.configId)
 
         var coordinator = ImageGenCoordinator(
             deps: .init(
                 global: prefs.global,
                 override: .init(),
-                mainConnection: (cfg.baseUrl, apiKey),
-                configBaseUrl: cfg.baseUrl,
+                mainConnection: (route.baseUrl, apiKey),
+                configBaseUrl: route.baseUrl,
                 configApiKey: apiKey,
                 lastGenAtMs: prefs.lastGenAtMs,
                 saveLastGenAt: { ms in

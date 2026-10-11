@@ -16,10 +16,20 @@ README 是**这个目录的状态源**——读它的人会拿这些数字判断
 ## 判据
 README 第一段里形如 `N 文件 / M 行（Swift A / Python B / Markdown C）`
 的三个数必须与实测一致。数字写错 → 失败。
+
+## ⚠️ 统计的是 **git 跟踪集**，不是磁盘
+第 203 轮改。原先扫磁盘，于是本机只要存在**任何被 `.gitignore` 的文件**
+（Apple 文档抓取脚本、`agent-native/target/` 的中间产物），本地统计就比 CI 多；
+我再用 `--fix` 把多的数字写进 README → **CI 立刻红**。
+第 202 轮真实发生过（README 写 Python 43 / CI 实际 37）。
+
+根因不是"忘了同步"，是**判据取错了树**：CI 只看 checkout 出来的那棵树。
+所以本脚本以 `git ls-files` 为准 —— 本地与 CI 从此同一个判据。
 """
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -28,22 +38,46 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 README = REPO_ROOT / "ios/README.md"
 
 EXTS = {".swift", ".py", ".md", ".plist", ".json", ".yml", ".sh", ".png"}
+ROOTS = ("ios", "scripts", ".github")
+
+
+def tracked_paths() -> list[Path]:
+    """git 跟踪的绝对路径；git 不可用时退回扫磁盘（并打印警告）。
+
+    静默换判据比统计漂移更危险，所以退回时一定会打一行字。
+    """
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+            capture_output=True, text=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as e:
+        print(f"[warn] 取不到 git 跟踪集（{e}）；退回扫磁盘 —— 结果可能与 CI 不一致")
+        fallback: list[Path] = []
+        for root in ROOTS:
+            base = REPO_ROOT / root
+            if base.exists():
+                fallback.extend(p for p in base.rglob("*") if p.is_file())
+        return fallback
+    return [REPO_ROOT / p for p in r.stdout.split("\0") if p]
 
 
 def actual() -> tuple[int, int, int, int, int, int]:
     files = lines = 0
     by_ext: Counter[str] = Counter()
-    for root in ("ios", "scripts", ".github"):
-        base = REPO_ROOT / root
-        if not base.exists():
+    for p in tracked_paths():
+        if p.suffix not in EXTS or "Generated" in str(p):
             continue
-        for p in base.rglob("*"):
-            if not p.is_file() or "Generated" in str(p) or p.suffix not in EXTS:
-                continue
-            files += 1
-            by_ext[p.suffix] += 1
-            if p.suffix != ".png":
-                lines += len(p.read_text(encoding="utf-8", errors="ignore").splitlines())
+        try:
+            rel = p.relative_to(REPO_ROOT)
+        except ValueError:
+            continue
+        if not rel.parts or rel.parts[0] not in ROOTS:
+            continue
+        files += 1
+        by_ext[p.suffix] += 1
+        if p.suffix != ".png":
+            lines += len(p.read_text(encoding="utf-8", errors="ignore").splitlines())
     return files, lines, by_ext[".swift"], by_ext[".py"], by_ext[".md"], by_ext[".json"]
 
 
