@@ -389,9 +389,23 @@ extension AgentStores: MemoryStore {
             return nil
         }
 
-        let model = resolved.model.isEmpty
-            ? EmbeddingClient.recommendedModel(provider: resolved.provider)
-            : resolved.model
+        // ⚠️ 第 204 轮：模型名的取法分两种情况。
+        //
+        // **显式绑定 / 有覆盖** → 用线路解析出来的模型（用户明确指定过）。
+        // **只是回退到「当前启用渠道」** → 用**该 provider 的推荐向量模型**。
+        //
+        // 后者是 Android 的既有语义（`getEmbeddingModelName()` 从不读渠道行的
+        // model），而且不这样做会出一个真问题：回退到的渠道行里存的是**对话模型**
+        // （如 `gpt-4o`），拿它去打 `/embeddings` 必然 400 ——
+        // 于是"没配过向量线路的用户"每隔一分钟就发一个注定失败的请求。
+        let model: String
+        if resolved.isBound || resolved.isModelOverridden {
+            model = resolved.model.isEmpty
+                ? EmbeddingClient.recommendedModel(provider: resolved.provider)
+                : resolved.model
+        } else {
+            model = EmbeddingClient.recommendedModel(provider: resolved.provider)
+        }
         let apiKey = KeychainStore.resolvedAPIKey(configId: resolved.configId)
         guard !apiKey.isEmpty else { return nil }
 

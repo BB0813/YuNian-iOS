@@ -19,7 +19,7 @@ final class ImageGenClientTests: XCTestCase {
     /// Kotlin `buildRequestAttempts`（:219-234）：
     /// primary(b64_json) → 去 responseFormat → count=1 → size=nil，distinct。
     func testAttemptSequenceDegradesInOrder() {
-        let a = ImageGenClient.buildAttempts(prompt: "一只猫", size: "1024x1024", count: 2)
+        let a = ImageGenClient.buildAttempts(prompt: "一只猫", model: "flux-schnell", size: "1024x1024", count: 2)
 
         XCTAssertEqual(a.count, 4, "应有 4 级")
         XCTAssertEqual(a[0].responseFormat, "b64_json", "第一级带 responseFormat")
@@ -37,27 +37,41 @@ final class ImageGenClientTests: XCTestCase {
         XCTAssertNil(a[3].responseFormat)
     }
 
+    /// ⚠️ 第 204 轮：模型名必须出现在**每一级**降级里，而且降级**不换模型**。
+    ///
+    /// 这条锁的是一个真实缺口：上一版把模型写死成 `Attempt(model: "")`，
+    /// 请求体永远 `{"model": "", …}` —— 任何服务端都会拒，
+    /// 而界面上「生图线路」看起来是通的（渠道、密钥、地址都对）。
+    func testEveryAttemptCarriesTheModel() {
+        let a = ImageGenClient.buildAttempts(prompt: "x", model: "flux-schnell",
+                                            size: nil, count: 2)
+        XCTAssertEqual(a.count, 4, "仍应是 4 级")
+        for (index, attempt) in a.enumerated() {
+            XCTAssertEqual(attempt.model, "flux-schnell", "第 \(index + 1) 级丢了模型名")
+        }
+    }
+
     /// `MAX_IMAGES_PER_REQUEST = 4` 上限（Kotlin :476）
     func testCountClampedToMax() {
-        let a = ImageGenClient.buildAttempts(prompt: "x", size: nil, count: 99)
+        let a = ImageGenClient.buildAttempts(prompt: "x", model: "flux-schnell", size: nil, count: 99)
         XCTAssertEqual(a[0].count, 4)
     }
 
     /// count 下限 1（Kotlin coerceIn(1, MAX)）
     func testCountClampedToMin() {
-        let a = ImageGenClient.buildAttempts(prompt: "x", size: nil, count: 0)
+        let a = ImageGenClient.buildAttempts(prompt: "x", model: "flux-schnell", size: nil, count: 0)
         XCTAssertEqual(a[0].count, 1)
     }
 
     /// 空 size 回落到默认（Kotlin :226 ifBlank DEFAULT_IMAGE_SIZE）
     func testBlankSizeFallsBackToDefault() {
-        let a = ImageGenClient.buildAttempts(prompt: "x", size: "   ", count: 1)
+        let a = ImageGenClient.buildAttempts(prompt: "x", model: "flux-schnell", size: "   ", count: 1)
         XCTAssertFalse((a[0].size ?? "").isEmpty, "空 size 必须有回落值")
     }
 
     /// distinct：第四级与第三级在 count=1 & size=nil & responseFormat=nil 时可能重复
     func testAttemptsAreDistinct() {
-        let a = ImageGenClient.buildAttempts(prompt: "x", size: nil, count: 1)
+        let a = ImageGenClient.buildAttempts(prompt: "x", model: "flux-schnell", size: nil, count: 1)
         var seen = Set<String>()
         for at in a {
             let key = "\(at.count)|\(at.size ?? "-")|\(at.responseFormat ?? "-")"

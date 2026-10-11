@@ -377,6 +377,9 @@ final class ChatSession: ObservableObject {
                 mainConnection: (route.baseUrl, apiKey),
                 configBaseUrl: route.baseUrl,
                 configApiKey: apiKey,
+                // 第 204 轮：模型名也是「生图线路」的一部分 ——
+                // 不传的话请求体是 `{"model": ""}`，任何服务端都拒。
+                imageModel: route.model,
                 lastGenAtMs: prefs.lastGenAtMs,
                 saveLastGenAt: { ms in
                     prefs.lastGenAtMs = ms

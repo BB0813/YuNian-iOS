@@ -127,6 +127,7 @@ struct ImageGenClient {
     func generate(
         baseUrl: String,
         apiKey: String,
+        model: String,
         prompt: String,
         size: String?,
         count: Int
@@ -135,7 +136,7 @@ struct ImageGenClient {
         guard !trimmed.isEmpty else { throw ImageGenError.emptyPrompt }
 
         var lastError: Error = ImageGenError.noModel
-        for attempt in Self.buildAttempts(prompt: trimmed, size: size, count: count) {
+        for attempt in Self.buildAttempts(prompt: trimmed, model: model, size: size, count: count) {
             do {
                 let datas = try await postGeneration(baseUrl: baseUrl, apiKey: apiKey, attempt: attempt)
                 if datas.isEmpty { throw ImageGenError.noImageData }
@@ -188,22 +189,28 @@ struct ImageGenClient {
 
     /// Kotlin `buildRequestAttempts`（:215-234）。
     /// 4 级降级 + distinct；`nil` 的字段不序列化。
-    static func buildAttempts(prompt: String, size: String?, count: Int) -> [Attempt] {
+    ///
+    /// ⚠️ 第 204 轮：补上 `model` 参数。
+    /// 上一版把模型写死成 `Attempt(model: "", …)` —— 请求体永远
+    /// `{"model": "", …}`，任何服务端都会拒。Kotlin 的
+    /// `buildRequestAttempts(…, model, …)` 每一级都带模型，
+    /// 而且**降级只动 n / size / response_format，不换模型**。
+    static func buildAttempts(prompt: String, model: String, size: String?, count: Int) -> [Attempt] {
         let safeCount = min(max(count, 1), maxImagesPerRequest)
         let safeSize = {
             let t = (size ?? "").trimmingCharacters(in: .whitespaces)
             return t.isEmpty ? "1024x1024" : t
         }()
-        let primary = Attempt(model: "", prompt: prompt, count: safeCount,
+        let primary = Attempt(model: model, prompt: prompt, count: safeCount,
                               size: safeSize, responseFormat: "b64_json")
         var out: [Attempt] = []
         for a in [
             primary,
-            Attempt(model: primary.model, prompt: prompt, count: safeCount,
+            Attempt(model: model, prompt: prompt, count: safeCount,
                     size: safeSize, responseFormat: nil),
-            Attempt(model: primary.model, prompt: prompt, count: 1,
+            Attempt(model: model, prompt: prompt, count: 1,
                     size: safeSize, responseFormat: nil),
-            Attempt(model: primary.model, prompt: prompt, count: 1,
+            Attempt(model: model, prompt: prompt, count: 1,
                     size: nil, responseFormat: nil),
         ] {
             if !out.contains(a) { out.append(a) }     // distinct

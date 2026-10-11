@@ -42,6 +42,15 @@ struct ImageGenCoordinator {
         var configBaseUrl: String
         /// Keychain 里的 apiKey。
         var configApiKey: String
+        /// 生图模型名（第 204 轮补）。
+        ///
+        /// ## 为什么必须传进来
+        /// Kotlin 的 `generateImage(baseUrl, apiKey, **model**, prompt, size, count)`
+        /// 一直带 model，而 iOS 移植时**漏了这一项** ——
+        /// `ImageGenClient.buildAttempts` 里的 `Attempt(model: "")` 是空串，
+        /// 于是请求体永远是 `{"model": "", …}`，任何服务端都会拒。
+        /// 也就是说：**在补上它之前，「生图线路」指向哪条渠道都无法真正出图**。
+        var imageModel: String = ""
         /// 该伴侣上次生图的 epoch 毫秒；0 表示从未生过。
         var lastGenAtMs: Int64 = 0
         /// 写回上次生图时间。
@@ -145,11 +154,23 @@ struct ImageGenCoordinator {
             ? deps.configApiKey
             : effective.apiKey
 
+        // 模型名：走「生图线路」解析出来的那一个（第 204 轮）。
+        // 空模型名没有合理的降级 —— 与其发一个注定被拒的请求，
+        // 不如直接说清楚该去哪填（Kotlin 会照发 `"model": ""` 并让服务端报错）。
+        if deps.imageModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let msg = ImageGenClient.ImageGenError.noModel.message
+            onMessage?(msg, true)
+            return Outcome(triggered: false, reason: decision.reason,
+                           matchedKeyword: decision.matchedKeyword, prompt: prompt,
+                           imagesWritten: 0, message: msg, isError: true)
+        }
+
         var images: [Data] = []
         do {
             images = try await client.generate(
                 baseUrl: baseUrl,
                 apiKey: apiKey,
+                model: deps.imageModel,
                 prompt: prompt,
                 size: deps.global.size,
                 count: deps.global.count
