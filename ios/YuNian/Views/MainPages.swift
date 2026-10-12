@@ -15,6 +15,7 @@ import SwiftUI
 struct ConversationsView: View {
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var rows: [ConversationRepository.ConvRow] = []
     @State private var loadError: String?
@@ -22,56 +23,118 @@ struct ConversationsView: View {
     /// 待清空记录的那个会话（危险操作要二次确认，并显示会删掉多少条）。
     @State private var clearTarget: ConversationRepository.ConvRow?
     @State private var notice: String?
+    /// 首屏入场动画是否已触发（只跑一次，滚动回来不再重放）。
+    @State private var appeared = false
+
+    /// 首屏入场的延迟（错峰）。`reduceMotion` 时调用点会跳过动画。
+    private func entryDelay(_ index: Int) -> Double {
+        YNTheme.Motion.entryDelay(index)
+    }
 
     var body: some View {
         let c = YNTheme.palette(scheme)
         let filtered = ConversationRepository.filter(rows, query: query)
+        let unreadTotal = rows.filter(\.hasUnread).count
 
         return NavigationStack {
             ZStack {
                 YNCanvas()
 
                 if rows.isEmpty, loadError == nil {
-                    ContentUnavailableView {
-                        Label("还没有对话", systemImage: "bubble.left.and.bubble.right")
-                    } description: {
-                        // 空状态是第一次打开时唯一的引导面：这里必须回答"下一步做什么"。
-                        // 指路到通讯录（选角色）+ 使用指南（怎么配 Key）。
-                        Text("到「通讯录」选择一位角色开始聊天。\n第一次用？「我 → 关于 → 使用指南」有三步配置说明。")
+                    // 空态给**出路**（不是"去别处找"那种死胡同文案）：
+                    // 一条通向使用指南（三步配置），一条说明去哪选角色。
+                    ScrollView {
+                        YNEmptyState(
+                            icon: "bubble.left.and.bubble.right.fill",
+                            title: "还没有对话",
+                            message: "去「通讯录」选一位角色就能开始。第一次用，先看使用指南里的三步配置。"
+                        ) {
+                            NavigationLink {
+                                GuideView()
+                            } label: {
+                                Label("打开使用指南", systemImage: "book")
+                                    .font(.subheadline.weight(.medium))
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(c.accent)
+                        }
                     }
                 } else {
-                    List(filtered) { row in
-                        NavigationLink {
-                            ChatView(companionId: row.companionId)
-                        } label: {
-                            ConversationRow(row: row)
-                        }
-                        // 只清理**这个会话**的记录，不动角色 ——
-                        // 与「通讯录」里删角色是两件事，菜单文案要分清。
-                        .swipeActions(edge: .trailing) {
-                            if row.messageCount > 0 {
-                                Button(role: .destructive) {
-                                    clearTarget = row
-                                } label: {
-                                    Label("清空记录", systemImage: "eraser")
+                    List {
+                        // 页头：大标题 + 计数（第 220 轮）。
+                        // 借 Aru 的做法：标题行右侧放一个轻量计数，副标题写状态。
+                        Section {
+                            YNPageHeader(
+                                title: "对话",
+                                subtitle: unreadTotal > 0 ? "\(unreadTotal) 个会话有新消息" : "全部已读"
+                            ) {
+                                if !rows.isEmpty {
+                                    Text("\(rows.count) 个")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(c.textTertiary)
+                                        .monospacedDigit()
                                 }
                             }
+                            .listRowInsets(EdgeInsets(top: 0, leading: YNTheme.Space.lg,
+                                                      bottom: YNTheme.Space.sm,
+                                                      trailing: YNTheme.Space.lg))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                         }
-                        .swipeActions(edge: .leading) {
-                            if row.hasUnread {
-                                Button {
-                                    markRead(row)
+
+                        Section {
+                            ForEach(Array(filtered.enumerated()), id: \.element.id) { index, row in
+                                NavigationLink {
+                                    ChatView(companionId: row.companionId)
                                 } label: {
-                                    Label("已读", systemImage: "checkmark.circle")
+                                    ConversationRow(row: row)
                                 }
-                                .tint(c.accent)
+                                // 首屏逐个入场（只给第一组、只跑一次；减弱动态效果时不播）
+                                .opacity(appeared ? 1 : 0)
+                                .offset(y: appeared ? 0 : 6)
+                                .animation(reduceMotion ? nil
+                                           : YNTheme.Motion.quick.delay(entryDelay(index)),
+                                           value: appeared)
+                                // 只清理**这个会话**的记录，不动角色 ——
+                                // 与「通讯录」里删角色是两件事，菜单文案要分清。
+                                .swipeActions(edge: .trailing) {
+                                    if row.messageCount > 0 {
+                                        Button(role: .destructive) {
+                                            clearTarget = row
+                                        } label: {
+                                            Label("清空记录", systemImage: "eraser")
+                                        }
+                                    }
+                                }
+                                .swipeActions(edge: .leading) {
+                                    if row.hasUnread {
+                                        Button {
+                                            markRead(row)
+                                        } label: {
+                                            Label("已读", systemImage: "checkmark.circle")
+                                        }
+                                        .tint(c.accent)
+                                    }
+                                }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.visible)
+                                .listRowInsets(EdgeInsets(top: YNTheme.Space.sm,
+                                                          leading: YNTheme.Space.lg,
+                                                          bottom: YNTheme.Space.sm,
+                                                          trailing: YNTheme.Space.lg))
                             }
                         }
-                        .listRowBackground(Color.clear)
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                     .refreshable { reload() }
+                    // 入场动画触发点：整页出现后置 true（只跑一次）
+                    .onAppear {
+                        guard !appeared else { return }
+                        withAnimation(reduceMotion ? nil : YNTheme.Motion.quick.delay(0.02)) {
+                            appeared = true
+                        }
+                    }
                     // 搜索：名字或最后一条消息（纯函数过滤，有测试）
                     .searchable(text: $query, prompt: "搜索名字或消息")
                     .overlay {
@@ -81,7 +144,9 @@ struct ConversationsView: View {
                     }
                 }
             }
-            .navigationTitle("予念")
+            // 标题由页头承担（系统导航栏 17pt 撑不起门面）；这里留空避免两个标题。
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .alert("无法载入会话", isPresented: errorPresented) {
                 Button("重试") { reload() }
                 Button("取消", role: .cancel) { loadError = nil }
@@ -183,50 +248,68 @@ private struct ConversationRow: View {
     var body: some View {
         let c = YNTheme.palette(scheme)
         HStack(spacing: YNTheme.Space.md) {
-            CompanionAvatar(avatarURL: row.avatarUrl, name: row.name, size: 46)
+            YNAvatarHalo(avatarURL: row.avatarUrl, name: row.name,
+                         size: 52, unread: row.hasUnread)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: YNTheme.Space.sm) {
+                // 未读：**加粗 + 暖色圆点**（不只靠颜色 —— T6）
+                HStack(spacing: 6) {
+                    if row.hasUnread {
+                        Circle()
+                            .fill(c.warm)
+                            .frame(width: 7, height: 7)
+                            .accessibilityHidden(true)
+                    }
                     Text(row.name)
                         .font(.body.weight(row.hasUnread ? .semibold : .regular))
                         .foregroundStyle(c.textPrimary)
                         .lineLimit(1)
-
-                    Spacer(minLength: YNTheme.Space.sm)
-
-                    if let timestamp = row.lastMessageAt {
-                        Text(Self.timeString(timestamp))
-                            .font(.caption)
-                            .foregroundStyle(c.textTertiary)
-                    }
                 }
 
-                HStack(spacing: 6) {
-                    if row.hasUnread {
-                        Circle()
-                            .fill(c.accent)
-                            .frame(width: 7, height: 7)
-                            .accessibilityLabel("有未读消息")
-                    }
-                    Text(row.lastMessageFromUser ? "我：\(row.preview)" : row.preview)
-                        .font(.subheadline)
-                        .foregroundStyle(row.hasUnread ? c.textSecondary : c.textTertiary)
-                        .lineLimit(1)
+                Text(row.lastMessageFromUser ? "我：\(row.preview)" : row.preview)
+                    .font(.subheadline)
+                    .foregroundStyle(row.hasUnread ? c.textSecondary : c.textTertiary)
+                    .lineLimit(1)
+            }
 
-                    // ⚠️ 第 218 轮：这里**曾经**显示「共 N 条」，现已移除。
-                    // 实测反馈（苏晚瑄截图）：它被挤成**竖排三行**「共 / 8 / 条」，
-                    // 而且抢走了预览消息的宽度（预览被截得更早）。
-                    // 根因是它和预览文字挤在同一个 HStack，且被显式设为
-                    // `.layoutPriority(-1)` —— 拿不到宽度时 SwiftUI 会**逐字换行**。
-                    // 这个数字真正的用处是「删之前知道会删多少条」，
-                    // 所以它只保留在「清空记录」的确认框里（那里宽度不受挤）。
-                    // 想再放回行里的话：挪到右侧时间下方做成 VStack，别和预览抢宽度。
+            Spacer(minLength: YNTheme.Space.sm)
+
+            // 右列：时间 + 条数（**竖排**）。
+            //
+            // ⚠️ 第 220 轮把这个数字**放回来了，但换了位置**：苏晚瑄反馈过
+            // 「条数跟在预览文字后面很怪」—— 根因是它和预览挤同一行、被挤成竖排。
+            // 借 Aru 的做法放到右侧固定列（那里宽度不受预览影响），
+            // 既保留"这条会话聊了多少"的信息，又不再抢预览的宽度。
+            VStack(alignment: .trailing, spacing: 4) {
+                if let timestamp = row.lastMessageAt {
+                    Text(Self.timeString(timestamp))
+                        .font(.caption)
+                        .foregroundStyle(c.textTertiary)
+                        .monospacedDigit()
+                }
+                if row.messageCount > 0 {
+                    Text("\(row.messageCount) 条")
+                        .font(.caption2)
+                        .foregroundStyle(c.textTertiary)
+                        .monospacedDigit()
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(Self.accessibilityLabel(row))
+    }
+
+    /// 读屏文案：把"未读/条数"说清楚（视觉上它们是颜色与位置，读屏读不到）。
+    private static func accessibilityLabel(_ row: ConversationRepository.ConvRow) -> String {
+        var parts = [row.name]
+        if row.hasUnread { parts.append("有未读") }
+        parts.append(row.lastMessageFromUser ? "我：\(row.preview)" : row.preview)
+        if row.messageCount > 0 { parts.append("共 \(row.messageCount) 条") }
+        return parts.joined(separator: "，")
     }
 
     private static func timeString(_ milliseconds: Int64) -> String {
