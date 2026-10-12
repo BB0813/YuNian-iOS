@@ -1,4 +1,36 @@
 import SwiftUI
+import os
+
+/// 布局探针（第 224 轮临时诊断）。
+///
+/// ## 为什么要有它
+/// 真机上出现"内容被裁"（标题缺字、右列被切、头像缺角），而本地**看不到渲染结果**：
+/// 没有 Mac/模拟器，`idevicescreenshot` 又缺 DDI。
+/// 但 `idevicesyslog` 是通的 —— 于是让视图自己把**布局几何**报出来：
+/// 尺寸 + **在全局坐标系里的原点**。
+///
+/// 判读方式：
+/// - `origin.x` 明显为负 → 有东西把内容往左推/居中溢出 ✗
+/// - `size.width` 大于屏幕宽（402） → 容器比屏幕宽 ✗
+/// - 一切正常 → 问题在具体子视图的绘制，而不在容器
+extension View {
+    func ynProbe(_ tag: String) -> some View {
+        background(
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .global)
+                Color.clear
+                    .onAppear {
+                        Logger(subsystem: "com.yunian.ai", category: "geometry")
+                            .notice("""
+                                probe \(tag, privacy: .public) \
+                                size=\(Int(proxy.size.width), privacy: .public)x\(Int(proxy.size.height), privacy: .public) \
+                                globalOrigin=\(Int(frame.origin.x), privacy: .public),\(Int(frame.origin.y), privacy: .public)
+                                """)
+                    }
+            }
+        )
+    }
+}
 
 /// 视觉原语 —— 第 220 轮「暖夜」。
 ///

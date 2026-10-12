@@ -108,11 +108,15 @@ struct ConversationsView: View {
                                     }
                                 }
                                 .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: YNTheme.Space.sm,
+                                                          leading: YNTheme.Space.lg,
+                                                          bottom: YNTheme.Space.sm,
+                                                          trailing: YNTheme.Space.lg))
 
                             }
                         }
                     }
-                    .listStyle(.plain)
+                    .listStyle(.insetGrouped)
                     .scrollContentBackground(.hidden)
                     .refreshable { reload() }
                     // 入场动画触发点：整页出现后置 true（只跑一次）
@@ -122,6 +126,7 @@ struct ConversationsView: View {
                             appeared = true
                         }
                     }
+                    .ynProbe("list-sessions")
                     // 搜索：名字或最后一条消息（纯函数过滤，有测试）
                     .searchable(text: $query, prompt: "搜索名字或消息")
                     .overlay {
@@ -441,15 +446,20 @@ struct ContactsView: View {
                             }
                         }
                         .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: YNTheme.Space.sm,
+                                                          leading: YNTheme.Space.lg,
+                                                          bottom: YNTheme.Space.sm,
+                                                          trailing: YNTheme.Space.lg))
 
                             }
                         }
                     }
-                    .listStyle(.plain)
+                    .listStyle(.insetGrouped)
                     .scrollContentBackground(.hidden)
                     .refreshable { reload() }
                 }
             }
+                    .ynProbe("list-contacts")
             // 大标题交回系统（同会话列表）；人数放工具栏尾部
             .navigationTitle("通讯录")
             .navigationBarTitleDisplayMode(.large)

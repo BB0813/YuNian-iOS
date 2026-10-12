@@ -59,6 +59,7 @@ struct RootView: View {
                 .tag(Tab.me)
         }
         // M6：背景延伸到底栏之下，让系统材质有东西可采样。
+        .ynProbe("root-tabs")
         .background {
             YNCanvas()
         }

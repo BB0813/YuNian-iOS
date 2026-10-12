@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import os
 import Combine   // ObservableObject / @Published
 
@@ -71,9 +72,42 @@ final class AppEnvironment: ObservableObject {
     }
 
     /// 幂等启动；失败时把原因暴露给 UI（不 crash —— 首启失败要有可读提示）。
+    /// 启动时打一行**几何诊断**（第 224 轮）。
+    ///
+    /// ## 为什么需要它
+    /// 真机上出现"内容被裁"（标题缺字、右列被切、头像缺角），
+    /// 而本地**没有任何办法看渲染结果**：
+    /// - 没有 Mac / 模拟器；
+    /// - `idevicescreenshot` 需要 Developer Disk Image，而 DDI 没挂载；
+    /// - 用户截图只能靠人肉回传，且容易拍到旧版本。
+    ///
+    /// 但 `idevicesyslog` **是通的**（不需要 DDI）—— 所以让 App 自己把
+    /// 屏幕 / 窗口 / 安全区几何报出来，我在 WSL 里读日志即可判断
+    /// "窗口是不是比屏幕宽"这类根因。
+    ///
+    /// 注意：`UIScreen.main` 在新系统上已不推荐，这里优先用 `UIWindowScene.screen`。
+    private func logGeometry() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first
+        let window = scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first
+        let screen = scene?.screen
+        log.notice("""
+            geometry idiom=\(UIDevice.current.userInterfaceIdiom.rawValue, privacy: .public) \
+            screenBounds=\(String(describing: screen?.bounds), privacy: .public) \
+            nativeBounds=\(String(describing: screen?.nativeBounds), privacy: .public) \
+            scale=\(screen?.scale ?? 0, privacy: .public) \
+            windowFrame=\(String(describing: window?.frame), privacy: .public) \
+            windowBounds=\(String(describing: window?.bounds), privacy: .public) \
+            safeArea=\(String(describing: window?.safeAreaInsets), privacy: .public) \
+            sceneBounds=\(String(describing: scene?.coordinateSpace.bounds), privacy: .public) \
+            sceneCount=\(scenes.count, privacy: .public)
+            """)
+    }
+
     func boot() {
         guard !didBoot else { return }
         didBoot = true
+        logGeometry()
 
         do {
             let dbURL = try AppPaths.databaseURL()
