@@ -83,37 +83,49 @@ struct StickerListParser {
     }
 
     /// 取字符串**开头**的括号内容：`（小猫拿红包）后面的…` → `小猫拿红包`。
+    ///
+    /// ## 两条实测得来的规则
+    /// 1. **只看本行**：用户清单里的括号从不跨行，而"跨行找闭合括号"会闯祸 ——
+    ///    CI 抓到的真 bug：第 1 条的 `（` 配到了第 2 条的 `）`，
+    ///    于是把中间**整条链接**当成名字吞了进去（名字里出现 `.jpg`）。
+    /// 2. **闭合括号认任意宽度**：Word 复制出来的清单常见全角开、半角闭
+    ///    （`（小猫拿红包配文"九九成稀罕物)`），只认配对宽度会让整条解析失败。
     static func leadingParenthetical(_ text: String) -> String? {
-        let body = text.drop { $0 == " " || $0.isNewline || $0 == "\t" }
+        let line = text.prefix { $0 != "\n" && $0 != "\r" && $0 != "\u{2028}" }
+        let body = line.drop { $0 == " " || $0 == "\t" }
         guard let opener = body.first else { return nil }
 
-        // 只认全角/半角圆括号与方括号这四种。
+        // 只认全角/半角圆括号与方括号这四种开括号；
+        // 闭合括号四种都认，取**最先出现**的那个。
         // 用 switch 而不是字典字面量：字典键里出现单独的方括号字符时，
         // 解析器在字面量上容易出"expected declaration"这类级联报错，
         // 而这里本来也不需要一个字典。
-        let closer: Character
         switch opener {
-        case "\u{FF08}": closer = "\u{FF09}"   // （ ）
-        case "(": closer = ")"
-        case "\u{3010}": closer = "】"         // 【 】
-        case "[": closer = "]"
+        case "\u{FF08}", "(", "\u{3010}", "[": break
         default: return nil
         }
 
-        guard let end = body.firstIndex(of: closer), end > body.startIndex else { return nil }
+        let closers: [Character] = ["\u{FF09}", ")", "\u{3011}", "]"]
+        guard let end = body.dropFirst().firstIndex(where: { closers.contains($0) }) else { return nil }
         let inner = body[body.index(after: body.startIndex)..<end]
         let value = inner.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 兜底：括号里若还含着链接，说明这次配对仍然跨了条目 —— 宁可不要，
+        // 让调用方回落到"链接之前那段文字"，也不能让名字变成一条 URL。
+        if value.contains("://") { return nil }
         return value.isEmpty ? nil : value
     }
 
-    /// 去掉分隔符、包裹的标点与**成对/落单的引号**。
+    /// 去掉分隔符、包裹的标点与**引号**。
     ///
-    /// 引号要单独处理：用户清单里常见 `配文"九九成稀罕物`（只有左引号，
-    /// 因为右引号被 Word 的自动配对吃掉或写在括号外），
-    /// 不清理的话名字里会挂着一个孤零零的引号，标签也跟着脏。
+    /// 引号是**任意位置**都去掉，而不是只 trim 两端：
+    /// 用户清单里常见 `配文"九九成稀罕物`（右引号被 Word 的自动配对吃掉，
+    /// 或落在括号之外），只清两端的话名字里会挂着一个孤零零的引号，
+    /// 标签也跟着脏 —— 而标签是模型挑表情的唯一依据。
     static func clean(_ text: String) -> String {
-        let punctuation = CharacterSet(charactersIn: " \n\t：:，,、;；-—–·\"'“”‘’")
-        return text.trimmingCharacters(in: punctuation)
+        let quotes: Set<Character> = ["\"", "'", "\u{201C}", "\u{201D}", "\u{2018}", "\u{2019}"]
+        let stripped = String(text.filter { !quotes.contains($0) })
+        let punctuation = CharacterSet(charactersIn: " \n\t：:，,、;；-—–·")
+        return stripped.trimmingCharacters(in: punctuation)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

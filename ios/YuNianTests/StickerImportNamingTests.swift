@@ -50,8 +50,33 @@ final class StickerImportNamingTests: XCTestCase {
     func testNameIsNotTheFileName() {
         for item in StickerListParser.parse(sample) {
             XCTAssertFalse(item.name.hasPrefix("033t"), "名字不能是图床文件名：\(item.name)")
-            XCTAssertFalse(item.name.contains(".jpg"))
+            XCTAssertFalse(item.name.contains(".jpg"), "名字里不该出现文件名：\(item.name)")
         }
+    }
+
+    /// ## 回归：括号不能跨条目配对（第 226 轮 CI 抓到的真 bug）
+    /// 第 1 条的 `（` 是**半角闭**，而它后面第 2 条是**全角闭** ——
+    /// 只按"配对宽度"找闭合括号时，第 1 条的 `（` 会一直找到第 2 条的 `）`，
+    /// 把中间**整条链接**当成名字吞进去（于是名字里出现 `.jpg`）。
+    func testParentheticalNeverSpansToTheNextEntry() {
+        for item in StickerListParser.parse(sample) {
+            XCTAssertFalse(item.name.contains("://"), "名字里不该出现链接：\(item.name)")
+            XCTAssertFalse(item.name.contains("）"), "名字里不该残留括号：\(item.name)")
+            XCTAssertFalse(item.name.contains("（"))
+        }
+    }
+
+    /// Word 复制出来的清单常见**全角开、半角闭**，必须认。
+    func testMixedWidthBrackets() {
+        let items = StickerListParser.parse("https://a.cn/9.jpg（全角开半角闭)")
+        XCTAssertEqual(items.first?.name, "全角开半角闭")
+    }
+
+    /// 括号内容里若真的套着链接，宁可不要（回落到链接前那段文字），
+    /// 也不能让名字变成一条 URL。
+    func testParentheticalContainingLinkIsRejected() {
+        let items = StickerListParser.parse("小猫：https://a.cn/10.jpg（见 https://b.cn/x.jpg）")
+        XCTAssertEqual(items.first?.name, "小猫")
     }
 
     /// 「名称：链接」写法（括号在链接**之前**）也要认。
