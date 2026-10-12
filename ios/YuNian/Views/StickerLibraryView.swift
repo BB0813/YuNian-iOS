@@ -110,13 +110,19 @@ struct StickerLibraryView: View {
                                 .frame(width: 64, height: 64)
                                 .background(c.surface,
                                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            // 名字用 textSecondary（不是 tertiary）：它是**用来判断
+                            // "这张会不会在合适语境被挑中"的依据**，不该是最弱的一层。
                             Text(entry.displayName)
                                 .font(.caption2)
-                                .foregroundStyle(c.textTertiary)
-                                .lineLimit(1)
+                                .foregroundStyle(c.textSecondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("表情 \(entry.displayName)")
+                        .accessibilityLabel(entry.tags.isEmpty
+                                             ? "表情 \(entry.displayName)"
+                                             : "表情 \(entry.displayName)，标签 \(entry.tags.joined(separator: "、"))")
                     }
                 }
                 .padding(.vertical, YNTheme.Space.xs)
@@ -184,7 +190,7 @@ struct StickerLibraryView: View {
         let fileName = "custom_\(Int(Date().timeIntervalSince1970 * 1000))_\(Int.random(in: 0..<1000)).\(ext)"
 
         do {
-            _ = try StickerImportRepository(database: database).importSticker(
+            let outcome = try StickerImportRepository(database: database).importSticker(
                 data: data,
                 fileName: fileName,
                 description: draftName,
@@ -197,7 +203,14 @@ struct StickerLibraryView: View {
             draftName = ""
             draftTags = ""
             reload()
-            status = .ok("已导入「\(name)」。回聊天页发条消息，模型就有表情可挑了。")
+            // 命中同一张图时不是跳过，而是**把名字补上**（第 226 轮）——
+            // 提示语要如实区分，否则用户不知道自己刚才到底做了件什么事。
+            switch outcome {
+            case .inserted:
+                status = .ok("已导入「\(name)」。回聊天页发条消息，模型就有表情可挑了。")
+            case .updated:
+                status = .ok("这张图之前已经导过，已把名字更新为「\(name)」（标签随之更新）。")
+            }
         } catch let error as StickerImportRepository.ImportError {
             status = .failure(error.description)
         } catch {

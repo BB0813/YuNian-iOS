@@ -16,6 +16,16 @@ struct StickerLibraryRepository {
     struct Entry: Identifiable, Equatable {
         let id: Int64
         var fileName: String
+        /// 表情名（用户在清单里写的括号描述 / 名称字段）。
+        ///
+        /// ⚠️ 第 226 轮修：这一列**原先根本没被读出来**，而 `displayName`
+        /// 的实现与它上面的注释相反（注释写"优先 description"，代码却直接返回
+        /// `fileName`）—— 于是用户按「链接（小猫拿红包）」导入后，
+        /// 库里明明存着名字，界面却全是 `custom_1791…` ✗。
+        ///
+        /// 刻意**不叫 `description`**：与 `CustomStringConvertible.description`
+        /// 撞名，字符串插值/调试输出时极易误用。DB 列名仍是 `description`。
+        var name: String
         var tags: [String]
         var embeddedText: String?
         var source: String
@@ -23,8 +33,15 @@ struct StickerLibraryRepository {
         var modelUsageCount: Int
         var lastUsedAt: Int64?
 
-        /// 展示用主标题：优先 description/文件名。
-        var displayName: String { fileName }
+        /// 展示用主标题：**优先表情名**（清单里的描述），空则回落文件名。
+        ///
+        /// 名称不只是给人看的：`StickerImportRepository.deriveTags` 由它派生
+        /// tags，而 tags 是 Rust `builtin_send_sticker` 精确匹配的唯一依据 ——
+        /// 名字填得越具体，模型越容易在合适语境挑中它。
+        var displayName: String {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? fileName : trimmed
+        }
     }
 
     struct TagStat: Identifiable, Equatable {
@@ -43,7 +60,7 @@ struct StickerLibraryRepository {
     func entries() throws -> [Entry] {
         try database.pool.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT id, fileName, tags, embeddedText, source,
+                SELECT id, fileName, description, tags, embeddedText, source,
                        userUsageCount, modelUsageCount, lastUsedAt
                 FROM sticker_entries
                 ORDER BY lastUsedAt IS NULL, lastUsedAt DESC, id DESC
@@ -52,6 +69,7 @@ struct StickerLibraryRepository {
                 Entry(
                     id: row["id"],
                     fileName: row["fileName"],
+                    name: row["description"] ?? "",
                     tags: splitTags(row["tags"]),
                     embeddedText: row["embeddedText"],
                     source: row["source"],

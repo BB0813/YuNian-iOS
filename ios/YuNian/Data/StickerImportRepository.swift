@@ -49,6 +49,16 @@ struct StickerImportRepository {
         }
     }
 
+    /// 导入结果 —— 让调用方能区分「新导入」与「给已有的补名字」。
+    ///
+    /// 第 226 轮新增 `.updated`：用户第一遍导入时清单里可能没描述（或旧版本没解析括号），
+    /// 库里于是全是 `custom_1791…`；**再贴一次清单就能把名字补齐**。
+    /// 这不是锦上添花 —— 名字决定 tags，tags 决定模型怎么挑表情。
+    enum Outcome: Equatable {
+        case inserted(StickerLibraryRepository.Entry)
+        case updated(StickerLibraryRepository.Entry)
+    }
+
     /// 把已拷贝到 stickers 目录之外的一份图片数据落库。
     ///
     /// - Parameters:
@@ -62,7 +72,7 @@ struct StickerImportRepository {
         fileName: String,
         description: String,
         userTags: [String]
-    ) throws -> StickerLibraryRepository.Entry {
+    ) throws -> Outcome {
         let dir = try AppPaths.stickersDirectory()
         let destURL = dir.appendingPathComponent(fileName)
 
@@ -87,7 +97,7 @@ struct StickerImportRepository {
         let fileSize = Int64(data.count)
 
         do {
-            let entryId: Int64 = try database.pool.write { db in
+            let (entryId, wasUpdate): (Int64, Bool) = try database.pool.write { db in
                 // 上限检查（Android L333：entries.size >= MAX → 拒绝）
                 let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sticker_entries") ?? 0
                 if count >= Self.maxImportedCount {
@@ -97,8 +107,23 @@ struct StickerImportRepository {
                 let existing = try Int.fetchOne(
                     db, sql: "SELECT id FROM sticker_entries WHERE hash = ? LIMIT 1",
                     arguments: [hash])
-                if existing != nil {
-                    throw ImportError.duplicate
+                if let existingId = existing {
+                    // ⚠️ 第 226 轮：**已经在库里的不再直接跳过，而是把名字补上**。
+                    // 用户第一遍导入时清单里常常没有描述，库里于是全是 `custom_1791…`；
+                    // 名字又决定 tags，tags 决定模型怎么挑表情 —— 所以补名字是
+                    // **功能性**的，不是装饰。重贴一次同样的清单即可完成补齐（幂等）。
+                    //
+                    // 与 Android 的差异：Android 遇到重复直接跳过。这里选择更新元数据 ——
+                    // 不新增行、不动 `hash` 唯一索引、不改任何跨端契约，只是把
+                    // description/tags 刷新成清单里的值。
+                    guard !trimmedDescription.isEmpty else {
+                        throw ImportError.duplicate
+                    }
+                    try db.execute(
+                        sql: "UPDATE sticker_entries SET description = ?, tags = ? WHERE id = ?",
+                        arguments: [trimmedDescription, tags, existingId])
+                    // `Int.fetchOne` 给的是 Int，这里要 Int64（GRDB 行 id）
+                    return (Int64(existingId), true)
                 }
                 // ⚠️ 第 116 轮：GRDB 6 的 `db.execute` 返回 **Void**，
                 // 拿不到插入 id —— CI 报 "cannot convert value of type '()' to
@@ -115,13 +140,14 @@ struct StickerImportRepository {
                     arguments: [
                         trimmedDescription, hash, tags, fileName, "imported", fileSize, now, now,
                     ])
-                return db.lastInsertedRowID
+                return (db.lastInsertedRowID, false)
             }
             // 导入后重建聚合表，与 Android rebuildTagStats 同结论
             try rebuildTagStats()
-            return StickerLibraryRepository.Entry(
+            let entry = StickerLibraryRepository.Entry(
                 id: entryId,
                 fileName: fileName,
+                name: trimmedDescription,
                 tags: Self.splitTags(tags),
                 embeddedText: nil,
                 source: "imported",
@@ -129,6 +155,14 @@ struct StickerImportRepository {
                 modelUsageCount: 0,
                 lastUsedAt: now
             )
+            if wasUpdate {
+                // 更新路径下，本次为"新文件名"写下的那份文件是多余的
+                // （库仍指向旧 fileName）—— 不删就成了孤儿文件。
+                // 注意：**不能删库指向的那一份**，所以只删 destURL。
+                try? FileManager.default.removeItem(at: destURL)
+                return .updated(entry)
+            }
+            return .inserted(entry)
         } catch let error as ImportError {
             // 落库失败要回滚文件，避免"文件在、库没有"的孤儿
             try? FileManager.default.removeItem(at: destURL)

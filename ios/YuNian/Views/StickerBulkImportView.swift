@@ -18,7 +18,7 @@ struct StickerBulkImportView: View {
     @Environment(\.colorScheme) private var scheme
 
     @State private var rawText = ""
-    @State private var items: [ParsedSticker] = []
+    @State private var items: [StickerListParser.ParsedSticker] = []
     @State private var status: Status?
     @State private var busy = false
     @State private var progress = (done: 0, total: 0)
@@ -27,32 +27,6 @@ struct StickerBulkImportView: View {
         case ok(String)
         case failure(String)
     }
-
-    /// 解析出的一条。
-    struct ParsedSticker: Identifiable, Equatable {
-        let id = UUID()
-        var name: String
-        var url: URL
-        var urlString: String
-    }
-
-    /// ## 正则为什么是「只允许 ASCII URL 安全字符、且不要求扩展名」
-    ///
-    /// 这是拿四份真实资料（137 张）实测出来的，前两版都是错的：
-    ///
-    /// **版本一** 用 `[^\s（）]+` 当字符类 → 允许中文 →
-    /// 正则从第一个链接**一路吞到后面某个 `.gif`**，
-    /// `Cin6DzJ.gif神气：https://…Cin6yfp.gif` 被当成**一个** URL。
-    /// 实测：`呆猫八条UR①` 从应有的 16 条掉到 **1 条**。
-    ///
-    /// **版本二** 要求以 `\.(jpg|png|gif|webp)` 结尾 →
-    /// 而 `https://u2.fukit.cn/4uhF9bynr` 这类图床链接**没有扩展名**。
-    /// 实测：`表情包gif` 整份 **0 条**。
-    ///
-    /// 现在：字符集限定 ASCII URL 安全字符，**不要求扩展名**。
-    /// 扩展名改由下载后**按魔数判定**（见 fileExtension）——
-    /// 反正图床返回的 Content-Type 也不可信。
-    private static let urlPattern = #"https?://[A-Za-z0-9\-._~:/?#@!$&*+,;=%]+"#
 
     var body: some View {
         let c = YNTheme.palette(scheme)
@@ -88,7 +62,7 @@ struct StickerBulkImportView: View {
                 .font(.footnote)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .onChange(of: rawText) { _, _ in items = Self.parse(rawText) }
+                .onChange(of: rawText) { _, _ in items = StickerListParser.parse(rawText) }
 
             HStack {
                 Text("解析出 \(items.count) 条")
@@ -106,7 +80,14 @@ struct StickerBulkImportView: View {
         } header: {
             Text("把清单粘贴到这里")
         } footer: {
-            Text("从 Word 里直接复制正文即可。支持「名称：链接」「名称链接」，以及链接后面括号里写描述这三种写法。链接要能直接打开图片。")
+            // 「括号里的描述会变成名字」这一点必须写出来 ——
+            // 名字决定标签、标签决定模型怎么挑表情（第 226 轮）。
+            // ⚠️ 不用 Markdown 加粗：这里用了字符串拼接，而 SwiftUI 的
+            // Markdown 只对**字面量**生效，拼接后 `**…**` 会原样显示成星号。
+            Text("从 Word 里直接复制正文即可。三种写法都认：「名称：链接」「名称链接」，"
+                 + "以及链接后面括号里的描述。括号内容会成为这张表情的名字，"
+                 + "并据此生成标签 —— 模型是按标签挑表情的，写得越具体越容易在合适语境被挑中。"
+                 + "重复导入不会多出图片，但会用新名字覆盖旧名字。链接要能直接打开图片。")
         }
     }
 
@@ -163,76 +144,6 @@ struct StickerBulkImportView: View {
         }
     }
 
-    // MARK: - 解析
-
-    /// 扫出全部图片直链，并取每个链接**之前**的那段文字当名称。
-    static func parse(_ text: String) -> [ParsedSticker] {
-        guard !text.isEmpty,
-              let regex = try? NSRegularExpression(pattern: urlPattern, options: [.caseInsensitive])
-        else { return [] }
-
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-
-        var result: [ParsedSticker] = []
-        var cursor = 0
-
-        for match in matches {
-            guard let url = URL(string: ns.substring(with: match.range)) else { continue }
-
-            // 名称 = 上一个链接结束 → 本链接开始之间的文字
-            let between = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
-            cursor = match.range.location + match.range.length
-
-            // URL 之后紧跟的括号内容（若有）往往比前面的标题更具体
-            let after = ns.substring(from: min(cursor, ns.length))
-            let trailing = leadingParenthetical(after)
-
-            let name = clean(trailing ?? between)
-            result.append(ParsedSticker(
-                name: name.isEmpty ? nameFromURL(url) : name,
-                url: url,
-                urlString: url.absoluteString
-            ))
-        }
-        return result
-    }
-
-    /// 取字符串**开头**的括号内容：`（小猫拿红包）后面的…` → `小猫拿红包`。
-    /// 取字符串**开头**的括号内容：`（小猫拿红包）后面的…` → `小猫拿红包`。
-    private static func leadingParenthetical(_ text: String) -> String? {
-        let body = text.drop { $0 == " " || $0.isNewline || $0 == "\t" }
-        guard let opener = body.first else { return nil }
-
-        // 只认全角/半角圆括号与方括号这四种。
-        // 用 switch 而不是字典字面量：字典键里出现单独的方括号字符时，
-        // 解析器在字面量上容易出"expected declaration"这类级联报错，
-        // 而这里本来也不需要一个字典。
-        let closer: Character
-        switch opener {
-        case "\u{FF08}": closer = "\u{FF09}"   // （ ）
-        case "(": closer = ")"
-        case "\u{3010}": closer = "\u{3011}"   // 【 】
-        case "[": closer = "]"
-        default: return nil
-        }
-
-        guard let end = body.firstIndex(of: closer), end > body.startIndex else { return nil }
-        let inner = body[body.index(after: body.startIndex)..<end]
-        let value = inner.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
-    }
-
-    /// 去掉分隔符与包裹的标点。
-    private static func clean(_ text: String) -> String {
-        text.trimmingCharacters(in: CharacterSet(charactersIn: " \n\t：:，,、;；-—–·"))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func nameFromURL(_ url: URL) -> String {
-        url.deletingPathExtension().lastPathComponent
-    }
-
     // MARK: - 导入
 
     private func runImport() async {
@@ -246,6 +157,7 @@ struct StickerBulkImportView: View {
 
         let repository = StickerImportRepository(database: database)
         var imported = 0
+        var updated = 0
         var skipped = 0
         var failed = 0
 
@@ -255,13 +167,17 @@ struct StickerBulkImportView: View {
                 let (data, _) = try await URLSession.shared.data(from: item.url)
                 let ext = Self.fileExtension(for: data, fallback: item.url.pathExtension)
                 let fileName = "custom_\(Int(Date().timeIntervalSince1970 * 1000))_\(Int.random(in: 0..<1000)).\(ext)"
-                _ = try repository.importSticker(
+                let outcome = try repository.importSticker(
                     data: data,
                     fileName: fileName,
                     description: item.name,
                     userTags: []
                 )
-                imported += 1
+                // 「更新」= 这张图库里已有，本次只是把名字（进而标签）补齐
+                switch outcome {
+                case .inserted: imported += 1
+                case .updated: updated += 1
+                }
             } catch let error as StickerImportRepository.ImportError {
                 // 重复 / 达上限属"可预期"，单独计数，不当作失败刷屏
                 if error == .duplicate || error == .limitReached { skipped += 1 } else { failed += 1 }
@@ -272,10 +188,11 @@ struct StickerBulkImportView: View {
         }
 
         var parts = ["导入 \(imported) 张"]
+        if updated > 0 { parts.append("更新 \(updated) 张的名字") }
         if skipped > 0 { parts.append("跳过 \(skipped) 张（重复或已达上限）") }
         if failed > 0 { parts.append("失败 \(failed) 张（链接失效或网络不通）") }
         let summary = parts.joined(separator: "，")
-        status = imported > 0 ? .ok(summary) : .failure(summary)
+        status = (imported + updated) > 0 ? .ok(summary) : .failure(summary)
     }
 
     /// 按魔数判扩展名；判不出再用 URL 的扩展名。
