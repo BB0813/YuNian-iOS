@@ -126,7 +126,6 @@ struct ConversationsView: View {
                             appeared = true
                         }
                     }
-                    .ynProbe("list-sessions")
                     // 搜索：名字或最后一条消息（纯函数过滤，有测试）
                     .searchable(text: $query, prompt: "搜索名字或消息")
                     .overlay {
@@ -459,7 +458,6 @@ struct ContactsView: View {
                     .refreshable { reload() }
                 }
             }
-                    .ynProbe("list-contacts")
             // 大标题交回系统（同会话列表）；人数放工具栏尾部
             .navigationTitle("通讯录")
             .navigationBarTitleDisplayMode(.large)

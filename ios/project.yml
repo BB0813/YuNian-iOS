@@ -37,7 +37,7 @@ settings:
     # 进入 Beta 起，MARKETING_VERSION 必须与 Release 标签的前缀一致
     # （标签 `v1.0.0-ios-beta.1` ↔ App 内显示 1.0.0 (1)）。
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     # ⚠️ 第 80 轮：CommonCrypto 从 target 级**提升到工程级**。
     # 第 79 轮我只加在 YuNian target 的 OTHER_LDFLAGS 上，
     # 结果 CI 仍报 "cannot find 'CCKeyDerivationPBKDF2' in scope" ——

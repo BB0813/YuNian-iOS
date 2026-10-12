@@ -29,20 +29,37 @@ struct YNCanvas: View {
 
     var body: some View {
         let c = YNTheme.palette(scheme)
-        ZStack {
-            // ① 黄昏底：上暖下暗
-            LinearGradient(
-                colors: [c.backgroundElevated, c.background],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
+        // ⚠️ 第 224 轮（真机探针抓到的 bug，严重）：
+        // 这一段原先是一个 `ZStack { 渐变; 光晕; 颗粒 }`，而光晕写了
+        // `.frame(width: 520, height: 520)` —— **ZStack 会按最大子视图的 ideal size 定尺寸**，
+        // 于是画布把父容器撑到 **520pt 宽**，上面的 `List` 跟着变成 520 宽并**居中**：
+        // 屏幕只有 402，左右各溢出 59pt 被裁掉 →
+        // 标题缺第一个字、右列时间/条数被切、头像缺角，
+        // 而**导航栏里的系统搜索框正常**（它不在这个容器里）。
+        //
+        // 真机日志（`idevicesyslog`）：
+        //   probe list-sessions size=520x623 globalOrigin=-59,168   ← 520 / -59 就是证据
+        //
+        // 修法：**装饰层一律用 overlay**（overlay 不影响父视图尺寸），
+        // 这样光晕可以随便溢出，画布本体尺寸永远等于可用空间。
+        LinearGradient(
+            colors: [c.backgroundElevated, c.background],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .overlay(alignment: .topTrailing) {
             if !reduceTransparency {
-                // ② 双光源
                 glow(c.canvasGlow, size: 1.0, alignment: .topTrailing)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if !reduceTransparency {
                 glow(c.canvasGlowWarm, size: 0.8, alignment: .bottomLeading)
-
-                // ③ 颗粒（0.05 在深色上刚可感知，不影响任何对比度）
+            }
+        }
+        .overlay {
+            if !reduceTransparency {
+                // 颗粒：破塑料感。0.05 在深色上刚可感知，不影响任何对比度。
                 YNGrain(opacity: scheme == .dark ? 0.05 : 0.035)
                     .blendMode(.overlay)
                     .allowsHitTesting(false)

@@ -1,43 +1,12 @@
 import SwiftUI
-import os
-
-/// 布局探针（第 224 轮临时诊断）。
-///
-/// ## 为什么要有它
-/// 真机上出现"内容被裁"（标题缺字、右列被切、头像缺角），而本地**看不到渲染结果**：
-/// 没有 Mac/模拟器，`idevicescreenshot` 又缺 DDI。
-/// 但 `idevicesyslog` 是通的 —— 于是让视图自己把**布局几何**报出来：
-/// 尺寸 + **在全局坐标系里的原点**。
-///
-/// 判读方式：
-/// - `origin.x` 明显为负 → 有东西把内容往左推/居中溢出 ✗
-/// - `size.width` 大于屏幕宽（402） → 容器比屏幕宽 ✗
-/// - 一切正常 → 问题在具体子视图的绘制，而不在容器
-extension View {
-    func ynProbe(_ tag: String) -> some View {
-        background(
-            GeometryReader { proxy in
-                let frame = proxy.frame(in: .global)
-                Color.clear
-                    .onAppear {
-                        Logger(subsystem: "com.yunian.ai", category: "geometry")
-                            .notice("""
-                                probe \(tag, privacy: .public) \
-                                size=\(Int(proxy.size.width), privacy: .public)x\(Int(proxy.size.height), privacy: .public) \
-                                globalOrigin=\(Int(frame.origin.x), privacy: .public),\(Int(frame.origin.y), privacy: .public)
-                                """)
-                    }
-            }
-        )
-    }
-}
 
 /// 视觉原语 —— 第 220 轮「暖夜」。
 ///
 /// 这一批解决的是**观感单调**的三个具体成因：
-/// 1. 页面没有大标题（全屏最大的字是导航栏 17pt）→ `YNPageHeader`
+/// 1. 页面没有大标题（全屏最大的字是导航栏 17pt）→ 第 222 轮起改用**系统 `.largeTitle`**
+///    （自绘 `YNPageHeader` 已在真机上被证明会裁字，见 DESIGN.md §5）
 /// 2. 内容面没有高度线索（全靠 0.05 的亮度差）→ `YNCard` / `ynElevation`
-/// 3. 头像是唯一图像，但它是平贴的 → `YNAvatarHalo`
+/// 3. 头像是唯一图像，但它是平贴的 → `YNAvatarHalo`（**不用于列表行**）
 ///
 /// ⚠️ 三者都必须遵守 `DESIGN.md` 的反模式清单：
 /// 描边与投影互斥、卡片圆角 ≤ 16、不用侧边色条、不做渐变文字。

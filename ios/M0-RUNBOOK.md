@@ -199,6 +199,37 @@ log.error("turn outcome: \(String(describing: outcome))")
 （含 provider/model/起止时间/工具调用明细/事件流），iOS 侧尚未移植 ——
 见 `docs/turn-path-parity.md` 第 91 轮的记录与理由。
 
+## 6.1 真机上"界面被裁 / 位置不对"怎么查（第 224 轮沉淀）
+
+**先记住一条**：本地没有 Mac / 模拟器，`idevicescreenshot` 又依赖 Developer Disk Image
+（DDI 没常驻挂载，报 `Could not start screenshotr service`）；
+但 **`idevicesyslog` 是通的，不需要 DDI** —— 所以让视图自己把几何报出来。
+
+```bash
+# ① 临时给可疑容器挂探针（View 扩展，几十行，见本轮提交历史）
+#    List { ... }.ynProbe("list-sessions")
+# ② 装到真机后抓日志（App 需在前台）
+sudo -u dev -H bash /mnt/d/Project/YuNian-iOS-localtools/shot.sh   # 抓屏（需 DDI，常常不可用）
+& wsl.exe -d Arch -u root -- bash -c \
+  "timeout 600 idevicesyslog 2>&1 | grep --line-buffered -E 'probe |geometry idiom'"
+```
+
+判读（**宽度与全局原点是关键**）：
+
+| 日志 | 含义 |
+|---|---|
+| `size=402x623 globalOrigin=0,168` | 正常（402 = 屏幕宽） |
+| `size=520x623 globalOrigin=-59,168` | ✗ 容器被撑宽并居中 → 左右各裁 59pt |
+| `origin.x` 为负但宽度正常 | ✗ 被推偏（对齐 / padding 问题） |
+
+App 启动时还会自动打一行 `geometry idiom=… screenBounds=… windowFrame=… safeArea=…`，
+用来先排除"窗口比屏幕宽 / 整屏缩放"这类系统级原因。
+
+> 实战结论（第 224 轮的真实事故）：**"系统控件正常、内容被裁"= 容器被撑宽的指纹**。
+> 那次根因是画布的光源写了固定 `520×520` 并放在与内容并列的 `ZStack` 里
+> —— 见 `DESIGN.md` §3.2。
+
+
 如果只能回报一样东西，**回报第 3 步的前 20 个编译错误**。
 
 如果全部通过，请回报：
