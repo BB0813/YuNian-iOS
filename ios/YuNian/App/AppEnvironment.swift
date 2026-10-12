@@ -494,6 +494,53 @@ final class AppEnvironment: ObservableObject {
         refreshCredentialsSummary(credentials: credentials)
     }
 
+    // MARK: - 后台继续的聊天会话（第 221 轮）
+
+    /// 正在跑（或刚跑完）的聊天会话。
+    ///
+    /// ## 为什么需要它（用户反馈）
+    /// 「发送完消息后直接返回列表会**取消模型回复**」。
+    /// 根因是 `ChatViewModel.disappear()` 主动 `session.cancel(...)` ——
+    /// 而它那么写是有原因的：**全局 StreamSink 只有一个订阅位**，
+    /// 两个 `ChatSession` 同时订阅会把两个会话的事件串在一起。
+    ///
+    /// 所以正确做法不是"不取消"，而是**让回合留在后台跑完、回来时复用同一份会话**：
+    /// 会话由本类（App 级）持有，离开聊天页不再销毁它；
+    /// 只要还是同一个角色，回到聊天页就接着用这一份 —— 不会出现第二个订阅者。
+    ///
+    /// ⚠️ 仍然只有一个订阅位：若在 A 正回复时打开 B 的聊天，
+    /// A 的回合会被取消（并把这件事回报给界面，让用户知道），
+    /// 这是引擎的单订阅约束，不是偷懒。
+    private(set) var liveChatSession: ChatSession?
+    private(set) var liveChatCompanionId: Int64?
+
+    /// 取（或建）某个角色的聊天会话。
+    ///
+    /// - Returns: `session` 会话本体；`reused` 是否复用了**上一份仍在用**的会话；
+    ///   `cancelledOtherCompanion` 因切到别的角色而被取消回复的**那个角色的名字**（可空）。
+    func chatSession(for companionId: Int64)
+        -> (session: ChatSession, reused: Bool, cancelledOtherCompanion: String?)
+    {
+        if let existing = liveChatSession, liveChatCompanionId == companionId {
+            return (existing, true, nil)
+        }
+
+        var cancelledName: String?
+        if let existing = liveChatSession, let otherId = liveChatCompanionId, otherId != companionId {
+            if existing.isRunning {
+                existing.cancel(in: self)
+                cancelledName = (try? companions?.fetch(id: otherId))?.name ?? "上一位角色"
+            }
+            liveChatSession = nil
+            liveChatCompanionId = nil
+        }
+
+        let session = ChatSession(companionId: companionId)
+        liveChatSession = session
+        liveChatCompanionId = companionId
+        return (session, false, cancelledName)
+    }
+
     /// 构造当前生效的 settings —— **全仓唯一入口**。
     ///
     /// ⚠️ 第 107 轮从 boot() 里抽出。此前 boot() 与 syncRuntimeConfig()

@@ -28,6 +28,8 @@ private struct ChatViewContent: View {
     /// 要展示收据的那条消息（nil = 不弹）。用 item 形式，避免"先置 true 再取消息"
     /// 那种两步状态（中间会有一帧拿到 nil）。
     @State private var receiptTarget: ChatSession.Message?
+    /// 待删除的那一条（第 221 轮）：先确认再删。
+    @State private var deleteTarget: ChatSession.Message?
     /// 角色页（第 219 轮）：点顶栏标题打开，进人设/记忆/世界书/音色/会话。
     @State private var showCompanionHub = false
     /// 历史是否已完成首次灌入。用于把「首次加载」与「新消息到达」区分开 ——
@@ -92,8 +94,51 @@ private struct ChatViewContent: View {
         .sheet(isPresented: $showCompanionHub) {
             CompanionHubView(companionId: model.companionId, embeddedInSheet: true)
         }
+        // 删除单条消息（第 221 轮）：破坏性且不可逆 → 先确认。
+        // 直接把要删的那句话开头放进标题里，避免删错（长按菜单很容易点错行）。
+        .confirmationDialog("删除这一条消息？",
+                            isPresented: Binding(get: { deleteTarget != nil },
+                                                 set: { if !$0 { deleteTarget = nil } }),
+                            titleVisibility: .visible) {
+            Button("删除", role: .destructive) {
+                if let target = deleteTarget { _ = model.deleteMessage(target) }
+                deleteTarget = nil
+            }
+            Button("取消", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text(deletePreview)
+        }
+        // 一行会自己消失的提示（删除结果 / 被中断的角色）。
+        .overlay(alignment: .top) {
+            if let notice = model.notice ?? model.interruptedCompanionName.map({ "\($0) 的回复已中断（同时只支持一位角色生成）" }) {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(c.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(c.surface, in: Capsule())
+                    .ynElevation(YNTheme.Elevation.card)
+                    .padding(.top, YNTheme.Space.sm)
+                    .transition(.opacity)
+                    .id(notice)
+                    .task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        model.notice = nil
+                    }
+            }
+        }
         .task { await model.appear() }
         .onDisappear { model.disappear() }
+    }
+
+    /// 确认框里回显要删的那句话（截断，够辨认就行）。
+    private var deletePreview: String {
+        guard let target = deleteTarget else { return "" }
+        let text = target.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let who = target.role == .user ? "你" : (model.companion?.name ?? "对方")
+        guard !text.isEmpty else { return "这条是\(who)发的（内容为空）。删除后不可恢复。" }
+        let head = text.count > 24 ? String(text.prefix(24)) + "…" : text
+        return "\(who)：\(head)\n删除后不可恢复。它会同时从发给模型的历史里移除。"
     }
 
     // MARK: - Toolbar
@@ -291,7 +336,11 @@ private struct ChatViewContent: View {
                             onSpeak: { target in model.speak(target) },
                             // 「本轮收据」：只有助手消息、且那一轮真的留了 turnId
                             // 才有得看（`nil` = 菜单里不出现，而不是弹一个空页面）。
-                            onReceipt: { target in receiptTarget = target }
+                            onReceipt: { target in receiptTarget = target },
+                            // 「删除这一条」（第 221 轮）：只有已落库的消息才给入口。
+                            // 先弹确认再删 —— 这是聊天页里唯一不可逆的操作。
+                            onDelete: model.canDelete(message)
+                                ? { target in deleteTarget = target } : nil
                         )
                         .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
                         .id(message.id)
@@ -679,6 +728,11 @@ private struct MessageBubble: View {
     /// 菜单里出现一个点了没内容的入口，比没有入口更糟。
     var onReceipt: ((ChatSession.Message) -> Void)?
 
+    /// 长按菜单里的「删除」（第 221 轮，用户反馈）。
+    ///
+    /// `nil` = 不提供（还没有库行的流式草稿）—— 见 `ChatViewModel.canDelete(_:)`。
+    var onDelete: ((ChatSession.Message) -> Void)?
+
     private var isUser: Bool { message.role == .user }
 
     /// 气泡内容是图片（含表情图）时收紧内边距 —— 图文混排时
@@ -739,6 +793,17 @@ private struct MessageBubble: View {
                             onReceipt(message)
                         } label: {
                             Label("本轮收据", systemImage: "list.bullet.rectangle")
+                        }
+                    }
+                    // 「删除」（第 221 轮）：只给**已落库**的消息（`onDelete` 为 nil
+                    // 就整项不出现）—— 流式草稿还没有库行，删它没有意义。
+                    // 放在菜单**最后**并以 destructive 呈现：它是这里唯一不可逆的操作。
+                    if let onDelete {
+                        Divider()
+                        Button(role: .destructive) {
+                            onDelete(message)
+                        } label: {
+                            Label("删除这一条", systemImage: "trash")
                         }
                     }
                 }

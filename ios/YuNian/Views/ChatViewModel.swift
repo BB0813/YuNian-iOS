@@ -122,6 +122,17 @@ final class ChatViewModel: ObservableObject {
     let capabilities = Capabilities()
     let companionId: Int64
 
+    /// 界面上的一行提示（删除成功、删除失败等）。
+    /// 用**会自己消失**的方式显示（见 ChatView），不弹窗打断。
+    @Published var notice: String?
+
+    /// 会话是不是从 App 级拿到的**已存在**那一份（第 221 轮）。
+    /// true = 用户返回时回合可能还在跑，`appear()` 不能再灌历史（会把流式那条挤掉）。
+    private let reusedSession: Bool
+    /// 若因为切到别的角色而中断了上一个角色的回复，这里是被中断者的名字（可空）。
+    /// 界面用一行提示如实说明 —— 静默中断比中断更糟。
+    let interruptedCompanionName: String?
+
     private let environment: AppEnvironment
     private let session: ChatSession
     private var cancellables = Set<AnyCancellable>()
@@ -299,7 +310,12 @@ final class ChatViewModel: ObservableObject {
     init(companionId: Int64, environment: AppEnvironment) {
         self.companionId = companionId
         self.environment = environment
-        self.session = ChatSession(companionId: companionId)
+        // 第 221 轮：会话由 App 级持有（见 AppEnvironment.chatSession(for:)）。
+        // 复用上一份时，用户返回聊天页会看到**仍在流式的回复**，而不是被清空重来。
+        let adopted = environment.chatSession(for: companionId)
+        self.session = adopted.session
+        self.reusedSession = adopted.reused
+        self.interruptedCompanionName = adopted.cancelledOtherCompanion
         self.draft = UserDefaults.standard.string(forKey: "chat.draft.\(companionId)") ?? ""
         bindSession()
         // 播完（或被停）清掉过程状态；失败提示保留 —— 那是用户要看的。
@@ -312,26 +328,43 @@ final class ChatViewModel: ObservableObject {
             return
         }
         didAppear = true
-        phase = .booting
 
         companion = try? environment.companions?.fetch(id: companionId)
-        session.loadHistory(from: environment, limit: 100)
+
+        if reusedSession {
+            // ⚠️ 复用会话时**不要重新灌历史**：
+            // 上一轮可能还在流式，`messages` 里已经有它；重灌会把正在跑的那条挤掉。
+            // 阶段直接按会话当前状态推。
+            phase = session.isRunning ? phase : .idle
+            updatePhase()
+        } else {
+            phase = .booting
+            session.loadHistory(from: environment, limit: 100)
+            updatePhase()
+        }
+
         // ⚠️ 第 208 轮：灌完历史才允许自动朗读 ——
         // 否则"进聊天页"这个动作本身会让最后一条历史被念一遍。
         didFinishInitialLoad = true
         lastSeenMessageCount = session.messages.count
         markRead()
-        updatePhase()
     }
 
-    /// 页面离开不直接销毁已完成消息；若仍在生成则取消底层回合，
-    /// 避免第二个 ChatSession 同时订阅全局 StreamSink 导致串会话。
+    /// 页面离开：**不再取消正在生成的回合**（第 221 轮，用户反馈）。
+    ///
+    /// ## 改了什么，以及为什么可以改
+    /// 旧实现里有 `session.cancel(in:)` 与 `sendTask?.cancel()`，注释写着
+    /// "避免第二个 ChatSession 同时订阅全局 StreamSink 导致串会话"。
+    /// 那个顾虑是真的，但**解法不是取消回合**：
+    /// 现在会话由 `AppEnvironment` 持有（`chatSession(for:)`），
+    /// 离开页面时它继续活着、继续消费事件流 —— 同一时刻仍然只有一个订阅者，
+    /// 而回复会在后台跑完并正常落库（返回列表就能看到新消息）。
+    ///
+    /// 回到同一个角色的聊天页时复用这一份会话；若中途打开了**别的**角色，
+    /// `chatSession(for:)` 会取消旧回合并把"是谁被中断了"回报给界面。
     func disappear() {
-        if session.isRunning {
-            session.cancel(in: environment)
-        }
-        sendTask?.cancel()
-        sendTask = nil
+        // ❌ 删掉了 session.cancel(...) 与 sendTask?.cancel()（见上面的说明）
+        //
         // 有待确认的写操作时离页：**登记拒绝**（fail-closed）。
         // 与 Android `AgentConfirmGuard` 同一条原则 —— 没有确认界面的回合上，
         // 写操作不得被放行；否则那份一次性批准会悬在集合里，
@@ -342,6 +375,40 @@ final class ChatViewModel: ObservableObject {
         // 离开页面就停朗读：后台继续出声而屏幕上没有任何"正在念"的指示，
         // 用户只能靠"声音从哪来"猜，那还不如停掉。
         stopSpeaking()
+    }
+
+    // MARK: - 删除单条消息（第 221 轮，用户反馈"补一个删除句子"）
+
+    /// 这条消息能不能删。
+    ///
+    /// 只有**已落库**的消息能删（`storedId != nil`）：
+    /// 正在流式的草稿还没有库行，删它没有意义 —— 界面据此**不显示入口**。
+    func canDelete(_ message: ChatSession.Message) -> Bool {
+        message.storedId != nil
+    }
+
+    /// 删除一条消息（真的删库行，不是只从界面移除）。
+    ///
+    /// ## 为什么删完要重灌历史
+    /// 发给模型的上下文来自**库**（`historyForRequest` 走仓储），
+    /// 所以"界面少了这一条"与"请求里少了这一条"必须同时成立；
+    /// 只改内存数组会让下一轮请求继续把已删的消息送给模型。
+    ///
+    /// - Returns: 是否删除成功（供界面给出可读反馈）
+    @discardableResult
+    func deleteMessage(_ message: ChatSession.Message) -> Bool {
+        guard let storedId = message.storedId else { return false }
+        guard let repo = environment.messages else { return false }
+        do {
+            try repo.delete(messageId: storedId)
+        } catch {
+            notice = "删除失败，请稍后重试"
+            return false
+        }
+        // 重灌：界面与请求都从库重建，避免两份状态不一致
+        session.loadHistory(from: environment, limit: 100)
+        notice = "已删除这一条"
+        return true
     }
 
     // MARK: - 朗读

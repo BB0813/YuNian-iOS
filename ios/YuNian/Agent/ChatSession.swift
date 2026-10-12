@@ -104,11 +104,25 @@ final class ChatSession: ObservableObject {
         /// 重启后就再也对不上（只能按时间戳猜，那必然出错）。
         var turnId: String?
 
+        /// **数据库行 id**（`messages.id`，第 221 轮）。
+        ///
+        /// ## 与 `id: UUID` 的区别（别混）
+        /// - `id`（UUID）= **界面身份**：ForEach 的身份、贴图缓存的键，只在本进程有意义；
+        /// - `storedId` = **库里的那一行**：删除、回查的依据。
+        ///
+        /// ⚠️ 旧注释写着"加它要动所有构造点，属下轮"—— 实际不会：给 init 参数**默认值**，
+        /// 既有构造点一行都不用改。所以这里只做加法。
+        ///
+        /// 只有**从库里读出来**的消息才有值；内存里新构造的（流式草稿、
+        /// 刚追加还没落库的）是 nil —— 界面据此**不提供删除**（宁可没有入口，
+        /// 也不给一个点了没反应的按钮）。
+        var storedId: Int64?
+
         init(role: AgentHistoryRole, text: String, isSticker: Bool = false,
              imageData: Data? = nil, imagePrompt: String? = nil,
              timestamp: Date = Date(), reasoning: String? = nil,
              stickerFileName: String? = nil, stickerImageData: Data? = nil,
-             turnId: String? = nil) {
+             turnId: String? = nil, storedId: Int64? = nil) {
             self.role = role
             self.text = text
             self.isSticker = isSticker
@@ -119,6 +133,7 @@ final class ChatSession: ObservableObject {
             self.stickerFileName = stickerFileName
             self.stickerImageData = stickerImageData
             self.turnId = turnId
+            self.storedId = storedId
         }
     }
 
@@ -1175,7 +1190,8 @@ final class ChatSession: ObservableObject {
                                           imageData: data,
                                           imagePrompt: r.searchContent,
                                           timestamp: stamp,
-                                          turnId: r.turnId))
+                                          turnId: r.turnId,
+                                          storedId: r.messageId))
                     continue
                 }
             }
@@ -1186,7 +1202,9 @@ final class ChatSession: ObservableObject {
                                   timestamp: stamp,
                                   reasoning: r.turnId.flatMap { reasoningByTurn[$0] } ?? reasoningByRowIndex[index],
                                   // turnId 也带上：重启后「本轮收据」靠它回查 `prompt_audit`
-                                  turnId: r.turnId))
+                                  turnId: r.turnId,
+                                  // 库行 id：删除该条时的依据（第 221 轮）
+                                  storedId: r.messageId))
         }
         guard !loaded.isEmpty else { return }
         messages.insert(contentsOf: loaded, at: 0)
