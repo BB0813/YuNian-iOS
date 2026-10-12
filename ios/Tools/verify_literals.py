@@ -557,6 +557,44 @@ def main() -> int:
     report.check("upsertActiveConfig 仍刻意写空 apiKey（不落明文）",
                  "apiKey = ''" in repo2)
 
+    # ── 消息类型串的大小写契约（第 223 轮，用户可见 bug）──────────────
+    print()
+    print("消息类型串（REASONING / TOOL_ACTIVITY）大小写契约")
+
+    # Android 侧：Room 存的是**枚举名**（而 @SerialName 的小写只用于备份 JSON）
+    db_kt = read(REPO_ROOT / "core/database/src/main/java/com/yunian/ai/database/"
+                               "AppDatabase.kt")
+    report.check(
+        "Android Room 以枚举名落库消息类型（fromMessageType = value.name）",
+        "fun fromMessageType(value: MessageType): String = value.name" in db_kt,
+        "这条决定了 DB 里存的是 'REASONING'（大写），不是 @SerialName 的小写",
+    )
+    report.check(
+        "Android 读取端对消息类型做 uppercase 容错",
+        "toMessageType" in db_kt and "uppercase()" in db_kt,
+    )
+
+    # iOS 侧：过滤必须**大小写不敏感** —— 兼容老的小写行与 Android 导入的数据
+    conv = read(SWIFT_DIR / "Data/Repositories/ConversationRepository.swift")
+    upper_filters = conv.count("UPPER(")
+    report.check(
+        "iOS 的类型过滤大小写不敏感（UPPER(...) NOT IN ...）",
+        upper_filters >= 5,
+        f"实际 {upper_filters} 处；曾经因为写入小写、过滤大写而"
+        "把思考过程当成会话列表的最后一条消息",
+    )
+    # 写入端必须与 Room 一致（大写）
+    session_src = read(SWIFT_DIR / "Agent/ChatSession.swift")
+    report.check(
+        'iOS 写入的思考过程类型串是大写 "REASONING"',
+        'static let reasoningType = "REASONING"' in session_src,
+        "小写会让 iOS 自己写的行被自己的 SQL 漏掉（第 223 轮的 bug）",
+    )
+    report.check(
+        "iOS 读取端也对类型做 uppercased() 容错",
+        "r.type.uppercased() == Self.reasoningType" in session_src,
+    )
+
     print()
     print(f"通过 {report.passed} 项，失败 {len(report.failed)} 项")
 

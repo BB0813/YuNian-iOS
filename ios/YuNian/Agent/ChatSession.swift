@@ -1078,7 +1078,26 @@ final class ChatSession: ObservableObject {
     ///
     /// 小写：与既有的 `"text"` / `"image"` 一致（iOS 侧存 MessageType 序列名），
     /// 而 `loadHistory` 会按它把这一行排除出「可见消息」。
-    static let reasoningType = "reasoning"
+    /// 思考过程消息的类型串（写库用）。
+    ///
+    /// ## ⚠️ 必须与 Android **存进 Room 的值**一致：大写枚举名
+    /// Android 的 `MessageType` 有两套写法，别混：
+    /// - `@SerialName("reasoning")` —— 那是 **kotlinx.serialization**（备份 JSON）用的，小写；
+    /// - `AppDatabase.Converters.fromMessageType(value) = value.name` —— 那才是
+    ///   **Room 落库**的值，即枚举名 **`"REASONING"`（大写）**；
+    ///   而它的读取端 `toMessageType` 会先 `value.trim().uppercase()` 再匹配（容错）。
+    ///
+    /// ## 这条常量曾经写错过（第 223 轮，用户可见 bug）
+    /// 它原先写的是 **小写 `"reasoning"`** —— 于是 iOS 自己写进去的行，
+    /// 被自己那些 `NOT IN ('REASONING', ...)` 的 SQL **排不掉**：
+    /// 会话列表把**思考过程当成"最后一条消息"显示**（用户看到一句英文分析，
+    /// 于是反馈"回复为什么是英文"），未读数也被思考过程撑大。
+    ///
+    /// 修法两条一起：
+    /// 1. 写入改成大写（与 Room 一致）；
+    /// 2. **过滤改成大小写不敏感**（`UPPER(type) NOT IN ...`）——
+    ///    既兼容已经写成小写的老行，也与 Android 读取端的 `uppercase()` 容错同一条思路。
+    static let reasoningType = "REASONING"
 
     /// 正文形如 `[123]`（纯数字）时返回 id，否则 nil。
     ///
@@ -1138,7 +1157,7 @@ final class ChatSession: ObservableObject {
         // 用 turnId 配对而不是行顺序：两行时间戳完全相同，
         // 顺序取决于 `history()` 的 ORDER BY，太脆。
         var reasoningByTurn: [String: String] = [:]
-        for r in rows where r.type == Self.reasoningType {
+        for r in rows where r.type.uppercased() == Self.reasoningType {
             guard let turnId = r.turnId, !turnId.isEmpty else { continue }
             reasoningByTurn[turnId] = r.content
         }
@@ -1148,7 +1167,7 @@ final class ChatSession: ObservableObject {
         var reasoningByRowIndex: [Int: String] = [:]
         var pendingReasoning: String?
         for (index, r) in rows.enumerated() {
-            if r.type == Self.reasoningType {
+            if r.type.uppercased() == Self.reasoningType {
                 pendingReasoning = r.content.isEmpty ? nil : r.content
                 continue
             }
@@ -1166,7 +1185,7 @@ final class ChatSession: ObservableObject {
         var loaded: [Message] = []
         for (index, r) in rows.enumerated() {
             // REASONING 行不进可见消息（它已按 turnId / 行序收进上面两张表）
-            if r.type == Self.reasoningType { continue }
+            if r.type.uppercased() == Self.reasoningType { continue }
 
             // ⚠️ 第 204 轮：键里的 `isSticker` 必须**按正文约定算**，不能写死 false。
             // 内存里的表情消息 `isSticker == true`，而库行反推出来的也是 true ——
