@@ -91,12 +91,42 @@ final class MemoryRepository {
         }) ?? (0, 0, 0)
     }
 
+    /// 某个角色的记忆计数（第 219 轮，角色页显示"这个角色记住了多少"）。
+    ///
+    /// ## scope 编码从哪来
+    /// Rust `memory_selector.rs::scope_json_for_ids` 把伴侣写成
+    /// `{"scope":"COMPANION","source_id":<companionId>}`，落到表里就是
+    /// `scope = 'COMPANION' AND sourceId = <companionId>`。
+    /// 这里**只数伴侣作用域** —— 群聊记忆（`GROUP` + groupId）不属于任何单个角色，
+    /// 混进来会让"这个角色记住了多少"偏大。
+    ///
+    /// ⚠️ 可见口径与 `counts()` **逐字一致**（deviceId + isDeleted + 未过期）：
+    /// 两处口径不一致时，用户会在「我 → 记忆」与角色页看到两个不同的数字。
+    func counts(companionId: Int64,
+                now: Int64 = Int64(Date().timeIntervalSince1970 * 1000))
+        -> (active: Int, deleted: Int)
+    {
+        (try? database.pool.read { db -> (Int, Int) in
+            let active = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM unified_memories
+                WHERE deviceId = ? AND scope = 'COMPANION' AND sourceId = ?
+                  AND isDeleted = 0
+                  AND (expiresAt IS NULL OR expiresAt > ?)
+                """, arguments: [DeviceIdentity.deviceId, companionId, now]) ?? 0
+            let deleted = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM unified_memories
+                WHERE deviceId = ? AND scope = 'COMPANION' AND sourceId = ?
+                  AND isDeleted = 1
+                """, arguments: [DeviceIdentity.deviceId, companionId]) ?? 0
+            return (active, deleted)
+        }) ?? (0, 0)
+    }
+
     /// 软删除一条记忆（对应 Android `softDelete(id, now)`）。
     @discardableResult
     func softDelete(id: Int64) -> Bool {
         setDeleted(true, id: id)
     }
-
     /// 撤销软删除（第 209 轮补）。
     ///
     /// ## 为什么必须有

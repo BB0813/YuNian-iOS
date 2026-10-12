@@ -69,15 +69,20 @@ enum WorldbookRuntimeSync {
         }
     }
 
-    /// 合成某伴侣当前生效的世界书 —— 对应 Android `synthForCompanion`。
+    /// 某个角色这一轮**真正会带上**的世界书行（引擎绑定规则的**唯一来源**）。
     ///
-    /// ## 一个省掉整张枚举映射表的等价化简
-    /// Android 走「解码 JSON → StEntry → 过滤/去重/排序/重编号 → `entryToJson` 再编码」，
-    /// 其中 `position` / `role` 要经 `stToPosition` → `positionToSt` 往返。
-    /// 但**源和目标都是同一个 JSON**，而 Android 写入时已用同一编解码器规范化过；
-    /// 因此这里直接**保留原始字符串**，与 Android 的输出等价
-    ///（也顺带避免了我尚未读取 `positionToSt` / `roleToSt` 的枚举映射）。
-    static func synthForCompanion(_ database: YuNianDatabase, companionId: Int64) -> String {
+    /// ## 为什么必须抽出来（第 219 轮）
+    /// 角色页要显示「世界书 当前生效 N 本」。如果那里自己再写一遍过滤，
+    /// 迟早会和引擎不一致 —— 表现是**界面说 0 本、引擎其实带了**（或反过来），
+    /// 而两边各自看都正常、都不报错。这类"双份契约互相掩盖"在这个仓库里出过多次，
+    /// 所以规则只留这一处，`synthForCompanion` 与界面都从这里取。
+    ///
+    /// 规则（对应 Android `effectiveRows`）：`enabled = 1` 且 json 非空且不为 `{}`，
+    /// 然后按绑定关系筛：
+    /// - 没有任何绑定 → 全局书 + 自己的书（**这也意味着别的角色的专属书不会漏进来**）
+    /// - 有绑定 → 自己的书 + 被绑定的全局书
+    private static func effectiveBookRows(_ database: YuNianDatabase,
+                                         companionId: Int64) -> [BookRow] {
         let rows: [BookRow]
         do {
             rows = try database.pool.read { db in
@@ -87,12 +92,10 @@ enum WorldbookRuntimeSync {
             }
         } catch {
             log.error("读取世界书失败：\(String(describing: error), privacy: .public)")
-            return ""
+            return []
         }
-
-        // ① 绑定规则（对应 effectiveRows）：enabled && json.isNotBlank() && json != "{}"
         let boundIds = companionId > 0 ? boundWorldbookIds(database, companionId: companionId) : Set<Int64>()
-        let effective = rows.filter { row in
+        return rows.filter { row in
             let j = row.json.trimmingCharacters(in: .whitespaces)
             guard !j.isEmpty, j != "{}" else { return false }
             if boundIds.isEmpty {
@@ -100,6 +103,41 @@ enum WorldbookRuntimeSync {
             }
             return row.companionId == companionId || (row.companionId == nil && boundIds.contains(row.id))
         }
+    }
+
+    /// 「这个角色当前会用到哪些世界书」的**给界面看的摘要**。
+    ///
+    /// `injectsAnything = false` 是有意义的一种状态：书**规则上生效**，
+    /// 但里面没有可用条目（全被停用/内容为空）→ 引擎合成结果为空串，
+    /// 模型其实什么都没收到。界面必须把这两种情况分开说，
+    /// 否则用户会以为"显示生效就一定注入了"。
+    struct EffectiveWorldbooks: Equatable {
+        var count: Int
+        var names: [String]
+        var injectsAnything: Bool
+    }
+
+    static func effectiveWorldbooks(_ database: YuNianDatabase,
+                                    companionId: Int64) -> EffectiveWorldbooks {
+        let effective = effectiveBookRows(database, companionId: companionId)
+        let payload = synthForCompanion(database, companionId: companionId)
+        return EffectiveWorldbooks(count: effective.count,
+                                   names: effective.map(\.name),
+                                   injectsAnything: !payload.isEmpty)
+    }
+
+    /// 合成某伴侣当前生效的世界书 —— 对应 Android `synthForCompanion`。
+    ///
+    /// ## 一个省掉整张枚举映射表的等价化简
+    /// Android 走「解码 JSON → StEntry → 过滤/去重/排序/重编号 → `entryToJson` 再编码」，
+    /// 其中 `position` / `role` 要经 `stToPosition` → `positionToSt` 往返。
+    /// 但**源和目标都是同一个 JSON**，而 Android 写入时已用同一编解码器规范化过；
+    /// 因此这里直接**保留原始字符串**，与 Android 的输出等价
+    ///（也顺带避免了我尚未读取 `positionToSt` / `roleToSt` 的枚举映射）。
+    static func synthForCompanion(_ database: YuNianDatabase, companionId: Int64) -> String {
+        // ① 绑定规则：只在 `effectiveBookRows` 里写一遍（见那里的说明）
+        let effective = effectiveBookRows(database, companionId: companionId)
+        if effective.isEmpty { return "" }
 
         // ② 逐本解码 → 过滤
         struct Item {

@@ -292,8 +292,8 @@ struct ContactsView: View {
                             .padding(.vertical, 4)
                             .contentShape(Rectangle())
                         }
-                        // 第 212 轮：编辑与删除。此前通讯录是**只读**的 ——
-                        // 仓储早有 create/update/delete，但没有任何界面调用过。
+                        // 第 212 轮：编辑与删除。第 219 轮加「详情」（角色页）——
+                        // 点行仍然是**去聊天**（主操作不变），改人设/看状态走左滑。
                         .swipeActions(edge: .leading) {
                             Button {
                                 editTarget = companion
@@ -301,6 +301,13 @@ struct ContactsView: View {
                                 Label("编辑", systemImage: "pencil")
                             }
                             .tint(c.accent)
+
+                            NavigationLink {
+                                CompanionHubView(companionId: companion.id)
+                            } label: {
+                                Label("详情", systemImage: "info.circle")
+                            }
+                            .tint(c.textSecondary)
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {

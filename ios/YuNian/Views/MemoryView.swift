@@ -19,6 +19,16 @@ import SwiftUI
 /// 「跳过与说明」正好互补：那里说这一轮带了什么，这里说库里还有什么。
 struct MemoryView: View {
 
+    /// 只看某个角色的记忆（第 219 轮：从角色页进来时带上）。
+    ///
+    /// `nil` = 全部（从「我 → 记忆」进来时的既有行为，保持不变）。
+    /// ⚠️ 过滤按 `scope == "COMPANION" && sourceId == companionId` ——
+    /// 与 Rust `scope_json_for_ids` 的编码一致；**群聊记忆不属于任何单个角色**，
+    /// 所以在角色页里看不到它们（页脚写明了这一点，不装作"这就是全部"）。
+    var companionId: Int64?
+    /// 只用于说明文案（"只看「阿念」的记忆"）。
+    var companionName: String?
+
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.colorScheme) private var scheme
 
@@ -27,6 +37,12 @@ struct MemoryView: View {
     @State private var showInactive = false
     @State private var sort: MemorySort = .importance
     @State private var notice: String?
+
+    /// 作用域过滤（纯函数，可单测）：按角色挑出伴侣记忆。
+    static func scoped(_ all: [MemoryRepository.Memory], companionId: Int64?) -> [MemoryRepository.Memory] {
+        guard let companionId else { return all }
+        return all.filter { $0.scope == "COMPANION" && $0.sourceId == companionId }
+    }
 
     /// 排序方式（**本机排序**，不动引擎召回顺序 —— 那只由 importance/observedAt 决定）。
     enum MemorySort: String, CaseIterable, Identifiable {
@@ -78,11 +94,14 @@ struct MemoryView: View {
 
     var body: some View {
         let c = YNTheme.palette(scheme)
-        let groups = Self.groups(memories, query: query, showInactive: showInactive,
+        // 作用域过滤在**分组之前**做：概览数字、分组、搜索都跟着同一个集合走，
+        // 否则会出现"上面写 3 条、下面列出 5 条"。
+        let scoped = Self.scoped(memories, companionId: companionId)
+        let groups = Self.groups(scoped, query: query, showInactive: showInactive,
                                  sort: sort, now: Self.nowMs())
 
         return List {
-            overviewSection(c)
+            overviewSection(c, memories: scoped)
             ForEach(groups) { group in
                 Section {
                     ForEach(group.items) { memory in
@@ -104,7 +123,7 @@ struct MemoryView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(YNCanvas())
-        .navigationTitle("记忆")
+        .navigationTitle(companionId == nil ? "记忆" : "记忆 · \(companionName ?? "这个角色")")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "搜记忆内容")
         .tint(c.accent)
@@ -113,19 +132,27 @@ struct MemoryView: View {
 
     // MARK: - 概览
 
-    private func overviewSection(_ c: YNTheme.Palette) -> some View {
+    private func overviewSection(_ c: YNTheme.Palette,
+                                 memories: [MemoryRepository.Memory]) -> some View {
         let counts = Self.counts(memories, now: Self.nowMs())
         return Section {
             LabeledContent("短期", value: "\(counts.working) 条")
             LabeledContent("长期", value: "\(counts.longTerm) 条")
             LabeledContent("不再注入", value: "\(counts.inactive) 条")
         } header: {
-            Text("总共 \(memories.count) 条")
+            Text(companionId == nil ? "总共 \(memories.count) 条"
+                                    : "「\(companionName ?? "这个角色")」的记忆 \(memories.count) 条")
         } footer: {
-            Text("""
-            只有"短期"与"长期"里的记录会被模型看到。想确认**最近一轮**到底带了哪些记忆，
-            去聊天里长按那条回复 → 「本轮收据」—— 那里有逐条材料与字数。
-            """)
+            Text(companionId == nil
+                 ? """
+                   只有"短期"与"长期"里的记录会被模型看到。想确认**最近一轮**到底带了哪些记忆，
+                   去聊天里长按那条回复 → 「本轮收据」—— 那里有逐条材料与字数。
+                   """
+                 : """
+                   这里只显示**属于这个角色**的记忆。群聊记忆不属于任何单个角色，
+                   所以不在这一页（要全看就去「我 → 记忆」）。
+                   想确认**最近一轮**带了哪些，长按那条回复 → 「本轮收据」。
+                   """)
         }
     }
 

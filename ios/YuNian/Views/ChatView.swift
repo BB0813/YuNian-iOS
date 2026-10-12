@@ -28,6 +28,8 @@ private struct ChatViewContent: View {
     /// 要展示收据的那条消息（nil = 不弹）。用 item 形式，避免"先置 true 再取消息"
     /// 那种两步状态（中间会有一帧拿到 nil）。
     @State private var receiptTarget: ChatSession.Message?
+    /// 角色页（第 219 轮）：点顶栏标题打开，进人设/记忆/世界书/音色/会话。
+    @State private var showCompanionHub = false
     /// 历史是否已完成首次灌入。用于把「首次加载」与「新消息到达」区分开 ——
     /// 二者都会让消息数增加，但只有后者才应该计数/滚动。
     @State private var didInitialScroll = false
@@ -84,6 +86,12 @@ private struct ChatViewContent: View {
                 TurnReceiptView(receipt: model.receipt(for: message))
             }
         }
+        // 角色页（第 219 轮）：点顶栏标题打开。
+        // ⚠️ 用 `model.companionId` 而不是 `companionId`：这一层是 `ChatViewContent`，
+        // 它不存 `companionId`（那个属性在 `ChatView` 上），companionId 由 ViewModel 持有。
+        .sheet(isPresented: $showCompanionHub) {
+            CompanionHubView(companionId: model.companionId, embeddedInSheet: true)
+        }
         .task { await model.appear() }
         .onDisappear { model.disappear() }
     }
@@ -93,29 +101,42 @@ private struct ChatViewContent: View {
     @ToolbarContentBuilder
     private func toolbarContent(colors c: YNTheme.Palette) -> some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            HStack(spacing: YNTheme.Space.sm) {
-                CompanionAvatar(
-                    avatarURL: model.companion?.avatarUrl,
-                    name: model.companion?.name ?? "对话",
-                    size: 34
-                )
+            // 第 219 轮：标题变**可点**，进"角色页"（人设/记忆/世界书/音色/会话）。
+            // 借鉴 Aru：聊天页顶栏那个头像点下去就是这位协作者的设置中枢。
+            // 用 Button 而不是 NavigationLink：工具栏里的 NavigationLink 行为不稳，
+            // 这里用受控 sheet，弹层自带导航栈（`embeddedInSheet`）。
+            Button {
+                showCompanionHub = true
+            } label: {
+                HStack(spacing: YNTheme.Space.sm) {
+                    CompanionAvatar(
+                        avatarURL: model.companion?.avatarUrl,
+                        name: model.companion?.name ?? "对话",
+                        size: 34
+                    )
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.companion?.name ?? "对话")
-                        .font(.headline)
-                        .foregroundStyle(c.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(model.companion?.name ?? "对话")
+                            .font(.headline)
+                            .foregroundStyle(c.textPrimary)
+                            .lineLimit(1)
 
-                    if let subtitle = model.subtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(c.textSecondary)
-                            .transition(.opacity)
+                        if let subtitle = model.subtitle {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(c.textSecondary)
+                                .transition(.opacity)
+                        }
                     }
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(c.textTertiary)
                 }
             }
+            .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(toolbarAccessibilityLabel)
+            .accessibilityLabel(toolbarAccessibilityLabel + "，打开角色页")
         }
 
         #if DEBUG

@@ -21,6 +21,8 @@ struct WorldbookLibraryView: View {
 
     @State private var books: [WorldbookRepository.Book] = []
     @State private var activeBook: WorldbookRepository.Book?
+    /// 角色 id → 名字（归属列要显示名字而不是 id）。
+    @State private var companionNames: [Int64: String] = [:]
     @State private var showImporter = false
     @State private var pendingDelete: WorldbookRepository.Book?
 
@@ -173,7 +175,7 @@ struct WorldbookLibraryView: View {
             }
             HStack(spacing: YNTheme.Space.sm) {
                 Text("\(book.entryCount) 条")
-                Text(book.companionId == nil ? "全局" : "角色 #\(book.companionId ?? 0)")
+                Text(ownerLabel(book))
                 if !book.isParsable { Text("JSON 解析失败").foregroundStyle(c.warning) }
                 Spacer()
                 Toggle("", isOn: Binding(
@@ -191,6 +193,16 @@ struct WorldbookLibraryView: View {
         .padding(.vertical, 2)
     }
 
+    /// 归属文案。
+    ///
+    /// ⚠️ 第 219 轮：此前写的是 `角色 #7`（**id**）。用户从角色页点进来时
+    /// 根本对不上号 —— 而这一列存在的全部意义就是"这本书是给谁的"。
+    /// 名字读不到时才退回 id（宁可难看也不要显示成"全局"）。
+    private func ownerLabel(_ book: WorldbookRepository.Book) -> String {
+        guard let id = book.companionId else { return "全局" }
+        return companionNames[id].map { "角色：\($0)" } ?? "角色 #\(id)"
+    }
+
     // MARK: - 数据
 
     private var repo: WorldbookRepository? {
@@ -201,6 +213,11 @@ struct WorldbookLibraryView: View {
     private func reload() {
         books = repo?.list() ?? []
         activeBook = repo?.activeGlobalBook()
+        // 归属要显示**角色名字**（不是 id）：这一列存在的意义就是"这本书给谁的"
+        companionNames = (try? environment.companions?.fetchAll())?
+            .reduce(into: [Int64: String]()) { map, companion in
+                map[companion.id] = companion.name
+            } ?? [:]
     }
 }
 
@@ -222,6 +239,15 @@ struct WorldbookDetailView: View {
     @State private var showRaw = false
     @State private var confirmDelete = false
     @State private var notice: String?
+
+    /// 归属文案：显示**角色名字**（读不到才退回 id，与列表页同一条规则）。
+    private var ownerText: String {
+        guard let id = book.companionId else { return "全局" }
+        if let companion = try? environment.companions?.fetch(id: id) {
+            return "角色：\(companion.name)"
+        }
+        return "角色 #\(id)"
+    }
 
     init(book: WorldbookRepository.Book, activeId: Int64?, onChanged: @escaping () -> Void) {
         self.book = book
@@ -255,7 +281,7 @@ struct WorldbookDetailView: View {
 
             Section {
                 LabeledContent("条目数", value: "\(entries.count)")
-                LabeledContent("归属", value: book.companionId.map { "角色 #\($0)" } ?? "全局")
+                LabeledContent("归属", value: ownerText)
                 LabeledContent("更新时间", value: Self.stamp(book.updatedAt))
                 LabeledContent("JSON 大小", value: "\(book.json.utf8.count) 字节")
             } header: {
