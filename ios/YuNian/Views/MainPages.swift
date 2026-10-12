@@ -249,6 +249,9 @@ struct ContactsView: View {
     @State private var showCreator = false
     @State private var showCardImport = false
     @State private var editTarget: CompanionRepository.Companion?
+    /// 角色页（第 219 轮）：左滑「详情」用 Button 触发（见下方注释为什么不放 NavigationLink）。
+    @State private var hubCompanionId: Int64?
+    @State private var showHub = false
     /// 待删除的角色 + 是否连聊天记录一起删（两选项，见删除对话框）。
     @State private var deleteTarget: CompanionRepository.Companion?
 
@@ -294,6 +297,11 @@ struct ContactsView: View {
                         }
                         // 第 212 轮：编辑与删除。第 219 轮加「详情」（角色页）——
                         // 点行仍然是**去聊天**（主操作不变），改人设/看状态走左滑。
+                        //
+                        // ⚠️ 这里必须是 Button + navigationDestination，**不能**直接在
+                        // swipeActions 里放 NavigationLink —— 滑动菜单里它的转场行为不可靠
+                        //（菜单会先收起，push 常被吞掉）。用 isPresented 形式还能避开
+                        // `Companion` 是否 Hashable 的问题。
                         .swipeActions(edge: .leading) {
                             Button {
                                 editTarget = companion
@@ -302,8 +310,9 @@ struct ContactsView: View {
                             }
                             .tint(c.accent)
 
-                            NavigationLink {
-                                CompanionHubView(companionId: companion.id)
+                            Button {
+                                hubCompanionId = companion.id
+                                showHub = true
                             } label: {
                                 Label("详情", systemImage: "info.circle")
                             }
@@ -379,6 +388,12 @@ struct ContactsView: View {
                 Button("取消", role: .cancel) { loadError = nil }
             } message: {
                 Text(loadError ?? "发生未知错误")
+            }
+            // 角色页（第 219 轮）：由左滑「详情」触发（Button → 这里 push）。
+            .navigationDestination(isPresented: $showHub) {
+                if let hubCompanionId {
+                    CompanionHubView(companionId: hubCompanionId)
+                }
             }
             .task { reload() }
             .onAppear { reload() }
