@@ -58,7 +58,10 @@ final class MessageDeletionTests: XCTestCase {
         }
         XCTAssertEqual(try conversations.rows().first?.messageCount, 3)
 
-        let last = try XCTUnwrap(try messages.history(conversationId: id, type: .chat)).last
+        // ⚠️ 注意可选解包层级：`Array.last` 本身是可选，
+        // `XCTUnwrap` 要包住**元素**而不是数组（CI 上就是这里报的
+        // "value of optional type 'HistoryRow?' must be unwrapped"）。
+        let last = try XCTUnwrap(try messages.history(conversationId: id, type: .chat).last)
         try messages.delete(messageId: last.messageId)
 
         let row = try XCTUnwrap(try conversations.rows().first)
