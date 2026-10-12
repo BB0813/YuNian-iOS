@@ -173,6 +173,49 @@ struct StickerImportRepository {
         }
     }
 
+    /// 给已有表情**改名 / 改标签**（第 226 轮，表情库预览页用）。
+    ///
+    /// 为什么值得有：名称派生 tags，tags 是 `builtin_send_sticker` 精确匹配的**唯一依据**。
+    /// 名字不对 = 模型永远挑不中这张图。导入时贴错、或事后想调，都得有地方改。
+    ///
+    /// 规则与导入保持一致（否则"导入"与"改名"两条路会得出不同的标签）：
+    /// 有手填标签 → `normalizeTags`；没有 → `deriveTags(description:fileName:)`。
+    func renameSticker(id: Int64, name: String, userTags: [String]) throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        try database.pool.write { db in
+            guard let fileName = try String.fetchOne(
+                db, sql: "SELECT fileName FROM sticker_entries WHERE id = ? LIMIT 1",
+                arguments: [id]) else {
+                throw ImportError.writeFailed("这张表情已经不在了")
+            }
+            let tags = userTags.isEmpty
+                ? Self.deriveTags(description: trimmed, fileName: fileName)
+                : Self.normalizeTags(userTags)
+            try db.execute(
+                sql: "UPDATE sticker_entries SET description = ?, tags = ? WHERE id = ?",
+                arguments: [trimmed, tags, id])
+        }
+        try rebuildTagStats()
+    }
+
+    /// 删除一张表情：**先删文件再删库行**，并重建标签聚合。
+    ///
+    /// 顺序理由：文件删失败时库行还在（界面仍能看到这张，最多是个坏图），
+    /// 反过来则会出现"库没了、文件还在"的孤儿文件（占空间且永远没人清）。
+    func deleteSticker(id: Int64) throws {
+        let fileName = try database.pool.read { db in
+            try String.fetchOne(db, sql: "SELECT fileName FROM sticker_entries WHERE id = ? LIMIT 1",
+                                arguments: [id])
+        }
+        if let fileName, let dir = try? AppPaths.stickersDirectory() {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(fileName))
+        }
+        try database.pool.write { db in
+            try db.execute(sql: "DELETE FROM sticker_entries WHERE id = ?", arguments: [id])
+        }
+        try rebuildTagStats()
+    }
+
     /// 从 `sticker_entries` 全量重建 `sticker_tags`（对应 Android rebuildTagStats L249）。
     func rebuildTagStats() throws {
         try database.pool.write { db in

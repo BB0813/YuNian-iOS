@@ -212,9 +212,67 @@ final class StickerImportNamingTests: XCTestCase {
         XCTAssertEqual(stats.map(\.tag), ["小猫拿红包"], "旧标签应被清掉")
     }
 
-    /// ## 「我」页那行显示的是**张数**，不是标签数（第 226 轮）
+    /// ## 预览页的改名与删除（第 226 轮）
+    /// 改名要**同时更新标签**（名字派生标签，标签决定模型挑不挑得中）；
+    /// 删除要**同时删文件**，否则留下永远没人清的孤儿文件。
+    func testRenameUpdatesTagsAndStats() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = StickerImportRepository(database: database)
+        let library = StickerLibraryRepository(database: database)
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47] + Array(repeating: 5, count: 16))
+        let outcome = try repo.importSticker(data: bytes, fileName: "custom_9_9.png",
+                                             description: "旧名字", userTags: [])
+        let id = try XCTUnwrap(library.entries().first?.id)
+        if case .inserted = outcome {} else { XCTFail("应当是新增") }
+
+        try repo.renameSticker(id: id, name: "小猫拿红包", userTags: ["开心", "撒娇"])
+
+        let row = try XCTUnwrap(library.entries().first)
+        XCTAssertEqual(row.displayName, "小猫拿红包")
+        XCTAssertEqual(row.tags, ["开心", "撒娇"], "手填标签优先，与导入同一条规则")
+        XCTAssertEqual(try library.tagStats().map(\.tag), ["开心", "撒娇"], "聚合表要跟着重建")
+    }
+
+    /// 不填标签时按名字自动拆分（与导入一致，两条路不能得出不同结果）。
+    func testRenameWithoutTagsDerivesFromName() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = StickerImportRepository(database: database)
+        let library = StickerLibraryRepository(database: database)
+        let bytes = Data([0x47, 0x49, 0x46] + Array(repeating: 2, count: 16))
+        _ = try repo.importSticker(data: bytes, fileName: "custom_8_8.gif",
+                                   description: "旧的", userTags: [])
+        let id = try XCTUnwrap(library.entries().first?.id)
+
+        try repo.renameSticker(id: id, name: "小猫,拿红包", userTags: [])
+
+        XCTAssertEqual(try library.entries().first?.tags, ["小猫", "拿红包"])
+    }
+
+    /// 删除：库行与文件都要消失，标签聚合表也要跟着少掉。
+    func testDeleteRemovesRowAndFile() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = StickerImportRepository(database: database)
+        let library = StickerLibraryRepository(database: database)
+        let bytes = Data([0xFF, 0xD8, 0xFF] + Array(repeating: 9, count: 16))
+        _ = try repo.importSticker(data: bytes, fileName: "custom_7_7.jpg",
+                                   description: "要删的", userTags: [])
+        let id = try XCTUnwrap(library.entries().first?.id)
+        let fileURL = try XCTUnwrap(try? AppPaths.stickersDirectory().appendingPathComponent("custom_7_7.jpg"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "导入后文件应当存在")
+
+        try repo.deleteSticker(id: id)
+
+        XCTAssertEqual(try library.count(), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "文件必须一起删掉")
+        XCTAssertTrue(try library.tagStats().isEmpty, "标签聚合要跟着清干净")
+    }
     /// 两个口径必须一致：徽标上的 N 张要等于列表里的条数，
     /// 否则用户看到的数字与打开后看到的张数对不上。
+    /// ## 「我」页那行显示的是**张数**，不是标签数
+    /// 两个口径必须一致：徽标上的 N 张要等于列表里的条数。
     func testCountMatchesEntries() throws {
         let (database, dir) = try makeDatabase()
         defer { try? FileManager.default.removeItem(at: dir) }

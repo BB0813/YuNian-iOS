@@ -26,6 +26,8 @@ struct StickerLibraryView: View {
     @State private var draftTags = ""
     @State private var status: Status?
     @State private var busy = false
+    /// 点开预览的那一张（第 226 轮）。
+    @State private var previewTarget: StickerLibraryRepository.Entry?
 
     private enum Status: Equatable {
         case ok(String)
@@ -49,6 +51,14 @@ struct StickerLibraryView: View {
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
             Task { await importPicked(item) }
+        }
+        // 预览页（改名 / 删除）关闭后刷新列表与徽标
+        .sheet(item: $previewTarget) { entry in
+            StickerPreviewView(entry: entry) {
+                reload()
+                environment.refreshStickerCount()
+            }
+            .environmentObject(environment)
         }
     }
 
@@ -105,24 +115,34 @@ struct StickerLibraryView: View {
                     spacing: YNTheme.Space.sm
                 ) {
                     ForEach(entries) { entry in
-                        VStack(spacing: 4) {
-                            stickerImage(entry)
-                                .frame(width: 64, height: 64)
-                                .background(c.surface,
-                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            // 名字用 textSecondary（不是 tertiary）：它是**用来判断
-                            // "这张会不会在合适语境被挑中"的依据**，不该是最弱的一层。
-                            Text(entry.displayName)
-                                .font(.caption2)
-                                .foregroundStyle(c.textSecondary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
+                        // 点开预览（第 226 轮）：顺带能在预览页里改名字/改标签/删除 ——
+                        // 名字是模型挑表情的唯一依据，光看不能改等于没解决问题。
+                        // 用 Button + .plain 而不是 onTapGesture：保住列表的点击反馈与
+                        // VoiceOver 的"按钮"语义（onTapGesture 在读屏下只是个文本）。
+                        Button {
+                            previewTarget = entry
+                        } label: {
+                            VStack(spacing: 4) {
+                                stickerImage(entry)
+                                    .frame(width: 64, height: 64)
+                                    .background(c.surface,
+                                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                // 名字用 textSecondary（不是 tertiary）：它是**用来判断
+                                // "这张会不会在合适语境被挑中"的依据**，不该是最弱的一层。
+                                Text(entry.displayName)
+                                    .font(.caption2)
+                                    .foregroundStyle(c.textSecondary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                        .buttonStyle(.plain)
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(entry.tags.isEmpty
                                              ? "表情 \(entry.displayName)"
                                              : "表情 \(entry.displayName)，标签 \(entry.tags.joined(separator: "、"))")
+                        .accessibilityHint("打开预览，可以改名字或删除")
                     }
                 }
                 .padding(.vertical, YNTheme.Space.xs)
