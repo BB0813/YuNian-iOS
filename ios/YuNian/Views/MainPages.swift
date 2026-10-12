@@ -345,39 +345,78 @@ struct ContactsView: View {
                 YNCanvas()
 
                 if companions.isEmpty, loadError == nil {
-                    ContentUnavailableView {
-                        Label("还没有联系人", systemImage: "person.2")
-                    } description: {
-                        Text("创建角色后，ta 会出现在这里")
-                    } actions: {
-                        Button("新建角色") { showCreator = true }
+                    // 空态给**出路**：直接新建（这是这一屏唯一要做的事）
+                    ScrollView {
+                        YNEmptyState(
+                            icon: "person.2.fill",
+                            title: "还没有联系人",
+                            message: "创建一位角色，或导入一张别人做好的角色卡。"
+                        ) {
+                            VStack(spacing: YNTheme.Space.sm) {
+                                Button {
+                                    showCreator = true
+                                } label: {
+                                    Label("新建角色", systemImage: "person.badge.plus")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(c.accent)
+
+                                Button {
+                                    showCardImport = true
+                                } label: {
+                                    Label("导入角色卡", systemImage: "square.and.arrow.down")
+                                        .font(.subheadline.weight(.medium))
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(c.accent)
+                            }
+                        }
                     }
                 } else {
-                    List(companions) { companion in
-                        NavigationLink {
-                            ChatView(companionId: companion.id)
-                        } label: {
-                            HStack(spacing: YNTheme.Space.md) {
-                                CompanionAvatar(
-                                    avatarURL: companion.avatarUrl,
-                                    name: companion.name,
-                                    size: 46
-                                )
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(companion.name)
-                                        .font(.body)
-                                        .foregroundStyle(c.textPrimary)
-                                    if !companion.personality.isEmpty {
-                                        Text(companion.personality)
-                                            .font(.subheadline)
-                                            .foregroundStyle(c.textSecondary)
-                                            .lineLimit(1)
-                                    }
-                                }
+                    List {
+                        // 页头：大标题 + 人数（第 220 轮，与首页同一套页头）
+                        Section {
+                            YNPageHeader(
+                                title: "通讯录",
+                                subtitle: "点进去直接聊天；左滑看详情、改人设"
+                            ) {
+                                Text("\(companions.count) 位")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(c.textTertiary)
+                                    .monospacedDigit()
                             }
-                            .padding(.vertical, 4)
-                            .contentShape(Rectangle())
+                            .listRowInsets(EdgeInsets(top: 0, leading: YNTheme.Space.lg,
+                                                      bottom: YNTheme.Space.sm,
+                                                      trailing: YNTheme.Space.lg))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                         }
+
+                        Section {
+                            ForEach(companions) { companion in
+                                NavigationLink {
+                                    ChatView(companionId: companion.id)
+                                } label: {
+                                    HStack(spacing: YNTheme.Space.md) {
+                                        // 头像带光晕（与首页一致；这里是"身份"语义 → 品牌色）
+                                        YNAvatarHalo(avatarURL: companion.avatarUrl,
+                                                     name: companion.name, size: 52)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(companion.name)
+                                                .font(.body.weight(.medium))
+                                                .foregroundStyle(c.textPrimary)
+                                            if !companion.personality.isEmpty {
+                                                Text(companion.personality)
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(c.textSecondary)
+                                                    .lineLimit(1)
+                                            }
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                    .contentShape(Rectangle())
+                                }
                         // 第 212 轮：编辑与删除。第 219 轮加「详情」（角色页）——
                         // 点行仍然是**去聊天**（主操作不变），改人设/看状态走左滑。
                         //
@@ -409,13 +448,22 @@ struct ContactsView: View {
                             }
                         }
                         .listRowBackground(Color.clear)
+                                .listRowSeparator(.visible)
+                                .listRowInsets(EdgeInsets(top: YNTheme.Space.sm,
+                                                          leading: YNTheme.Space.lg,
+                                                          bottom: YNTheme.Space.sm,
+                                                          trailing: YNTheme.Space.lg))
+                            }
+                        }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                     .refreshable { reload() }
                 }
             }
-            .navigationTitle("通讯录")
+            // 标题由页头承担
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             // 点行 = 去聊天（主操作），改人设走左滑 —— 与记忆/技能页的手势语言一致
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

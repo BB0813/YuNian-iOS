@@ -89,7 +89,8 @@ struct CompanionHubView: View {
                             _ c: YNTheme.Palette) -> some View {
         Section {
             VStack(spacing: YNTheme.Space.md) {
-                CompanionAvatar(avatarURL: companion.avatarUrl, name: companion.name, size: 76)
+                // 与首页/通讯录同一套头像语言（这里是"身份"语义 → 品牌色光晕）
+                YNAvatarHalo(avatarURL: companion.avatarUrl, name: companion.name, size: 76)
 
                 Text(companion.name)
                     .font(.title3.weight(.semibold))

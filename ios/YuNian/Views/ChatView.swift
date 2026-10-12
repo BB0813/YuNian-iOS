@@ -167,15 +167,82 @@ private struct ChatViewContent: View {
 
     // MARK: - Messages
 
+    /// 新对话的开场状态（第 220 轮）。
+    ///
+    /// ## 为什么从"刻意留白"改掉
+    /// 旧实现是 `Color.clear.frame(minHeight: ...)`，注释写着"不放大插画或 CTA，
+    /// 让对话自然开始"。但实测观感反馈正是**「没有使用欲望」** ——
+    /// 而第一屏（刚进聊天、什么都没有）就是决定使用欲望的地方：
+    /// 一片空白 + 一个输入框，用户不知道该说什么。
+    ///
+    /// ## 现在的形状
+    /// 头像光晕（这是"人"）+ 一句邀请 + **三个可点的开场语**。
+    /// 开场语点了**直接发出去**（不是填进输入框让用户再点一次发送）。
+    ///
+    /// ⚠️ 开场语是**通用**的，不带任何角色专属设定：
+    /// 我们不知道这个角色的世界观，编造"符合人设"的开场语只会出戏。
+    @ViewBuilder
+    private func openingState(colors c: YNTheme.Palette) -> some View {
+        VStack(spacing: YNTheme.Space.lg) {
+            YNAvatarHalo(avatarURL: model.companion?.avatarUrl,
+                         name: model.companion?.name ?? "对话",
+                         size: 84)
+
+            VStack(spacing: YNTheme.Space.xs) {
+                Text(model.companion?.name ?? "对方")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(c.textPrimary)
+                Text("还没聊过。说点什么开始吧 —— 或者从下面挑一句。")
+                    .font(.subheadline)
+                    .foregroundStyle(c.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+            }
+
+            VStack(spacing: YNTheme.Space.sm) {
+                ForEach(Self.openingPrompts, id: \.self) { prompt in
+                    Button {
+                        // 直接发送：点了还要再点一次发送键，等于把两步做成一步半
+                        model.draft = prompt
+                        model.sendText()
+                    } label: {
+                        Text(prompt)
+                            .font(.subheadline)
+                            .foregroundStyle(c.textPrimary)
+                            .padding(.horizontal, YNTheme.Space.lg)
+                            .padding(.vertical, YNTheme.Space.sm)
+                            .background(c.surface, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, YNTheme.Space.xs)
+        }
+        .padding(.horizontal, YNTheme.Space.xl)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 开场语：**通用**、口语、不预设角色设定（见 `openingState` 的说明）。
+    private static let openingPrompts = [
+        "在吗？",
+        "今天过得怎么样？",
+        "给我讲件你今天遇到的小事",
+    ]
+
     private func messageScroll(colors c: YNTheme.Palette, viewportHeight: CGFloat) -> some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 if model.displayPhase == .booting && model.displayMessages.isEmpty {
                     loadingRows(colors: c)
                 } else if model.displayMessages.isEmpty && model.displayStreaming.isEmpty {
-                    // Android 没有欢迎空态；这里同样不放大插画或 CTA，
-                    // 只保留输入区，让角色和对话自然开始。
-                    Color.clear.frame(minHeight: max(viewportHeight * 0.55, 240))
+                    // 第 220 轮：从"一片空白"换成**开场状态**。
+                    //
+                    // 旧实现刻意留白（注释说 Android 没有欢迎空态）——
+                    // 但实测观感反馈正是「没有使用欲望」，而第一屏就是它。
+                    // 现在给：角色头像光晕 + 一句人话 + 三个可点的开场语
+                    //（点了直接发出去，用户不用想第一句说什么）。
+                    openingState(colors: c)
+                        .padding(.top, max(viewportHeight * 0.18, 80))
                 }
 
                 ForEach(Array(model.displayMessages.enumerated()), id: \.element.id) { index, message in
@@ -205,6 +272,11 @@ private struct ChatViewContent: View {
                             message: message,
                             companionName: model.companion?.name ?? "对方",
                             colors: c,
+                            // 第 220 轮：助手一组的第一条显示**头像 + 名字**（借 Aru 的做法）。
+                            // 之前整屏只有气泡，没有任何"说话人"的视觉身份 ——
+                            // 这是聊天页观感单薄的主要原因之一。
+                            showsIdentity: previous?.role != .assistant && message.role == .assistant,
+                            isFirstOfGroup: previous?.role != message.role,
                             stickerImage: model.stickerImages[message.id],
                             // 诊断必须是**完备**的：有图 / 三种失败 / 未解析，五选一。
                             // 真机上曾出现"气泡在、图不在、且一行原因都没有" ——
@@ -586,6 +658,10 @@ private struct MessageBubble: View {
     let message: ChatSession.Message
     let companionName: String
     let colors: YNTheme.Palette
+    /// 是否在这一条上显示**说话人身份**（助手一组的第一条：头像 + 名字）。
+    var showsIdentity: Bool = false
+    /// 是否是这一组的第一条（决定头像/名字的间距）。
+    var isFirstOfGroup: Bool = false
     /// 已在 ViewModel 解析好的表情图（查不到为 nil → 退化为占位）。
     let stickerImage: UIImage?
     /// 解析失败的原因（显示在占位符下方）。
@@ -612,14 +688,34 @@ private struct MessageBubble: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom) {
-            if isUser { Spacer(minLength: 72) }
+        VStack(alignment: .leading, spacing: 5) {
+            // 说话人身份：助手一组的第一条显示头像 + 名字。
+            // 借 Aru 的做法 —— 整屏只有气泡时，聊天页读起来"没有人在说话"。
+            if showsIdentity, !isUser {
+                HStack(spacing: YNTheme.Space.sm) {
+                    CompanionAvatar(avatarURL: nil, name: companionName, size: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Text(companionName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(colors.textSecondary)
+                }
+                .padding(.leading, 2)
+                .accessibilityHidden(true)
+            }
 
-            bubbleContent
-                .padding(.horizontal, hasVisualContent ? 4 : 14)
-                .padding(.vertical, hasVisualContent ? 4 : 10)
-                .background(bubbleColor, in: bubbleShape)
-                .contextMenu {
+            HStack(alignment: .bottom) {
+                if isUser { Spacer(minLength: 72) }
+
+                bubbleContent
+                    .padding(.horizontal, hasVisualContent ? 4 : 14)
+                    .padding(.vertical, hasVisualContent ? 4 : 10)
+                    .background(bubbleColor, in: bubbleShape)
+                    // 用户气泡带一层**品牌色淡光**：它是"我"说的话，
+                    // 在深色画布上需要比助手气泡更"跳"一点（tinted shadow，
+                    // 不是黑色阴影 —— 见 DESIGN.md §6.4 Elevation.glow）。
+                    .ynElevation(isUser ? YNTheme.Elevation.glow(colors.accent, radius: 10)
+                                        : YNTheme.Elevation.Spec(color: .clear, radius: 0, y: 0))
+                    .contextMenu {
                     if !message.text.isEmpty, message.imageData == nil, !message.isSticker {
                         Button {
                             UIPasteboard.general.string = message.text
@@ -649,9 +745,10 @@ private struct MessageBubble: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(accessibilityLabel)
 
-            if !isUser { Spacer(minLength: 72) }
+                if !isUser { Spacer(minLength: 72) }
+            }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -695,6 +792,8 @@ private struct MessageBubble: View {
             Text(message.text)
                 .font(.body)
                 .foregroundStyle(isUser ? colors.onAccent : colors.textPrimary)
+                // 行距 2：中文正文挤在一起读起来费劲；多行回复尤其明显。
+                .lineSpacing(2)
                 .textSelection(.enabled)
         }
     }

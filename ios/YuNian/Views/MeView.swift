@@ -79,7 +79,8 @@ struct MeView: View {
         let c = YNTheme.palette(scheme)
         NavigationStack {
             List {
-                ownerSection
+                headerSection(c)
+                profileCard(c)
                 aiSection
                 systemSection
                 dataSection
@@ -89,31 +90,76 @@ struct MeView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(YNCanvas())
-            .navigationTitle("我")
+            // 标题由页头承担（系统导航栏 17pt 撑不起门面，见 DESIGN.md §5）
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .task { loadOnce() }
         }
         .tint(c.accent)
     }
 
-    // MARK: - 个人信息
+    // MARK: - 页头
 
-    private var ownerSection: some View {
+    /// 门面页头：大标题「我」+ 右侧版本 + 副标题写**当前可用状态**。
+    ///
+    /// 副标题刻意回答"我现在能不能用"（渠道是否就绪），
+    /// 因为这一页第一次打开时的真实问题就是这个。
+    private func headerSection(_ c: YNTheme.Palette) -> some View {
         Section {
-            // 内联编辑而不是跳页：只有一个字段，开一屏是多余的。
-            HStack(spacing: YNTheme.Space.md) {
-                Image(systemName: "person.text.rectangle")
-                    .foregroundStyle(YNTheme.palette(scheme).accent)
-                    .frame(width: 26)
-                TextField("你的称呼", text: $ownerName)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onSubmit { saveOwnerName() }
-                    .accessibilityLabel("你的称呼")
+            YNPageHeader(
+                title: "我",
+                subtitle: channelReady ? "渠道已就绪" : "还没有可用渠道 —— 先在「模型渠道」里配一条"
+            ) {
+                Text(Self.versionText)
+                    .font(.caption)
+                    .foregroundStyle(c.textTertiary)
+                    .monospacedDigit()
             }
-        } header: {
-            Text("个人信息")
-        } footer: {
-            Text("角色会用它称呼你。留空则不下发。")
+            .listRowInsets(EdgeInsets(top: 0, leading: YNTheme.Space.lg,
+                                      bottom: YNTheme.Space.sm, trailing: YNTheme.Space.lg))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    /// 版本号：`1.0.0 (1)`。与 Release 标签前缀一致（第 217 轮起两者对齐）。
+    private static var versionText: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
+    }
+
+    // MARK: - 个人卡
+
+    /// 个人信息卡：大头像（首字）+ 内联改称呼。
+    ///
+    /// 旧版这一处只是一行带图标的 `TextField` —— 一整页里没有任何"人的痕迹"。
+    /// 头像用**暖色光晕**：这是这个 App 唯一属于"你"的形象位。
+    private func profileCard(_ c: YNTheme.Palette) -> some View {
+        Section {
+            HStack(spacing: YNTheme.Space.md) {
+                YNAvatarHalo(avatarURL: nil,
+                             name: ownerName.isEmpty ? "我" : ownerName,
+                             size: 64)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    // 内联编辑而不是跳页：只有一个字段，开一屏是多余的。
+                    TextField("你的称呼", text: $ownerName)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(c.textPrimary)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit { saveOwnerName() }
+                        .accessibilityLabel("你的称呼")
+
+                    Text(ownerName.isEmpty ? "角色会用它称呼你（留空则不下发）" : "点一下可以改")
+                        .font(.caption)
+                        .foregroundStyle(c.textTertiary)
+                }
+            }
+            .padding(.vertical, YNTheme.Space.sm)
+            .listRowBackground(Color.clear)
         }
     }
 
