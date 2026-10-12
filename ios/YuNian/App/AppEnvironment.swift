@@ -30,6 +30,16 @@ final class AppEnvironment: ObservableObject {
     @Published private(set) var memoryRepo: MemoryRepository?
     /// 标签数量摘要（自检面板用）。
     @Published private(set) var stickerTagsSummary: String = "—"
+    /// 表情**张数**（`我` 页「表情库」那行的徽标用）。
+    ///
+    /// ⚠️ 第 226 轮：原先那行显示的是 `stickerTagsSummary`（**标签数**），
+    /// 而它只在 `syncRuntimeConfig()` 里被赋值 —— 那个函数只在「发消息前 / 改渠道后 /
+    /// 改线路后」调用，**启动时不调用** ✗。于是刚开机会显示 `—`，
+    /// 发过一条消息才变正常（用户原话："有时候正常有时候不正常"）。
+    ///
+    /// 现在：`nil` 表示"还不知道"，由 `refreshStickerSummary()` 按需取真值，
+    /// 并在 `boot()` 结束时、以及界面出现时各刷一次。
+    @Published private(set) var stickerCount: Int?
     /// 实际标签列表（自检面板展开显示；下发给 Rust 的就是这批）。
     @Published private(set) var stickerTagList: [String] = []
     @Published private(set) var runtime: AgentRuntime?
@@ -198,6 +208,10 @@ final class AppEnvironment: ObservableObject {
             self.stickerTags = StickerTagProvider(database: database, stores: stores)
             self.memoryRepo = memoryRepo
             self.runtime = runtime
+
+            // 启动就把「表情张数」问出来 —— 不能让界面等某次 `syncRuntimeConfig()`
+            // 的副作用（那正是"刚开机显示 —、发过消息才正常"的成因）。
+            refreshStickerCount()
 
             // 装配工具目录（记忆工具 + load_skill）并注册执行器。
             // 必须在 runtime 就绪后、且 ChatSession 发送前完成。
@@ -738,8 +752,22 @@ final class AppEnvironment: ObservableObject {
             stickerTagsSummary = "\(tags.count) 个标签"
             stickerTagList = tags
         }
+        refreshStickerCount()
 
         pushCredentials()
+    }
+
+    /// 刷新「表情张数」徽标（`我` 页用）。
+    ///
+    /// 独立成一个方法，是因为它**不能只靠 `syncRuntimeConfig()` 的副作用**：
+    /// 那个函数启动时不跑，界面就会出现"刚开机是 `—`、发过消息才正常"。
+    /// 现在 `boot()` 结束、以及界面出现时都会各刷一次，导入完返回也会刷新。
+    func refreshStickerCount() {
+        guard let database else {
+            stickerCount = nil
+            return
+        }
+        stickerCount = try? StickerLibraryRepository(database: database).count()
     }
 
     /// 只显示「是否已配置」，不泄露明文。

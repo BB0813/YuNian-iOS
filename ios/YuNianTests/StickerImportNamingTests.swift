@@ -211,4 +211,24 @@ final class StickerImportNamingTests: XCTestCase {
         let stats = try StickerLibraryRepository(database: database).tagStats()
         XCTAssertEqual(stats.map(\.tag), ["小猫拿红包"], "旧标签应被清掉")
     }
+
+    /// ## 「我」页那行显示的是**张数**，不是标签数（第 226 轮）
+    /// 两个口径必须一致：徽标上的 N 张要等于列表里的条数，
+    /// 否则用户看到的数字与打开后看到的张数对不上。
+    func testCountMatchesEntries() throws {
+        let (database, dir) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = StickerImportRepository(database: database)
+        let library = StickerLibraryRepository(database: database)
+
+        XCTAssertEqual(try library.count(), 0, "空库应当是 0（徽标显示「0 张」，而不是 —）")
+
+        for index in 0..<3 {
+            let bytes = Data([0x89, 0x50, 0x4E, 0x47] + Array(repeating: UInt8(index), count: 8))
+            _ = try repo.importSticker(data: bytes, fileName: "custom_\(index)_1.png",
+                                       description: "表情 \(index)", userTags: [])
+        }
+        XCTAssertEqual(try library.count(), 3)
+        XCTAssertEqual(try library.count(), try library.entries().count, "两个口径必须一致")
+    }
 }

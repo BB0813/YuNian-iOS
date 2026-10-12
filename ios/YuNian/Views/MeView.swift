@@ -94,7 +94,12 @@ struct MeView: View {
             // 原来挂在页头上的版本号与渠道状态，移进下面的个人卡（那里本来就是身份位）。
             .navigationTitle("我")
             .navigationBarTitleDisplayMode(.large)
-            .task { loadOnce() }
+            .task {
+                loadOnce()
+                // 每次这一页出现都问一次张数：导入完返回、或别处改了表情库，
+                // 徽标立刻跟上（不能只靠启动时那一次）。
+                environment.refreshStickerCount()
+            }
         }
         .tint(YNTheme.palette(scheme).accent)
     }
@@ -238,7 +243,11 @@ struct MeView: View {
                     icon: "face.smiling",
                     title: "表情库",
                     subtitle: "导入表情并命名 —— 名称决定标签，模型按标签挑表情。",
-                    badge: environment.stickerTagsSummary
+                    // ⚠️ 第 226 轮：这里原先显示 `stickerTagsSummary`（**标签数**），
+                    // 而它只在 `syncRuntimeConfig()` 里被赋值（发消息前 / 改渠道后才跑）
+                    // → 刚开机会显示 `—`，用户反馈"有时候正常有时候不正常"。
+                    // 现在显示**张数**（这才是"表情总数"），并在下面 `.task` 里按需刷新。
+                    badge: environment.stickerCount.map { "\($0) 张" } ?? "—"
                 )
             }
 

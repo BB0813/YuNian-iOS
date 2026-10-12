@@ -56,6 +56,20 @@ struct StickerLibraryRepository {
         self.database = database
     }
 
+    /// 表情**张数**（不是标签数）。
+    ///
+    /// 第 226 轮：`我` 页「表情库」那行原先显示的是 `stickerTagsSummary`（标签数），
+    /// 而它只在 `syncRuntimeConfig()` 里被赋值 —— 那个函数只在发消息前 / 改渠道后调用，
+    /// **启动时不调用**，所以刚开机会显示 `—`，发过一条消息才正常。
+    ///
+    /// 这里提供一个独立、可随时调用的计数入口，让界面**按需取真值**，
+    /// 而不是依赖某个流程的副作用。
+    func count() throws -> Int {
+        try database.pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sticker_entries") ?? 0
+        }
+    }
+
     /// 全部表情，按最近使用 → 创建时间倒序。
     func entries() throws -> [Entry] {
         try database.pool.read { db in
