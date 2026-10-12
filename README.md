@@ -5,7 +5,7 @@
 原 Android 仓库见 <https://github.com/Sylvara-Lin/YuNian>（公开）。
 
 > **只想装上用** → 直接看 [装到自己的 iPhone 上（自签教程）](#装到自己的-iphone-上自签教程)。
-> **想下载** → [最新 Release](https://github.com/BB0813/YuNian-iOS/releases)（当前 **Beta 1**）。
+> **想下载** → [最新 Release](https://github.com/BB0813/YuNian-iOS/releases)（当前 **Beta 2**）。
 > **想自己编译** → 看 [自己构建（不需要 Mac）](#自己构建不需要-mac) 与 [`ios/M0-RUNBOOK.md`](ios/M0-RUNBOOK.md)。
 
 ---
@@ -22,11 +22,11 @@ Apple 只允许**已签名**的 App 安装到 iPhone 上，而签名必须绑到
 
 - 工程最低系统版本：**iOS 17.0**（`minos 17.0`）
 - **下载 IPA（首选）**：[Releases](https://github.com/BB0813/YuNian-iOS/releases) → 最新一版
-  （当前 **Beta 1**）→ 下载 **`YuNian-unsigned.ipa`**。Release 里的产物**长期保留**。
+  （当前 **Beta 2**）→ 下载 **`YuNian-unsigned.ipa`**。Release 里的产物**长期保留**。
 - **下载 IPA（想拿最新构建）**：本仓库 → **Actions** → 最近一次成功的 `iOS Agent`
   → 页面底部 **Artifacts** → **`YuNian-unsigned-ipa`**（只保留 14 天）
-- 装好后可在 App 内 `我 → 关于` 核对版本：**Beta 1 对应 `1.0.0 (1)`**
-  （Release 标签 `v1.0.0-ios-beta.1` ↔ App 内 `1.0.0 (1)`，从这一版起两者对齐）
+- 装好后可在 App 内 `我 → 关于` 核对版本：**Beta 2 对应 `1.0.0 (2)`**
+  （Release 标签 `v1.0.0-ios-beta.2` ↔ App 内 `1.0.0 (2)`，两者对齐）
 
 ### 准备（三条路线都需要）
 
