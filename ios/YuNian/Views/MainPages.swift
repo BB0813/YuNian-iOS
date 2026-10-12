@@ -75,9 +75,7 @@ struct ConversationsView: View {
                                         .monospacedDigit()
                                 }
                             }
-                            .listRowInsets(EdgeInsets(top: 0, leading: YNTheme.Space.lg,
-                                                      bottom: YNTheme.Space.sm,
-                                                      trailing: YNTheme.Space.lg))
+
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
@@ -117,11 +115,7 @@ struct ConversationsView: View {
                                     }
                                 }
                                 .listRowBackground(Color.clear)
-                                .listRowSeparator(.visible)
-                                .listRowInsets(EdgeInsets(top: YNTheme.Space.sm,
-                                                          leading: YNTheme.Space.lg,
-                                                          bottom: YNTheme.Space.sm,
-                                                          trailing: YNTheme.Space.lg))
+
                             }
                         }
                     }
@@ -271,15 +265,19 @@ private struct ConversationRow: View {
                     .foregroundStyle(row.hasUnread ? c.textSecondary : c.textTertiary)
                     .lineLimit(1)
             }
-
-            Spacer(minLength: YNTheme.Space.sm)
+            // ⚠️ 第 222 轮（真机截图驱动）：
+            // 左列必须**主动吸收剩余宽度**。之前这里用的是 `Spacer(minLength:)`，
+            // 而右列又写了 `.fixedSize(horizontal: true)` —— 两者叠加会让整行
+            // 需求宽度**超过屏幕**，SwiftUI 于是把内容居中并**两侧一起裁掉**：
+            // 标题被切掉第一个字（「对话」→「舌」）、右列时间与条数也被切。
+            // 正确形状：中间可伸缩列 maxWidth: .infinity，右列靠 layoutPriority 保尺寸。
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // 右列：时间 + 条数（**竖排**）。
             //
             // ⚠️ 第 220 轮把这个数字**放回来了，但换了位置**：苏晚瑄反馈过
             // 「条数跟在预览文字后面很怪」—— 根因是它和预览挤同一行、被挤成竖排。
-            // 借 Aru 的做法放到右侧固定列（那里宽度不受预览影响），
-            // 既保留"这条会话聊了多少"的信息，又不再抢预览的宽度。
+            // 借 Aru 的做法放到右侧固定列（那里宽度不受预览影响）。
             VStack(alignment: .trailing, spacing: 4) {
                 if let timestamp = row.lastMessageAt {
                     Text(Self.timeString(timestamp))
@@ -294,7 +292,7 @@ private struct ConversationRow: View {
                         .monospacedDigit()
                 }
             }
-            .fixedSize(horizontal: true, vertical: false)
+            // 优先满足右列（它很短且不该被压缩），中间列再吃掉剩下的
             .layoutPriority(1)
         }
         .padding(.vertical, 4)
@@ -386,9 +384,7 @@ struct ContactsView: View {
                                     .foregroundStyle(c.textTertiary)
                                     .monospacedDigit()
                             }
-                            .listRowInsets(EdgeInsets(top: 0, leading: YNTheme.Space.lg,
-                                                      bottom: YNTheme.Space.sm,
-                                                      trailing: YNTheme.Space.lg))
+
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         }
@@ -406,13 +402,18 @@ struct ContactsView: View {
                                             Text(companion.name)
                                                 .font(.body.weight(.medium))
                                                 .foregroundStyle(c.textPrimary)
-                                            if !companion.personality.isEmpty {
-                                                Text(companion.personality)
-                                                    .font(.subheadline)
-                                                    .foregroundStyle(c.textSecondary)
-                                                    .lineLimit(1)
-                                            }
+                                                .lineLimit(1)
+                                            // ⚠️ 第 222 轮（真机截图驱动）：副标题从**原样铺人设**
+                                            // 改成摘要。人设常写成整段提示词（截图里是
+                                            // "你是小鱼，一个温柔体贴、有点粘人的AI女友。你喜欢分…"）
+                                            // —— 列表里像一堵墙，还把名字挤没了。
+                                            // 摘要只取**用户真正填过的字段**，且与角色页同用一个函数。
+                                            Text(CompanionHubStats.personaSummary(for: companion))
+                                                .font(.subheadline)
+                                                .foregroundStyle(c.textSecondary)
+                                                .lineLimit(1)
                                         }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .padding(.vertical, 4)
                                     .contentShape(Rectangle())
@@ -448,11 +449,7 @@ struct ContactsView: View {
                             }
                         }
                         .listRowBackground(Color.clear)
-                                .listRowSeparator(.visible)
-                                .listRowInsets(EdgeInsets(top: YNTheme.Space.sm,
-                                                          leading: YNTheme.Space.lg,
-                                                          bottom: YNTheme.Space.sm,
-                                                          trailing: YNTheme.Space.lg))
+
                             }
                         }
                     }

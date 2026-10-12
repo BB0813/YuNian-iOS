@@ -62,6 +62,11 @@ struct RootView: View {
         .background {
             YNCanvas()
         }
+        // 第 222 轮（真机截图驱动）：**标签栏的选中色要跟品牌色走**。
+        // 之前只在各页的 NavigationStack 上设了 `.tint`，而浮动标签栏在
+        // TabView 这一层，于是选中项呈现系统蓝 —— 与整屏紫/暖色根本不搭。
+        // 在 TabView 上设一次，三个标签一起生效。
+        .tint(YNTheme.palette(scheme).accent)
     }
 }
 

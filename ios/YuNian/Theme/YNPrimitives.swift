@@ -31,20 +31,30 @@ struct YNPageHeader<Trailing: View>: View {
     var body: some View {
         let c = YNTheme.palette(scheme)
         VStack(alignment: .leading, spacing: YNTheme.Space.xs) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: YNTheme.Space.sm) {
                 Text(title)
                     .font(YNTheme.Display.hero)
                     .tracking(YNTheme.Display.heroTracking)
                     .foregroundStyle(c.textPrimary)
-                Spacer(minLength: YNTheme.Space.sm)
+                    // ⚠️ 第 222 轮（真机截图驱动）：大标题原来会**被切掉第一个字**。
+                    // 成因是整行需求宽度超过屏幕、SwiftUI 把内容居中并两侧裁掉。
+                    // 这里做两件事兜底：允许略微缩放 + 不撑破可用宽度。
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
                 trailing()
+                    // 计数是短文本，不该被压缩（配合中间列的 maxWidth: .infinity）
+                    .fixedSize(horizontal: true, vertical: false)
             }
             if let subtitle {
                 Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(c.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, YNTheme.Space.sm)
         .padding(.bottom, YNTheme.Space.xs)
         .accessibilityElement(children: .combine)
