@@ -76,11 +76,9 @@ struct MeView: View {
     @State private var didLoad = false
 
     var body: some View {
-        let c = YNTheme.palette(scheme)
         NavigationStack {
             List {
-                headerSection(c)
-                profileCard(c)
+                profileCard
                 aiSection
                 systemSection
                 dataSection
@@ -90,35 +88,53 @@ struct MeView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(YNCanvas())
-            // 标题由页头承担（系统导航栏 17pt 撑不起门面，见 DESIGN.md §5）
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            // ⚠️ 第 222 轮第二次修正：页头交回**系统大标题**。
+            // 自绘页头（`YNPageHeader`）在真机上出现"标题缺字 / 内容被裁"，
+            // 所以三个页签统一用系统 `.largeTitle`（34pt 粗体，量级一致、几何由系统保证）。
+            // 原来挂在页头上的版本号与渠道状态，移进下面的个人卡（那里本来就是身份位）。
+            .navigationTitle("我")
+            .navigationBarTitleDisplayMode(.large)
             .task { loadOnce() }
         }
-        .tint(c.accent)
+        .tint(YNTheme.palette(scheme).accent)
     }
 
-    // MARK: - 页头
-
-    /// 门面页头：大标题「我」+ 右侧版本 + 副标题写**当前可用状态**。
+    /// 个人信息卡：大头像（首字）+ 内联改称呼 + **渠道状态 / 版本号**。
     ///
-    /// 副标题刻意回答"我现在能不能用"（渠道是否就绪），
-    /// 因为这一页第一次打开时的真实问题就是这个。
-    private func headerSection(_ c: YNTheme.Palette) -> some View {
-        Section {
-            YNPageHeader(
-                title: "我",
-                subtitle: channelReady ? "渠道已就绪" : "还没有可用渠道 —— 先在「模型渠道」里配一条"
-            ) {
-                Text(Self.versionText)
-                    .font(.caption)
-                    .foregroundStyle(c.textTertiary)
-                    .monospacedDigit()
+    /// 第 222 轮：原来这三样分别挂在"自绘页头"和一行带图标的输入框上；
+    /// 页头改回系统大标题后，把它们都收进这张卡 —— 它本来就是这一页的身份位。
+    private var profileCard: some View {
+        let c = YNTheme.palette(scheme)
+        return Section {
+            HStack(spacing: YNTheme.Space.md) {
+                YNAvatarHalo(avatarURL: nil,
+                             name: ownerName.isEmpty ? "我" : ownerName,
+                             size: 64)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    // 内联编辑而不是跳页：只有一个字段，开一屏是多余的。
+                    TextField("你的称呼", text: $ownerName)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(c.textPrimary)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit { saveOwnerName() }
+                        .accessibilityLabel("你的称呼")
+
+                    Text(ownerName.isEmpty ? "角色会用它称呼你（留空则不下发）" : "点一下可以改")
+                        .font(.caption)
+                        .foregroundStyle(c.textTertiary)
+
+                    // 状态与版本（原来在自绘页头上）
+                    Text(channelReady ? "渠道已就绪 · \(Self.versionText)"
+                                      : "还没有可用渠道 —— 先在「模型渠道」里配一条")
+                        .font(.caption2)
+                        .foregroundStyle(channelReady ? c.textTertiary : c.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .listRowInsets(EdgeInsets(top: 0, leading: YNTheme.Space.lg,
-                                      bottom: YNTheme.Space.sm, trailing: YNTheme.Space.lg))
+            .padding(.vertical, YNTheme.Space.sm)
             .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
         }
     }
 

@@ -10,62 +10,17 @@ import SwiftUI
 /// ⚠️ 三者都必须遵守 `DESIGN.md` 的反模式清单：
 /// 描边与投影互斥、卡片圆角 ≤ 16、不用侧边色条、不做渐变文字。
 
-// MARK: - 页头（大标题）
+// MARK: - 页头（已废弃 → 用系统大标题）
 
-/// 门面页的页头：大标题 + 右侧计数 +（可选）副标题。
-///
-/// ## 为什么不用 `.navigationTitle`
-/// 系统导航栏标题是 17pt —— **整屏最大的字就是它**，所以任何一页都没有重点。
-/// 这里借用 Aru 的做法：标题行里的字真正大（34pt / 粗），
-/// 右侧放一个**轻量计数**（`2 段` 那种），副标题再补一句状态。
-///
-/// 用法：放进 `List` 的第一个 `Section`，并把 `.navigationBarTitleDisplayMode(.inline)`
-/// 且 `navigationTitle("")`，否则会出现两个标题。
-struct YNPageHeader<Trailing: View>: View {
-    let title: String
-    var subtitle: String?
-    @ViewBuilder var trailing: () -> Trailing
-
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        let c = YNTheme.palette(scheme)
-        VStack(alignment: .leading, spacing: YNTheme.Space.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: YNTheme.Space.sm) {
-                Text(title)
-                    .font(YNTheme.Display.hero)
-                    .tracking(YNTheme.Display.heroTracking)
-                    .foregroundStyle(c.textPrimary)
-                    // ⚠️ 第 222 轮（真机截图驱动）：大标题原来会**被切掉第一个字**。
-                    // 成因是整行需求宽度超过屏幕、SwiftUI 把内容居中并两侧裁掉。
-                    // 这里做两件事兜底：允许略微缩放 + 不撑破可用宽度。
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Spacer(minLength: 0)
-                trailing()
-                    // 计数是短文本，不该被压缩（配合中间列的 maxWidth: .infinity）
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            if let subtitle {
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(c.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, YNTheme.Space.sm)
-        .padding(.bottom, YNTheme.Space.xs)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-extension YNPageHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String? = nil) {
-        self.init(title: title, subtitle: subtitle) { EmptyView() }
-    }
-}
+// ⚠️ 第 222 轮第二次修正：原先这里有一个自绘的 `YNPageHeader`
+// （34pt 大标题 + 右侧计数 + 副标题）。真机上它**把标题的第一个字裁掉了**，
+// 右侧计数也被切到屏幕外 —— 我按"整行比屏幕宽"的假设改过一轮（中间列 maxWidth +
+// 去掉 fixedSize），**没有修好**。
+//
+// 既然自绘几何在这台设备上不可靠，三个页签统一改用**系统 `.largeTitle`**：
+// 量级一样（34pt 粗体），几何由系统保证；计数改放工具栏尾部。
+// 这里刻意**不保留**这个原语 —— 留着一个已被证明会出错的组件，
+// 下一个人还会再踩一次（"删掉而不是注释掉"）。
 
 // MARK: - 卡片
 

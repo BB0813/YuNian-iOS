@@ -61,25 +61,18 @@ struct ConversationsView: View {
                     }
                 } else {
                     List {
-                        // 页头：大标题 + 计数（第 220 轮）。
-                        // 借 Aru 的做法：标题行右侧放一个轻量计数，副标题写状态。
-                        Section {
-                            YNPageHeader(
-                                title: "对话",
-                                subtitle: unreadTotal > 0 ? "\(unreadTotal) 个会话有新消息" : "全部已读"
-                            ) {
-                                if !rows.isEmpty {
-                                    Text("\(rows.count) 个")
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(c.textTertiary)
-                                        .monospacedDigit()
-                                }
-                            }
-
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                        }
-
+                        // ⚠️ 第 222 轮第二次修正（真机截图驱动）：
+                        // **页头交回系统的 `.largeTitle`**，不再自绘。
+                        //
+                        // 第一版我自绘了 `YNPageHeader`（大标题 + 右侧计数 + 副标题），
+                        // 真机上标题被**切掉第一个字**、右侧计数被切到屏幕外 ——
+                        // 表现是"整行比屏幕宽、被居中后两侧裁掉"。
+                        // 我按这个假设改过一轮（中间列 maxWidth + 去掉 fixedSize），
+                        // **没有修好**。既然自绘几何在这台设备上不可靠，
+                        // 就用系统的大标题：量级一样（34pt 粗体），几何由系统保证。
+                        //
+                        // 计数不再与标题同行 —— 放到工具栏尾部（见下面的 toolbar），
+                        // 那里是系统管理的位置，不会参与内容宽度计算。
                         Section {
                             ForEach(Array(filtered.enumerated()), id: \.element.id) { index, row in
                                 NavigationLink {
@@ -138,9 +131,21 @@ struct ConversationsView: View {
                     }
                 }
             }
-            // 标题由页头承担（系统导航栏 17pt 撑不起门面）；这里留空避免两个标题。
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            // 大标题交回系统（`.largeTitle` = 34pt 粗体，与设计要的量级一致），
+            // 计数放工具栏尾部 —— 都不参与内容行宽计算。
+            .navigationTitle("对话")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !rows.isEmpty {
+                        Text(unreadTotal > 0 ? "\(rows.count) 个 · \(unreadTotal) 未读"
+                                             : "\(rows.count) 个")
+                            .font(.footnote)
+                            .foregroundStyle(c.textTertiary)
+                            .monospacedDigit()
+                    }
+                }
+            }
             .alert("无法载入会话", isPresented: errorPresented) {
                 Button("重试") { reload() }
                 Button("取消", role: .cancel) { loadError = nil }
@@ -373,31 +378,18 @@ struct ContactsView: View {
                     }
                 } else {
                     List {
-                        // 页头：大标题 + 人数（第 220 轮，与首页同一套页头）
-                        Section {
-                            YNPageHeader(
-                                title: "通讯录",
-                                subtitle: "点进去直接聊天；左滑看详情、改人设"
-                            ) {
-                                Text("\(companions.count) 位")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(c.textTertiary)
-                                    .monospacedDigit()
-                            }
-
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                        }
-
+                        // 页头同样交回系统大标题（第 222 轮第二次修正，原因见会话列表处）
                         Section {
                             ForEach(companions) { companion in
                                 NavigationLink {
                                     ChatView(companionId: companion.id)
                                 } label: {
                                     HStack(spacing: YNTheme.Space.md) {
-                                        // 头像带光晕（与首页一致；这里是"身份"语义 → 品牌色）
-                                        YNAvatarHalo(avatarURL: companion.avatarUrl,
-                                                     name: companion.name, size: 52)
+                                        // 头像（第 222 轮第二次修正：**列表行里不再用自绘光晕**）。
+                                        // 自绘光晕是 1.62× 的溢出绘制，是"内容被裁"的重点嫌疑；
+                                        // 光晕保留在角色页/个人卡这种独立卡片上（那里有空间、也不会挤压别的内容）。
+                                        CompanionAvatar(avatarURL: companion.avatarUrl,
+                                                        name: companion.name, size: 52)
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(companion.name)
                                                 .font(.body.weight(.medium))
@@ -458,9 +450,19 @@ struct ContactsView: View {
                     .refreshable { reload() }
                 }
             }
-            // 标题由页头承担
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
+            // 大标题交回系统（同会话列表）；人数放工具栏尾部
+            .navigationTitle("通讯录")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !companions.isEmpty {
+                        Text("\(companions.count) 位")
+                            .font(.footnote)
+                            .foregroundStyle(c.textTertiary)
+                            .monospacedDigit()
+                    }
+                }
+            }
             // 点行 = 去聊天（主操作），改人设走左滑 —— 与记忆/技能页的手势语言一致
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
