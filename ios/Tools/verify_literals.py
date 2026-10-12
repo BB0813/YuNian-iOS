@@ -594,6 +594,23 @@ def main() -> int:
         "iOS 读取端也对类型做 uppercased() 容错",
         "r.type.uppercased() == Self.reasoningType" in session_src,
     )
+    # 同类错的第二处：文本 / 图片消息的类型串也必须是大写枚举名
+    #（Android 的 fromMessageType(value) = value.name）
+    report.check(
+        'iOS 的文本 / 图片类型串是大写 "TEXT" / "IMAGE"',
+        'static let textType = "TEXT"' in session_src
+        and 'static let imageType = "IMAGE"' in session_src,
+        "小写只属于 @SerialName（备份 JSON），不是 Room 落库的值",
+    )
+    report.check(
+        "iOS 里不再有 type 的小写字面量写入",
+        'type: "text"' not in session_src and 'type: "image"' not in session_src,
+        'MessageRepository.insert(type:) 必须传 Self.textType / Self.imageType',
+    )
+    report.check(
+        "iOS 读图片消息时大小写不敏感",
+        "r.type.uppercased() == Self.imageType" in session_src,
+    )
 
     print()
     print(f"通过 {report.passed} 项，失败 {len(report.failed)} 项")

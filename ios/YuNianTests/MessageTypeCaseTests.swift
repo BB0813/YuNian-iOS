@@ -48,6 +48,9 @@ final class MessageTypeCaseTests: XCTestCase {
     func testReasoningTypeMatchesRoomStoredValue() {
         XCTAssertEqual(ChatSession.reasoningType, "REASONING",
                        "Room 存的是枚举名（大写）；@SerialName 的小写只用于备份 JSON")
+        // 同类错的第二处：文本 / 图片也必须是大写枚举名
+        XCTAssertEqual(ChatSession.textType, "TEXT")
+        XCTAssertEqual(ChatSession.imageType, "IMAGE")
     }
 
     /// 小写（历史遗留行）与大写（新写入 / Android 导入）都**不能**出现在会话列表里。

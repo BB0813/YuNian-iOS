@@ -262,7 +262,7 @@ final class ChatSession: ObservableObject {
                     conversationType: .chat,
                     isFromUser: true,
                     senderId: 0,
-                    type: "text",
+                    type: Self.textType,
                     content: trimmed,
                     searchContent: trimmed
                 )
@@ -945,7 +945,7 @@ final class ChatSession: ObservableObject {
                 conversationType: .chat,
                 isFromUser: isFromUser,
                 senderId: 0,
-                type: "text",
+                type: Self.textType,
                 content: text,
                 searchContent: ""
             )
@@ -1037,7 +1037,7 @@ final class ChatSession: ObservableObject {
                     conversationType: .chat,
                     isFromUser: false,
                     senderId: 0,
-                    type: "text",
+                    type: Self.textType,
                     content: text,
                     searchContent: text,
                     turnId: turnId
@@ -1098,6 +1098,18 @@ final class ChatSession: ObservableObject {
     /// 2. **过滤改成大小写不敏感**（`UPPER(type) NOT IN ...`）——
     ///    既兼容已经写成小写的老行，也与 Android 读取端的 `uppercase()` 容错同一条思路。
     static let reasoningType = "REASONING"
+
+    /// 普通文本消息的类型串。
+    ///
+    /// ⚠️ 与 `reasoningType` **同一条契约**：Android Room 的 `MessageType` 转换器是
+    /// `fromMessageType(value) = value.name`，所以库里存的是**大写枚举名** `"TEXT"`；
+    /// `@SerialName("text")` 那套小写只用于**备份 JSON**。
+    /// iOS 原先写小写 —— 症状与第 223 轮那个 bug 同类（自己写的行自己认不出），
+    /// 只是文本消息恰好没人按类型过滤，所以一直没暴露。
+    static let textType = "TEXT"
+
+    /// 图片消息的类型串（同 `textType` 的契约）。
+    static let imageType = "IMAGE"
 
     /// 正文形如 `[123]`（纯数字）时返回 id，否则 nil。
     ///
@@ -1201,7 +1213,7 @@ final class ChatSession: ObservableObject {
             // 上一版读到 "[图片]" 就只是个文本占位 —— 重启后图没了。
             // 读不到文件时退回文本（消息仍可见），与 Android
             // "资源缺失时显示描述"的处理一致。
-            if r.type == "image" {
+            if r.type.uppercased() == Self.imageType {
                 if let link = r.linkString,
                    let data = FileManager.default.contents(atPath: link) {
                     loaded.append(Message(role: r.isFromUser ? .user : .assistant,
@@ -1248,7 +1260,7 @@ final class ChatSession: ObservableObject {
                 conversationType: .chat,
                 isFromUser: false,
                 senderId: 0,
-                type: "image",
+                type: Self.imageType,
                 content: "[图片]",
                 searchContent: prompt
             )
