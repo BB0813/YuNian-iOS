@@ -7,6 +7,11 @@
 > **只想装上用** → 直接看 [装到自己的 iPhone 上（自签教程）](#装到自己的-iphone-上自签教程)。
 > **想下载** → [最新 Release](https://github.com/BB0813/YuNian-iOS/releases)（当前 **Beta 2**）。
 > **想自己编译** → 看 [自己构建（不需要 Mac）](#自己构建不需要-mac) 与 [`ios/M0-RUNBOOK.md`](ios/M0-RUNBOOK.md)。
+> **想知道还差什么** → [`ios/BACKLOG.md`](ios/BACKLOG.md)：全部待开发 / 做了一半 / **决定不做**的事，
+> 每项带成本与验收方式（单测能覆盖还是必须真机），有数据风险的单独标出。
+>
+> ⚠️ **接手的同学注意**：这是 **iOS 仓库**（`YuNian-iOS`）。
+> 另有一个 Android 仓库 `YuNian`，两边目录名相似，别在错的那边找 `ios/` 下的文件。
 
 ---
 

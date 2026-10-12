@@ -1,8 +1,10 @@
 # 予念 iOS 端
 
+> 待办 / 规划见仓库根的 [`ios/BACKLOG.md`](../BACKLOG.md)：全部待开发、做了一半、以及**决定不做**的事。
+
 > ## 第 99 轮：阶段性总账（数字由 verify_readme_accounting.py 把关，勿手改后不同步）
 >
-> **交付**：191 文件 / 52,252 行（Swift 134 / Python 37），
+> **交付**：191 文件 / 52,255 行（Swift 134 / Python 37），
 > 43 个测试文件，**34 项本地验证关卡全绿**（`run_all_gates.py` 一键驱动，
 > 计数口径：驱动器里的条目数，不含被 import 的库与被删掉的检查器）。
 >
@@ -2781,3 +2783,4 @@ SQLite 验证，但**没有任何查询消费方**（上面第 6 条说的"补�
 - 唯一对 Android 侧资产的改动：`agent-native/uniffi.toml` 新增 `[bindings.swift]` 段
   （对 `[bindings.kotlin]` 无影响，Kotlin 绑定生成行为不变）
 - 若将来需要把逻辑下沉到 Rust（Kotlin → Rust），必须走 AGENTS.md 的「冲突预审」清单
+
