@@ -17,6 +17,8 @@ struct RootView: View {
 
     @EnvironmentObject private var environment: AppEnvironment
     @Environment(\.colorScheme) private var scheme
+    /// 角标刷新用（第 227 轮）
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Tab: Hashable {
         case conversations
@@ -35,6 +37,12 @@ struct RootView: View {
             } else {
                 StartupLoadingView()
             }
+        }
+        // 角标（第 227 轮）：切后台时算一次未读（用户离开前最后的真实状态），
+        // 回前台再算一次（期间可能已读、也可能又来了回复）。
+        // 放在根视图而不是各页 —— "切后台"这件事只在这一层能可靠观察到。
+        .onChange(of: scenePhase) { _, _ in
+            Task { await environment.refreshBadge() }
         }
     }
 

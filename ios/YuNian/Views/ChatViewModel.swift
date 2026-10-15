@@ -535,7 +535,33 @@ final class ChatViewModel: ObservableObject {
             if !Task.isCancelled {
                 self.updatePhase()
                 self.markRead()
+                self.notifyReplyIfNeeded()
             }
+        }
+    }
+
+    /// 回复跑完时，如果 App **不在前台**就发一条本地通知（第 227 轮）。
+    ///
+    /// ## 为什么要有"不在前台"这个判断
+    /// 用户正盯着屏幕时再弹一条通知是打扰 —— 通知只解决"我没在看"的场景。
+    ///
+    /// ## iOS 的现实边界（写在代码里，免得以后有人以为能做更多）
+    /// App 切到后台后通常会被挂起，回合也会停 —— 所以这条主要覆盖
+    /// "切走但还没被挂起""回到桌面后系统仍给了几秒"这类窗口期。
+    /// 真正"角色在后台主动找你"在 iOS 上只能靠**定时提醒**（见 `AppNotifications`）。
+    private func notifyReplyIfNeeded() {
+        guard environment.notificationSettings.replyDoneEnabled else { return }
+        guard !AppNotifications.isActive else { return }
+        // 取最后一条**非用户**消息当预览；没有就不发（空通知等于骚扰）
+        guard let reply = messages.last(where: { $0.role != .user })?.text,
+              !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let preview = String(reply.replacingOccurrences(of: "\n", with: " ").prefix(60))
+        let name = (try? environment.companions?.fetch(id: companionId))?.name ?? "予念"
+        Task {
+            await AppNotifications.notifyReplyDone(companionName: name,
+                                                  preview: preview,
+                                                  companionId: companionId)
         }
     }
 
@@ -624,6 +650,8 @@ final class ChatViewModel: ObservableObject {
         guard let database = environment.database else { return }
         _ = try? ConversationRepository(database: database)
             .markReadThroughLatest(companionId: companionId)
+        // 标已读之后角标要跟着掉 —— 否则"角标还在、消息已经读完"。
+        Task { await environment.refreshBadge() }
     }
 
     // MARK: - 表情图片解析

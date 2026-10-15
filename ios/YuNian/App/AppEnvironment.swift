@@ -213,6 +213,11 @@ final class AppEnvironment: ObservableObject {
             // 的副作用（那正是"刚开机显示 —、发过消息才正常"的成因）。
             refreshStickerCount()
 
+            // 通知设置也要启动就位：角标与"回复完成提醒"都以它为准，
+            // 晚一步就出现"设置里关着、行为上还开着"。
+            loadNotificationSettings()
+            Task { await refreshBadge() }
+
             // 装配工具目录（记忆工具 + load_skill）并注册执行器。
             // 必须在 runtime 就绪后、且 ChatSession 发送前完成。
             AgentToolCatalog.install(
@@ -768,6 +773,62 @@ final class AppEnvironment: ObservableObject {
             return
         }
         stickerCount = try? StickerLibraryRepository(database: database).count()
+    }
+
+    // MARK: - 通知与角标（第 227 轮）
+
+    /// 通知设置（角标 / 回复完成提醒 / 每日提醒）。
+    @Published private(set) var notificationSettings = NotificationSettings()
+
+    /// 从 `app_meta` 读设置；读不到就是默认值（不猜）。
+    func loadNotificationSettings() {
+        notificationSettings = NotificationSettings.load(from: apiConfigs)
+    }
+
+    /// 保存设置并**立刻生效**（角标、每日提醒排程都跟着改）。
+    ///
+    /// 「保存了但没生效」是设置类功能最常见的坑：
+    /// 用户关掉每日提醒，如果这里不 `cancel`，到点还会响。
+    func updateNotificationSettings(_ settings: NotificationSettings) {
+        var next = settings
+        let time = NotificationSettings.normalizedTime(hour: next.dailyHour,
+                                                       minute: next.dailyMinute)
+        next.dailyHour = time.hour
+        next.dailyMinute = time.minute
+        notificationSettings = next
+
+        do {
+            try next.save(to: apiConfigs)
+        } catch {
+            log.error("保存通知设置失败：\(String(describing: error), privacy: .public)")
+        }
+
+        Task {
+            if next.dailyEnabled {
+                let granted = await AppNotifications.requestAuthorization()
+                guard granted else { return }
+                await AppNotifications.scheduleDailyReminder(hour: next.dailyHour,
+                                                             minute: next.dailyMinute,
+                                                             text: next.dailyText)
+            } else {
+                // 关掉时必须真的撤掉待触发的那条
+                AppNotifications.cancelDailyReminder()
+            }
+            await refreshBadge()
+        }
+    }
+
+    /// 把角标刷成**未读总数**（口径与列表完全一致，见 `unreadTotal`）。
+    ///
+    /// 调用点：启动、App 进后台 / 回前台、标已读之后。
+    func refreshBadge() async {
+        guard notificationSettings.badgeEnabled else {
+            await AppNotifications.setBadge(0)
+            return
+        }
+        guard let database else { return }
+        let total = (try? ConversationRepository(database: database).unreadTotal()) ?? 0
+        await AppNotifications.setBadge(total)
     }
 
     /// 只显示「是否已配置」，不泄露明文。

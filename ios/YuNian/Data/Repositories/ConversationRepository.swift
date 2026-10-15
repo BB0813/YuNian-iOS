@@ -227,6 +227,28 @@ struct ConversationRepository {
         }
     }
 
+    /// 全部会话的未读总数 —— 图标角标用它（第 227 轮）。
+    ///
+    /// **口径复用**：直接对每个角色调 `unreadCount(companionId:)`，不另写 SQL。
+    /// 未读口径已经踩过坑（思考过程算不算未读、没有游标算不算全未读），
+    /// 任何"差不多"的重写都会让角标与列表对不上 ——
+    /// **角标显示 3、点进去一条新消息都没有**，是最伤信任的那种 bug。
+    ///
+    /// 代价是每个角色一次查询（角色通常个位数），换来口径绝对一致。
+    func unreadTotal() throws -> Int {
+        let companionIds = try database.pool.read { db in
+            try Int64.fetchAll(db, sql: """
+                SELECT DISTINCT conversationId FROM messages
+                WHERE conversationType = 'chat'
+                """)
+        }
+        var total = 0
+        for companionId in companionIds {
+            total += try unreadCount(companionId: companionId)
+        }
+        return total
+    }
+
     /// 读已读游标。没有记录时返回 nil。
     func readCursor(companionId: Int64) throws -> (timestamp: Int64, messageId: Int64)? {
         try database.pool.read { db in

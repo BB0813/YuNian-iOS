@@ -236,6 +236,20 @@ struct MeView: View {
                 )
             }
 
+            // 第 227 轮：通知与提醒（角标 / 回复完成提醒 / 每日提醒）。
+            // 放在「AI 能力」组里是因为它决定"它会不会在你不看的时候出现"，
+            // 属于陪伴体验的一部分；开关本身在系统连接那种"配置"语义之外。
+            NavigationLink {
+                NotificationSettingsView()
+            } label: {
+                YNSettingsRow(
+                    icon: "bell.badge",
+                    title: "通知与提醒",
+                    subtitle: "角标显示未读、回复跑完提醒你、每天固定时间提醒。",
+                    badge: notificationBadge
+                )
+            }
+
             NavigationLink {
                 StickerLibraryView()
             } label: {
@@ -359,6 +373,20 @@ struct MeView: View {
     private var replyLanguageBadge: String {
         guard let repo = environment.apiConfigs else { return "—" }
         return ReplyLanguage.load(from: repo).title
+    }
+
+    /// 通知徽标：如实显示"现在会不会响"（第 227 轮）。
+    ///
+    /// 不显示开关数量那种虚的 —— 用户看这一行只想知道一件事：
+    /// **它到底会不会在我没看的时候提醒我**。
+    private var notificationBadge: String {
+        let settings = environment.notificationSettings
+        switch (settings.replyDoneEnabled, settings.dailyEnabled) {
+        case (true, true): return "回复 + 每日 \(settings.dailyTimeText)"
+        case (true, false): return "回复提醒"
+        case (false, true): return "仅每日 \(settings.dailyTimeText)"
+        case (false, false): return "全部关闭"
+        }
     }
 
     /// 技能徽标：已启用 / 全部。

@@ -258,6 +258,10 @@ FOUNDATION_TYPES = {
     #    首次编译时请重点核对这些调用点。
     "UNUserNotificationCenter", "UNMutableNotificationContent",
     "UNNotificationRequest", "UNNotificationSound",
+    # 第 227 轮新增：每日提醒要用日历触发器（本地定时，不需要 App 在跑）。
+    # ⚠️ 注意它拿到越界的时/分会**静默不触发**（不报错），
+    #    所以 `NotificationSettings.normalizedTime` 是必测的。
+    "UNCalendarNotificationTrigger", "UNAuthorizationStatus",
     # CryptoKit（`BackupCrypto` 的 AES-GCM 与派生密钥）
     "SymmetricKey", "AES", "SealedBox", "Nonce",
     # CommonCrypto（PBKDF2 —— CryptoKit 未暴露）
