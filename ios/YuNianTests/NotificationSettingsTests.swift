@@ -110,14 +110,14 @@ final class NotificationSettingsTests: XCTestCase {
 
         // A：一条用户消息（不算未读）+ 两条 AI 回复（算未读）+ 一条思考过程（不算）
         _ = try messages.insert(conversationId: a, conversationType: .chat, isFromUser: true,
-                                senderId: 0, type: "TEXT", content: "在吗")
+                                senderId: 0, type: "TEXT", content: "在吗", searchContent: "在吗")
         _ = try messages.insert(conversationId: a, conversationType: .chat, isFromUser: false,
-                                senderId: a, type: "TEXT", content: "在的")
+                                senderId: a, type: "TEXT", content: "在的", searchContent: "在的")
         _ = try messages.insert(conversationId: a, conversationType: .chat, isFromUser: false,
-                                senderId: a, type: "REASONING", content: "thinking")
+                                senderId: a, type: "REASONING", content: "thinking", searchContent: "thinking")
         // B：一条 AI 回复
         _ = try messages.insert(conversationId: b, conversationType: .chat, isFromUser: false,
-                                senderId: b, type: "TEXT", content: "嗯")
+                                senderId: b, type: "TEXT", content: "嗯", searchContent: "嗯")
 
         let perCompanion = try conversations.unreadCount(companionId: a)
                          + (try conversations.unreadCount(companionId: b))
@@ -136,7 +136,7 @@ final class NotificationSettingsTests: XCTestCase {
 
         let id = try companions.create(name: "小鱼", personality: "温柔")
         _ = try messages.insert(conversationId: id, conversationType: .chat, isFromUser: false,
-                                senderId: id, type: "TEXT", content: "你好呀")
+                                senderId: id, type: "TEXT", content: "你好呀", searchContent: "你好呀")
         XCTAssertEqual(try conversations.unreadTotal(), 1)
 
         _ = try conversations.markReadThroughLatest(companionId: id)

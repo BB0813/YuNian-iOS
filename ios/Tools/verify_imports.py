@@ -162,8 +162,78 @@ def check_testable_import() -> int:
     return 0
 
 
+def _balanced_call(text: str, open_paren: int) -> str:
+    """从 `(` 的位置起取到配平的 `)`（含），用于粗看一次调用的实参。"""
+    depth = 0
+    for i in range(open_paren, len(text)):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren:i + 1]
+    return text[open_paren:]
+
+
+def check_insert_arguments() -> int:
+    """测试里调 `MessageRepository.insert(...)` 必须带 `searchContent:`（第 227 轮）。
+
+    起因与上面那条一样，但更具体：`searchContent` 在签名里是**必填**
+    （`searchContent: String`，FTS 正文，刻意不给默认值 —— 逼调用方想清楚
+    "这条消息该被什么关键词搜到"）。我写 `NotificationSettingsTests` 时漏了它，
+    **本地构建只编 App、不编测试目标**，于是一路绿灯，CI 才报编译错 —— 又是一整轮。
+
+    这条关卡只做一件窄事，但正好堵住这个反复出现的坑：
+    逐个 `insert(` 调用取出配平括号内的实参文本，看有没有 `searchContent:`。
+
+    自我保护：**先去真实签名里确认该参数仍是必填** ——
+    哪天有人把它改成 `searchContent: String = ""`，这条检查就该自动失效，
+    而不是继续逼着测试写一个已经可省的参数。
+    """
+    repo_file = REPO_ROOT / "ios/YuNian/Data/Repositories/MessageRepository.swift"
+    if not repo_file.exists():
+        return 0
+    signature = repo_file.read_text(encoding="utf-8", errors="ignore")
+    if not re.search(r"searchContent:\s*String\s*,", signature):
+        print("[ok] searchContent 已不是必填参数，跳过该检查")
+        return 0
+
+    tests = REPO_ROOT / "ios/YuNianTests"
+    if not tests.exists():
+        return 0
+
+    bad = []
+    checked = 0
+    for f in sorted(tests.glob("*.swift")):
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        # ⚠️ 只查**绑定了 MessageRepository 的那个变量**。
+        # 第一版我匹配所有 `.insert(` —— 结果把字典/集合的 `insert` 也算了进来
+        # （`EmbeddingClientTests` / `ImageGenClientTests` 各报了几处假阳性）。
+        # 关卡报假阳性比漏报更糟：会训练人忽略它。
+        names = set(re.findall(r"(\w+)\s*=\s*MessageRepository\(", text))
+        for name in names:
+            for m in re.finditer(rf"\b{re.escape(name)}\.insert\(", text):
+                checked += 1
+                call = _balanced_call(text, m.end() - 1)
+                if "searchContent:" not in call:
+                    line = text[:m.start()].count("\n") + 1
+                    bad.append(f"{f.name}:{line}")
+    if bad:
+        print("[FAIL] 测试里的 insert 调用缺少必填参数 `searchContent:`：")
+        for q in bad:
+            print("  -", q)
+        print("       （该参数无默认值，漏了会在测试 target 编译期才报错）")
+        return 1
+    print(f"[ok] 测试里 {checked} 处 MessageRepository.insert 都带了 searchContent")
+    return 0
+
+
 def main() -> int:
     rc = check_testable_import()
+    if rc:
+        return rc
+    rc = check_insert_arguments()
     if rc:
         return rc
     return _main_imports()
