@@ -95,6 +95,32 @@ final class NotificationSettingsTests: XCTestCase {
                        NotificationSettings().dailyText)
     }
 
+    // MARK: - 布尔取值（`"0"` 必须被读成 false）
+
+    /// ## 第 227 轮 CI 抓到的真 bug
+    /// 存的是 `"1"`/`"0"`，而 `Bool("0")` 在 Swift 里是 **nil** ——
+    /// 于是"关掉的开关读回来又是开的"，用户只会以为设置没保存。
+    func testBoolValueAcceptsNumericForm() {
+        XCTAssertTrue(NotificationSettings.boolValue("1", fallback: false))
+        XCTAssertFalse(NotificationSettings.boolValue("0", fallback: true))
+        XCTAssertTrue(NotificationSettings.boolValue("true", fallback: false))
+        XCTAssertFalse(NotificationSettings.boolValue("false", fallback: true))
+        // 认不出的值才回落默认，而不是一律当成 false
+        XCTAssertTrue(NotificationSettings.boolValue("wat", fallback: true))
+        XCTAssertTrue(NotificationSettings.boolValue(nil, fallback: true))
+    }
+
+    /// 直接复现 bug 现场：显式写 `"0"` 之后读回来必须是关。
+    func testStoredZeroReadsBackAsFalse() throws {
+        let (_, repo, dir) = try makeEnvironment()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try repo.setMetaValue("0", forKey: NotificationSettings.badgeKey)
+        try repo.setMetaValue("0", forKey: NotificationSettings.replyDoneKey)
+        let loaded = NotificationSettings.load(from: repo)
+        XCTAssertFalse(loaded.badgeEnabled, "写了 0 就该是关")
+        XCTAssertFalse(loaded.replyDoneEnabled, "写了 0 就该是关")
+    }
+
     // MARK: - 角标口径
 
     /// **角标总数 = 各会话未读之和**，且思考过程不算未读（口径与列表一致）。

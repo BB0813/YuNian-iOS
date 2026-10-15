@@ -36,19 +36,35 @@ struct NotificationSettings: Equatable {
     /// 每日提醒的固定标识符（改时间时先撤旧的再排新的，避免叠出两条）。
     static let dailyRequestIdentifier = "yunian.daily.reminder"
 
+    /// `app_meta` 里的布尔取值。
+    ///
+    /// ## ⚠️ 别用 `Bool(raw)`
+    /// Swift 的 `Bool(String)` **只认 `"true"` / `"false"`**；
+    /// 我们存的是 `"1"` / `"0"`（与仓内其它设置一致），
+    /// 于是 `Bool("0")` 返回 `nil` → 回落到默认值 → **关掉的开关读回来又是开的** ✗。
+    ///
+    /// 这个 bug 是第 227 轮被自己写的测试抓到的
+    /// （`testSaveClampsAndPersists` / `testRoundTrip`）——
+    /// 症状很隐蔽：单看界面"开关打开了"，用户只会觉得设置没保存。
+    static func boolValue(_ raw: String?, fallback: Bool) -> Bool {
+        guard let raw else { return fallback }
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on": return true
+        case "0", "false", "no", "off": return false
+        default: return fallback
+        }
+    }
+
     static func load(from repo: ApiConfigRepository?) -> NotificationSettings {
         var settings = NotificationSettings()
         guard let repo else { return settings }
         // 读不到就是默认值 —— 与 Android/其它 iOS 设置同一原则：**不猜**
-        if let raw = try? repo.metaValue(forKey: badgeKey), let value = Bool(raw) {
-            settings.badgeEnabled = value
-        }
-        if let raw = try? repo.metaValue(forKey: replyDoneKey), let value = Bool(raw) {
-            settings.replyDoneEnabled = value
-        }
-        if let raw = try? repo.metaValue(forKey: dailyEnabledKey), let value = Bool(raw) {
-            settings.dailyEnabled = value
-        }
+        settings.badgeEnabled = boolValue(try? repo.metaValue(forKey: badgeKey),
+                                          fallback: settings.badgeEnabled)
+        settings.replyDoneEnabled = boolValue(try? repo.metaValue(forKey: replyDoneKey),
+                                              fallback: settings.replyDoneEnabled)
+        settings.dailyEnabled = boolValue(try? repo.metaValue(forKey: dailyEnabledKey),
+                                          fallback: settings.dailyEnabled)
         if let raw = try? repo.metaValue(forKey: dailyHourKey), let value = Int(raw) {
             settings.dailyHour = value
         }
