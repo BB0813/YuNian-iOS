@@ -604,13 +604,9 @@ final class ChatSession: ObservableObject {
     ///
     /// ⚠️ 未做：per-companion override（Kotlin 的
     /// `ChatDetailSettingsStore` 那套）。iOS 恒传空 override。
-    private func maybeTriggerImageGen(
-        userText: String,
-        aiText: String,
-        environment: AppEnvironment
-    ) async {
+    private func makeImageCoordinator(environment: AppEnvironment) -> ImageGenCoordinator? {
         // ⚠️ 第 161 轮：`var` 而非 `let` —— saveLastGenAt 闭包要改它。
-        guard let loaded = ImageGenStore.load() else { return }   // 未配置 → 不触发
+        guard let loaded = ImageGenStore.load() else { return nil }   // 未配置 → 不触发
 
         // ⚠️ 第 203 轮（P0 ②）：改用**「生图」线路**指向的渠道，而不是
         // 「当前启用渠道」。理由很直接：当前启用渠道是**对话**用的那家，
@@ -618,7 +614,7 @@ final class ChatSession: ObservableObject {
         // 取法由 `ApiConfigRepository.resolve` 统一给出（绑定 → 行；无绑定 → 当前启用），
         // 所以**没配过多线路的库行为与改动前完全一致**。
         guard let repo = environment.apiConfigs,
-              let route = (try? repo.resolve(purpose: .image)) ?? nil else { return }
+              let route = (try? repo.resolve(purpose: .image)) ?? nil else { return nil }
         var prefs = loaded
 
         // apiKey 取一次，避免闭包里重复读 Keychain
@@ -676,11 +672,36 @@ final class ChatSession: ObservableObject {
             }
         }
 
+        return coordinator
+    }
+
+    /// 自动触发（回合结束后调用）：由关键词 + 冷却 + 概率决定要不要配图。
+    private func maybeTriggerImageGen(
+        userText: String,
+        aiText: String,
+        environment: AppEnvironment
+    ) async {
+        guard var coordinator = makeImageCoordinator(environment: environment) else { return }
         _ = await coordinator.run(
             userText: userText,
             aiText: aiText,
             companionId: companionId ?? 0
         )
+    }
+
+    /// **用户主动要一张图**（第 228 轮，BACKLOG B2 的入口）。
+    ///
+    /// 与自动路径共用 `makeImageCoordinator` —— 线路解析、Keychain 取 key、
+    /// 模型名校验只有一处，两条路才不会漂（漂了的后果是"自动能出图、手动不能"）。
+    ///
+    /// - Returns: 失败时给界面看的一句话；成功返回 nil（成功由消息流表达）。
+    func requestImage(prompt: String, in environment: AppEnvironment) async -> String? {
+        guard var coordinator = makeImageCoordinator(environment: environment) else {
+            return "还没配置生图：先到「我 → AI 能力 → 用途线路」，给生图线路指定渠道与模型"
+        }
+        let outcome = await coordinator.runManual(prompt: prompt, companionId: companionId ?? 0)
+        guard !outcome.triggered else { return nil }
+        return outcome.message ?? "生图没有成功"
     }
 
     // MARK: - 事件落地

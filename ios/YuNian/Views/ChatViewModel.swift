@@ -565,6 +565,44 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 主动生图（第 228 轮，BACKLOG B2）
+
+    /// 「画一张」输入框的内容（画面描述）。
+    @Published var imagePromptDraft = ""
+    /// 是否正在生图（按钮转圈 + 防重复点击）。
+    @Published private(set) var imageBusy = false
+    /// 生图失败原因（未配线路 / 未设模型 / 接口报错），成功时清空。
+    @Published var imageError: String?
+
+    /// 用户主动要一张图。
+    ///
+    /// ## 为什么与"自动配图"分开
+    /// 自动路径靠关键词 + 冷却 + 概率，是"它想画就画"；
+    /// 这条是**用户点名要** —— 再拿关键词去卡它就成了"点了没反应"。
+    /// 两条路共用同一套线路解析与落库（见 `ChatSession.makeImageCoordinator`）。
+    ///
+    /// 过程与结果都走**消息流**（协调器的回调会 append「配图生成中…」/
+    /// 图片消息 /「配图已生成」），所以这里只管状态与错误，
+    /// 不在界面上另造一套进度展示。
+    func requestImage() {
+        let prompt = imagePromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !imageBusy else { return }
+        imageBusy = true
+        imageError = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            let failure = await self.session.requestImage(prompt: prompt, in: self.environment)
+            self.imageBusy = false
+            if let failure {
+                self.imageError = failure
+            } else {
+                // 成功才清空输入 —— 失败时留着，用户可以直接改了重试
+                self.imagePromptDraft = ""
+            }
+        }
+    }
+
     func stopGenerating() {
         guard session.isRunning else { return }
         phase = .stopping

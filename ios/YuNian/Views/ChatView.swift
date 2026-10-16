@@ -968,6 +968,9 @@ private struct ChatComposer: View {
 
     @FocusState private var focused: Bool
 
+    /// 「画一张」弹层（第 228 轮）。
+    @State private var showImageSheet = false
+
     /// 写入确认卡（P0 ③）。
     ///
     /// ## 这条链路的完整语义（照 Rust 的实现写，不要想当然）
@@ -1012,6 +1015,21 @@ private struct ChatComposer: View {
                 confirmationCard(pending)
             }
             HStack(alignment: .bottom, spacing: YNTheme.Space.sm) {
+                // 第 228 轮：主动要一张图。放在输入框左边而不是藏进菜单 ——
+                // 这是"我明确想让它画"的动作，藏起来等于没有。
+                Button {
+                    showImageSheet = true
+                } label: {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.body.weight(.medium))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(colors.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .disabled(model.pendingConfirmation != nil)
+                .accessibilityLabel("画一张")
+
                 TextField("发消息", text: $model.draft, axis: .vertical)
                     .font(.body)
                     .lineLimit(1...5)
@@ -1059,6 +1077,9 @@ private struct ChatComposer: View {
         }
         .padding(.horizontal, YNTheme.Space.lg)
         .padding(.vertical, YNTheme.Space.sm)
+        .sheet(isPresented: $showImageSheet) {
+            ImageRequestSheet(model: model)
+        }
     }
 
     @ViewBuilder

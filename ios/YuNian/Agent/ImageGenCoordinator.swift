@@ -109,7 +109,7 @@ struct ImageGenCoordinator {
         )
 
         // 判定（randomRoll 每次只抽一次，Kotlin :283）
-        var decision = ImageGenTrigger.decide(
+        let decision = ImageGenTrigger.decide(
             global: deps.global,
             effective: effective,
             userText: userText,
@@ -125,34 +125,90 @@ struct ImageGenCoordinator {
         }
 
         // prompt 拼装（Kotlin :329-333）
-        var prompt = ImageGenTrigger.buildPrompt(
+        let prompt = ImageGenTrigger.buildPrompt(
             aiText: aiText,
             userText: userText,
             matchedKeyword: decision.matchedKeyword,
             template: deps.global.promptTemplate
         )
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            // Kotlin :331-333 的「触发后又反悔」分支
-            decision = ImageGenTrigger.Decision(
-                triggered: false, reason: .notConfigured,
-                matchedKeyword: decision.matchedKeyword, prompt: nil)
+            // Kotlin :331-333 的「触发后又反悔」分支 —— 必须保留：
+            // 判定说"该画"，但拼出来的描述是空的，这时**不能**往下走
+            //（会得到一个空的生图请求），而要如实回报"没配置"。
             return Outcome(triggered: false, reason: .notConfigured,
                            matchedKeyword: decision.matchedKeyword, prompt: nil)
         }
 
-        // ⚠️ 冷却「先扣后画」（Kotlin :346-347）——失败也计入冷却。
-        // 这是刻意保留的 Kotlin 行为，不是疏漏。
+        return await generateAndHandOff(
+            prompt: prompt,
+            reason: decision.reason,
+            matchedKeyword: decision.matchedKeyword,
+            companionId: companionId
+        )
+    }
+
+    /// **用户主动要一张图**（第 228 轮，BACKLOG B2 的入口）。
+    ///
+    /// 与 `run(userText:aiText:companionId:)` 的唯一区别是**判定段**：
+    /// 自动路径要靠关键词、冷却与概率决定"要不要画"；
+    /// 手动路径是用户直接点的按钮 —— 再拿关键词去卡它就成了"点了没反应" ✗。
+    /// 其余（线路解析、模型校验、生成、回调）走**同一段代码**。
+    ///
+    /// - Returns: `.triggered == false` 且 `isError == true` 时，
+    ///   `message` 是给用户看的失败原因（未配生图模型 / 接口报错 / 没返回图片）。
+    @MainActor
+    mutating func runManual(prompt rawPrompt: String, companionId: Int64) async -> Outcome {
+        guard let prompt = Self.manualPrompt(rawPrompt) else {
+            let msg = ImageGenClient.ImageGenError.emptyPrompt.message
+            onMessage?(msg, true)
+            return Outcome(triggered: false, reason: .notConfigured, matchedKeyword: nil,
+                           prompt: nil, imagesWritten: 0, message: msg, isError: true)
+        }
+        return await generateAndHandOff(
+            prompt: prompt,
+            // 手动 = 用户点名要一张，语义上最贴近"命中关键词"这一档
+            //（`Reason` 是跨端共享的枚举，**不加新 case** —— 那会破坏对齐）。
+            reason: .keyword,
+            matchedKeyword: nil,
+            companionId: companionId
+        )
+    }
+
+    /// 手动输入的清洗：去空白；空则返回 nil（由调用方给出"描述为空"）。
+    ///
+    /// 顺手**封顶长度**：生图接口对 prompt 有长度限制，超长会得到
+    /// 一个语焉不详的 400；与其让服务端拒，不如在这里截断并说明。
+    static func manualPrompt(_ raw: String, limit: Int = 800) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(limit))
+    }
+
+    /// 两条件路径共用的「生成 + 回调」段。
+    ///
+    /// ⚠️ 冷却「先扣后画」在此处执行（Kotlin :346-347：失败也计入冷却，刻意保留）。
+    /// 手动路径**也**扣 —— 否则用户手动出一张后，自动路径可能紧接着再出一张，
+    /// 变成一次对话两张图。
+    @MainActor
+    private mutating func generateAndHandOff(
+        prompt: String,
+        reason: ImageGenTrigger.Reason,
+        matchedKeyword: String?,
+        companionId: Int64
+    ) async -> Outcome {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let effective = ImageGenTrigger.resolveEffective(
+            global: deps.global,
+            override: deps.override,
+            mainConnection: deps.mainConnection
+        )
+
         deps.saveLastGenAt(nowMs)
 
         onMessage?("配图生成中…", false)
 
-        // 生图（ImageGenClient，第 150 轮）
-        let baseUrl = effective.baseUrl.isEmpty
-            ? deps.configBaseUrl
-            : effective.baseUrl
-        let apiKey = effective.apiKey.isEmpty
-            ? deps.configApiKey
-            : effective.apiKey
+        let baseUrl = effective.baseUrl.isEmpty ? deps.configBaseUrl : effective.baseUrl
+        let apiKey = effective.apiKey.isEmpty ? deps.configApiKey : effective.apiKey
 
         // 模型名：走「生图线路」解析出来的那一个（第 204 轮）。
         // 空模型名没有合理的降级 —— 与其发一个注定被拒的请求，
@@ -160,9 +216,8 @@ struct ImageGenCoordinator {
         if deps.imageModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let msg = ImageGenClient.ImageGenError.noModel.message
             onMessage?(msg, true)
-            return Outcome(triggered: false, reason: decision.reason,
-                           matchedKeyword: decision.matchedKeyword, prompt: prompt,
-                           imagesWritten: 0, message: msg, isError: true)
+            return Outcome(triggered: false, reason: reason, matchedKeyword: matchedKeyword,
+                           prompt: prompt, imagesWritten: 0, message: msg, isError: true)
         }
 
         var images: [Data] = []
@@ -176,31 +231,27 @@ struct ImageGenCoordinator {
                 count: deps.global.count
             )
         } catch {
-            // Kotlin :393-400 —— generate 失败
             let msg = "配图生成失败：\(error.localizedDescription)"
             onMessage?(msg, true)
-            return Outcome(triggered: false, reason: decision.reason,
-                           matchedKeyword: decision.matchedKeyword, prompt: prompt,
-                           imagesWritten: 0, message: msg, isError: true)
+            return Outcome(triggered: false, reason: reason, matchedKeyword: matchedKeyword,
+                           prompt: prompt, imagesWritten: 0, message: msg, isError: true)
         }
 
         guard !images.isEmpty else {
-            let msg = "配图生成失败：接口未返回图片数据"
+            let msg = ImageGenClient.ImageGenError.noImageData.message
             onMessage?(msg, true)
-            return Outcome(triggered: false, reason: decision.reason,
-                           matchedKeyword: decision.matchedKeyword, prompt: prompt,
-                           imagesWritten: 0, message: msg, isError: true)
+            return Outcome(triggered: false, reason: reason, matchedKeyword: matchedKeyword,
+                           prompt: prompt, imagesWritten: 0, message: msg, isError: true)
         }
 
         // Kotlin :385-387 —— 全成功。
         // ⚠️ 第 160 轮：把图交回调用方（一张图一次的语义由调用方处理）。
-        // Kotlin 在 ImageGenTrigger.kt:367-384 里逐张 writeMessage。
         onImages?(images, prompt)
         onMessage?("配图已生成", false)
         return Outcome(
             triggered: true,
-            reason: decision.reason,
-            matchedKeyword: decision.matchedKeyword,
+            reason: reason,
+            matchedKeyword: matchedKeyword,
             prompt: prompt,
             imagesWritten: images.count,
             message: nil,
