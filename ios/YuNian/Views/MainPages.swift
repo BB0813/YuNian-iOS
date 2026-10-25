@@ -130,7 +130,7 @@ struct ConversationsView: View {
                     .searchable(text: $query, prompt: "搜索名字或消息")
                     .overlay {
                         if filtered.isEmpty, !query.isEmpty {
-                            ContentUnavailableView.search(text: query)
+                            YNSearchEmptyView(text: query)
                         }
                     }
                 }

@@ -398,12 +398,14 @@ private struct ChatViewContent: View {
             .padding(.vertical, YNTheme.Space.md)
         }
         .coordinateSpace(name: "chat-scroll")
-        // iOS 17+ 原生「聊天式初始锚点」：首次布局即停在底部。
+        // 原生「聊天式初始锚点」：首次布局即停在底部（iOS 17+；16 上由
+        // `.onChange(of: displayMessages.count)` 的 scrollToBottom 兜底，
+        // 见 YuNian/Support/Compatibility.swift）。
         //
         // 不能靠手写 scrollTo 解决：历史是**一次性灌入**的（0 → N），
         // 那一刻测量到的「是否在底部」必然是 false，于是既不滚动、
         // 还会把 N 条历史误记成「N 条新消息」。
-        .defaultScrollAnchor(.bottom)
+        .ynDefaultScrollAnchorBottom()
         .scrollDismissesKeyboard(.interactively)
         .background(Color.clear)
         .onTapGesture { dismissKeyboard() }
