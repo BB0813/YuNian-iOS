@@ -595,3 +595,149 @@ jobs:
             ${{ runner.temp }}/archive.log
           retention-days: 7
           if-no-files-found: ignore
+
+  # ── 5. Mac 原生运行包（Designed for iPad）────────────────────────────
+  # 目的：产出一个 **在 Apple Silicon Mac 上双击就能跑** 的 .app。
+  #
+  # 为什么是「Designed for iPad」而不是 Catalyst：
+  #   · Catalyst 需要给 target 加 SUPPORTS_MACCATALYST 并按 macOS 重写一批 API；
+  #   · Designed for iPad 是**同一份 iOS 产物**，由 macOS 自带的 UIKit 运行时承载，
+  #     不需要改一行代码，也不需要 App Store 上架 —— 本地双击即可。
+  #   · 代价：只有 Apple Silicon 能跑（iOS 二进制是 arm64），Intel Mac 无解。
+  #
+  # 为什么不用 `xcodebuild -scheme ... -destination 'platform=macOS'` 直接跑：
+  #   本 target 的 SUPPORTED_PLATFORMS 只有 iphoneos/iphonesimulator，
+  #   必须用 `variant=Designed for iPad` 才会被 macOS 运行时接受。
+  #
+  # 签名策略：**先关签名构建，再 ad-hoc 重签**。
+  #   直接让 xcodebuild 在 macOS destination 上签名会要求 DEVELOPMENT_TEAM
+  #   与 provisioning profile（免费账号申请不到），而 ad-hoc（`-`）足够本地运行。
+  #   代价：从网上下载后 Gatekeeper 会拦，需 `xattr -dr com.apple.quarantine`。
+  mac-ipad-app:
+    name: 导出 Mac 可运行 .app（Designed for iPad）
+    needs: rust-ios
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 打印 Xcode 与可用 destination
+        run: |
+          xcodebuild -version
+          echo "---- 宿主架构 ----"
+          uname -m || true
+
+      - name: 下载 Rust 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: lianyu-agent-ios
+          path: ios
+
+      - name: 安装 XcodeGen（锁定版本）
+        run: |
+          set -euo pipefail
+          VER=2.44.0
+          curl -fsSL -o /tmp/xcodegen.zip \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${VER}/xcodegen.zip"
+          rm -rf /tmp/xg && mkdir -p /tmp/xg
+          unzip -qo /tmp/xcodegen.zip -d /tmp/xg
+          sudo cp -r /tmp/xg/xcodegen/share /usr/local/
+          sudo cp -r /tmp/xg/xcodegen/bin /usr/local/
+          test -x /usr/local/bin/xcodegen
+          /usr/local/bin/xcodegen --version
+
+      - name: 生成 Xcode 工程
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: 列出可用 destination（失败时定位用）
+        working-directory: ios
+        run: |
+          set +e
+          xcodebuild -showdestinations -project YuNian.xcodeproj -scheme YuNian 2>&1 | head -n 40
+          exit 0
+
+      - name: 构建 Mac 版（Designed for iPad，关闭签名）
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          BUNDLE_ID="${YUNIAN_BUNDLE_ID:-com.bb0813.yunian}"
+          DD="$RUNNER_TEMP/dd"
+          rm -rf "$DD"
+          set +e
+          xcodebuild build \
+            -project YuNian.xcodeproj \
+            -scheme YuNian \
+            -configuration Release \
+            -destination "platform=macOS,variant=Designed for iPad" \
+            -derivedDataPath "$DD" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            > "$RUNNER_TEMP/mac-build.log" 2>&1
+          code=$?
+          set -e
+          echo "xcodebuild 退出码：$code"
+          grep -nE 'error:|Undefined symbols|ld: |symbol\(s\) not found|framework not found|is not available' \
+            "$RUNNER_TEMP/mac-build.log" | head -n 60 || true
+          echo "---- 尾部 120 行 ----"
+          tail -n 120 "$RUNNER_TEMP/mac-build.log" || true
+          exit $code
+
+      - name: ad-hoc 重签并核验产物
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          DD="$RUNNER_TEMP/dd"
+          APP=$(find "$DD/Build/Products" -maxdepth 2 -name "YuNian.app" -type d | head -n 1)
+          test -n "$APP" || { echo "找不到 YuNian.app"; find "$DD/Build/Products" -maxdepth 2 | head -40; exit 1; }
+          echo "产物路径：$APP"
+
+          echo "---- 重签前签名状态 ----"
+          codesign -dv "$APP" 2>&1 | head -n 5 || true
+
+          # ad-hoc 签名：本地运行足够，不需要 Apple 账号
+          codesign --force --deep --sign - --timestamp=none "$APP"
+          echo "---- 重签后 ----"
+          codesign -dv "$APP" 2>&1 | head -n 5 || true
+          codesign --verify --deep --strict "$APP" && echo "签名校验通过" || echo "签名校验未通过（可能仍需手动 xattr）"
+
+          echo "---- 二进制架构 ----"
+          file "$APP/YuNian"
+          lipo -info "$APP/YuNian" || true
+
+          echo "---- 平台标记（6 = iOS，Mac 靠 Designed for iPad 运行）----"
+          otool -l "$APP/YuNian" | grep -A5 LC_BUILD_VERSION | head -n 8 || true
+
+          echo "---- Info.plist 关键字段 ----"
+          for k in CFBundleIdentifier MinimumOSVersion CFBundleSupportedPlatforms UIDeviceFamily; do
+            printf '  %-30s ' "$k"
+            /usr/libexec/PlistBuddy -c "Print :$k" "$APP/Info.plist" 2>/dev/null | tr '\n' ' ' || true
+            echo
+          done
+
+          # 用 ditto 打包：保住符号链接与扩展属性，普通 zip 会把 .app 打坏
+          OUT="$RUNNER_TEMP/YuNian-mac-ipad.zip"
+          rm -f "$OUT"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT"
+          ls -lh "$OUT"
+
+      - name: 上传 Mac .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuNian-mac-ipad-app
+          path: "${{ runner.temp }}/YuNian-mac-ipad.zip"
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 上传构建日志（失败时定位用）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build-log
+          path: "${{ runner.temp }}/mac-build.log"
+          retention-days: 7
+          if-no-files-found: ignore

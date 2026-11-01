@@ -19,8 +19,12 @@ options:
   # 原 ID 很可能已被其他 Apple 账号注册，导致用户用爱思助手免费签名时报
   # 「描述文件生成失败」。CI 侧还会用命令行再覆盖一层（见 workflow）。
   bundleIdPrefix: com.bb0813.yunian
+  # iOS 16.0：`NavigationStack`（13 处）与 `LabeledContent`（102 处）都是 iOS 16 起才有，
+  # 要再往下探到 15 需要重写这 115 处，收益不抵成本。
+  # 原先卡在 17.0 的三处 iOS 17 专属 API 已由 YuNian/Support/Compatibility.swift 垫片吃掉
+  # （两参数 onChange / ContentUnavailableView / defaultScrollAnchor）。
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "16.0"
   createIntermediateGroups: true
   groupSortPosition: top
 
