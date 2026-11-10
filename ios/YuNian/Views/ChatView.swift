@@ -792,7 +792,7 @@ private struct MessageBubble: View {
                         Button {
                             onReceipt(message)
                         } label: {
-                            Label("本轮收据", systemImage: "list.bullet.rectangle")
+                            Label("上下文账本", systemImage: "list.bullet.rectangle")
                         }
                     }
                     // 「删除」（第 221 轮）：只给**已落库**的消息（`onDelete` 为 nil
@@ -971,6 +971,13 @@ private struct ChatComposer: View {
     /// 「画一张」弹层（第 228 轮）。
     @State private var showImageSheet = false
 
+    /// 「上下文账本」弹层（第 229 轮）。
+    ///
+    /// 入口按 Aru 的实测位置放：**聊天页左下角**（与"添加"同一侧），
+    /// 而不是消息菜单 —— 账本回答的是"这一轮"，用户想随时查，
+    /// 不该先想起"要长按某条消息"。长按菜单里的旧入口**保留**（渐进迁移）。
+    @State private var showLedger = false
+
     /// 写入确认卡（P0 ③）。
     ///
     /// ## 这条链路的完整语义（照 Rust 的实现写，不要想当然）
@@ -1015,6 +1022,20 @@ private struct ChatComposer: View {
                 confirmationCard(pending)
             }
             HStack(alignment: .bottom, spacing: YNTheme.Space.sm) {
+                // 第 229 轮：上下文账本。放左下角（与"添加"同一侧），
+                // 与「画一张」并列 —— 这两个都是"我主动要看/要做点什么"的动作。
+                Button {
+                    showLedger = true
+                } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.body.weight(.medium))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(colors.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("上下文账本")
+
                 // 第 228 轮：主动要一张图。放在输入框左边而不是藏进菜单 ——
                 // 这是"我明确想让它画"的动作，藏起来等于没有。
                 Button {
@@ -1080,6 +1101,45 @@ private struct ChatComposer: View {
         .sheet(isPresented: $showImageSheet) {
             ImageRequestSheet(model: model)
         }
+        .sheet(isPresented: $showLedger) {
+            // 取**最近一条助手消息**那一轮的账本：用户在聊天页点"账本"，
+            // 想看的就是"刚刚这一轮"，而不是去挑一条消息。
+            NavigationStack {
+                if let last = model.messages.last(where: { $0.role != .user }),
+                   let receipt = model.receipt(for: last) {
+                    ContextLedgerView(
+                        ledger: .from(receipt: receipt),
+                        providerInputTokens: receipt.usage?.promptTokens,
+                        turnStatus: Self.turnStatus(of: receipt)
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "还没有可查的账本",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("先发一条消息，这一轮的装箱清单就会记在这里。")
+                    )
+                }
+            }
+        }
+    }
+
+    /// 把回合结束原因映射成四态。
+    ///
+    /// ⚠️ **不照抄 Aru**：它把"完成度"和"有没有回执"揉进一个 `status`，
+    /// 结果用户点「停止」之后状态仍显示 `complete`（实测确认的缺陷）。
+    /// 这里用引擎给的 `finishReason` 判真实完成度，回执缺失另算。
+    private static func turnStatus(of receipt: TurnReceipt) -> ContextLedgerView.TurnStatus {
+        let reason = receipt.finishReason.lowercased()
+        if reason.contains("cancel") || reason.contains("interrupt") {
+            return .cancelled
+        }
+        if reason.contains("error") || reason.contains("fail") {
+            return .failed
+        }
+        // 没有供应商回执 = 这一轮拿不到完整用量 —— 归"未完整"，
+        // 而不是假装 complete
+        if receipt.usage == nil { return .partial }
+        return .complete
     }
 
     @ViewBuilder
