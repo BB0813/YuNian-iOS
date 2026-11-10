@@ -13,6 +13,7 @@ pub mod agentlog;
 pub mod api_probe;
 pub mod card_import;
 pub mod cordis_bridge;
+pub mod ledger;
 pub mod lorebook;
 
 // UniFFI 0.29 顶层函数不支持 Result<T, String> 抛错类型 → Option（None = 解析失败，详情在 Rust 侧 eprintln）
