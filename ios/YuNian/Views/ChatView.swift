@@ -1108,7 +1108,7 @@ private struct ChatComposer: View {
                 if let last = model.messages.last(where: { $0.role != .user }),
                    let receipt = model.receipt(for: last) {
                     ContextLedgerView(
-                        ledger: .from(receipt: receipt),
+                        ledger: .best(receipt: receipt),
                         providerInputTokens: receipt.usage?.promptTokens,
                         turnStatus: Self.turnStatus(of: receipt)
                     )

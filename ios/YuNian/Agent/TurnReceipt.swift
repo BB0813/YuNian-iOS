@@ -44,6 +44,12 @@ struct TurnReceipt: Equatable {
     var systemPromptHash: String
     /// 被**主动跳过**的部分及原因（"用户关闭了 X"这类），逐条写出来。
     var skipped: [String]
+    /// 装配现场算出的工具成本 JSON（第 233 轮，来自 `ledger_tools` 事件）。
+    ///
+    /// 为什么必须由 Rust 给：内置工具的定义只在 Rust 的 `tool_defs` 里，iOS 看不到。
+    /// 让 iOS 用"它看得见的工具"去估，会得到一个**偏低**的数字 ——
+    /// 而低估比缺失更糟：用户会以为"工具不是成本"，于是永远不去优化。
+    var ledgerToolsJson: String? = nil
 
     /// 一个材料片段（本机估算口径）。
     struct Segment: Equatable, Identifiable {
@@ -256,6 +262,11 @@ struct TurnManifest: Equatable {
     var toolNames: [String]
     /// 被主动跳过的部分及原因（逐条人话）。
     var skipped: [String]
+    /// 装配现场算出的工具成本 JSON（第 233 轮，来自 `ledger_tools` 事件）。
+    ///
+    /// 为什么必须由 Rust 给：内置工具的定义只在 Rust 的 `tool_defs` 里，
+    /// iOS 看不到。让 iOS 用"看得见的工具"去估 → **偏低** → 用户以为工具不是成本。
+    var ledgerToolsJson: String? = nil
 }
 
 // MARK: - 落库 / 回读
@@ -277,7 +288,11 @@ enum TurnReceiptStore {
     /// `[{"id","source","layer","lifetime","chars"}]`。
     static func saveAudit(_ receipt: TurnReceipt, database: YuNianDatabase?) {
         guard let database else { return }
-        let fragmentsJson = encodeSegments(receipt.segments)
+        // ⚠️ 第 233 轮：优先写 **v2 账本**（Rust 装配现场算的权威数据）；
+        // 拿不到账本事件时回落 v1 裸数组（历史格式，界面按 v1 解析并标注"旧记录"）。
+        // 绝不"部分填"—— 半份账比没有更误导。
+        let fragmentsJson = ContextLedger.v2JSON(receipt: receipt)
+            ?? encodeSegments(receipt.segments)
         do {
             try database.pool.write { db in
                 try db.execute(sql: """

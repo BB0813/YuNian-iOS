@@ -198,6 +198,10 @@ final class ChatSession: ObservableObject {
 
     /// 本回合请求前采集的材料清单（见 `TurnManifest`）。
     private var lastManifest: TurnManifest?
+    /// 本轮装配现场算出的工具成本（来自 Rust 的 `ledger_tools` 事件）。
+    ///
+    /// 每轮重置：这是"这一轮"的事实，沿用上一轮的值会算错账。
+    private var ledgerToolsJson: String?
 
     /// 当前会话绑定的伴侣。
     ///
@@ -518,7 +522,7 @@ final class ChatSession: ObservableObject {
             finishReason: result.finishedReason,
             toolNames: manifest.toolNames,
             systemPromptHash: manifest.systemPromptHash,
-            skipped: manifest.skipped + confirmNote(settings: settings)
+            skipped: manifest.skipped + confirmNote(settings: settings), ledgerToolsJson: ledgerToolsJson
         )
         receipts[turnId] = receipt
         // 内存只留最近若干条（其余靠 prompt_audit 回读）
@@ -718,6 +722,13 @@ final class ChatSession: ObservableObject {
     ///     entry_id=123;file_name=custom_1699_1.png
     /// 需要手工解析，不能想当然按 JSON 解。
     private func applyEvents(_ events: [AgentEvent], environment: AppEnvironment) {
+        // 账本的"工具成本"来自 Rust 装配现场（第 233 轮）。
+        // 内置工具的定义只在 Rust 侧，我们拿不到 —— 所以不能自己估。
+        if let ledger = events.last(where: { $0.kind == "ledger_tools" }) {
+            ledgerToolsJson = ledger.text
+        } else {
+            ledgerToolsJson = nil
+        }
         // 确认门：Rust 停下回合时，把**待确认的那次调用**交出来
         // （agent.rs:1360-1364，text = 工具名，extra = 参数 JSON）。
         // 这里只负责把它变成界面上的一张卡；批准/拒绝与重跑见 `resolveConfirmation`。

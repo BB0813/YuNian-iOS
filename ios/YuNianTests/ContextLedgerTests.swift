@@ -209,4 +209,84 @@ final class ContextLedgerTests: XCTestCase {
         XCTAssertTrue(ledger.channels.isEmpty)
         XCTAssertEqual(ledger.toolSchemaShare, 0, "无数据时不能除零")
     }
+
+    // MARK: - v2 构造（阶段 3：Rust 权威 → iOS 只搬运）
+
+    private func makeReceipt(toolsJson: String?) -> TurnReceipt {
+        TurnReceipt(
+            turnId: "t1", timestamp: 0, companionId: 1,
+            provider: "p", model: "m",
+            segments: [
+                .init(id: "env.static_meta", source: "env", layer: 0,
+                      lifetime: "stable", chars: 40),
+                .init(id: "persona.identity", source: "persona", layer: 1,
+                      lifetime: "stable", chars: 100),
+            ],
+            usage: nil, roundsUsed: 1, finishReason: "stop",
+            toolNames: ["emit_bubble"], systemPromptHash: "h", skipped: [],
+            ledgerToolsJson: toolsJson
+        )
+    }
+
+    /// 没有账本事件 → 不构造 v2（回落 v1，界面标"旧记录"）。
+    func testInputJSONRequiresLedgerToolsEvent() throws {
+        XCTAssertNil(ContextLedger.inputJSON(receipt: makeReceipt(toolsJson: nil)))
+        XCTAssertNil(ContextLedger.v2JSON(receipt: makeReceipt(toolsJson: nil)))
+    }
+
+    /// ★ 核心：工具成本必须**原样搬运** Rust 算好的字节数，不能自己估。
+    ///
+    /// 这条守的是"低估比缺失更糟"：如果 iOS 用自己看得见的工具去估，
+    /// 内置工具的成本会整块丢掉，账本就会说"工具很便宜"。
+    func testToolBytesArePassedThroughVerbatim() throws {
+        let tools = """
+        {"perTool":[{"name":"emit_bubble","bytes":900,"tokens":258},
+                    {"name":"send_sticker","bytes":1800,"tokens":515}],
+         "schemaBytes":2700,"schemaTokens":772,
+         "worldbookBytes":0,"worldbookEntries":0,
+         "windowCount":3,"windowBytes":600}
+        """
+        let input = try XCTUnwrap(ContextLedger.inputJSON(receipt: makeReceipt(toolsJson: tools)))
+        let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(input.utf8)) as? [String: Any])
+        let toolsArr = try XCTUnwrap(obj["tools"] as? [[String: Any]])
+        XCTAssertEqual(toolsArr.count, 2)
+        let bytes = toolsArr.compactMap { $0["bytes"] as? Int }.sorted()
+        XCTAssertEqual(bytes, [900, 1800], "字节数必须与 Rust 给的完全一致（不重算）")
+    }
+
+    /// 世界书没注入 → 记 `skipped_no_trigger`（**正常状态**），不是"未绑定"。
+    /// 写错会引导用户去绑一本其实绑过的书。
+    func testWorldbookWithoutInjectionIsNormalState() throws {
+        let tools = """
+        {"perTool":[{"name":"emit_bubble","bytes":900}],"schemaBytes":900,
+         "worldbookBytes":0,"worldbookEntries":2,"windowCount":1,"windowBytes":100}
+        """
+        let input = try XCTUnwrap(ContextLedger.inputJSON(receipt: makeReceipt(toolsJson: tools)))
+        let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(input.utf8)) as? [String: Any])
+        let wb = try XCTUnwrap(obj["worldbook"] as? [String: Any])
+        XCTAssertEqual(wb["injected"] as? Bool, false)
+        XCTAssertEqual(wb["reason"] as? String, "skipped_no_trigger")
+    }
+
+    /// 端到端：iOS 入参 → Rust 权威实现 → 解回来的账本里**必须有工具通道**。
+    /// 这是"账本真的能量出工具成本"的最小证明。
+    func testV2JSONProducesToolSchemaChannel() throws {
+        let tools = """
+        {"perTool":[{"name":"emit_bubble","bytes":900,"tokens":258}],
+         "schemaBytes":900,"schemaTokens":258,
+         "worldbookBytes":0,"worldbookEntries":0,
+         "windowCount":1,"windowBytes":100}
+        """
+        let json = try XCTUnwrap(ContextLedger.v2JSON(receipt: makeReceipt(toolsJson: tools)),
+                                 "有事件时必须能构造 v2")
+        let ledger = try XCTUnwrap(ContextLedger.decode(fragmentsJson: json))
+        XCTAssertEqual(ledger.version, 2)
+        XCTAssertFalse(ledger.isLegacy)
+        let toolChannel = try XCTUnwrap(ledger.channels.first { $0.id == "tool_schemas" },
+                                        "工具成本必须是独立通道（最贵的那块）")
+        XCTAssertTrue(toolChannel.sent)
+        XCTAssertEqual(toolChannel.tokens, 258, "token 由 Rust 按 bytes/3.5 算")
+        XCTAssertEqual(ledger.toolLedger.perTool.first?.name, "emit_bubble")
+        XCTAssertGreaterThan(ledger.toolSchemaShare, 0, "占比必须能算出来")
+    }
 }

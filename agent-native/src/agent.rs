@@ -1266,6 +1266,71 @@ impl AgentRuntime {
                     apply_worldbook_injections(&messages, &pending_worldbook_injections);
                 &injected_messages
             };
+            // ── 上下文账本：本轮"绕过片段机制"的两块成本（第 233 轮）──
+            //
+            // 为什么必须在**这里**算：工具的权威定义只存在于 `tool_defs`，
+            // 世界书的注入量只存在于这次装配的结果里 —— iOS 两头都看不到。
+            // 让 iOS 用"它看得见的工具"去估，会得到一个**偏低**的数字，
+            // 而低估比缺失更糟：用户会以为"工具不是成本"，于是永远不去优化。
+            //
+            // `AgentEvent` 结构不变，只新增一个 kind —— 旧客户端会忽略未知 kind，
+            // 所以这是纯加法。
+            {
+                let mut per_tool: Vec<serde_json::Value> = Vec::new();
+                let mut total_bytes: u32 = 0;
+                for def in &tool_defs {
+                    // `tool_defs` 已经是"要发出去的 JSON 形态"（`tools_value` 直接用它），
+                    // 所以序列化它就是请求里的真实体积 —— 不是估的。
+                    let bytes = serde_json::to_string(def)
+                        .map(|s| s.len() as u32)
+                        .unwrap_or(0);
+                    total_bytes += bytes;
+                    per_tool.push(serde_json::json!({
+                        "name": def.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                        "bytes": bytes,
+                        "tokens": crate::ledger::tokens_for_bytes(bytes),
+                    }));
+                }
+                // 最贵的排前面（不让成本藏在折叠里）
+                per_tool.sort_by(|a, b| {
+                    let bt = b.get("tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let at = a.get("tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    bt.cmp(&at)
+                });
+
+                // 世界书注入量 = 注入后的消息流体积 − 注入前。
+                // 用差值而不是遍历计划，是因为"真正发出去的"才是账本要答的问题。
+                let worldbook_bytes: u32 = if pending_worldbook_injections.is_empty() {
+                    0
+                } else {
+                    let after = serde_json::to_string(send_messages)
+                        .map(|s| s.len())
+                        .unwrap_or(0);
+                    let before = serde_json::to_string(&messages)
+                        .map(|s| s.len())
+                        .unwrap_or(0);
+                    after.saturating_sub(before) as u32
+                };
+
+                events.push(AgentEvent {
+                    kind: "ledger_tools".to_string(),
+                    text: serde_json::json!({
+                        "perTool": per_tool,
+                        "schemaBytes": total_bytes,
+                        "schemaTokens": crate::ledger::tokens_for_bytes(total_bytes),
+                        "worldbookBytes": worldbook_bytes,
+                        "worldbookEntries": pending_worldbook_injections.len(),
+                        // 消息窗口：条数与体积（同样只在这里能拿到）
+                        "windowCount": send_messages.len(),
+                        "windowBytes": serde_json::to_string(send_messages)
+                            .map(|s| s.len() as u32)
+                            .unwrap_or(0),
+                    })
+                    .to_string(),
+                    extra: String::new(),
+                });
+            }
+
             let raw = if let Some(sink) = &stream_sink {
                 native.send_stream(&turn_request, companion_id, send_messages, &tools_value, &tool_choice, sink.as_ref())
             } else {
@@ -2849,7 +2914,18 @@ mod tests {
         assert_eq!(result.finished_reason, "error");
         let err = result.error.unwrap_or_default();
         assert!(err.contains("max_tokens"), "错误应指明 max_tokens 截断: {err}");
-        assert!(result.events.is_empty());
+        // ⚠️ 第 233 轮：这里原先断言 `events.is_empty()`，但账本会先推一条
+        // **诊断事件**（`ledger_tools`）。断言的**原意**是"这一轮不产出任何
+        // 消息级事件（气泡/表情/思考）"，而不是"events 数组必须为空" ——
+        // 诊断事件不是给用户看的内容。改成按意图断言，避免把
+        // "账本记了账" 误判成 "产生了空回复"。
+        let user_visible: Vec<&AgentEvent> = result
+            .events
+            .iter()
+            .filter(|e| e.kind != "ledger_tools")
+            .collect();
+        assert!(user_visible.is_empty(),
+                "不该产出消息级事件，实际有 {} 条", user_visible.len());
     }
 
     /// Eval：脚本化传输（离线 mock）——不触网，按序弹出预置响应驱动完整回合

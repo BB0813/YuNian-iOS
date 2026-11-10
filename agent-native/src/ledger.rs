@@ -348,6 +348,15 @@ pub struct ToolInput {
     pub name: String,
     /// 该工具真正发给 API 的 JSON（name + description + parameters）
     pub schema_json: String,
+    /// **预先算好的字节数**（第 233 轮）。
+    ///
+    /// 为什么要这个：工具的权威定义在 Rust 装配现场（`tool_defs`），
+    /// iOS 拿不到内置工具的定义。与其让 iOS 用"看得见的工具"去估一个
+    /// **偏低**的数字（低估比缺失更糟 —— 会让用户以为工具不是成本），
+    /// 不如由 Rust 在装配时算好、经 `ledger_tools` 事件带出来。
+    ///
+    /// 非空时优先用它，不再解析 `schema_json`。
+    pub precomputed_bytes: Option<u32>,
     /// 所属工具组
     pub group: String,
     /// 用户是否允许（组开关）
@@ -552,7 +561,16 @@ pub fn build_snapshot(
     let mut hidden: Vec<(String, SkipReason)> = Vec::new();
 
     for t in tools {
-        let est = estimate_text(&t.schema_json);
+        // 优先用装配现场算好的字节数（Rust 才知道内置工具的定义）
+        let est = match t.precomputed_bytes {
+            Some(b) if b > 0 => Estimate {
+                chars: 0,
+                bytes: b,
+                tokens: tokens_for_bytes(b),
+                method: "bytes_per_token:3.5",
+            },
+            _ => estimate_text(&t.schema_json),
+        };
         // 隐藏的两种情形，**原因必须分开**：
         // 用户关的组 → GroupDisabled；组开着但能力没就绪 → 具体 unavailable
         if !t.enabled {
@@ -961,6 +979,7 @@ pub fn ledger_build_snapshot_json(input_json: String) -> String {
                     .unwrap_or("")
                     .to_string(),
                 group: item.get("group").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                precomputed_bytes: item.get("bytes").and_then(|v| v.as_u64()).map(|b| b as u32),
                 enabled: item.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
                 available: item.get("available").and_then(|v| v.as_bool()).unwrap_or(true),
                 unavailable_reason: item
@@ -1232,6 +1251,7 @@ mod tests {
             ToolInput {
                 name: "createFile".to_string(),
                 schema_json: "{}".to_string(),
+                precomputed_bytes: None,
                 group: "生成文件".to_string(),
                 enabled: false,
                 available: true,
@@ -1240,6 +1260,7 @@ mod tests {
             ToolInput {
                 name: "generateImage".to_string(),
                 schema_json: "{}".to_string(),
+                precomputed_bytes: None,
                 group: "生成图片".to_string(),
                 enabled: true,
                 available: false,
@@ -1311,6 +1332,7 @@ mod tests {
             ToolInput {
                 name: "cheap".to_string(),
                 schema_json: "{\"a\":1}".to_string(),
+                precomputed_bytes: None,
                 group: "g".to_string(),
                 enabled: true,
                 available: true,
@@ -1319,6 +1341,7 @@ mod tests {
             ToolInput {
                 name: "expensive".to_string(),
                 schema_json: format!("{{\"d\":\"{}\"}}", "x".repeat(2000)),
+                precomputed_bytes: None,
                 group: "g".to_string(),
                 enabled: true,
                 available: true,
