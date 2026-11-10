@@ -54,7 +54,7 @@ final class ContextLedgerTests: XCTestCase {
     }
     """
 
-    func testDecodesV2() {
+    func testDecodesV2() throws {
         let ledger = try XCTUnwrap(ContextLedger.decode(fragmentsJson: v2JSON))
         XCTAssertEqual(ledger.version, 2)
         XCTAssertFalse(ledger.isLegacy)
@@ -196,7 +196,7 @@ final class ContextLedgerTests: XCTestCase {
 
     // MARK: - 坏输入
 
-    func testBadInputReturnsNilInsteadOfCrashing() {
+    func testBadInputReturnsNilInsteadOfCrashing() throws {
         for bad in ["", "{}", "not json", "[1,2,3]", "null"] {
             XCTAssertNil(ContextLedger.decode(fragmentsJson: bad),
                          "无法解析时返回 nil，由界面回落到旧展示：`\(bad)`")

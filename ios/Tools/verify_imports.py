@@ -229,11 +229,98 @@ def check_insert_arguments() -> int:
     return 0
 
 
+def _code_only(line: str) -> str:
+    """去掉行注释与字符串字面量，只留代码。
+
+    ⚠️ 第一版直接 `"try " in line` —— 把**中文注释里提到 try 的那几行**也算进来了，
+    于是三处本来正确的测试被误报。关卡报假阳性比漏报更糟：会训练人忽略它。
+    字符串字面量同理（断言消息里可能写到 `try`）。
+    """
+    # 去行注释（粗粒度：不处理 `//` 出现在字符串里的情况，对本仓库够用）
+    out = []
+    in_string = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == '"' and (i == 0 or line[i - 1] != "\\"):
+            in_string = not in_string
+            i += 1
+            continue
+        if not in_string and ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+            break
+        if not in_string:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def check_throws_declarations() -> int:
+    """测试里用了 `try` 的函数必须声明 `throws`（第 229 轮新增）。
+
+    起因：`ContextLedgerTests` 里多个用例写了 `try XCTUnwrap(...)` 却没标 `throws`，
+    CI 报 `errors thrown from here are not handled`。
+    **这是同一类盲点第四次咬人**（第 140 轮漏 `@testable import`、
+    第 221 轮可选解包层级、第 227 轮漏必填参数，都是"本地不编测试目标 → 只有 CI 拦"）。
+
+    规则很窄：在 `ios/YuNianTests/*.swift` 里，
+    一个 `func xxx(...) {` 的函数体若出现 `try `，签名必须带 `throws`。
+
+    自我保护：只查**顶层函数**（按缩进识别，跳过嵌套闭包），
+    并跳过已经是 `throws` / `rethrows` 的签名。
+    """
+    tests = REPO_ROOT / "ios/YuNianTests"
+    if not tests.exists():
+        return 0
+
+    bad = []
+    checked = 0
+    for f in sorted(tests.glob("*.swift")):
+        lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
+        i = 0
+        while i < len(lines):
+            # 修饰符（throws / async / -> T）都在 `{` 之前，统一用组 4 捕获。
+            # ⚠️ 第一版把 `-> T` 写成可选组、再要求紧跟 `{` —— 于是
+            # `func x() throws {` **根本匹配不到**（`throws` 挡在中间），
+            # 检查等于空跑（报 0 个）。这种"关卡空转"比误报更危险：看着通过，其实没查。
+            m = re.match(r"^(\s+)func (\w+)\(([^)]*)\)([^{]*)\{\s*$", lines[i])
+            if not m:
+                i += 1
+                continue
+            indent, name, _params, modifiers = m.group(1), m.group(2), m.group(3), m.group(4)
+            signature_throws = "throws" in modifiers or "rethrows" in modifiers
+            # 收集函数体（同缩进的 func 之前）
+            j = i + 1
+            body = []
+            while j < len(lines) and not re.match(rf"^{indent}func ", lines[j]):
+                body.append(lines[j])
+                j += 1
+            # 只查 `try XCTUnwrap` —— 这是实际反复咬人的那一个模式
+            # （第 221/229 轮）。放宽到 "try " 会因函数体扫描跨段而误报。
+            uses_try = any("try XCTUnwrap" in _code_only(ln) for ln in body)
+            if uses_try:
+                checked += 1
+                if not signature_throws:
+                    bad.append(f"{f.name}:{i + 1} {name}")
+            i = j
+
+    if bad:
+        print("[FAIL] 测试里用了 try 但未声明 throws：")
+        for q in bad:
+            print("  -", q)
+        print("       （`try XCTUnwrap` 等要求函数标 throws，否则只在测试 target 编译期报错）")
+        return 1
+    print(f"[ok] {checked} 个用 try 的测试函数都声明了 throws")
+    return 0
+
+
 def main() -> int:
     rc = check_testable_import()
     if rc:
         return rc
     rc = check_insert_arguments()
+    if rc:
+        return rc
+    rc = check_throws_declarations()
     if rc:
         return rc
     return _main_imports()
