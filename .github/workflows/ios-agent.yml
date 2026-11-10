@@ -208,7 +208,11 @@ jobs:
   rust-ios:
     name: Rust Agent → iOS
     needs: contract-checks
-    runs-on: macos-14
+    # ⚠️ 2026-11-10：`macos-14` 已不可用 —— GitHub 报
+    # `The configuration 'macos-14-arm64-us-default' is not supported`，
+    # 表现为**job 启动 1 秒即 cancelled**（看起来像并发顶掉，其实是 runner 不存在）。
+    # 本工作流其它 job 用 `macos-26`，这里改用 `macos-15`（当前仍可用的标准镜像）。
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
