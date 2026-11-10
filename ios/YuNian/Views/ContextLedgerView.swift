@@ -1,58 +1,52 @@
 import SwiftUI
 
-/// 上下文账本 —— 「这一轮模型到底收到了什么」，按 Aru 的实测层级实现。
+/// 上下文账本 —— 「这一轮模型到底收到了什么」。
 ///
-/// # 与「本轮收据」的区别
+/// # 为什么是"先结论后明细"这个形状（第 232 轮改版）
 ///
-/// 「本轮收据」（第 207 轮）只到「片段名 + 字符数」。账本把同一件事做成**可审计结构**：
-/// 按通道分组、三态（送进/只记录/本实现没有）、四种深度、
-/// **未准入原因是枚举**、双口径 token 并列且不相加、逐工具成本。
+/// 第一版我做成了审计工具的排布：8 行「名称 ×N ≈ N Token」，一行行往下排。
+/// 用户的原话是「感觉很丑」。剖析下来问题**不在渲染，在结构**：
 ///
-/// # 信息架构：两个清单并立（本页最重要的设计）
+/// 1. 打开先看到 8 行长相一样的行，眼睛没有落点；
+/// 2. 想知道"大头在哪"要自己做加法和除法 —— 而这恰恰是这页存在的**唯一理由**；
+/// 3. 右侧一列「≈ N Token」重复 7 次，看着像账单不像界面。
 ///
-/// ```
-/// ⑤ 本轮带入的材料   ← 只列 sent == true    「先看真送进去了什么」
-/// ⑥ 降级区块         ← 只列 sent == false   「再看为什么没送」
-/// ⑦ 本实现没有的通道 ← not_applicable       「我们没有这个能力，不是丢了」
-/// ```
+/// 现在：**一个主数字 + 一条占比条 + 一句人话结论**，明细降级为三行折叠。
+/// 「≈ Token」只在展开明细时出现。
 ///
-/// 三者**视觉上分开**，绝不混流。
+/// # 两个清单的分工（保留）
+/// - 材料（送入的）
+/// - 没带上（降级，单独一块，**与送入的视觉分开**）
+/// - 本实现没有（别家有的能力）
 ///
-/// # 六条硬规则（全部来自 Aru 实测，代码里逐条注释）
-///
+/// # 六条硬规则（来自 Aru 实测，逐条落进代码）
 /// 1. 无供应商回执 → **差异行整行不渲染**（不是 `0%`，也不是 `—%`）
-/// 2. 供应商口径的每个字段独立显示 `—`（不是 `0`）
-/// 3. 本机估算**照常显示**（它不依赖回执）
-/// 4. 降级项按 `severity` 三分类呈现，**引导语不同**
-/// 5. `skipped_no_trigger` 写「无需处理」，**不用警示色、不给修复入口**
+/// 2. 供应商口径每字段独立 `—`
+/// 3. 本机估算照常显示
+/// 4. 降级项按 `severity` 三分类引导（用户可改 / 配置缺失 / 正常状态）
+/// 5. `skipped_no_trigger` 写「无需处理」，**不警示、不给修复入口**
 /// 6. 降级项带结构化证据（可复现）
 struct ContextLedgerView: View {
 
     let ledger: ContextLedger
-    /// 对话标题（小字，标在标题上方 —— 让用户知道这是"哪个对话"的账本）
+    /// 对话标题（让用户知道这是"哪个对话"的账本）
     var conversationTitle: String = ""
-    /// 供应商回执（有则显示差异行；无则整行不渲染）
+    /// 供应商回执（有则显示差异；无则整行不渲染）
     var providerInputTokens: Int?
-    /// 回合状态（四态，与「有没有回执」分开）
+    /// 回合状态（四态，与"有没有回执"分开）
     var turnStatus: TurnStatus = .complete
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dismiss) private var dismiss
 
-    /// 展开状态（默认全部折叠 —— 层级多，一上来全展开会吓人）
-    @State private var showTechnical = false
-    @State private var showToolLedger = false
-    @State private var showNotApplicable = false
+    @State private var expanded: Set<String> = []
 
     /// 回合完成度。
     ///
-    /// ⚠️ **不照抄 Aru 的 `status`**：它的用户中断轮次仍然显示 `complete`
-    ///（实测确认的缺陷）。这里四态分开，并且"有没有 usage 回执"是**另一个字段**。
+    /// ⚠️ **不照抄 Aru 的 `status`**：它的用户中断轮次仍显示 `complete`（实测确认的缺陷）。
+    /// 这里四态分开，"有没有 usage 回执"是另一个字段（`providerInputTokens == nil`）。
     enum TurnStatus: String {
-        case complete
-        case cancelled
-        case failed
-        case partial
+        case complete, cancelled, failed, partial
 
         var text: String {
             switch self {
@@ -66,366 +60,419 @@ struct ContextLedgerView: View {
 
     var body: some View {
         let c = YNTheme.palette(scheme)
-
-        List {
-            headerSection(c)
-            usageSection(c)
-            messageWindowSection(c)
-            admittedSection(c)
-            degradedSection(c)
-            notApplicableSection(c)
-            technicalSection(c)
+        ScrollView {
+            VStack(spacing: YNTheme.Space.md) {
+                heroCard(c)
+                usageCard(c)
+                detailSection(c)
+                if !actionable.isEmpty { actionableCard(c) }
+                footnote(c)
+            }
+            .padding(.horizontal, YNTheme.Space.lg)
+            .padding(.vertical, YNTheme.Space.md)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(YNCanvas())
         .navigationTitle("上下文账本")
         .navigationBarTitleDisplayMode(.inline)
         .tint(c.accent)
-    }
-
-    // MARK: - ① 头部
-
-    private func headerSection(_ c: YNTheme.Palette) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: YNTheme.Space.xs) {
-                if !conversationTitle.isEmpty {
-                    Text(conversationTitle)
-                        .font(.caption)
-                        .foregroundStyle(c.textTertiary)
-                }
-                Text("这一轮请求的装箱清单：模型实际收到什么、没收到什么，各占多少。")
-                    .font(.subheadline)
-                    .foregroundStyle(c.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                // 状态与「有没有回执」分开显示 —— 见 TurnStatus 的注释
-                Label(turnStatus.text,
-                      systemImage: turnStatus == .complete
-                          ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(turnStatus == .complete ? c.textTertiary : c.warning)
-                if ledger.isLegacy {
-                    // 旧记录必须标注：当时只记了字符数，且没记工具/世界书
-                    Text("旧记录：只有字符数，Token 为按字符估算；"
-                         + "当时未记录工具 Schema 与世界书注入。")
-                        .font(.caption2)
-                        .foregroundStyle(c.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { dismiss() }
             }
-            .listRowBackground(Color.clear)
         }
     }
 
-    // MARK: - ② 本轮用量（双口径）
+    // MARK: - 主卡：一个数字 + 一条占比条 + 一句人话
 
-    private func usageSection(_ c: YNTheme.Palette) -> some View {
-        // 差异行只在**供应商给了回执**时出现（规则 1）
+    private func heroCard(_ c: YNTheme.Palette) -> some View {
+        VStack(alignment: .leading, spacing: YNTheme.Space.sm) {
+            Text(conversationTitle.isEmpty ? "这一轮" : "这一轮 · \(conversationTitle)")
+                .font(.caption)
+                .foregroundStyle(c.textTertiary)
+
+            // 主数字：本机估算。它是这一页唯一该被"大字"强调的数字。
+            HStack(alignment: .firstTextBaseline, spacing: YNTheme.Space.sm) {
+                Text(Self.format(ledger.estimate.tokens))
+                    .font(YNTheme.Display.hero)
+                    .tracking(YNTheme.Display.heroTracking)
+                    .foregroundStyle(c.textPrimary)
+                    .monospacedDigit()
+                Text("Token（本机估算）")
+                    .font(.caption)
+                    .foregroundStyle(c.textTertiary)
+            }
+
+            compositionBar(c)
+
+            // 一句人话结论 —— 整页最重要的字，不让用户自己推
+            Text(verdict)
+                .font(.subheadline)
+                .foregroundStyle(c.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if turnStatus != .complete || ledger.isLegacy {
+                HStack(spacing: 6) {
+                    if turnStatus != .complete {
+                        Label(turnStatus.text, systemImage: "exclamationmark.circle.fill")
+                    }
+                    if ledger.isLegacy {
+                        Text("旧记录：未计量工具与世界书")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(c.warning)
+            }
+        }
+        .padding(YNTheme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(c.surface,
+                    in: RoundedRectangle(cornerRadius: YNTheme.Radius.container, style: .continuous))
+    }
+
+    /// 占比条：**同一色相的透明度阶梯**。
+    ///
+    /// 为什么不用多色：`DESIGN.md` 规定一个控件里不同时出现两个强调色；
+    /// 而"多通道拼色"必然要两三个色相。改用单色渐变既守住规则，
+    /// 也更能表达"这是同一个总量的切分"。
+    private func compositionBar(_ c: YNTheme.Palette) -> some View {
+        let parts = ledger.admitted.sorted { $0.tokens > $1.tokens }
+        let total = max(parts.reduce(0) { $0 + $1.tokens }, 1)
+        return VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { proxy in
+                HStack(spacing: 1) {
+                    ForEach(Array(parts.enumerated()), id: \.element.id) { index, part in
+                        let width = proxy.size.width * CGFloat(part.tokens) / CGFloat(total)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(c.accent.opacity(Self.ramp(index)))
+                            .frame(width: max(width, 1.5))
+                    }
+                }
+            }
+            .frame(height: 10)
+            .background(c.textTertiary.opacity(0.15),
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+            // 图例只列前 3 —— 列全了又变回数字墙
+            HStack(spacing: YNTheme.Space.md) {
+                ForEach(Array(parts.prefix(3).enumerated()), id: \.element.id) { index, part in
+                    HStack(spacing: 5) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(c.accent.opacity(Self.ramp(index)))
+                            .frame(width: 8, height: 8)
+                        Text("\(part.cn) \(Self.percent(part.tokens, of: total))")
+                            .font(.caption2)
+                            .foregroundStyle(c.textSecondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    // MARK: - 本轮用量
+
+    private func usageCard(_ c: YNTheme.Palette) -> some View {
         let diff = ContextLedger.Diff.compute(provider: providerInputTokens,
                                               local: ledger.estimate.tokens)
-        return Section {
-            // 本机估算照常显示（规则 3：它不依赖回执）
-            LabeledContent("本机文本估算") {
-                Text("\(ledger.estimate.tokens)")
-                    .monospacedDigit()
-            }
-            LabeledContent("估算算法") {
-                Text(ledger.estimate.isRoughEstimate ? "\(ledger.estimate.method)（粗估）"
-                                                     : ledger.estimate.method)
-                    .font(.caption)
-                    .foregroundStyle(c.textTertiary)
-            }
-            // 供应商口径：有值给值，没值给 `—`（规则 2：不是 0）
-            LabeledContent("供应商输入") {
-                if let provider = diff.providerInputTokens {
-                    Text("\(provider)").monospacedDigit()
-                } else {
-                    Text("—").foregroundStyle(c.textTertiary)
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionLabel("本轮用量", colors: c)
+            VStack(spacing: 0) {
+                kv("本机文本估算", Self.format(ledger.estimate.tokens), colors: c)
+                divider(c)
+                kv("估算算法", ledger.estimate.method + (ledger.estimate.isRoughEstimate ? "（粗估）" : ""),
+                   colors: c, valueColor: c.textTertiary)
+                divider(c)
+                // 规则 2：供应商口径没值就给 `—`，不是 0
+                kv("供应商输入",
+                   diff.providerInputTokens.map { Self.format($0) } ?? "—",
+                   colors: c,
+                   valueColor: diff.providerInputTokens == nil ? c.textTertiary : c.textPrimary)
+                // 规则 1：**没有回执就整行不渲染**（不是 0%、不是 —%）
+                if let percentText = diff.percentText {
+                    divider(c)
+                    kv("差异", percentText, colors: c)
                 }
             }
-            if let percentText = diff.percentText {
-                LabeledContent("差异") {
-                    Text(percentText).monospacedDigit()
-                }
-            }
-            // 原文口径（规则 1 的可读版）：一行说清"哪些是两种口径"
-            Text("分项 Token 是发出请求前的本机估算；供应商回执来自服务端。"
-                 + "两种口径用于对照，不能相加。")
+            .background(c.surface,
+                        in: RoundedRectangle(cornerRadius: YNTheme.Radius.container, style: .continuous))
+
+            Text("没有供应商回执就不给对比：不显示 0%，也不显示「—%」。")
                 .font(.caption2)
                 .foregroundStyle(c.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        } header: {
-            Text("本轮用量")
+                .padding(.top, 6)
+                .padding(.horizontal, 4)
         }
     }
 
-    // MARK: - ④ 消息窗口
+    // MARK: - 明细（三行折叠）
 
-    @ViewBuilder
-    private func messageWindowSection(_ c: YNTheme.Palette) -> some View {
-        if let window = ledger.channels.first(where: { $0.id == "conversation_window" }) {
-            Section {
-                materialRow(window, colors: c)
-            } header: {
-                Text("消息窗口")
-            } footer: {
-                Text("窗口内的历史消息。条数与体积随对话增长 —— 它不在下面的材料列表里，"
-                     + "但同样是真实输入的一部分。")
-            }
-        }
-    }
-
-    // MARK: - ⑤ 本轮带入的材料
-
-    @ViewBuilder
-    private func admittedSection(_ c: YNTheme.Palette) -> some View {
-        // 排除独立的「消息窗口」—— 它已经单独成块
-        let items = ledger.admitted.filter { $0.id != "conversation_window" }
-        if !items.isEmpty {
-            Section {
-                ForEach(items) { channel in
-                    materialRow(channel, colors: c)
-                }
-            } header: {
-                HStack {
-                    Text("本轮带入的材料")
-                    Spacer()
-                    Text("\(items.count) 项 · ≈ \(ledger.admittedTokens) Token")
-                        .font(.caption2)
-                        .foregroundStyle(c.textTertiary)
-                        .monospacedDigit()
-                }
-            } footer: {
-                Text("只有真正送进请求的才会出现在这里。没送进去的在下面「降级」一块。")
-            }
-        }
-    }
-
-    /// 一条材料/降级行 —— 两个清单共用同一个渲染器，**但色点与第二行不同**。
-    ///
-    /// Aru 实测用的是绿/灰点；我们按 `PRODUCT.md` 不用原色，
-    /// 改用**品牌紫（已送入）/ 中性灰（未送入）/ 暖色（有配置问题）**，
-    /// 并且**文字始终同时给出**（不靠颜色单独承载语义 —— `DESIGN.md` 的既有规则）。
-    private func materialRow(_ channel: ContextLedger.Channel, colors c: YNTheme.Palette) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Circle()
-                    .fill(dotColor(channel, colors: c))
-                    .frame(width: 7, height: 7)
-                Text(channel.cn)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(c.textPrimary)
-                // 复合计数（记忆召回）优先于 `×N`
-                Text(channel.itemsLabel ?? (channel.items > 0 ? "×\(channel.items)" : ""))
-                    .font(.caption)
-                    .foregroundStyle(c.textTertiary)
-                Spacer(minLength: 0)
-                Text("≈ \(channel.tokens) Token")
-                    .font(.caption)
+    private func detailSection(_ c: YNTheme.Palette) -> some View {
+        let groups: [(id: String, title: String, caption: String, items: [ContextLedger.Channel], color: Color)] = [
+            ("material", "材料", "全部送进请求",
+             ledger.admitted.sorted { $0.tokens > $1.tokens }, c.accent),
+            ("degraded", "没带上", degradedCaption,
+             ledger.degraded, c.warm),
+            ("na", "本实现没有", "别家有的能力",
+             ledger.notApplicable, c.textTertiary),
+        ]
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                sectionLabel("明细", colors: c)
+                Spacer()
+                Text("\(ledger.admitted.count) 项材料 · \(ledger.degraded.count) 项未带入")
+                    .font(.caption2)
                     .foregroundStyle(c.textTertiary)
                     .monospacedDigit()
             }
-            // 第二行：跨轮/状态标记（降级固定「本次未发送」）。空则不渲染。
-            if !channel.statusLine.isEmpty {
-                Label(channel.statusLine,
-                      systemImage: channel.sent ? "arrow.triangle.2.circlepath" : "arrow.uturn.backward")
-                    .font(.caption2)
-                    .foregroundStyle(channel.sent ? c.textTertiary : c.textSecondary)
+            VStack(spacing: 0) {
+                ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                    if index > 0 { divider(c) }
+                    disclosureRow(group.id, group.title, group.caption,
+                                  group.items, group.color, colors: c)
+                }
             }
-            // 原因 + 三分类引导（只在降级时）
-            if let hint = channel.reasonHint {
+            .background(c.surface,
+                        in: RoundedRectangle(cornerRadius: YNTheme.Radius.container, style: .continuous))
+        }
+    }
+
+    private func disclosureRow(_ id: String, _ title: String, _ caption: String,
+                              _ items: [ContextLedger.Channel], _ dotColor: Color,
+                              colors c: YNTheme.Palette) -> some View {
+        let isOpen = expanded.contains(id)
+        return VStack(spacing: 0) {
+            Button {
+                withAnimation(YNTheme.Motion.quick) {
+                    if isOpen { expanded.remove(id) } else { expanded.insert(id) }
+                }
+            } label: {
+                HStack(alignment: .center, spacing: YNTheme.Space.sm) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(title)
+                                .font(.body)
+                                .foregroundStyle(c.textPrimary)
+                            Text("\(items.count) 项")
+                                .font(.caption)
+                                .foregroundStyle(c.textTertiary)
+                                .monospacedDigit()
+                        }
+                        Text(caption)
+                            .font(.caption2)
+                            .foregroundStyle(c.textTertiary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(c.textTertiary)
+                        .rotationEffect(.degrees(isOpen ? 180 : 0))
+                }
+                .padding(.horizontal, YNTheme.Space.md)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(items.isEmpty)
+
+            if isOpen && !items.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(items) { channel in
+                        channelRow(channel, colors: c)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    /// 明细里的一行：名称 + ×N + Token（**只在展开时才有数字**）。
+    private func channelRow(_ channel: ContextLedger.Channel, colors c: YNTheme.Palette) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(channel.sent ? c.accent : dotColorFor(channel, colors: c))
+                    .frame(width: 6, height: 6)
+                Text(channel.cn)
+                    .font(.subheadline)
+                    .foregroundStyle(channel.sent ? c.textPrimary : c.textSecondary)
+                if let label = channel.itemsLabel ?? (channel.items > 1 ? "×\(channel.items)" : nil) {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(c.textTertiary)
+                }
+                Spacer(minLength: 0)
+                Text(channel.sent ? "≈ \(channel.tokens)" : "未送入")
+                    .font(.caption2)
+                    .foregroundStyle(c.textTertiary)
+                    .monospacedDigit()
+            }
+            if !channel.sent, let hint = channel.reasonHint {
                 Text(hint)
                     .font(.caption2)
-                    .foregroundStyle(c.textSecondary)
+                    .foregroundStyle(channel.severity == .normal ? c.textTertiary : c.warm)
+                    .padding(.leading, 12)
             }
             if let fix = channel.fixPath {
                 Text(fix)
                     .font(.caption2)
                     .foregroundStyle(c.accent)
+                    .padding(.leading, 12)
             }
-            // 结构化证据（可复现）
             if !channel.evidence.isEmpty {
                 Text(channel.evidence.sorted { $0.key < $1.key }
                         .map { "\($0.key)=\($0.value)" }
                         .joined(separator: "; "))
                     .font(.caption2.monospaced())
                     .foregroundStyle(c.textTertiary)
+                    .padding(.leading, 12)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(.horizontal, YNTheme.Space.md)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityText(channel))
     }
 
-    private func dotColor(_ channel: ContextLedger.Channel, colors c: YNTheme.Palette) -> Color {
-        if channel.sent { return c.accent }
-        switch channel.severity {
-        case .config, .actionable: return c.warm   // 有东西要改 → 暖色
-        case .normal: return c.textTertiary        // 正常状态 → 中性，不警示
-        case .notApplicable, .none: return c.textTertiary.opacity(0.5)
-        }
-    }
+    // MARK: - 可操作项（把"要你动手的"单独提出来）
 
-    private func accessibilityText(_ channel: ContextLedger.Channel) -> String {
-        var parts = ["\(channel.cn)"]
-        parts.append(channel.sent ? "已送入 \(channel.tokens) Token" : "未送入")
-        if let hint = channel.reasonHint { parts.append(hint) }
-        return parts.joined(separator: "，")
-    }
-
-    // MARK: - ⑥ 降级区块
-
-    @ViewBuilder
-    private func degradedSection(_ c: YNTheme.Palette) -> some View {
-        let items = ledger.degraded
-        if !items.isEmpty {
-            Section {
-                ForEach(items) { channel in
-                    materialRow(channel, colors: c)
+    /// 只有**用户能动手改**的项才进这张卡。
+    ///
+    /// `skipped_no_trigger`（本轮没命中）**永远不进** —— 它不是故障，
+    /// 放进来就是在催用户去改一个没问题的设置。
+    private var actionable: [ContextLedger.Channel] {
+        (ledger.degraded + ledger.channels.filter { !$0.sent && $0.severity == .config })
+            .filter { $0.severity == .actionable || $0.severity == .config }
+            .reduce(into: [ContextLedger.Channel]()) { acc, ch in
+                if !acc.contains(where: { $0.fixPath == ch.fixPath && $0.cn == ch.cn }) {
+                    acc.append(ch)
                 }
-            } header: {
-                Text("\(items.count) 项没有按完整形态带入")
-            } footer: {
-                // 这句话是 Aru 实测里最有用的一个提示：告诉用户这块是"附注"
-                Text("这里记录降级、跳过和失败事实；收起时不影响上面的实际装箱清单。"
-                     + "「本轮没有命中」是正常状态，不需要处理。")
             }
-        }
     }
 
-    // MARK: - ⑦ 本实现没有的通道
-
-    @ViewBuilder
-    private func notApplicableSection(_ c: YNTheme.Palette) -> some View {
-        let items = ledger.notApplicable
-        if !items.isEmpty {
-            Section {
-                DisclosureGroup(isExpanded: $showNotApplicable) {
-                    ForEach(items) { channel in
-                        HStack {
-                            Text(channel.cn)
-                                .font(.caption)
-                                .foregroundStyle(c.textTertiary)
-                            Spacer()
-                            Text("本实现没有")
+    private func actionableCard(_ c: YNTheme.Palette) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(actionable.prefix(3).enumerated()), id: \.element.id) { index, channel in
+                if index > 0 { divider(c) }
+                HStack(alignment: .top, spacing: YNTheme.Space.sm) {
+                    Circle()
+                        .fill(c.warm)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 6)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(channel.reasonHint ?? channel.cn)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(c.textPrimary)
+                        if let fix = channel.fixPath {
+                            Text(fix)
                                 .font(.caption2)
                                 .foregroundStyle(c.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                } label: {
-                    Text("\(items.count) 条通道本实现没有")
-                        .font(.subheadline)
-                        .foregroundStyle(c.textSecondary)
+                    Spacer(minLength: 0)
                 }
-            } footer: {
-                Text("列出来而不是隐藏：这些是别的实现有的能力，我们没有 —— "
-                     + "不是「这一轮没带上」。")
+                .padding(.horizontal, YNTheme.Space.md)
+                .padding(.vertical, 12)
             }
+        }
+        .background(c.warmSoft,
+                    in: RoundedRectangle(cornerRadius: YNTheme.Radius.container, style: .continuous))
+    }
+
+    private func footnote(_ c: YNTheme.Palette) -> some View {
+        Text("两种口径不能相加：本机估算按文本体积算，供应商回执来自服务端。")
+            .font(.caption2)
+            .foregroundStyle(c.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+    }
+
+    // MARK: - 小工具
+
+    private func sectionLabel(_ text: String, colors c: YNTheme.Palette) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(c.textTertiary)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 6)
+    }
+
+    private func kv(_ label: String, _ value: String, colors c: YNTheme.Palette,
+                    valueColor: Color? = nil) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(c.textSecondary)
+            Spacer(minLength: YNTheme.Space.sm)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(valueColor ?? c.textPrimary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, YNTheme.Space.md)
+        .padding(.vertical, 11)
+    }
+
+    private func divider(_ c: YNTheme.Palette) -> some View {
+        Rectangle()
+            .fill(c.textTertiary.opacity(0.15))
+            .frame(height: 0.5)
+            .padding(.leading, YNTheme.Space.md)
+    }
+
+    private func dotColorFor(_ channel: ContextLedger.Channel, colors c: YNTheme.Palette) -> Color {
+        switch channel.severity {
+        case .actionable, .config: return c.warm
+        case .normal, .notApplicable, .none: return c.textTertiary
         }
     }
 
-    // MARK: - 工具账 + 技术收据（折叠）
-
-    private func technicalSection(_ c: YNTheme.Palette) -> some View {
-        Section {
-            DisclosureGroup(isExpanded: $showToolLedger) {
-                toolLedgerRows(c)
-            } label: {
-                HStack {
-                    Text("工具账")
-                    Spacer()
-                    Text("\(ledger.toolLedger.visible.count) 可见 · "
-                         + "\(ledger.toolLedger.hidden.count) 隐藏 · "
-                         + "≈ \(ledger.toolLedger.schemaTokens) Token")
-                        .font(.caption2)
-                        .foregroundStyle(c.textTertiary)
-                        .monospacedDigit()
-                }
-            }
-            DisclosureGroup(isExpanded: $showTechnical) {
-                technicalRows(c)
-            } label: {
-                Text("技术收据")
-            }
-        } footer: {
-            Text("技术收据是排查用的原始字段，平时不用展开。")
+    private var degradedCaption: String {
+        guard !ledger.degraded.isEmpty else { return "全部按完整形态带入" }
+        // 按原因三分类给出不同的副标题 —— 用户据此判断"要不要动手"
+        if ledger.degraded.contains(where: { $0.severity == .actionable || $0.severity == .config }) {
+            return "有需要你去配的项"
         }
+        return "都是正常状态，无需处理"
     }
 
-    @ViewBuilder
-    private func toolLedgerRows(_ c: YNTheme.Palette) -> some View {
-        if ledger.toolLedger.perTool.isEmpty {
-            Text(ledger.isLegacy
-                 ? "旧记录没有工具账（当时未计量）。"
-                 : "本轮没有下发工具。")
-                .font(.caption2)
-                .foregroundStyle(c.textTertiary)
-        } else {
-            // 逐工具成本 —— **按 token 降序**（最贵的排第一，不让成本藏在折叠里）
-            ForEach(ledger.toolLedger.perTool) { tool in
-                HStack {
-                    Text(tool.name)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(c.textSecondary)
-                    Spacer()
-                    Text("≈ \(tool.tokens) Token")
-                        .font(.caption2)
-                        .foregroundStyle(c.textTertiary)
-                        .monospacedDigit()
-                }
-            }
+    /// 一句人话结论 —— **由数据算出**，不是写死的文案。
+    private var verdict: String {
+        guard !ledger.isLegacy else {
+            return "旧记录没有计量工具成本，只能看到材料与字数。"
         }
-        ForEach(ledger.toolLedger.hidden) { hidden in
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(hidden.name)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(c.textTertiary)
-                    Spacer()
-                    Text(hidden.reason?.rawValue ?? "未下发")
-                        .font(.caption2)
-                        .foregroundStyle(c.textTertiary)
-                }
-                // 三分类引导：用户关的 vs 没配线路，去处不同
-                if let severity = hidden.severity {
-                    Text(severityText(severity))
-                        .font(.caption2)
-                        .foregroundStyle(severity == .normal ? c.textTertiary : c.warm)
-                }
-            }
+        guard ledger.admittedTokens > 0 else {
+            return "这一轮还没有可统计的材料。"
         }
+        let share = ledger.toolSchemaShare
+        let count = ledger.toolLedger.visible.count
+        if share >= 0.6 {
+            return String(format: "工具 Schema 占 %.0f%% —— 这是最大的一块，减少工具数量能明显省下输入。",
+                          share * 100)
+        }
+        if share >= 0.3 {
+            return String(format: "工具 Schema 占 %.0f%%（%d 个工具）—— 有一定占比，但不是主要成本。",
+                          share * 100, count)
+        }
+        return String(format: "工具 Schema 占 %.0f%% —— 只装了 %d 个工具，少塞工具对这里几乎没用。",
+                      share * 100, count)
     }
 
-    private func severityText(_ severity: ContextLedger.Severity) -> String {
-        switch severity {
-        case .actionable: return "你关掉了这个组 —— 去工具箱开启"
-        case .config: return "能力还没就绪 —— 去用途线路配置"
-        case .normal: return "正常状态，无需处理"
-        case .notApplicable: return "本实现没有"
-        }
+    /// 单色透明度阶梯（前几项最浓）。
+    private static func ramp(_ index: Int) -> Double {
+        let steps: [Double] = [0.92, 0.62, 0.46, 0.36, 0.28, 0.22, 0.16, 0.11]
+        return index < steps.count ? steps[index] : 0.08
     }
 
-    @ViewBuilder
-    private func technicalRows(_ c: YNTheme.Palette) -> some View {
-        LabeledContent("结构版本", value: "v\(ledger.version)")
-        LabeledContent("本机估算字节", value: "\(ledger.estimate.bytes)")
-        LabeledContent("本机估算字符", value: "\(ledger.estimate.chars)")
-        LabeledContent("工具 Schema 占比",
-                       value: String(format: "%.1f%%", ledger.toolSchemaShare * 100))
-        LabeledContent("差异公式", value: ledger.diff?.formula ?? "(provider−local)/local")
-        ForEach(ledger.channels) { channel in
-            VStack(alignment: .leading, spacing: 2) {
-                Text(channel.cn)
-                    .font(.caption)
-                    .foregroundStyle(c.textSecondary)
-                Text("id=\(channel.id) · status=\(channel.status.rawValue) · "
-                     + "depth=\(channel.depth.rawValue) · owner=\(channel.owner) · "
-                     + "fragments=\(channel.fragmentCount)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(c.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+    private static func percent(_ part: Int, of total: Int) -> String {
+        guard total > 0 else { return "0%" }
+        return String(format: "%.0f%%", Double(part) / Double(total) * 100)
+    }
+
+    private static func format(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }
 
@@ -435,16 +482,12 @@ extension ContextLedger {
 
     /// 用「本轮收据」的片段构造账本（v1 语义：全部 admitted）。
     ///
-    /// ## 为什么需要有这个桥
     /// Rust 侧 `ledger_build_snapshot_json` 要等 CI 产出新框架才能被 Swift 调用，
     /// 而**界面不该等**：先用现有片段拼出同一套结构，账本页今天就能看。
-    /// 等 v2 接通后，这里换成解码 JSON 即可，界面代码一行不用改。
+    /// v2 接通后换成解码 JSON，界面代码一行不用改。
     ///
-    /// ## 已知局限（界面会如实标注 `isLegacy = true`）
-    /// - 没有工具账（当时未计量）
-    /// - 没有降级区（当时未记原因）
+    /// 局限（界面顶部如实标注 `isLegacy`）：没有工具账、没有降级区。
     static func from(receipt: TurnReceipt) -> ContextLedger {
-        let encoder = JSONEncoder()
         let legacyShape = receipt.segments.map { seg -> [String: Any] in
             ["id": seg.id, "source": seg.source, "layer": Int(seg.layer),
              "lifetime": seg.lifetime, "chars": seg.chars]
@@ -454,8 +497,6 @@ extension ContextLedger {
            let decoded = ContextLedger.decode(fragmentsJson: json) {
             return decoded
         }
-        // 兜底：空账本（宁可空，也不要假数据）
-        _ = encoder
         return ContextLedger(
             version: 1, channels: [],
             toolLedger: ToolLedger(visible: [], hidden: [], perTool: [],
