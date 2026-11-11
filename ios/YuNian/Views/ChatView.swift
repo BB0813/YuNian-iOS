@@ -271,6 +271,31 @@ private struct ChatViewContent: View {
             .accessibilityLabel(toolbarAccessibilityLabel + "，打开角色页")
         }
 
+        // ⚠️ 第 236 轮：账本与生图的入口放在**顶栏**，不再放在输入栏。
+        //
+        // 证据：设备日志 15 分钟里**一条 `chat.sheet` 都没有**（用户明确点了好几次）——
+        // 说明输入栏里按钮的 action **根本没执行**。输入栏活在 iOS 26 的
+        // `safeAreaBar(edge: .bottom)` 里，那里的按钮命中区不可靠。
+        // 而顶栏这个 Button（点标题进角色页）是**验证过能用**的，走的是同一个 sheet。
+        // 所以入口搬到顶栏 —— 不是猜，是照日志换机制。
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button {
+                    model.composerSheet = .ledger
+                } label: {
+                    Label("上下文账本", systemImage: "doc.text.magnifyingglass")
+                }
+                Button {
+                    model.composerSheet = .image
+                } label: {
+                    Label("画一张", systemImage: "photo.badge.plus")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("更多：上下文账本、画一张")
+        }
+
         #if DEBUG
         // 仅 DEBUG：无 API Key 时也能验收完整视觉状态（AI 气泡 / typing /
         // 流式 / 思考过程 / 停止按钮 / 消息分组）。
@@ -1108,35 +1133,6 @@ private struct ChatComposer: View {
                 confirmationCard(pending)
             }
             HStack(alignment: .bottom, spacing: YNTheme.Space.sm) {
-                // 第 229 轮：上下文账本。放左下角（与"添加"同一侧），
-                // 与「画一张」并列 —— 这两个都是"我主动要看/要做点什么"的动作。
-                Button {
-                    model.composerSheet = .ledger
-                } label: {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.body.weight(.medium))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(colors.accent)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("上下文账本")
-
-                // 第 228 轮：主动要一张图。放在输入框左边而不是藏进菜单 ——
-                // 这是"我明确想让它画"的动作，藏起来等于没有。
-                Button {
-                    model.composerSheet = .image
-                } label: {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.body.weight(.medium))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(colors.accent)
-                .frame(minWidth: 44, minHeight: 44)
-                .disabled(model.pendingConfirmation != nil)
-                .accessibilityLabel("画一张")
-
                 TextField("发消息", text: $model.draft, axis: .vertical)
                     .font(.body)
                     .lineLimit(1...5)
