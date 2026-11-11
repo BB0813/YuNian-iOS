@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import UIKit
 
 /// iOS 原生单聊页（V1 文本闭环）。
@@ -25,13 +26,18 @@ private struct ChatViewContent: View {
 
     @State private var isNearBottom = true
     @State private var unseenCount = 0
-    /// 要展示收据的那条消息（nil = 不弹）。用 item 形式，避免"先置 true 再取消息"
-    /// 那种两步状态（中间会有一帧拿到 nil）。
-    @State private var receiptTarget: ChatSession.Message?
     /// 待删除的那一条（第 221 轮）：先确认再删。
     @State private var deleteTarget: ChatSession.Message?
-    /// 角色页（第 219 轮）：点顶栏标题打开，进人设/记忆/世界书/音色/会话。
-    @State private var showCompanionHub = false
+    /// **唯一的弹层锚点**（第 235 轮）。
+    ///
+    /// ⚠️ 这一层原先挂了**三个** `.sheet`（收据 / 角色页 / 输入栏两个按钮）。
+    /// 用户第二次反馈"还是点不开"后确认：同一视图链上的多个 sheet 在真机上
+    /// 只有**其中一个**可靠呈现 —— 我 229 轮加第二个（账本）时就已经埋了这个坑，
+    /// 234 轮只是把第三个换了个位置，并没有减少数量。
+    ///
+    /// 现在全部合并成**一个** `.sheet(item:)`，按枚举分支渲染。
+    /// 这不是风格问题：**一个视图只能有一个可靠的呈现锚点**。
+    @State private var activeSheet: ActiveSheet?
     /// 历史是否已完成首次灌入。用于把「首次加载」与「新消息到达」区分开 ——
     /// 二者都会让消息数增加，但只有后者才应该计数/滚动。
     @State private var didInitialScroll = false
@@ -39,6 +45,23 @@ private struct ChatViewContent: View {
     /// 已落地思考过程的展开状态（按消息 id 记 ——
     /// 用一个 Bool 会让"展开一条"把所有条都撑开）。
     @State private var expandedReasoning: Set<UUID> = []
+
+    /// 聊天页里所有弹层（第 235 轮合并，见 `activeSheet` 的注释）。
+    enum ActiveSheet: Identifiable {
+        case receipt(ChatSession.Message)
+        case companionHub
+        case image
+        case ledger
+
+        var id: String {
+            switch self {
+            case .receipt(let m): return "receipt-\(m.id)"
+            case .companionHub: return "hub"
+            case .image: return "image"
+            case .ledger: return "ledger"
+            }
+        }
+    }
 
     init(companionId: Int64, environment: AppEnvironment) {
         _model = StateObject(wrappedValue: ChatViewModel(
@@ -82,49 +105,39 @@ private struct ChatViewContent: View {
         // `toolbar(_:for:)` 是 iOS 16+ 的系统做法，返回上一层会自动恢复。
         .toolbar(.hidden, for: .tabBar)
         .toolbar { toolbarContent(colors: c) }
-        // 「上下文账本」：从消息菜单打开**那一轮**的账本。
+
+        // ⚠️ **本页唯一的弹层锚点**（第 235 轮）。
         //
-        // ⚠️ 第 234 轮：菜单项已经改名「上下文账本」，但这里原先还开着旧的
-        // `TurnReceiptView` —— **名实不符**。用户看到"账本"却得到一个不同形状的页面，
-        // 会以为"账本没做"。现在统一指到新账本；旧的「上下文选项」仍在
-        // `我 → AI 能力 → 上下文与收据` 里，功能没丢。
-        .sheet(item: $receiptTarget) { message in
-            NavigationStack {
-                if let receipt = model.receipt(for: message) {
-                    ContextLedgerView(
-                        ledger: .best(receipt: receipt),
-                        providerInputTokens: receipt.usage?.promptTokens,
-                        turnStatus: ContextLedgerView.status(of: receipt)
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "这一轮没有账本",
-                        systemImage: "doc.text.magnifyingglass",
-                        description: Text("只有真正发出过请求的回合才有装箱清单。")
-                    )
-                }
-            }
-        }
-        // 角色页（第 219 轮）：点顶栏标题打开。
-        // ⚠️ 用 `model.companionId` 而不是 `companionId`：这一层是 `ChatViewContent`，
-        // 它不存 `companionId`（那个属性在 `ChatView` 上），companionId 由 ViewModel 持有。
-        .sheet(isPresented: $showCompanionHub) {
-            CompanionHubView(companionId: model.companionId, embeddedInSheet: true)
-        }
-        // 输入栏上的两个弹层（画一张 / 上下文账本）—— **统一在这里呈现**。
-        //
-        // ⚠️ 第 234 轮修：这两块原先是挂在 `ChatComposer` 上的两个独立 `.sheet`，
-        // 用户反馈「根本点不开」。两个原因叠加：
-        //   1. 同一视图挂两个 `.sheet` → SwiftUI 只可靠呈现一个；
-        //   2. `ChatComposer` 活在 `safeAreaInset` 里，从 inset 内容呈现 sheet 不可靠。
-        // 现在改成**一个**枚举驱动的 sheet，且放在顶层（与角色页同一层，那条路验证可用）。
-        .sheet(item: $model.composerSheet) { sheet in
+        // 原先这里有三个独立 `.sheet`（收据 / 角色页 / 输入栏），
+        // 用户两次反馈"点不开"后确认：同一视图链上的多个 sheet，
+        // 真机上只有其中一个可靠呈现。
+        // 现在只有一个，按枚举分支渲染 —— 无论将来加多少入口，
+        // 都只是往枚举里加一个 case，不会再出现"点了没反应"。
+        .sheet(item: $activeSheet) { sheet in
             switch sheet {
+            case .receipt(let message):
+                NavigationStack {
+                    if let receipt = model.receipt(for: message) {
+                        ContextLedgerView(
+                            ledger: .best(receipt: receipt),
+                            providerInputTokens: receipt.usage?.promptTokens,
+                            turnStatus: ContextLedgerView.status(of: receipt)
+                        )
+                    } else {
+                        ContentUnavailableView(
+                            "这一轮没有账本",
+                            systemImage: "doc.text.magnifyingglass",
+                            description: Text("只有真正发出过请求的回合才有装箱清单。")
+                        )
+                    }
+                }
+            case .companionHub:
+                CompanionHubView(companionId: model.companionId, embeddedInSheet: true)
             case .image:
                 ImageRequestSheet(model: model)
             case .ledger:
                 NavigationStack {
-                    // 取**最近一条助手消息**那一轮的账本：用户点"账本"想看的就是"刚刚这一轮"。
+                    // 取**最近一条助手消息**那一轮：点"账本"想看的就是"刚刚这一轮"。
                     if let last = model.messages.last(where: { $0.role != .user }),
                        let receipt = model.receipt(for: last) {
                         ContextLedgerView(
@@ -142,6 +155,32 @@ private struct ChatViewContent: View {
                 }
             }
         }
+        // 输入栏按钮只写 `model.composerSheet`（它在 safeAreaInset 里，
+        // 不能自己呈现），这里把它转成统一锚点的状态。
+        .onChange(of: model.composerSheet) { _, new in
+            // 证据：若"点了没反应"，先看这行有没有打出来 ——
+            // 打出来 = 按钮触发了、问题在呈现；没打出来 = 按钮没触发。
+            Logger(subsystem: "com.yunian.ai", category: "chat.sheet")
+                .notice("composerSheet=\(String(describing: new), privacy: .public)")
+            guard let new else { return }
+            activeSheet = (new == .ledger) ? .ledger : .image
+            model.composerSheet = nil
+        }
+        // 「上下文账本」：从消息菜单打开**那一轮**的账本。
+        //
+        // ⚠️ 第 234 轮：菜单项已经改名「上下文账本」，但这里原先还开着旧的
+        // `TurnReceiptView` —— **名实不符**。用户看到"账本"却得到一个不同形状的页面，
+        // 会以为"账本没做"。现在统一指到新账本；旧的「上下文选项」仍在
+        // `我 → AI 能力 → 上下文与收据` 里，功能没丢。
+        // ⚠️ 用 `model.companionId` 而不是 `companionId`：这一层是 `ChatViewContent`，
+        // 它不存 `companionId`（那个属性在 `ChatView` 上），companionId 由 ViewModel 持有。
+        // 输入栏上的两个弹层（画一张 / 上下文账本）—— **统一在这里呈现**。
+        //
+        // ⚠️ 第 234 轮修：这两块原先是挂在 `ChatComposer` 上的两个独立 `.sheet`，
+        // 用户反馈「根本点不开」。两个原因叠加：
+        //   1. 同一视图挂两个 `.sheet` → SwiftUI 只可靠呈现一个；
+        //   2. `ChatComposer` 活在 `safeAreaInset` 里，从 inset 内容呈现 sheet 不可靠。
+        // 现在改成**一个**枚举驱动的 sheet，且放在顶层（与角色页同一层，那条路验证可用）。
         // 删除单条消息（第 221 轮）：破坏性且不可逆 → 先确认。
         // 直接把要删的那句话开头放进标题里，避免删错（长按菜单很容易点错行）。
         .confirmationDialog("删除这一条消息？",
@@ -199,7 +238,7 @@ private struct ChatViewContent: View {
             // 用 Button 而不是 NavigationLink：工具栏里的 NavigationLink 行为不稳，
             // 这里用受控 sheet，弹层自带导航栈（`embeddedInSheet`）。
             Button {
-                showCompanionHub = true
+                activeSheet = .companionHub
             } label: {
                 HStack(spacing: YNTheme.Space.sm) {
                     CompanionAvatar(
@@ -384,7 +423,7 @@ private struct ChatViewContent: View {
                             onSpeak: { target in model.speak(target) },
                             // 「本轮收据」：只有助手消息、且那一轮真的留了 turnId
                             // 才有得看（`nil` = 菜单里不出现，而不是弹一个空页面）。
-                            onReceipt: { target in receiptTarget = target },
+                            onReceipt: { target in activeSheet = .receipt(target) },
                             // 「删除这一条」（第 221 轮）：只有已落库的消息才给入口。
                             // 先弹确认再删 —— 这是聊天页里唯一不可逆的操作。
                             onDelete: model.canDelete(message)
