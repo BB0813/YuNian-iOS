@@ -427,8 +427,23 @@ struct ContextLedgerView: View {
         }
     }
 
-    private var degradedCaption: String {
-        guard !ledger.degraded.isEmpty else { return "全部按完整形态带入" }
+    /// 把回合结束原因映射成四态。
+    ///
+    /// ⚠️ **不照抄 Aru**：它把"完成度"和"有没有回执"揉进一个 `status`，
+    /// 结果用户点「停止」之后状态仍显示 `complete`（实测确认的缺陷）。
+    /// 这里用引擎给的 `finishReason` 判真实完成度，回执缺失另算。
+    ///
+    /// 放在这里（而不是 `ChatView` 里）是因为**调用方有两处**：
+    /// 聊天页的账本弹层，以及将来的其它入口 —— 复制两份迟早会漂。
+    static func status(of receipt: TurnReceipt) -> TurnStatus {
+        let reason = receipt.finishReason.lowercased()
+        if reason.contains("cancel") || reason.contains("interrupt") { return .cancelled }
+        if reason.contains("error") || reason.contains("fail") { return .failed }
+        if receipt.usage == nil { return .partial }
+        return .complete
+    }
+
+    private var degradedCaption: String {        guard !ledger.degraded.isEmpty else { return "全部按完整形态带入" }
         // 按原因三分类给出不同的副标题 —— 用户据此判断"要不要动手"
         if ledger.degraded.contains(where: { $0.severity == .actionable || $0.severity == .config }) {
             return "有需要你去配的项"

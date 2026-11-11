@@ -565,6 +565,23 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 输入栏弹层（第 234 轮）
+
+    /// 输入栏上两个按钮要打开的弹层。
+    ///
+    /// ## 为什么状态放在 ViewModel 而不是输入栏的 `@State`
+    /// 输入栏（`ChatComposer`）活在 `safeAreaInset` 里，**从那里呈现 sheet 不可靠**；
+    /// 而且它上面同时挂了两个 `.sheet`，SwiftUI 只会可靠呈现一个 ——
+    /// 实测结果就是"点了没反应"。
+    /// 现在按钮只写这个状态，呈现交给顶层的**单个**枚举 sheet。
+    enum ComposerSheet: String, Identifiable {
+        case image
+        case ledger
+        var id: String { rawValue }
+    }
+
+    @Published var composerSheet: ComposerSheet?
+
     // MARK: - 主动生图（第 228 轮，BACKLOG B2）
 
     /// 「画一张」输入框的内容（画面描述）。

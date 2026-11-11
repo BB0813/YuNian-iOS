@@ -82,10 +82,27 @@ private struct ChatViewContent: View {
         // `toolbar(_:for:)` 是 iOS 16+ 的系统做法，返回上一层会自动恢复。
         .toolbar(.hidden, for: .tabBar)
         .toolbar { toolbarContent(colors: c) }
-        // 「本轮收据」（P1）：从消息菜单打开，展示**那一轮**的装箱清单。
+        // 「上下文账本」：从消息菜单打开**那一轮**的账本。
+        //
+        // ⚠️ 第 234 轮：菜单项已经改名「上下文账本」，但这里原先还开着旧的
+        // `TurnReceiptView` —— **名实不符**。用户看到"账本"却得到一个不同形状的页面，
+        // 会以为"账本没做"。现在统一指到新账本；旧的「上下文选项」仍在
+        // `我 → AI 能力 → 上下文与收据` 里，功能没丢。
         .sheet(item: $receiptTarget) { message in
             NavigationStack {
-                TurnReceiptView(receipt: model.receipt(for: message))
+                if let receipt = model.receipt(for: message) {
+                    ContextLedgerView(
+                        ledger: .best(receipt: receipt),
+                        providerInputTokens: receipt.usage?.promptTokens,
+                        turnStatus: ContextLedgerView.status(of: receipt)
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "这一轮没有账本",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("只有真正发出过请求的回合才有装箱清单。")
+                    )
+                }
             }
         }
         // 角色页（第 219 轮）：点顶栏标题打开。
@@ -93,6 +110,37 @@ private struct ChatViewContent: View {
         // 它不存 `companionId`（那个属性在 `ChatView` 上），companionId 由 ViewModel 持有。
         .sheet(isPresented: $showCompanionHub) {
             CompanionHubView(companionId: model.companionId, embeddedInSheet: true)
+        }
+        // 输入栏上的两个弹层（画一张 / 上下文账本）—— **统一在这里呈现**。
+        //
+        // ⚠️ 第 234 轮修：这两块原先是挂在 `ChatComposer` 上的两个独立 `.sheet`，
+        // 用户反馈「根本点不开」。两个原因叠加：
+        //   1. 同一视图挂两个 `.sheet` → SwiftUI 只可靠呈现一个；
+        //   2. `ChatComposer` 活在 `safeAreaInset` 里，从 inset 内容呈现 sheet 不可靠。
+        // 现在改成**一个**枚举驱动的 sheet，且放在顶层（与角色页同一层，那条路验证可用）。
+        .sheet(item: $model.composerSheet) { sheet in
+            switch sheet {
+            case .image:
+                ImageRequestSheet(model: model)
+            case .ledger:
+                NavigationStack {
+                    // 取**最近一条助手消息**那一轮的账本：用户点"账本"想看的就是"刚刚这一轮"。
+                    if let last = model.messages.last(where: { $0.role != .user }),
+                       let receipt = model.receipt(for: last) {
+                        ContextLedgerView(
+                            ledger: .best(receipt: receipt),
+                            providerInputTokens: receipt.usage?.promptTokens,
+                            turnStatus: ContextLedgerView.status(of: receipt)
+                        )
+                    } else {
+                        ContentUnavailableView(
+                            "还没有可查的账本",
+                            systemImage: "doc.text.magnifyingglass",
+                            description: Text("先发一条消息，这一轮的装箱清单就会记在这里。")
+                        )
+                    }
+                }
+            }
         }
         // 删除单条消息（第 221 轮）：破坏性且不可逆 → 先确认。
         // 直接把要删的那句话开头放进标题里，避免删错（长按菜单很容易点错行）。
@@ -968,15 +1016,14 @@ private struct ChatComposer: View {
 
     @FocusState private var focused: Bool
 
-    /// 「画一张」弹层（第 228 轮）。
-    @State private var showImageSheet = false
-
-    /// 「上下文账本」弹层（第 229 轮）。
-    ///
-    /// 入口按 Aru 的实测位置放：**聊天页左下角**（与"添加"同一侧），
-    /// 而不是消息菜单 —— 账本回答的是"这一轮"，用户想随时查，
-    /// 不该先想起"要长按某条消息"。长按菜单里的旧入口**保留**（渐进迁移）。
-    @State private var showLedger = false
+    // ⚠️ 第 234 轮：这里原来有两个 `@State` + 两个 `.sheet`（画一张 / 上下文账本），
+    // 用户反馈「根本点不开」。根因有两条，都在这层：
+    //   1. **同一个视图挂两个 `.sheet`** —— SwiftUI 只会可靠呈现其中一个；
+    //   2. 这层是 `ChatComposer`，被装在 `safeAreaInset`/`safeAreaBar` 里，
+    //      从 inset 内容里呈现 sheet 不可靠。
+    // 现在改成：按钮只**写状态**（`model.composerSheet`），呈现交给
+    // `ChatViewContent`（顶层、已有工作正常的 sheet）—— 那里只挂**一个**
+    // 枚举驱动的 sheet，不可能互相顶掉。
 
     /// 写入确认卡（P0 ③）。
     ///
@@ -1025,7 +1072,7 @@ private struct ChatComposer: View {
                 // 第 229 轮：上下文账本。放左下角（与"添加"同一侧），
                 // 与「画一张」并列 —— 这两个都是"我主动要看/要做点什么"的动作。
                 Button {
-                    showLedger = true
+                    model.composerSheet = .ledger
                 } label: {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.body.weight(.medium))
@@ -1039,7 +1086,7 @@ private struct ChatComposer: View {
                 // 第 228 轮：主动要一张图。放在输入框左边而不是藏进菜单 ——
                 // 这是"我明确想让它画"的动作，藏起来等于没有。
                 Button {
-                    showImageSheet = true
+                    model.composerSheet = .image
                 } label: {
                     Image(systemName: "photo.badge.plus")
                         .font(.body.weight(.medium))
@@ -1098,49 +1145,9 @@ private struct ChatComposer: View {
         }
         .padding(.horizontal, YNTheme.Space.lg)
         .padding(.vertical, YNTheme.Space.sm)
-        .sheet(isPresented: $showImageSheet) {
-            ImageRequestSheet(model: model)
-        }
-        .sheet(isPresented: $showLedger) {
-            // 取**最近一条助手消息**那一轮的账本：用户在聊天页点"账本"，
-            // 想看的就是"刚刚这一轮"，而不是去挑一条消息。
-            NavigationStack {
-                if let last = model.messages.last(where: { $0.role != .user }),
-                   let receipt = model.receipt(for: last) {
-                    ContextLedgerView(
-                        ledger: .best(receipt: receipt),
-                        providerInputTokens: receipt.usage?.promptTokens,
-                        turnStatus: Self.turnStatus(of: receipt)
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "还没有可查的账本",
-                        systemImage: "doc.text.magnifyingglass",
-                        description: Text("先发一条消息，这一轮的装箱清单就会记在这里。")
-                    )
-                }
-            }
-        }
     }
 
-    /// 把回合结束原因映射成四态。
-    ///
-    /// ⚠️ **不照抄 Aru**：它把"完成度"和"有没有回执"揉进一个 `status`，
-    /// 结果用户点「停止」之后状态仍显示 `complete`（实测确认的缺陷）。
-    /// 这里用引擎给的 `finishReason` 判真实完成度，回执缺失另算。
-    private static func turnStatus(of receipt: TurnReceipt) -> ContextLedgerView.TurnStatus {
-        let reason = receipt.finishReason.lowercased()
-        if reason.contains("cancel") || reason.contains("interrupt") {
-            return .cancelled
-        }
-        if reason.contains("error") || reason.contains("fail") {
-            return .failed
-        }
-        // 没有供应商回执 = 这一轮拿不到完整用量 —— 归"未完整"，
-        // 而不是假装 complete
-        if receipt.usage == nil { return .partial }
-        return .complete
-    }
+
 
     @ViewBuilder
     private var sendButton: some View {
