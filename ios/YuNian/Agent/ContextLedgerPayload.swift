@@ -1,3 +1,4 @@
+import os
 import Foundation
 
 /// 把「这一轮收据」翻译成 Rust 账本函数的入参（第 233 轮，阶段 3）。
@@ -37,6 +38,8 @@ extension ContextLedger {
         // 工具：**上游已算好 bytes**，这里只搬（Rust 侧 `precomputed_bytes` 优先）。
         // 能出现在 `tool_defs` 里的，就是"用户允许 + 能力就绪"的那批。
         let perTool = (tools["perTool"] as? [[String: Any]]) ?? []
+        Logger(subsystem: "com.yunian.ai", category: "ledger")
+            .notice("payload perTool=\(perTool.count, privacy: .public)")
         let toolInputs: [[String: Any]] = perTool.compactMap { item in
             guard let name = item["name"] as? String, !name.isEmpty,
                   let bytes = item["bytes"] as? Int, bytes > 0 else { return nil }

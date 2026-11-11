@@ -1908,6 +1908,33 @@ mod tests {
         let result = runner.run_turn_inner(&req, Some(1), &gw, None, &NoopHost, &DefaultTurnStateMachine);
         assert_eq!(result.finished_reason, "completed");
         assert!(result.events.iter().any(|e| e.kind == "bubble"));
+
+        // ⚠️ 第 236 轮：**账本事件必须带真实工具成本**。
+        //
+        // 真机现象：账本显示「工具 Schema 占 0% —— 只装了 0 个工具」，
+        // 而同一份账本里「工具一览」通道存在（21%！）——
+        // 说明"文字里宣称有工具、事件里却是 0 个"。
+        // 这条断言把两者钉在一起：只要事件里 perTool 为空就直接失败。
+        let ledger = result
+            .events
+            .iter()
+            .find(|e| e.kind == "ledger_tools")
+            .expect("必须推 ledger_tools 事件（账本的唯一数据来源）");
+        let v: serde_json::Value =
+            serde_json::from_str(&ledger.text).expect("账本事件必须是合法 JSON");
+        let per = v
+            .get("perTool")
+            .and_then(|p| p.as_array())
+            .expect("必须有 perTool 数组");
+        assert!(
+            !per.is_empty(),
+            "内置工具不该是 0 个（账本会算出 0%）。事件内容: {}",
+            ledger.text
+        );
+        assert!(
+            v.get("schemaBytes").and_then(|b| b.as_u64()).unwrap_or(0) > 0,
+            "工具 Schema 字节数必须 > 0"
+        );
         assert_eq!(result.final_text, "好的呢");
     }
 

@@ -459,6 +459,13 @@ struct ContextLedgerView: View {
         guard ledger.admittedTokens > 0 else {
             return "这一轮还没有可统计的材料。"
         }
+        // ⚠️ 工具数据缺失时**不能**说"只装了 0 个工具、少塞工具没用" ——
+        // 那是在用一个我们没测到的数字下结论（真机上就出现过这句，
+        // 而同一份账本里"工具一览"通道明摆着有内容）。
+        // 缺数据就如实说缺数据。
+        guard !ledger.toolLedger.perTool.isEmpty else {
+            return "这一轮没有拿到工具成本数据（账本只统计了材料）。"
+        }
         let share = ledger.toolSchemaShare
         let count = ledger.toolLedger.visible.count
         if share >= 0.6 {
