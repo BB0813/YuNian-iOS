@@ -796,6 +796,21 @@ private struct ChatViewContent: View {
 
 // MARK: - Bubble
 
+/// 全屏查看的目标（`Identifiable` 是为了用 `.fullScreenCover(item:)`）。
+///
+/// 为什么用 item 形式而不是 `Bool + UIImage`：两步状态会在中间留一帧
+/// "图还没设好但已经要弹"的空档，表现为闪一下黑屏。`item` 保证有值才弹。
+struct ViewingImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let data: Data?
+
+    init(data: Data) {
+        self.data = data
+        self.image = UIImage(data: data) ?? UIImage()
+    }
+}
+
 private struct MessageBubble: View {
     let message: ChatSession.Message
     let companionName: String
@@ -814,6 +829,10 @@ private struct MessageBubble: View {
     /// 长按菜单里的「朗读」（走 `feature_route.tts` 的语音渠道）。
     /// `nil` = 不提供入口（例如预览模式或将来把朗读收进别处）。
     var onSpeak: ((ChatSession.Message) -> Void)?
+
+    /// 要全屏查看的图（第 243 轮，BACKLOG D2）。
+    /// 聊天里的图片原先**点了没有任何反应** —— 既不能放大也不能保存。
+    @State private var viewingImage: ViewingImage?
 
     /// 长按菜单里的「本轮收据」（P1）。
     ///
@@ -907,6 +926,11 @@ private struct MessageBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    // 全屏看图（第 243 轮）。挂在每个气泡内部而不是上层：
+    // 各自持有自己那张图的查看态，互不干扰，也不用把状态往上抬。
+    .fullScreenCover(item: $viewingImage) { target in
+        ImageViewer(image: target.image, originalData: target.data, suggestedName: nil)
+    }
     }
 
     @ViewBuilder
@@ -917,6 +941,11 @@ private struct MessageBubble: View {
                 .scaledToFit()
                 .frame(maxHeight: 320)
                 .clipShape(RoundedRectangle(cornerRadius: YNTheme.Radius.bubbleImage, style: .continuous))
+                // 第 243 轮（BACKLOG D2）：点开全屏。此前图片**点了没有任何反应**，
+                // 想保存只能截图。
+                .onTapGesture { viewingImage = ViewingImage(data: data) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("点按全屏查看")
         } else if message.isSticker {
             // 🔴 第 202 轮：**这里此前一直是原始占位符**。
             //

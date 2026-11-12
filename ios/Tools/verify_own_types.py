@@ -91,7 +91,8 @@ EXTERNAL_ALLOWLIST = {
     #   - 朗读（第 203 轮）：`AVAudioPlayer` 播放语音渠道合成出来的音频。
     #     它是本仓第一个「播放」用途的 AVFoundation 类型（此前只有授权查询）。
     "AVCaptureDevice", "AVAuthorizationStatus", "AVAudioSession", "AVAudioPlayer",
-    "PHPhotoLibrary", "PHAuthorizationStatus",
+    "PHPhotoLibrary", "PHAuthorizationStatus", "PHAssetCreationRequest",
+    "PHAssetResourceType", "PHAssetCollection", "PHAsset",
     "SFSpeechRecognizer", "SFSpeechRecognizerAuthorizationStatus",
     "LAContext",
     # Foundation（URL 组件解析）
@@ -173,6 +174,10 @@ EXTERNAL_ALLOWLIST = {
     "ScaleEffect", "RotationEffect", "Offset", "Font", "Font", "TextStyle",
     "EdgeInsets", "SafeArea", "NavigationPath", "Binding", "State", "Gesture",
     "TapGesture", "LongPressGesture", "DragGesture", "MagnificationGesture",
+    # iOS 17 起 `MagnificationGesture` 更名为 `MagnifyGesture`（旧名仍可用但已废弃）；
+    # 同时新增 `SpatialTapGesture` / `RotateGesture` 等。这里按新名登记 ——
+    # 否则新写的代码会被这道关卡判成"引用了不存在的自有类型"。
+    "MagnifyGesture", "SpatialTapGesture", "RotateGesture", "PanGesture",
     "RotationGesture", "AnyGesture", "SimultaneousGesture", "SequentialGesture",
     "GestureMask", "GestureState", "FocusState", "FocusedValue", "Scene",
     "WindowGroup", "DocumentGroup", "Settings", "Commands", "CommandGroup",
