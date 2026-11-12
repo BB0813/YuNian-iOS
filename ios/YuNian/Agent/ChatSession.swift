@@ -199,6 +199,9 @@ final class ChatSession: ObservableObject {
 
     /// 本回合请求前采集的材料清单（见 `TurnManifest`）。
     private var lastManifest: TurnManifest?
+
+    /// 本轮的工具裁剪决定（第 242 轮）—— 供收据解释"为什么少了几个工具"。
+    private var lastTrimDecision: ToolTrim.Decision?
     /// 本轮装配现场算出的工具成本（来自 Rust 的 `ledger_tools` 事件）。
     ///
     /// 每轮重置：这是"这一轮"的事实，沿用上一轮的值会算错账。
@@ -295,9 +298,24 @@ final class ChatSession: ObservableObject {
         // 下发给模型的是 `gatedDefinitions`（按工具集过滤 + 按确认策略改类别），
         // 不是完整目录 `definitions`。
         let toolSettings = self.toolSettings(for: environment)
-        let gatedTools = AgentToolCatalog.gatedDefinitions(toolSettings)
+
+        // ⚠️ 第 242 轮：**按这一轮说了什么**再裁掉用不到的组。
+        //
+        // 真机数据：工具 Schema 占输入 62%（1,823 tok / 2,951），
+        // 而一句「今天好累」用不到 `device_set_clipboard` 或 `device_open_url`。
+        // 这些工具每轮都在付费，却几乎不会被调用。
+        //
+        // 裁剪规则刻意保守（见 `ToolTrim` 的注释）：只裁 `device` 组 ——
+        // 猜错的代价是"这轮用不了、下轮就回来"（可逆）；
+        // `chat` 是地基、`memory` 猜错会永久丢记忆（不可逆），都不裁。
+        let trimDecision = ToolTrim.decide(userText: trimmed)
+        let effectiveToolSettings = ToolTrim.merge(trimDecision, into: toolSettings)
+        let gatedTools = AgentToolCatalog.gatedDefinitions(effectiveToolSettings)
         let contextSettings = self.contextSettings(for: environment)
         let history = historyForRequest(limit: contextSettings.historyLimit)
+
+        // 收据要能解释"这轮为什么少了几个工具" —— 否则用户看到工具数变化会以为出 bug。
+        lastTrimDecision = trimDecision
 
         // ── 本轮收据的材料清单（第 207 轮，P1）──
         // ⚠️ **必须在请求之前采集**，且用与 Rust `orchestration_options` 同一套参数
@@ -506,7 +524,15 @@ final class ChatSession: ObservableObject {
                                usage: TurnReceipt.Usage?,
                                result: AgentTurnResult,
                                environment: AppEnvironment) {
-        guard let manifest = lastManifest else { return }
+        // ⚠️ 第 241 轮：这里原先静默 `return`。`lastManifest` 是**请求前**采集的，
+        // 任何让它在收尾时变成 nil 的路径（重试、并发回合、异常提前返回）
+        // 都会让账本**悄悄不落库**，而界面上那一轮看起来完全正常
+        // （数字来自内存里的 receipt）。这类"只在数据库里缺一条"的 bug
+        // 没有日志就只能靠猜 —— 所以这里必须留痕。
+        guard let manifest = lastManifest else {
+            TurnReceiptStore.auditTraceForMissingManifest(turnId: turnId)
+            return
+        }
         let settings = environment.apiConfigs.map { ToolSettings.load(from: $0) } ?? ToolSettings()
         // 线路/模型名：**走与回合同一套解析**（`resolve(.chat)`），
         // 而不是读"当前启用渠道"那一行 —— 收据要回答"这一轮到底走的哪条线"。

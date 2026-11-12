@@ -287,12 +287,19 @@ enum TurnReceiptStore {
     /// 写入一条审计行。`fragmentsJson` 的结构与 Android `dry_run` 的摘要一致：
     /// `[{"id","source","layer","lifetime","chars"}]`。
     static func saveAudit(_ receipt: TurnReceipt, database: YuNianDatabase?) {
-        guard let database else { return }
+        // ⚠️ 第 241 轮：这里原先 `guard let database else { return }` —— 静默返回。
+        // 真机上出现了「界面能显示账本，但 prompt_audit 里没有新记录」，
+        // 而**没有任何日志**说明为什么没写。审计是"回头看"的唯一依据，
+        // 它失败必须留痕，否则只能靠猜（这一轮就猜了两轮）。
+        guard let database else {
+            Self.auditTrace("skip: database=nil turn=\(receipt.turnId)")
+            return
+        }
         // ⚠️ 第 233 轮：优先写 **v2 账本**（Rust 装配现场算的权威数据）；
         // 拿不到账本事件时回落 v1 裸数组（历史格式，界面按 v1 解析并标注"旧记录"）。
         // 绝不"部分填"—— 半份账比没有更误导。
-        let fragmentsJson = ContextLedger.v2JSON(receipt: receipt)
-            ?? encodeSegments(receipt.segments)
+        let v2 = ContextLedger.v2JSON(receipt: receipt)
+        let fragmentsJson = v2 ?? encodeSegments(receipt.segments)
         do {
             try database.pool.write { db in
                 try db.execute(sql: """
@@ -310,9 +317,33 @@ enum TurnReceiptStore {
                         receipt.toolNames.joined(separator: ","),
                     ])
             }
+            Self.auditTrace("ok v\(v2 == nil ? 1 : 2) bytes=\(fragmentsJson.count) turn=\(receipt.turnId)")
         } catch {
-            // 审计失败不影响对话
+            // 审计失败不影响对话 —— 但**必须留痕**，否则"没写进去"和"没触发"无法区分
             log.error("提示词审计落库失败：\(error.localizedDescription, privacy: .public)")
+            Self.auditTrace("FAIL \(error.localizedDescription) turn=\(receipt.turnId)")
+        }
+    }
+
+    /// 把审计落库的结果追加到 Rust 日志文件。
+    ///
+    /// 为什么写**那个文件**：`os.Logger` 只能在真机连着时抓实时流，
+    /// 而这里是"事后才知道要查"的场景 —— 日志必须落在能被 `apps pull` 拉走的地方。
+    /// 失败不影响任何功能（日志本身不该成为新的故障源）。
+    /// 供 `ChatSession` 报告"收尾时拿不到清单"的情况（见那边的注释）。
+    static func auditTraceForMissingManifest(turnId: String) {
+        auditTrace("skip: lastManifest=nil turn=\(turnId)")
+    }
+
+    private static func auditTrace(_ message: String) {
+        guard let url = try? AppPaths.rustLogURL(),
+              let data = "[audit] \(message)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
         }
     }
 
