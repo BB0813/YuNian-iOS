@@ -1285,8 +1285,24 @@ impl AgentRuntime {
                         .map(|s| s.len() as u32)
                         .unwrap_or(0);
                     total_bytes += bytes;
+                    // ⚠️ 名字在 `function.name`，**不在顶层**！
+                    //
+                    // 这里原先写的是 `def.get("name")` —— 而 `tool_defs` 的形态是
+                    // `{"type":"function","function":{"name":…,"description":…,"parameters":…}}`
+                    // （OpenAI tools 协议）。顶层没有 `name`，于是**每个工具的名字都成了空串**。
+                    //
+                    // 真机表现：账本显示「工具 Schema 占 0% —— 只装了 0 个工具」，
+                    // 而字节数其实算得好好的 —— iOS 侧按名字过滤时把所有工具都丢了。
+                    // 一个 `get` 的路径写错，症状却是"根本没有工具"，非常容易被误判成
+                    // "工具没下发"或"账本没接线"。
+                    let name = def
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| def.get("name").and_then(|v| v.as_str()))
+                        .unwrap_or("");
                     per_tool.push(serde_json::json!({
-                        "name": def.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                        "name": name,
                         "bytes": bytes,
                         "tokens": crate::ledger::tokens_for_bytes(bytes),
                     }));
@@ -1935,6 +1951,18 @@ mod tests {
             v.get("schemaBytes").and_then(|b| b.as_u64()).unwrap_or(0) > 0,
             "工具 Schema 字节数必须 > 0"
         );
+        // ⚠️ 光有"非空数组"不够 —— 曾经每项的 `name` 都是空串（读错了 JSON 路径
+        // `name` 而不是 `function.name`），数组照样非空、字节数照样对，
+        // 但 iOS 按名字过滤后**一个工具都剩不下**，界面显示「0 个工具」。
+        // 所以必须断言名字也是真的。
+        for item in per {
+            let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            assert!(
+                !name.is_empty(),
+                "工具名不能为空串（说明读错了 JSON 路径）。事件内容: {}",
+                ledger.text
+            );
+        }
         assert_eq!(result.final_text, "好的呢");
     }
 

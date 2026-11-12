@@ -1,3 +1,4 @@
+import os
 import Foundation
 import os
 import Combine   // ObservableObject / @Published —— 不依赖 SwiftUI 的传递导入
@@ -726,6 +727,9 @@ final class ChatSession: ObservableObject {
         // 内置工具的定义只在 Rust 侧，我们拿不到 —— 所以不能自己估。
         if let ledger = events.last(where: { $0.kind == "ledger_tools" }) {
             ledgerToolsJson = ledger.text
+            // 取证：把事件原文长度与前 200 字记下来 —— 区分"Rust 没给工具"与"iOS 丢了"
+            Logger(subsystem: "com.yunian.ai", category: "ledger")
+                .notice("event len=\(ledger.text.count, privacy: .public) head=\(String(ledger.text.prefix(200)), privacy: .public)")
         } else {
             ledgerToolsJson = nil
         }
