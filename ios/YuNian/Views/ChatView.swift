@@ -295,25 +295,6 @@ private struct ChatViewContent: View {
             }
             .accessibilityLabel("更多：上下文账本、画一张")
         }
-
-        #if DEBUG
-        // 仅 DEBUG：无 API Key 时也能验收完整视觉状态（AI 气泡 / typing /
-        // 流式 / 思考过程 / 停止按钮 / 消息分组）。
-        // release 构建里这段不存在，因此不会变成对用户的伪能力。
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                ForEach(ChatViewModel.PreviewMode.allCases) { mode in
-                    Button(mode.rawValue) { model.startPreview(mode) }
-                }
-                if model.previewMode != nil {
-                    Button("退出预览", role: .destructive) { model.stopPreview() }
-                }
-            } label: {
-                Image(systemName: model.previewMode == nil ? "eye" : "eye.fill")
-            }
-            .accessibilityLabel("预览界面（示例数据）")
-        }
-        #endif
     }
 
     private var toolbarAccessibilityLabel: String {

@@ -184,111 +184,18 @@ final class ChatViewModel: ObservableObject {
             && pendingConfirmation == nil
     }
 
-    // MARK: - 离线预览（仅 DEBUG）
-    //
-    // 目的：**在没有 API Key 的情况下也能看到聊天页的完整视觉状态**。
-    // 没有它，AI 气泡 / typing / 流式 / 思考过程 / 停止按钮 / 消息分组
-    // 全部无法被验收 —— 而那正是这个页面最需要被评的部分。
-    //
-    // 三条自我约束（避免它变成"伪功能"）：
-    //   1. 只在 DEBUG 构建存在，release 里连入口都没有；
-    //   2. UI 上明确写「预览」，不冒充真实发送；
-    //   3. 只在 ViewModel 做显示层覆盖，不写进 ChatSession、不落库。
+    // MARK: - 页面渲染入口
 
-    enum PreviewMode: String, CaseIterable, Identifiable {
-        case conversation = "预览：完整对话"
-        case generating = "预览：生成中状态"
-        var id: String { rawValue }
-    }
-
-    @Published private(set) var previewMode: PreviewMode?
-    /// 预览用的对话（在 `startPreview` 时**一次性构建**并缓存，
-    /// 不在每次访问时重算 —— 见 `displayMessages`）。
-    @Published private(set) var previewMessages: [ChatSession.Message]?
-
-    /// 页面渲染统一走这几个属性，预览时被覆盖。
-    var displayMessages: [ChatSession.Message] {
-        previewMessages ?? messages
-    }
-    var displayReasoning: String {
-        previewMode == .generating ? Self.previewReasoning : reasoningText
-    }
-    var displayStreaming: String {
-        previewMode == .generating ? Self.previewStreaming : streamingText
-    }
-    var displayPhase: Phase {
-        previewMode == .generating ? .streaming : phase
-    }
-
-    func startPreview(_ mode: PreviewMode) {
-        switch mode {
-        case .conversation:
-            // ⚠️ 用**库里真实存在的**表情 id。
-            // 上一版写死 `[1]`，而库里通常没有 id=1 的表情 ——
-            // 于是预览里那条恰好显示占位，反而让"表情渲染"这条无法被验收。
-            let convo = Self.previewConversation(stickerEntryId: firstStickerEntryId())
-            previewMessages = convo
-            // 预览消息不走 session.$messages，必须显式解析一次，
-            // 否则表情图字典是空的 —— 预览里还是占位。
-            resolveStickerImages(convo)
-        case .generating:
-            previewMessages = nil
-            resolveStickerImages(messages)
-        }
-        previewMode = mode
-        errorMessage = nil
-    }
-
-    func stopPreview() {
-        previewMode = nil
-        previewMessages = nil
-        resolveStickerImages(messages)
-    }
-
-    /// 取库里任一条表情的 id；没有表情时返回 nil（预览里就少一条表情消息）。
-    private func firstStickerEntryId() -> Int64? {
-        guard let database = environment.database else { return nil }
-        return try? database.pool.read { db in
-            try Int64.fetchOne(db, sql: "SELECT id FROM sticker_entries ORDER BY id LIMIT 1")
-        }
-    }
-
-    /// 覆盖多种真实情况：连续同角色（测分组节奏）、长文本（测换行）、
-    /// 表情（测非文本气泡，**只在库里有表情时才放**）、短回复（测紧凑排布），
-    /// 以及**跨时段**（测时间分隔线是否出现）。
-    private static func previewConversation(stickerEntryId: Int64?) -> [ChatSession.Message] {
-        let now = Date()
-        func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
-
-        var items: [ChatSession.Message] = [
-            .init(role: .user, text: "在吗？今天有点累。", timestamp: ago(46)),
-            .init(role: .assistant, text: "在的。", timestamp: ago(45)),
-            .init(role: .assistant, text: "怎么了，发生什么事了吗？", timestamp: ago(45)),
-        ]
-        if let stickerEntryId {
-            items.append(.init(role: .assistant, text: "[\(stickerEntryId)]",
-                               isSticker: true, timestamp: ago(44)))
-        }
-        // ↑ 与下一条相隔约 40 分钟：应当出现一条时间分隔线
-        items.append(contentsOf: [
-            .init(role: .user, text: "工作上出了点问题，被领导当众说了一顿。", timestamp: ago(4)),
-            .init(role: .assistant, text: """
-                那确实很难受。被当众说，最难过的往往不是那句话本身，而是那种「所有人都在看着」的感觉。
-
-                你现在是想先吐槽一下，还是想让我陪你想想怎么处理？
-                """, timestamp: ago(4)),
-            .init(role: .user, text: "先吐槽。", timestamp: ago(2)),
-            .init(role: .assistant, text: "那就说吧，我在听。想骂多久都行。", timestamp: ago(1)),
-        ])
-        return items
-    }
-
-    private static let previewReasoning = """
-        用户情绪偏负面，提到了工作挫折。先共情，不要急着给建议。
-        上一轮用户说过「今天有点累」，可以呼应一下。
-        """
-
-    private static let previewStreaming = "我大概能想象那个场面。被当众指出问题，难受的不只是内容本身"
+    /// 页面渲染统一走这几个属性。
+    ///
+    /// ⚠️ 第 243 轮：它们原先会被"预览模式"覆盖（`previewMessages ?? messages` 之类），
+    /// 现在预览已删除，所以**全部直通**。保留这四个名字而不是让调用方直接读
+    /// `messages`/`phase`，是为了留一个**单一渲染入口** ——
+    /// 将来若再需要"显示层覆盖"（比如草稿态、编辑态），只改这里，不动 19 处调用点。
+    var displayMessages: [ChatSession.Message] { messages }
+    var displayReasoning: String { reasoningText }
+    var displayStreaming: String { streamingText }
+    var displayPhase: Phase { phase }
 
     var isGenerating: Bool {
         switch displayPhase {
