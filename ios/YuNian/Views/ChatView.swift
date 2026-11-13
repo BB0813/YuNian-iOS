@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 import os
 import UIKit
 
@@ -38,6 +39,15 @@ private struct ChatViewContent: View {
     /// 现在全部合并成**一个** `.sheet(item:)`，按枚举分支渲染。
     /// 这不是风格问题：**一个视图只能有一个可靠的呈现锚点**。
     @State private var activeSheet: ActiveSheet?
+
+    // MARK: 消息多选（第 257 轮）
+    @State private var selectionMode = false
+    @State private var selectedIds: Set<UUID> = []
+    @State private var confirmBatchDelete = false
+
+    /// 语音消息播放器（第 253 轮）。放在这一层：一次只播一条，
+    /// 状态必须由**一个**地方持有，否则两条会同时响。
+    @StateObject private var voicePlayer = VoiceMessagePlayer()
     /// 历史是否已完成首次灌入。用于把「首次加载」与「新消息到达」区分开 ——
     /// 二者都会让消息数增加，但只有后者才应该计数/滚动。
     @State private var didInitialScroll = false
@@ -73,8 +83,11 @@ private struct ChatViewContent: View {
     var body: some View {
         let c = YNTheme.palette(scheme)
 
-        GeometryReader { viewport in
-            ScrollViewReader { reader in
+        // ⚠️ 输入栏放在普通 VStack 里，不用 `safeAreaBar`（第 249 轮）：
+        // 那个容器里裸按钮的命中区不可靠 —— "点不开"三次的根源。
+        VStack(spacing: 0) {
+            GeometryReader { viewport in
+                ScrollViewReader { reader in
                 messageScroll(colors: c, viewportHeight: viewport.size.height)
                     .onChange(of: model.displayMessages.count) { old, new in
                         handleMessageCountChange(old: old, new: new, reader: reader)
@@ -93,11 +106,64 @@ private struct ChatViewContent: View {
                     }
             }
         }
-        .modifier(ChatComposerInset(
-            model: model,
-            colors: c,
-            reduceTransparency: reduceTransparency
-        ))
+            // 多选操作条（第 257 轮）：多选是"整理模式"，替换输入栏而非叠加。
+            if selectionMode {
+                HStack(spacing: YNTheme.Space.md) {
+                    Button {
+                        selectionMode = false
+                        selectedIds = []
+                    } label: {
+                        Text("取消")
+                            .font(.subheadline)
+                            .foregroundStyle(c.textSecondary)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("已选 \(selectedIds.count) 条")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(c.textPrimary)
+
+                    Spacer()
+
+                    Button(role: .destructive) {
+                        confirmBatchDelete = true
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(c.danger)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(selectedIds.isEmpty)
+                }
+                .padding(.horizontal, YNTheme.Space.lg)
+                .padding(.vertical, YNTheme.Space.sm)
+                .background(c.surface)
+                .confirmationDialog(
+                    "删除选中的 \(selectedIds.count) 条消息？",
+                    isPresented: $confirmBatchDelete, titleVisibility: .visible) {
+                    Button("删除 \(selectedIds.count) 条", role: .destructive) {
+                        let targets = model.displayMessages.filter { selectedIds.contains($0.id) }
+                        for message in targets where model.canDelete(message) {
+                            _ = model.deleteMessage(message)
+                        }
+                        selectionMode = false
+                        selectedIds = []
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("删除不可撤销。")
+                }
+            }
+
+            ChatComposer(model: model, colors: c, reduceTransparency: reduceTransparency)
+                // 普通 VStack 不会自动让开 Home 指示条（safeAreaBar 会），
+                // 不补这一行输入框底部会被压住一截。
+                .safeAreaPadding(.bottom)
+        }
         .navigationBarTitleDisplayMode(.inline)
         // 进到聊天页就**收起底部标签栏**：已经在这一层了，
         // 底栏继续戳在那儿既是多余的视觉噪音，也白占一截纵向空间
@@ -405,9 +471,14 @@ private struct ChatViewContent: View {
                     // 连思考过程都不留；现在会留一条"只有思考过程"的消息，
                     // 而它的正文是空串 —— 画出来就是一个空气泡。
                     // 上面那段已经把思考过程显示了，所以这里直接跳过气泡。
+                    // 第 247 轮：先算成局部量再传 —— 内联表达式会把
+                    // SwiftUI 类型推断爆掉（"unable to type-check"）。
+                    let isLastAssistant = message.role != .user
+                        && model.displayMessages.last(where: { $0.role != .user })?.id == message.id
                     if !(message.text.isEmpty && message.reasoning?.isEmpty == false) {
                         MessageBubble(
                             message: message,
+                        voicePlayer: voicePlayer,
                             companionName: model.companion?.name ?? "对方",
                             colors: c,
                             // 第 220 轮：助手一组的第一条显示**头像 + 名字**（借 Aru 的做法）。
@@ -433,7 +504,25 @@ private struct ChatViewContent: View {
                             // 「删除这一条」（第 221 轮）：只有已落库的消息才给入口。
                             // 先弹确认再删 —— 这是聊天页里唯一不可逆的操作。
                             onDelete: model.canDelete(message)
-                                ? { target in deleteTarget = target } : nil
+                                ? { target in deleteTarget = target } : nil,
+                            // 第 247 轮：引用 / 重新生成。
+                            onQuote: { target in model.quoteIntoDraft(target) },
+                            onRegenerate: isLastAssistant ? { model.regenerateLastReply() } : nil,
+                            isLastAssistantMessage: isLastAssistant,
+                            // 第 257 轮：多选。
+                            selectionMode: selectionMode,
+                            isSelected: selectedIds.contains(message.id),
+                            onToggleSelect: {
+                                if selectedIds.contains(message.id) {
+                                    selectedIds.remove(message.id)
+                                } else {
+                                    selectedIds.insert(message.id)
+                                }
+                            },
+                            onStartSelection: {
+                                selectionMode = true
+                                selectedIds = []
+                            }
                         )
                         .padding(.top, divider ? YNTheme.Space.xs : groupSpacing(index: index, previous: previous, current: message))
                         .id(message.id)
@@ -588,8 +677,25 @@ private struct ChatViewContent: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            // 第 246 轮：失败时给「重试」—— 原样重发刚才那条，
+            // 不读当前草稿（用户此刻可能已经改了输入框）。
+            if model.failedTurn != nil {
+                Button {
+                    model.retryFailedTurn()
+                } label: {
+                    Text("重试")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(c.accent)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("重新发送")
+            }
+
             Button {
                 model.clearError()
+                model.discardFailedTurn()
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.semibold))
@@ -800,6 +906,12 @@ private struct ChatViewContent: View {
 ///
 /// 为什么用 item 形式而不是 `Bool + UIImage`：两步状态会在中间留一帧
 /// "图还没设好但已经要弹"的空档，表现为闪一下黑屏。`item` 保证有值才弹。
+/// 全屏播放的目标视频（`item` 形式保证有值才弹）。
+struct VideoTarget: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct ViewingImage: Identifiable {
     let id = UUID()
     let image: UIImage
@@ -813,6 +925,8 @@ struct ViewingImage: Identifiable {
 
 private struct MessageBubble: View {
     let message: ChatSession.Message
+    /// 语音播放器（第 253 轮）：由 `ChatViewContent` 传入。
+    @ObservedObject var voicePlayer: VoiceMessagePlayer
     let companionName: String
     let colors: YNTheme.Palette
     /// 是否在这一条上显示**说话人身份**（助手一组的第一条：头像 + 名字）。
@@ -833,6 +947,8 @@ private struct MessageBubble: View {
     /// 要全屏查看的图（第 243 轮，BACKLOG D2）。
     /// 聊天里的图片原先**点了没有任何反应** —— 既不能放大也不能保存。
     @State private var viewingImage: ViewingImage?
+    /// 全屏播放的视频（第 257 轮）。
+    @State private var videoTarget: VideoTarget?
 
     /// 长按菜单里的「本轮收据」（P1）。
     ///
@@ -844,6 +960,20 @@ private struct MessageBubble: View {
     ///
     /// `nil` = 不提供（还没有库行的流式草稿）—— 见 `ChatViewModel.canDelete(_:)`。
     var onDelete: ((ChatSession.Message) -> Void)?
+
+    /// 长按菜单里的「引用」（第 247 轮）。
+    var onQuote: ((ChatSession.Message) -> Void)?
+    /// 长按菜单里的「重新生成」—— 只给**最后一条**助手消息
+    /// （调用方算好传入；重生成中间那条会让后面的对话全对不上）。
+    var onRegenerate: (() -> Void)?
+    /// 这条是否是最后一条助手消息。
+    var isLastAssistantMessage: Bool = false
+
+    // MARK: 消息多选（第 257 轮）
+    var selectionMode: Bool = false
+    var isSelected: Bool = false
+    var onToggleSelect: (() -> Void)? = nil
+    var onStartSelection: (() -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
 
@@ -898,6 +1028,30 @@ private struct MessageBubble: View {
                             }
                         }
                     }
+                    // 第 257 轮：「多选」。
+                    if let onStartSelection {
+                        Button {
+                            onStartSelection()
+                        } label: {
+                            Label("多选", systemImage: "checkmark.circle")
+                        }
+                    }
+                    // 第 247 轮：「引用」—— 话题跳来跳去时"我在回哪句"是真实需求。
+                    if let onQuote {
+                        Button {
+                            onQuote(message)
+                        } label: {
+                            Label("引用", systemImage: "quote.opening")
+                        }
+                    }
+                    // 「重新生成」：只给最后一条助手消息。
+                    if !isUser, isLastAssistantMessage, let onRegenerate {
+                        Button {
+                            onRegenerate()
+                        } label: {
+                            Label("重新生成", systemImage: "arrow.clockwise")
+                        }
+                    }
                     // 收据不看正文是否为空：正文为空的"只有思考过程"那种回合
                     // 恰恰最需要看收据（模型把预算花在推理上了）。
                     if !isUser, message.turnId != nil, let onReceipt {
@@ -928,14 +1082,135 @@ private struct MessageBubble: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     // 全屏看图（第 243 轮）。挂在每个气泡内部而不是上层：
     // 各自持有自己那张图的查看态，互不干扰，也不用把状态往上抬。
+        // 多选模式：徽章叠在气泡上，点气泡切换选中（第 257 轮）。
+        .overlay { selectionBadge }
+        .modifier(SelectionTapModifier(
+            active: selectionMode,
+            onTap: onToggleSelect ?? {}
+        ))
     .fullScreenCover(item: $viewingImage) { target in
         ImageViewer(image: target.image, originalData: target.data, suggestedName: nil)
     }
     }
 
+    /// 语音消息气泡（第 253 轮）。
+    ///
+    /// ## 宽度按时长走，不按内容走
+    ///
+    /// 微信的做法：宽度随秒数增长（约 62pt~200pt）。
+    /// 这不是装饰 —— 它让「这条 3 秒、那条 30 秒」**一眼可辨**，不用读数字。
+    ///
+    /// ## 播放状态
+    ///
+    /// 播放时图标变暂停、进度用一条细线表示。同一时刻只播一条
+    /// （见 `VoiceMessagePlayer` 的注释）。
+    /// 多选模式的选中圆圈（气泡左上角，第 257 轮）。
+    @ViewBuilder
+    private var selectionBadge: some View {
+        if selectionMode {
+            VStack {
+                HStack {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.body)
+                        .foregroundStyle(isSelected ? colors.accent : colors.textTertiary)
+                        .padding(4)
+                        .background(.white.opacity(0.9), in: Circle())
+                        .accessibilityHidden(true)
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(4)
+        }
+    }
+
+    /// 视频消息气泡（第 257 轮）。
+    ///
+    /// 不做内嵌播放器：LazyVStack 里每个视频常驻一个 AVPlayer 会内存爆炸。
+    /// 点开全屏播 —— 与图片查看器同一交互。
+    private func videoBubble(url: URL) -> some View {
+        let tint = isUser ? colors.onAccent : colors.accent
+        return Button {
+            videoTarget = VideoTarget(url: url)
+        } label: {
+            HStack(spacing: YNTheme.Space.sm) {
+                Image(systemName: "play.rectangle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("视频")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(isUser ? colors.onAccent : colors.textPrimary)
+                    Text("点按播放")
+                        .font(.caption2)
+                        .foregroundStyle(isUser ? colors.onAccent.opacity(0.8) : colors.textTertiary)
+                }
+            }
+            .padding(12)
+            .frame(minWidth: 150, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("视频消息")
+        .fullScreenCover(item: Binding(
+            get: { videoTarget },
+            set: { videoTarget = $0 }
+        )) { target in
+            VideoPlayer(player: AVPlayer(url: target.url))
+                .ignoresSafeArea()
+        }
+    }
+
+    private func audioBubble(url: URL, duration: TimeInterval?) -> some View {
+        let seconds = max(1, Int((duration ?? 0).rounded()))
+        let isPlaying = voicePlayer.playingId == message.id
+        let width = min(200, 62 + CGFloat(min(seconds, 60)) * 2.3)
+        let tint = isUser ? colors.onAccent : colors.accent
+
+        return Button {
+            voicePlayer.toggle(messageId: message.id, url: url)
+        } label: {
+            HStack(spacing: YNTheme.Space.sm) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(tint)
+
+                ZStack(alignment: .leading) {
+                    Capsule().fill(tint.opacity(0.22)).frame(height: 3)
+                    if isPlaying {
+                        GeometryReader { geo in
+                            Capsule()
+                                .fill(tint)
+                                .frame(width: geo.size.width * voicePlayer.progress, height: 3)
+                        }
+                        .frame(height: 3)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                Text("\(seconds)\u{2033}")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(tint.opacity(0.85))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(width: width)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("语音消息 \(seconds) 秒")
+    }
+
     @ViewBuilder
     private var bubbleContent: some View {
-        if let data = message.imageData, let image = UIImage(data: data) {
+        // 第 253 轮：语音消息。**必须排在图片之前** ——
+        // 音频消息的 `imageData` 是 nil，但将来加波形图时会撞上。
+        // 第 257 轮：视频消息（与音频互斥，一条消息只有一种媒体）。
+        if let videoURL = message.videoURL {
+            videoBubble(url: videoURL)
+        } else if let audioURL = message.audioURL {
+            audioBubble(url: audioURL, duration: message.audioDuration)
+        } else if let data = message.imageData, let image = UIImage(data: data) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
@@ -1065,23 +1340,6 @@ struct CompanionAvatar: View {
 
 // MARK: - Composer
 
-private struct ChatComposerInset: ViewModifier {
-    @ObservedObject var model: ChatViewModel
-    let colors: YNTheme.Palette
-    let reduceTransparency: Bool
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.safeAreaBar(edge: .bottom, spacing: 0) {
-                ChatComposer(model: model, colors: colors, reduceTransparency: reduceTransparency)
-            }
-        } else {
-            content.safeAreaInset(edge: .bottom, spacing: 0) {
-                ChatComposer(model: model, colors: colors, reduceTransparency: reduceTransparency)
-            }
-        }
-    }
-}
 
 private struct ChatComposer: View {
     @ObservedObject var model: ChatViewModel
@@ -1089,6 +1347,14 @@ private struct ChatComposer: View {
     let reduceTransparency: Bool
 
     @FocusState private var focused: Bool
+
+    // MARK: 附件 / 语音（第 245-252 轮）
+    /// 语音输入（说话转文字）。
+    @StateObject private var transcriber = SpeechTranscriber()
+    @State private var showVoiceStrip = false
+    /// 语音消息（按住说话发给对方听）—— 与语音输入是两件事。
+    @StateObject private var recorder = VoiceRecorder()
+    @State private var voiceMode = false
 
     // ⚠️ 第 234 轮：这里原来有两个 `@State` + 两个 `.sheet`（画一张 / 上下文账本），
     // 用户反馈「根本点不开」。根因有两条，都在这层：
@@ -1135,6 +1401,56 @@ private struct ChatComposer: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// 待发附件的小预览条（第 244 轮）。
+    private func pendingAttachmentStrip(_ attachment: MessageAttachment) -> some View {
+        HStack(spacing: YNTheme.Space.sm) {
+            if let data = attachment.data, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Image(systemName: attachment.kind == .audio ? "waveform" : "video")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .background(colors.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(attachment.kind == .image ? "图片"
+                     : attachment.kind == .video ? "视频" : "语音")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(colors.textPrimary)
+                Text(Self.byteText(attachment.byteCount))
+                    .font(.caption2)
+                    .foregroundStyle(colors.textTertiary)
+            }
+
+            Spacer()
+
+            Button {
+                model.pendingAttachment = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(colors.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("取消这个附件")
+        }
+        .padding(8)
+        .background(
+            colors.surface.opacity(0.6),
+            in: RoundedRectangle(cornerRadius: YNTheme.Radius.composer, style: .continuous)
+        )
+    }
+
+    private static func byteText(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.0f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / 1024 / 1024)
+    }
+
     var body: some View {
         VStack(spacing: YNTheme.Space.xs) {
             // ⚠️ 写入确认卡（P0 ③）摆在输入框**上方**：它属于"这一轮还没结束"，
@@ -1142,7 +1458,64 @@ private struct ChatComposer: View {
             if let pending = model.pendingConfirmation {
                 confirmationCard(pending)
             }
+            // 待发附件预览（第 244 轮）：选好图/视频后还能补一句文字再发，
+            // **必须能撤掉** —— 选错了没法取消是最糟的体验。
+            if let attachment = model.pendingAttachment {
+                pendingAttachmentStrip(attachment)
+            }
+            // 语音输入实时条（第 245 轮）：说话时要能看到"它听到了什么"。
+            if showVoiceStrip {
+                VoiceInputStrip(
+                    colors: colors,
+                    transcriber: transcriber,
+                    onConfirm: { text in
+                        model.draft = model.draft.isEmpty ? text : model.draft + text
+                    },
+                    onCancel: { showVoiceStrip = false }
+                )
+            }
+            if voiceMode {
+                // 语音消息录音（第 252 轮）：按住说、松手即发、上滑取消。
+                VoiceRecordBar(
+                    colors: colors,
+                    recorder: recorder,
+                    onFinish: { url, _ in
+                        voiceMode = false
+                        guard let attachment = MessageAttachment.fromAudioURL(url) else {
+                            model.reportError("录音保存失败")
+                            return
+                        }
+                        // 松手即发：先挂附件再走与图片完全相同的发送路径。
+                        model.pendingAttachment = attachment
+                        model.sendText()
+                    },
+                    onCancel: { voiceMode = false }
+                )
+            } else {
             HStack(alignment: .bottom, spacing: YNTheme.Space.sm) {
+                // 第 244 轮：附件入口。此前输入栏只有文本框和发送按钮。
+                ComposerAttachButton(
+                    colors: colors,
+                    onPicked: { model.pendingAttachment = $0 },
+                    onError: { model.reportError($0) }
+                )
+
+                // 第 245 轮：语音输入（点）；第 252 轮：长按切录音模式。
+                ComposerVoiceButton(colors: colors, transcriber: transcriber) { text in
+                    model.draft = model.draft.isEmpty ? text : model.draft + text
+                    showVoiceStrip = false
+                }
+                .onChange(of: transcriber.state) { _, new in
+                    if new == .listening || new == .requesting { showVoiceStrip = true }
+                }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        transcriber.cancel()
+                        showVoiceStrip = false
+                        voiceMode = true
+                    }
+                )
+
                 TextField("发消息", text: $model.draft, axis: .vertical)
                     .font(.body)
                     .lineLimit(1...5)
@@ -1169,6 +1542,7 @@ private struct ChatComposer: View {
                     sendButton
                 }
             }
+            }   // voiceMode 的 else 分支结束
 
             // 当前模型：把"正在用的是哪个"直接摊出来，不用去设置里翻。
             //
@@ -1251,5 +1625,22 @@ private struct ChatBottomPositionKey: PreferenceKey {
     static var defaultValue: CGFloat = .greatestFiniteMagnitude
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+/// 多选模式的点按切换。
+///
+/// 用 modifier 而不是直接 `.onTapGesture`：多选关闭时**完全不挂手势**，
+/// 避免空手势改变气泡的命中行为（历史教训：输入栏按钮的命中区）。
+private struct SelectionTapModifier: ViewModifier {
+    let active: Bool
+    let onTap: () -> Void
+
+    func body(content: Content) -> some View {
+        if active {
+            content.contentShape(Rectangle()).onTapGesture { onTap() }
+        } else {
+            content
+        }
     }
 }

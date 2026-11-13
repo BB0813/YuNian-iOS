@@ -236,6 +236,23 @@ struct MeView: View {
                 )
             }
 
+            // 外观与字号（浅色/深色 + 四档字号）。
+            //
+            // 放在「回复语言」旁边：这一组里唯二**不改变模型行为**的入口 ——
+            // 它们只改界面呈现。用户带着"字太小了""晚上太刺眼"这类问题来，
+            // 最先翻的就是这组纯偏好项。
+            // 存储走 `app_meta` 的 `appearance.*` 键，由对话页接线方读取应用；
+            // 生效时机是"重启对话页后完全生效"，页面里有如实说明。
+            NavigationLink {
+                AppearanceSettingsView(environment: environment)
+            } label: {
+                YNSettingsRow(
+                    icon: "paintpalette",
+                    title: "外观与字号",
+                    subtitle: "浅色/深色/跟随系统，四档聊天字号。"
+                )
+            }
+
             // 第 227 轮：通知与提醒（角标 / 回复完成提醒 / 每日提醒）。
             // 放在「AI 能力」组里是因为它决定"它会不会在你不看的时候出现"，
             // 属于陪伴体验的一部分；开关本身在系统连接那种"配置"语义之外。
@@ -247,6 +264,21 @@ struct MeView: View {
                     title: "通知与提醒",
                     subtitle: "角标显示未读、回复跑完提醒你、每天固定时间提醒。",
                     badge: notificationBadge
+                )
+            }
+
+            // 第 251 轮：生图设置。
+            //
+            // 为什么必须有这一页：「画一张」的入口早就有了，但**永远画不出图** ——
+            // 生图走 `feature_route.image` 指向的渠道，而 iOS 没有任何界面能绑这条路由，
+            // 于是 `Deps.imageModel` 恒为空串，请求体是 `{"model": "", …}`，任何服务端都拒。
+            NavigationLink {
+                ImageGenSettingsView(environment: environment)
+            } label: {
+                YNSettingsRow(
+                    icon: "paintbrush.pointed",
+                    title: "生图设置",
+                    subtitle: "选哪家渠道画、用什么模型、画多大。不配这个「画一张」用不了。"
                 )
             }
 

@@ -43,6 +43,17 @@ enum AppPaths {
     }
 
     /// Rust 侧日志落点（与 db 同目录，跟随 Rust 的约定）。
+    /// 聊天附件的落盘目录（第 244 轮）。
+    ///
+    /// 与 `stickersDirectory` 分开：表情是**资源库**（用户导入后长期复用），
+    /// 附件是**消息内容**（跟着消息走，删消息该能连带删）。
+    /// 混在一个目录里，将来做"清理表情库"会误删聊天图片。
+    static func attachmentsDirectory() throws -> URL {
+        let dir = try applicationSupport().appendingPathComponent("attachments", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     static func rustLogURL() throws -> URL {
         try applicationSupport().appendingPathComponent(rustLogName, isDirectory: false)
     }

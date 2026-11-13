@@ -1,5 +1,6 @@
 import os
 import Foundation
+import AVFoundation
 import os
 import Combine   // ObservableObject / @Published —— 不依赖 SwiftUI 的传递导入
 
@@ -52,6 +53,26 @@ final class ChatSession: ObservableObject {
         /// 加它是**加法式改动**：带默认值，所有既有构造点不受影响；
         /// 从数据库装载时用真实时间戳，实时追加时用当前时间。
         var timestamp: Date
+
+        /// 语音消息的音频文件 URL（第 253 轮）。
+        ///
+        /// ⚠️ 与 `imageData` 同理：**显式字段**，不靠文本反推。
+        /// 语音消息不落 `messages.content`（那里放时长文字），
+        /// 音频字节在 `attachments/` 里，由 `linkString` 指向。
+        var audioURL: URL?
+        /// 语音时长（秒），用于气泡宽度与显示。
+        var audioDuration: TimeInterval?
+
+        /// 视频消息的文件 URL。
+        ///
+        /// 与 `audioURL` 同一条约定：**显式字段**，不靠文本反推。
+        /// 视频字节在 `attachments/` 里（`saveAttachment` 拷文件落盘，
+        /// 几十 MB 不过一次 RAM），`messages.content` 只放用户配的文字
+        /// （可以没有）。展示层据此渲染视频气泡（首帧 + 播放入口）。
+        var videoURL: URL?
+        /// 视频时长（秒）。发送时从落盘后的文件读（见 `mediaDuration`），
+        /// 取不到就是 nil —— 气泡显示不带时长的图标块，而不是假装 0 秒。
+        var videoDuration: TimeInterval?
 
         /// 本轮思考过程（REASONING）。
         ///
@@ -121,7 +142,10 @@ final class ChatSession: ObservableObject {
 
         init(role: AgentHistoryRole, text: String, isSticker: Bool = false,
              imageData: Data? = nil, imagePrompt: String? = nil,
-             timestamp: Date = Date(), reasoning: String? = nil,
+             timestamp: Date = Date(),
+             audioURL: URL? = nil, audioDuration: TimeInterval? = nil,
+             videoURL: URL? = nil, videoDuration: TimeInterval? = nil,
+             reasoning: String? = nil,
              stickerFileName: String? = nil, stickerImageData: Data? = nil,
              turnId: String? = nil, storedId: Int64? = nil) {
             self.role = role
@@ -130,6 +154,10 @@ final class ChatSession: ObservableObject {
             self.imageData = imageData
             self.imagePrompt = imagePrompt
             self.timestamp = timestamp
+            self.audioURL = audioURL
+            self.audioDuration = audioDuration
+            self.videoURL = videoURL
+            self.videoDuration = videoDuration
             self.reasoning = reasoning
             self.stickerFileName = stickerFileName
             self.stickerImageData = stickerImageData
@@ -220,9 +248,71 @@ final class ChatSession: ObservableObject {
     }
 
     /// 发送一条用户消息并驱动一轮 Agent 回合。
-    func send(_ text: String, in environment: AppEnvironment) async {
+    /// 把附件落盘，返回文件名（写进 `message_bodies.linkString`）。
+    ///
+    /// 为什么落盘而不是只留内存：聊天历史要能跨重启回读。
+    /// `messages` 是内存数组，重启就没了；`linkString` 是 Android/iOS 共用的
+    /// 文件引用字段（见 `MessageBody.kt`），图片文件名存这里，
+    /// 装载时按它去 `attachmentsDirectory` 找字节。
+    /// 从音频/视频文件读时长（`AVURLAsset`）。
+    /// 拿不到就返回 nil —— 气泡按「未知时长」渲染，而不是假装 0 秒。
+    /// （语音与视频气泡共用这一份；本地文件同步读足够快，与既有语音路径一致。）
+    private static func mediaDuration(from url: URL?) -> TimeInterval? {
+        guard let url else { return nil }
+        let asset = AVURLAsset(url: url)
+        let seconds = CMTimeGetSeconds(asset.duration)
+        return seconds.isFinite && seconds > 0 ? seconds : nil
+    }
+
+    /// `linkString` → 附件文件 URL（重载路径用）。
+    ///
+    /// iOS 自己的发送路径往库里写的是**文件名**（`saveAttachment` 的返回值），
+    /// 而更早的生图路径回填的是**绝对路径** —— 两种历史形态都要接住：
+    /// 含路径分隔符就当完整路径，否则按 attachments 目录下的文件名解析。
+    /// （只判文件名的话，用户自己发的图片/视频会在重启后全部变成文本占位。）
+    private static func attachmentURL(forLink link: String) -> URL {
+        if link.contains("/") { return URL(fileURLWithPath: link) }
+        let dir = (try? AppPaths.attachmentsDirectory())
+            ?? FileManager.default.temporaryDirectory
+        return dir.appendingPathComponent(link)
+    }
+
+    private func saveAttachment(_ attachment: MessageAttachment) -> (fileName: String, url: URL)? {
+        let ext = attachment.fileExtension
+        let name = "img_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString.prefix(6)).\(ext)"
+        guard let dir = try? AppPaths.attachmentsDirectory() else { return nil }
+        let target = dir.appendingPathComponent(name)
+
+        do {
+            if let data = attachment.data {
+                try data.write(to: target, options: .atomic)
+            } else if let url = attachment.url {
+                // 视频：拷文件而不是读进内存（几十 MB 不该过一次 RAM）
+                if FileManager.default.fileExists(atPath: target.path) {
+                    try FileManager.default.removeItem(at: target)
+                }
+                try FileManager.default.copyItem(at: url, to: target)
+            } else {
+                return nil
+            }
+            return (name, target)
+        } catch {
+            log.error("附件落盘失败：\(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// 发送一条文本（可附带一张图片）。
+    ///
+    /// - Parameter attachment: 要随消息发出的图片（第 244 轮，BACKLOG D2 的上一环）。
+    ///   `nil` = 纯文本。**这是 iOS 侧第一个真正的视觉输入通路** ——
+    ///   此前 `AgentTurnRequest.image` 一直写死 `nil`，所以聊天里的图片
+    ///   只能是 AI 生成的，用户没法发图给模型看。
+    func send(_ text: String, attachment: MessageAttachment? = nil,
+              in environment: AppEnvironment) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isRunning else { return }
+        // 带图时允许空文本（"发一张图给它看"本身就是完整意图）
+        guard !trimmed.isEmpty || attachment != nil, !isRunning else { return }
         guard let runtime = environment.runtime else {
             lastError = "Agent 未就绪"
             return
@@ -263,6 +353,11 @@ final class ChatSession: ObservableObject {
         // 落库失败**不阻断发送**：打招呼/首轮对话比持久化更重要，
         // 失败只进日志。
         let conversationId = companionId ?? 0
+        // 带图时先落盘，拿到文件名再落库 —— 图片按「消息 id 或时间戳」命名，
+        // 与 `Message.imageData` 的回读约定一致（见 `ChatSession` 里 imageData 的读取）。
+        // 落盘后拿到文件名与最终 URL（第 253 轮：语音消息要 URL 才能播）。
+        let savedAttachment = attachment.flatMap { saveAttachment($0) }
+        let attachmentFileName = savedAttachment?.fileName
         if let repo = messageRepository(for: environment) {
             do {
                 _ = try repo.insert(
@@ -270,16 +365,37 @@ final class ChatSession: ObservableObject {
                     conversationType: .chat,
                     isFromUser: true,
                     senderId: 0,
-                    type: Self.textType,
+                    // 附件类型决定落库的 type：无附件 = TEXT，音频 = AUDIO，
+                    // 视频 = VIDEO，其余（图片）= IMAGE。与 Android 的枚举名一致。
+                    type: attachmentFileName == nil ? Self.textType
+                        : (attachment?.kind == .audio ? Self.audioType
+                            : (attachment?.kind == .video ? Self.videoType : Self.imageType)),
                     content: trimmed,
-                    searchContent: trimmed
+                    searchContent: trimmed,
+                    attachmentFileName: attachmentFileName
                 )
             } catch {
                 log.error("用户消息落库失败：\(error.localizedDescription, privacy: .public)")
             }
         }
 
-        messages.append(Message(role: .user, text: trimmed))
+        messages.append(Message(
+            role: .user,
+            text: trimmed,
+            imageData: attachment?.kind == .image ? attachment?.data : nil,
+            // ⚠️ 参数顺序必须与 `Message` 的属性声明顺序一致
+            // （`imageData` → `timestamp` → `audioURL` → `audioDuration`
+            //   → `videoURL` → `videoDuration`）。
+            timestamp: Date(),
+            // 第 253 轮：语音消息带 URL 与时长，供气泡渲染与播放。
+            audioURL: attachment?.kind == .audio ? savedAttachment?.url : nil,
+            audioDuration: attachment?.kind == .audio
+                ? Self.mediaDuration(from: savedAttachment?.url) : nil,
+            // 视频（发视频）：URL 供气泡首帧/播放，时长从落盘后的文件读。
+            videoURL: attachment?.kind == .video ? savedAttachment?.url : nil,
+            videoDuration: attachment?.kind == .video
+                ? Self.mediaDuration(from: savedAttachment?.url) : nil
+        ))
         // ⚠️ 缓冲与回合标志的复位已移进 `performTurn` ——
         // "确认后重跑"也要复位，放在这里会漏掉那条路径。
 
@@ -368,7 +484,21 @@ final class ChatSession: ObservableObject {
             maxRounds: AgentRequestBuilder.defaultMaxRounds,
             toolChoice: "auto",
             stickerProbability: 0,
-            image: nil,
+            // ⚠️ 第 244 轮：这里从移植以来一直是写死的 `nil` ——
+            // 所以视觉输入这条链路**从来没被用过**。现在接上附件。
+            // 用 base64 而不是 path：Rust 侧两种都支持，但 path 在沙盒里
+            // 会因容器路径变化（每次安装 UUID 都不同）而失效，
+            // 而 base64 是自包含的 —— 一次请求里数据跟着走，没有"文件找不到"这种失败态。
+            //
+            // ⚠️ 只有**图片**附件才进视觉输入：语音/视频不是图，把它们的
+            // 字节塞进 `ImageInput` 等于让 Rust 拿一段 m4a/mp4 当图片解码。
+            image: attachment?.kind == .image ? attachment.map { att in
+                ImageInput(
+                    path: nil,
+                    base64Data: att.data?.base64EncodedString(),
+                    mimeType: att.mimeType
+                )
+            } : nil,
             systemPrompt: nil,
             companionNameMapJson: nil
         )
@@ -1173,6 +1303,15 @@ final class ChatSession: ObservableObject {
     /// 图片消息的类型串（同 `textType` 的契约）。
     static let imageType = "IMAGE"
 
+    /// 语音消息（第 253 轮）。与 Android 的 `type=AUDIO` 对应。
+    static let audioType = "AUDIO"
+
+    /// 视频消息（用户发视频）。与 Android 的 `type=VIDEO` 对应 ——
+    /// Android 规格：VIDEO 当前只落**用户发的**视频，附件路径存 `linkString`，
+    /// 点按走播放器，不自动触发 AI 理解。iOS 侧行为对齐：视频不进
+    /// `ImageInput`，模型看到的只是用户配的那句话（可以没有）。
+    static let videoType = "VIDEO"
+
     /// 正文形如 `[123]`（纯数字）时返回 id，否则 nil。
     ///
     /// 只在**重载**路径用：库里没有 `isSticker` 列，而正文 `[<id>]`
@@ -1273,16 +1412,37 @@ final class ChatSession: ObservableObject {
 
             // ⚠️ 第 167 轮：图片消息从 linkString 读文件回来。
             // 上一版读到 "[图片]" 就只是个文本占位 —— 重启后图没了。
+            // ⚠️ linkString 存的是**文件名**（saveAttachment 落库路径），
+            // 必须拼回 attachments 目录；更早的生图路径回填的是绝对路径 ——
+            // 两种历史形态都由 `attachmentURL(forLink:)` 接住。
             // 读不到文件时退回文本（消息仍可见），与 Android
             // "资源缺失时显示描述"的处理一致。
-            if r.type.uppercased() == Self.imageType {
-                if let link = r.linkString,
-                   let data = FileManager.default.contents(atPath: link) {
+            if r.type.uppercased() == Self.imageType,
+               let linkString = r.linkString, !linkString.isEmpty {
+                let link = Self.attachmentURL(forLink: linkString)
+                if let data = FileManager.default.contents(atPath: link.path) {
                     loaded.append(Message(role: r.isFromUser ? .user : .assistant,
                                           text: r.content, isSticker: false,
                                           imageData: data,
                                           imagePrompt: r.searchContent,
                                           timestamp: stamp,
+                                          turnId: r.turnId,
+                                          storedId: r.messageId))
+                    continue
+                }
+            }
+
+            // 视频消息（发视频）同样从 linkString 读回文件。
+            // 读不到（文件被清 / iCloud 未回）时退回文本，消息不凭空消失。
+            if r.type.uppercased() == Self.videoType,
+               let linkString = r.linkString, !linkString.isEmpty {
+                let link = Self.attachmentURL(forLink: linkString)
+                if FileManager.default.fileExists(atPath: link.path) {
+                    loaded.append(Message(role: r.isFromUser ? .user : .assistant,
+                                          text: r.content,
+                                          timestamp: stamp,
+                                          videoURL: link,
+                                          videoDuration: Self.mediaDuration(from: link),
                                           turnId: r.turnId,
                                           storedId: r.messageId))
                     continue

@@ -388,7 +388,25 @@ struct ChannelConfigView: View {
     // MARK: - 逻辑
 
     private var canSave: Bool {
-        isEditing || !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // ⚠️ 第 253 轮修：**这是一个死锁**。
+        //
+        // 原来的条件是 `isEditing || 模型名非空` —— 新增渠道时必须先填模型名。
+        // 而「从服务端拉取模型列表」又要求 `isActiveRow`（= 这条已经是当前渠道）
+        // 且 `hasSavedKey`（= 已经保存过密钥）。
+        //
+        // 于是新用户卡在中间：
+        //   · 不填模型名 → 保存按钮是灰的，点不了
+        //   · 想拉模型列表来选 → 必须先保存
+        //   · 想保存 → 必须先填模型名
+        // **三个条件互相依赖，一个都走不通。**
+        //
+        // 现在放宽：只要有密钥或模型名之一就能保存。
+        // 保存一条"还没定模型"的渠道是合理的中间状态 ——
+        // 用户可以先存下密钥，再拉列表选模型，再存一次。
+        let hasModel = !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasKey = !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || hasSavedKey
+        return isEditing || hasModel || hasKey
     }
 
     private func loadOnce() {

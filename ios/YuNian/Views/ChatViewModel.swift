@@ -177,7 +177,9 @@ final class ChatViewModel: ObservableObject {
     }
 
     var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // 第 244 轮：带附件时不需要文字 —— 光发一张图也是完整的一句话。
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || pendingAttachment != nil)
             && phase == .idle
             // 有待确认的工具调用时先处理它：批准要重跑"最后那份请求"，
             // 此时发新消息会把请求覆盖掉（见 ChatComposer 的确认卡注释）。
@@ -196,6 +198,34 @@ final class ChatViewModel: ObservableObject {
     var displayReasoning: String { reasoningText }
     var displayStreaming: String { streamingText }
     var displayPhase: Phase { phase }
+
+    // MARK: - 聊天内搜索
+
+    /// 搜索关键词。
+    ///
+    /// ## 为什么是内存过滤，不走 FTS
+    /// 历史已经**一次性灌进内存**（`displayMessages`），在数组上过滤是零成本；
+    /// `message_search_index`（FTS）是给跨会话的全局搜索（`MessageSearchView`）
+    /// 用的 —— 聊天页内搜索用它反而要另开查询面。两者共存，互不替代。
+    @Published var searchText: String = ""
+
+    /// 搜索是否在生效（有非空白关键词）。
+    var isSearchFiltering: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 搜索过滤后的消息。
+    ///
+    /// ⚠️ **不改 `displayMessages` 的语义**（19 处引用的是"完整展示列表"）——
+    /// 这是给搜索态 ForEach 用的**新**计算属性，搜索时由视图换数据源。
+    /// `localizedStandardContains`：与系统搜索同口径（大小写不敏感、
+    /// 忽略变音符号差异）。图片/语音/视频消息正文为空，天然不命中
+    /// —— 与"搜的是一句话"的直觉一致。
+    var searchFilteredMessages: [ChatSession.Message] {
+        guard isSearchFiltering else { return displayMessages }
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return displayMessages.filter { $0.text.localizedStandardContains(keyword) }
+    }
 
     var isGenerating: Bool {
         switch displayPhase {
@@ -426,19 +456,145 @@ final class ChatViewModel: ObservableObject {
     /// 错误文案统一走 `TtsClient.describe` ——
     /// 聊天页与设置页试听共用一份，避免"同一句话两处说法不同"。
 
+    /// 待发送的附件（第 244 轮）。选好图后先挂在这里，用户还能补一句文字再发。
+    @Published var pendingAttachment: MessageAttachment?
+
+    /// 由视图层报告一个可恢复的错误（第 244 轮）。
+    ///
+    /// 为什么不把 `errorMessage` 直接放开 `private(set)`：它被多处写，
+    /// 一旦可写，任何视图都能随手改它 —— 那样"这条错误到底谁报的"就查不清了。
+    /// 留一个语义明确的入口，比放开可见性更省事。
+    func reportError(_ message: String) {
+        errorMessage = message
+    }
+
+    // MARK: - 失败重试（第 246 轮）
+
+    /// 一次失败的发送（保留原始输入，供"重试"原样再发一次）。
+    struct FailedTurn: Equatable {
+        let text: String
+        let attachment: MessageAttachment?
+    }
+
+    /// 最近一次失败的回合（nil = 没有可重试的）。
+    @Published private(set) var failedTurn: FailedTurn?
+    /// 发起发送时先记下这一份；失败时把它转成 `failedTurn`。
+    private var pendingRetrySnapshot: FailedTurn?
+
+    /// 原样重发上一次失败的回合。
+    ///
+    /// ⚠️ **不重新走 `sendText`**：那条路会读当前草稿，而用户此刻可能已经改了输入框。
+    /// 重试的语义是"把刚才那条再发一次"，不是"发现在输入框里的东西"。
+    func retryFailedTurn() {
+        guard let failed = failedTurn, phase == .idle else { return }
+        failedTurn = nil
+        errorMessage = nil
+        phase = .typing
+        pendingRetrySnapshot = failed
+
+        sendTask = Task { [weak self] in
+            guard let self else { return }
+            await self.session.send(failed.text, attachment: failed.attachment, in: self.environment)
+            if !Task.isCancelled {
+                self.updatePhase()
+                self.markRead()
+                self.notifyReplyIfNeeded()
+            }
+        }
+    }
+
+    // MARK: - 引用（第 247 轮）
+
+    /// 把一条消息作为引用前缀放进输入框。
+    ///
+    /// ## 为什么只取前三行、且加 `>` 前缀
+    ///
+    /// 整段塞进去会让输入框变成"又一坨正文"，用户分不清哪是引用哪是自己写的。
+    /// `>` 是 Markdown 引用标记，一眼可辨；只取前三行是因为
+    /// 引用长回复的目的通常是"针对某句回应"，不是把整段搬过来。
+    func quoteIntoDraft(_ message: ChatSession.Message) {
+        let lines = message.text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .prefix(3)
+            .map { "> " + $0 }
+        guard !lines.isEmpty else { return }
+        let quoted = lines.joined(separator: "\n") + "\n\n"
+        draft = quoted + draft
+    }
+
+    /// 放弃这次重试（用户选择"不用了"）。
+    func discardFailedTurn() {
+        failedTurn = nil
+        errorMessage = nil
+    }
+
+    // MARK: - 重新生成（第 247 轮）
+
+    /// 让助手把最后一条回复重说一遍。
+    ///
+    /// ## 为什么是"删掉再重发上一条用户消息"
+    ///
+    /// 真正的"重生成"需要引擎支持「用同一份上下文、丢弃上一轮输出」，
+    /// 而 `AgentTurnRequest` 没有这个语义 —— 硬加会给 Rust 引入一个新的回合模式，
+    /// 影响 Android 共用协议。
+    ///
+    /// 折中做法：把最后一条助手消息从**显示层和库里**都删掉，
+    /// 然后重发它前面那条用户消息。用户看到的效果是"这条回复重新生成了"，
+    /// 而模型看到的是"同一句话再问一遍" —— 语义上完全等价。
+    ///
+    /// ⚠️ 前提：最后一条必须是助手消息（调用方用 `isLastAssistant` 保证）。
+    func regenerateLastReply() {
+        guard phase == .idle else { return }
+        guard let lastAssistant = displayMessages.last(where: { $0.role != .user }) else { return }
+        // 找到它前面最近的一条用户消息
+        guard let index = displayMessages.firstIndex(where: { $0.id == lastAssistant.id }),
+              let lastUser = displayMessages[..<index].last(where: { $0.role == .user }),
+              !lastUser.text.isEmpty
+        else {
+            reportError("找不到可以重新生成的那句话")
+            return
+        }
+
+        // 删掉那条助手回复（显示层 + 库）
+        _ = deleteMessage(lastAssistant)
+        // 重发用户那句话
+        failedTurn = nil
+        errorMessage = nil
+        phase = .typing
+        let text = lastUser.text
+        let attachment: MessageAttachment? = nil
+        pendingRetrySnapshot = FailedTurn(text: text, attachment: attachment)
+
+        sendTask = Task { [weak self] in
+            guard let self else { return }
+            await self.session.send(text, attachment: attachment, in: self.environment)
+            if !Task.isCancelled {
+                self.updatePhase()
+                self.markRead()
+                self.notifyReplyIfNeeded()
+            }
+        }
+    }
+
     func sendText() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, phase == .idle else { return }
+        let attachment = pendingAttachment
+        // 带图时允许空文本 —— "发一张图给它看"本身就是完整意图
+        guard !text.isEmpty || attachment != nil, phase == .idle else { return }
 
         draft = ""
+        pendingAttachment = nil
         errorMessage = nil
+        failedTurn = nil
+        // 记下这一份，失败时 `lastError` 的订阅会把它转成 `failedTurn`
+        pendingRetrySnapshot = FailedTurn(text: text, attachment: attachment)
         // Android 语义：成功入队即乐观 typing。当前 iOS 无独立队列，
         // 这里在发起 session.send 前立即切换。
         phase = .typing
 
         sendTask = Task { [weak self] in
             guard let self else { return }
-            await self.session.send(text, in: self.environment)
+            await self.session.send(text, attachment: attachment, in: self.environment)
             if !Task.isCancelled {
                 self.updatePhase()
                 self.markRead()
@@ -570,6 +726,9 @@ final class ChatViewModel: ObservableObject {
             .sink { [weak self] in
                 guard let value = $0, !value.isEmpty else { return }
                 self?.errorMessage = value
+                // 第 246 轮：失败时记下"能重试的那一份"。
+                // 此前网络一断那条消息就废了 —— 只能重打一遍。
+                self?.failedTurn = self?.pendingRetrySnapshot
             }
             .store(in: &cancellables)
 

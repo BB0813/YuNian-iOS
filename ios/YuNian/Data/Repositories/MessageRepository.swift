@@ -91,7 +91,11 @@ final class MessageRepository {
         turnId: String? = nil,
         eventIndex: Int? = nil,
         durationMs: Int? = nil,
-        anchorMessageId: Int64? = nil
+        anchorMessageId: Int64? = nil,
+        /// 附件文件名（第 244 轮）：写进 `message_bodies.linkString`。
+        /// 图片/视频按文件名落盘在 `AppPaths.attachmentsDirectory()`，
+        /// 装载时按它回读字节。与 Android 的 `ChatMessage.linkString` 同一语义。
+        attachmentFileName: String? = nil
     ) throws -> Int64 {
         try database.pool.write { db in
             try db.execute(sql: """
@@ -108,7 +112,7 @@ final class MessageRepository {
             try db.execute(sql: """
             INSERT OR REPLACE INTO message_bodies (messageId, content, searchContent, linkString)
             VALUES (?,?,?,?)
-            """, arguments: [messageId, content, searchContent, ""])
+            """, arguments: [messageId, content, searchContent, attachmentFileName ?? ""])
 
             try self.upsertSearchIndex(db, messageId: messageId, searchContent: searchContent)
             return messageId
@@ -525,7 +529,9 @@ final class MessageRepository {
 
     /// 写入 FTS 索引。`rowid` 必须显式等于 `messageId`
     /// （Android 侧靠 `MessageSearchIndex` 的 `@PrimaryKey rowid` 保证）。
-    private func upsertSearchIndex(_ db: Database, messageId: Int64, searchContent: String) throws {
+    /// 第 255 轮改为 internal：备份恢复（BackupRestorer）要在同一事务里重建 FTS ——
+    /// 恢复出的消息若不重建索引，搜索永远搜不到（旧 rowid 还全悬空）。
+    func upsertSearchIndex(_ db: Database, messageId: Int64, searchContent: String) throws {
         let tokens = MessageSearchTokenizer.indexTokens(searchContent)
         try db.execute(
             sql: "INSERT OR REPLACE INTO message_search_index(rowid, tokens) VALUES (?, ?)",

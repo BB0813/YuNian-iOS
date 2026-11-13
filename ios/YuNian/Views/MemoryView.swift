@@ -1,4 +1,5 @@
 import SwiftUI
+import GRDB
 
 /// 记忆页 —— 「它到底记住了我什么」。
 ///
@@ -37,6 +38,8 @@ struct MemoryView: View {
     @State private var showInactive = false
     @State private var sort: MemorySort = .importance
     @State private var notice: String?
+    /// 正在编辑的记忆（nil = 编辑 sheet 没开着）。
+    @State private var editingMemory: MemoryRepository.Memory?
 
     /// 作用域过滤（纯函数，可单测）：按角色挑出伴侣记忆。
     static func scoped(_ all: [MemoryRepository.Memory], companionId: Int64?) -> [MemoryRepository.Memory] {
@@ -128,6 +131,15 @@ struct MemoryView: View {
         .searchable(text: $query, prompt: "搜记忆内容")
         .tint(c.accent)
         .onAppear(perform: reload)
+        .sheet(item: $editingMemory) { memory in
+            MemoryEditView(memory: memory) { saved in
+                // 生效路径不需要任何额外同步：Rust `MemorySelector.select`
+                // 每回合经 `AgentStores.listMemories` **实时读库**，没有记忆行缓存。
+                notice = saved ? "已保存修改（下一回合起生效）"
+                               : "保存失败：这条记录可能已经不在了"
+                reload()
+            }
+        }
     }
 
     // MARK: - 概览
@@ -199,6 +211,16 @@ struct MemoryView: View {
                     Label("恢复", systemImage: "arrow.uturn.backward")
                 }
                 .tint(YNTheme.palette(scheme).accent)
+            }
+        }
+        // 点按 = 编辑（改动最小的入口，比行内展开多一步但能放下完整表单）。
+        // 已删除的行没有编辑意义 —— 引擎根本不读它；提示先恢复再编辑，
+        // 不然用户会以为"改了没生效"。
+        .onTapGesture {
+            if memory.isDeleted {
+                notice = "这条已删除 —— 先左滑恢复，再编辑"
+            } else {
+                editingMemory = memory
             }
         }
     }
@@ -344,5 +366,120 @@ struct MemoryView: View {
         let date = Date(timeIntervalSince1970: TimeInterval(expiresAt) / 1000)
         if expiresAt <= now { return "已过期 \(formatter.string(from: date))" }
         return "有效至 \(formatter.string(from: date))"
+    }
+}
+
+// MARK: - 编辑
+
+/// 编辑一条记忆的内容与重要度。
+///
+/// ## 为什么只开放这两列
+/// `unified_memories` 其余列都背着引擎语义：`memoryType` 决定进短期还是召回、
+/// `expiresAt` 决定过期、`scope`/`sourceId` 决定归属 —— 改错任何一列都会让
+/// 这条记忆静默地从提示词里消失或串到别的角色身上。内容与重要度才是用户
+/// 真正会想改的，而且改它们不改变"这条记忆属于谁、何时失效"。
+///
+/// ## 为什么不走 `AgentStores.updateMemory`
+/// 那是 Rust 记忆工具（`memory.update`）的宿主实现：它把未提供的字段一并重置、
+/// 还会把 `lastAccessedAt` 刷成 now（把"界面改一笔"伪装成一次取用）。
+/// 界面编辑只需要 content + importance，直接按 `MemoryRepository.setDeleted`
+/// 的同款最小 UPDATE 写库；`version = version + 1` 与引擎侧更新路径
+/// （`AgentStores.updateMemory`）保持一致。
+///
+/// ## 生效路径（无需额外同步）
+/// Rust `MemorySelector.select` 每回合经 `AgentStores.listMemories` **实时读库**
+/// （`pool.read` 现查，唯一的缓存是按文本键的 embedding 缓存，与本编辑无关），
+/// 保存后下一回合自然生效。
+private struct MemoryEditView: View {
+
+    let memory: MemoryRepository.Memory
+    /// 保存结果（false = 行不存在或已删除，界面据此给提示）。
+    var onSaved: (Bool) -> Void
+
+    @EnvironmentObject private var environment: AppEnvironment
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var content: String
+    @State private var importance: Double
+
+    init(memory: MemoryRepository.Memory, onSaved: @escaping (Bool) -> Void) {
+        self.memory = memory
+        self.onSaved = onSaved
+        _content = State(initialValue: memory.content)
+        _importance = State(initialValue: min(max(memory.importance, 0), 1))
+    }
+
+    /// 空白内容不允许保存：引擎写入侧本就拒绝空白记忆
+    /// （`AgentStores.insertMemory` 收到空白直接丢弃），编辑侧保持同一约束。
+    private var contentIsValid: Bool {
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        let c = YNTheme.palette(scheme)
+        return NavigationStack {
+            List {
+                Section {
+                    TextEditor(text: $content)
+                        .frame(minHeight: 120)
+                } header: {
+                    Text("内容")
+                } footer: {
+                    Text("这里改的就是会进提示词的原文（`unified_memories.content`）。")
+                }
+
+                Section {
+                    Slider(value: $importance, in: 0...1, step: 0.05)
+                    LabeledContent("重要度", value: String(format: "%.2f", importance))
+                } header: {
+                    Text("重要度")
+                } footer: {
+                    Text("0~1。长期记忆按重要度参与召回挑选（越高越优先）；短期记忆只要未过期每回合都注入。")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(YNCanvas())
+            .navigationTitle("编辑记忆")
+            .navigationBarTitleDisplayMode(.inline)
+            .tint(c.accent)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { save() }
+                        .disabled(!contentIsValid)
+                }
+            }
+        }
+    }
+
+    /// 列名对齐 schema v45 的 `unified_memories`（content / importance / updatedAt / version）。
+    /// `WHERE isDeleted = 0` 与 `AgentStores.updateMemory` 同一语义：
+    /// 编辑一条已删除的记忆没有意义，行不在了就如实报失败。
+    private func save() {
+        guard let database = environment.database else {
+            onSaved(false)
+            dismiss()
+            return
+        }
+        let clamped = min(max(importance, 0), 1)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        do {
+            let changed = try database.pool.write { db -> Int in
+                try db.execute(sql: """
+                    UPDATE unified_memories
+                    SET content = ?, importance = ?, updatedAt = ?, version = version + 1
+                    WHERE id = ? AND isDeleted = 0
+                    """, arguments: [content, clamped, now, memory.id])
+                return db.changesCount
+            }
+            onSaved(changed > 0)
+        } catch {
+            onSaved(false)
+        }
+        dismiss()
     }
 }
